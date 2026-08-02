@@ -1,0 +1,381 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===========================================================
+   VIMDY DESIGN SYSTEM v1.0 — Variables globales
+   -----------------------------------------------------------
+   Espejo en CSS puro de tailwind.config.js / VimdyTheme.ts.
+   Cualquier CSS "a mano" (fuera de clases Tailwind) debe usar
+   estas variables — nunca un hex suelto.
+   Regla de oro: si cambia un valor aquí, cambia también en
+   tailwind.config.js y VimdyTheme.ts. Los tres deben quedar
+   idénticos siempre.
+=========================================================== */
+
+/* ===========================================================
+   ACCESIBILIDAD — tamaño base más grande en toda la app
+   -----------------------------------------------------------
+   Sube el font-size raíz de 16px a 18px. Como casi todas las
+   clases de Tailwind (text-sm, text-xs, p-2, h-9, etc.) usan
+   rem por defecto, este único cambio agranda proporcionalmente
+   letra, botones y espaciados en TODA la app de una sola vez,
+   sin tener que tocar archivo por archivo — prioridad: que sea
+   fácil de leer y de tocar para cualquier usuario, incluyendo
+   adultos mayores. Los pocos tamaños en px fijo (px-[Npx]) no
+   se ven afectados por este cambio y deben migrarse a clases
+   estándar de Tailwind cuando se detecten.
+=========================================================== */
+html {
+  font-size: 112.5%; /* 18px */
+}
+
+:root {
+  /* --- Fondos --- */
+  --vimdy-background: #0A0A0C;
+  --vimdy-background-secondary: #111114;
+
+  /* --- Superficie --- */
+  --vimdy-surface: #18181B;
+  --vimdy-surface-hover: #1F1F23;
+  --vimdy-surface-active: #232327;
+
+  /* --- Bordes --- */
+  --vimdy-border: #27272F;
+  --vimdy-border-subtle: #1C1C21;
+
+  /* --- Texto --- */
+  --vimdy-text: #F5F5F4;
+  --vimdy-text-secondary: #A1A1AA;
+  --vimdy-text-tertiary: #5C5C64;
+
+  /* --- Acento (marca) --- */
+  --vimdy-accent: #2563EB;
+  --vimdy-accent-hover: #3B82F6;
+  --vimdy-accent-dark: #1D4ED8;
+
+  /* --- Estado --- */
+  --vimdy-success: #22C55E;
+  --vimdy-success-bg: #132018;
+  --vimdy-warning: #F59E0B;
+  --vimdy-warning-bg: #221A0C;
+  --vimdy-danger: #EF4444;
+  --vimdy-danger-bg: #241315;
+
+  /* --- Marca (decorativo, no interactivo — ver tailwind.config.js) --- */
+  --vimdy-blue: #38BDF8;
+
+  /* --- Alias legacy ---
+     Algunos componentes (Kitchen, POS, Voice, Onboarding) todavía
+     leen estos nombres antiguos vía CSS var. Se mantienen como
+     alias para no romper nada hoy; se eliminan del todo en el
+     Paso 6/7 cuando se rediseñan esos módulos. */
+  --vimdy-primary: var(--vimdy-accent);
+  --vimdy-primary-dark: var(--vimdy-accent-dark);
+  --vimdy-secondary: var(--vimdy-accent);
+  --vimdy-secondary-dark: var(--vimdy-accent-dark);
+  --vimdy-surface-secondary: var(--vimdy-background-secondary);
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--vimdy-background);
+  color: var(--vimdy-text);
+  font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* ===========================================================
+   SELECCIÓN DE TEXTO — coherente con el acento oficial
+=========================================================== */
+
+::selection {
+  background: var(--vimdy-accent);
+  color: var(--vimdy-text);
+}
+
+/* ===========================================================
+   JERARQUÍA TIPOGRÁFICA — misma fuente y escala en toda la app
+   (espejo de la escala fontSize.vimdy-* en tailwind.config.js)
+=========================================================== */
+
+h1, .vimdy-h1 {
+  font-size: 36px;
+  line-height: 44px;
+  font-weight: 700;
+  color: var(--vimdy-text);
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+h2, .vimdy-h2 {
+  font-size: 25px;
+  line-height: 32px;
+  font-weight: 600;
+  color: var(--vimdy-text);
+  letter-spacing: -0.005em;
+  margin: 0;
+}
+
+h3, .vimdy-h3 {
+  font-size: 19px;
+  line-height: 26px;
+  font-weight: 600;
+  color: var(--vimdy-text);
+  margin: 0;
+}
+
+p, .vimdy-body {
+  font-size: 17px;
+  line-height: 25px;
+  font-weight: 400;
+  color: var(--vimdy-text);
+  margin: 0;
+}
+
+.vimdy-small {
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 400;
+  color: var(--vimdy-text-secondary);
+}
+
+.vimdy-micro {
+  font-size: 13px;
+  line-height: 16px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--vimdy-text-secondary);
+  text-transform: uppercase;
+}
+
+/* ===========================================================
+   INPUTS — base compartida (VimdyInput hereda de aquí)
+=========================================================== */
+
+input,
+select,
+textarea {
+  font-family: inherit;
+  color: var(--vimdy-text);
+  background-color: var(--vimdy-surface);
+  border: 1px solid var(--vimdy-border);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--vimdy-text-tertiary);
+}
+
+/* Quita el estilo azul nativo de autofill de Chrome */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--vimdy-text);
+  -webkit-box-shadow: 0 0 0px 1000px var(--vimdy-surface) inset;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+/* ===========================================================
+   FOCUS ACCESIBLE — mismo estilo en toda la app
+=========================================================== */
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--vimdy-accent);
+  outline-offset: 2px;
+}
+
+/* ===========================================================
+   SCROLLBAR — coherente con la identidad oscura
+=========================================================== */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--vimdy-background);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--vimdy-border);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--vimdy-accent-hover);
+}
+
+/* ===========================================================
+   VIMDY ANIMATIONS (deduplicadas)
+   -----------------------------------------------------------
+   Recalibradas al nuevo acento (#2563EB) y al nuevo fondo
+   (#0A0A0C). Mismos nombres de clase que antes para no romper
+   VimdyLogo, VimdyBackground, VimdyIntro y WelcomeStep — esos
+   componentes se rediseñan formalmente en el Paso 6/7.
+=========================================================== */
+
+@keyframes waveHand {
+  0% { transform: rotate(0deg); }
+  10% { transform: rotate(16deg); }
+  20% { transform: rotate(-10deg); }
+  30% { transform: rotate(16deg); }
+  40% { transform: rotate(-6deg); }
+  50% { transform: rotate(10deg); }
+  60% { transform: rotate(0deg); }
+  100% { transform: rotate(0deg); }
+}
+
+.wave-hand {
+  display: inline-block;
+  transform-origin: 70% 70%;
+  animation: waveHand 2.2s ease-in-out infinite;
+}
+
+@keyframes vimdyFloat {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-8px); }
+  100% { transform: translateY(0px); }
+}
+
+.animate-vimdy-float {
+  animation: vimdyFloat 6s ease-in-out infinite;
+}
+
+@keyframes vimdyBreath {
+  0% { opacity: .20; transform: scale(1); }
+  50% { opacity: .45; transform: scale(1.08); }
+  100% { opacity: .20; transform: scale(1); }
+}
+
+.animate-vimdy-breath {
+  animation: vimdyBreath 5s ease-in-out infinite;
+}
+
+@keyframes vimdyGlow {
+  0% {
+    box-shadow:
+      0 0 20px rgba(37,99,235,.10),
+      0 0 40px rgba(37,99,235,.05);
+  }
+  50% {
+    box-shadow:
+      0 0 45px rgba(37,99,235,.25),
+      0 0 80px rgba(37,99,235,.15);
+  }
+  100% {
+    box-shadow:
+      0 0 20px rgba(37,99,235,.10),
+      0 0 40px rgba(37,99,235,.05);
+  }
+}
+
+.animate-vimdy-glow {
+  animation: vimdyGlow 4s ease-in-out infinite;
+}
+
+@keyframes vimdyWave {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.vimdy-gradient {
+  background: linear-gradient(
+    135deg,
+    #0A0A0C,
+    #111114,
+    #18181B,
+    #27272F,
+    #2563EB,
+    #27272F,
+    #18181B,
+    #0A0A0C
+  );
+  background-size: 500% 500%;
+  animation: vimdyWave 18s linear infinite;
+}
+
+/* ===========================================================
+   FASE 6, PASO 1 — Intro cinematográfica
+   Se muestra UNA sola vez (ver appIntroStore + VimdyIntro.tsx),
+   justo después de instalar la app. Efectos sobrios: escala,
+   desvanecimiento y resplandor — nunca algo exagerado.
+=========================================================== */
+
+@keyframes vimdyIntroLogoIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.55);
+    filter: blur(8px);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.05);
+    filter: blur(0px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0px);
+  }
+}
+
+.animate-vimdy-intro-logo {
+  animation: vimdyIntroLogoIn 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes vimdyIntroTaglineIn {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+    letter-spacing: 0.2em;
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+    letter-spacing: 0.04em;
+  }
+}
+
+.animate-vimdy-intro-tagline {
+  animation: vimdyIntroTaglineIn 0.7s ease-out forwards;
+}
+
+@keyframes vimdyIntroFadeOut {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.animate-vimdy-intro-fadeout {
+  animation: vimdyIntroFadeOut 0.45s ease-in forwards;
+}
+
+/* ===========================================================
+   SKELETON DE CARGA — nunca pantallas vacías
+=========================================================== */
+
+@keyframes vimdySkeletonPulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+.vimdy-skeleton {
+  background: var(--vimdy-surface-hover);
+  border-radius: 12px;
+  animation: vimdySkeletonPulse 1.6s ease-in-out infinite;
+}

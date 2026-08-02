@@ -1,0 +1,39 @@
+name: VIMDY — Backup diario
+
+# Corre todos los días a las 06:17 UTC (01:17 hora Colombia/México — fuera
+# del horario pico de ventas). El minuto 17 (no en punto) es a propósito:
+# evita la congestión de miles de crons de GitHub Actions que arrancan
+# justo a las horas exactas.
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch: {}   # permite correrlo a mano desde la pestaña Actions
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar cliente de PostgreSQL
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client gnupg
+
+      - name: Configurar AWS CLI (o compatible S3)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.BACKUP_S3_REGION || 'us-east-1' }}
+
+      - name: Ejecutar backup
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.BACKUP_ENCRYPTION_PASSPHRASE }}
+          STORAGE_BACKEND: s3
+          S3_BUCKET: ${{ secrets.BACKUP_S3_BUCKET }}
+          S3_ENDPOINT: ${{ vars.BACKUP_S3_ENDPOINT }}   # vacío si es AWS S3 real; con valor si es R2/B2/Wasabi
+          WEBHOOK_URL: ${{ secrets.OPS_WEBHOOK_URL }}
+        run: ./scripts/backup/backup.sh
