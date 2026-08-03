@@ -1,0 +1,45 @@
+name: VIMDY — Verificación semanal de aislamiento entre negocios
+
+# El corazón de la Fase 3.5 #3: no basta con que las políticas RLS "se vean
+# bien" en schema.sql — hay que forzar el error a propósito y confirmar que
+# el sistema lo bloquea. Corre en un Postgres efímero (services.postgres),
+# nunca toca producción ni datos reales de ningún negocio.
+on:
+  schedule:
+    - cron: "30 7 * * 0"   # domingos 07:30 UTC, justo después del simulacro de backup
+  workflow_dispatch: {}
+
+jobs:
+  tenant-isolation-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: isolationtest
+          POSTGRES_DB: vimdy_isolation_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar cliente de PostgreSQL
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+
+      - name: Ejecutar verificación de aislamiento
+        env:
+          TEST_DB_URL: postgresql://postgres:isolationtest@localhost:5432/vimdy_isolation_test
+        run: |
+          chmod +x ./scripts/security/verify_tenant_isolation.sh
+          ./scripts/security/verify_tenant_isolation.sh
+
+      # Si este job queda en rojo, GitHub manda email automáticamente —
+      # segunda red de alerta, igual que en el simulacro de backup.
