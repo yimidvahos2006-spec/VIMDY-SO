@@ -68,6 +68,13 @@ begin
     (business_a, 'Negocio A — prueba de aislamiento'),
     (business_b, 'Negocio B — prueba de aislamiento');
 
+  -- auth.users ahora es una tabla real (stub creado en
+  -- verify_tenant_isolation.sh, antes de aplicar schema.sql), y
+  -- business_members.user_id tiene una llave foránea real hacia ella —
+  -- hay que insertar los usuarios de prueba ahí primero, o el insert de
+  -- business_members de abajo la viola.
+  insert into auth.users (id) values (user_a), (user_b);
+
   insert into business_members (business_id, user_id) values
     (business_a, user_a),
     (business_b, user_b);
