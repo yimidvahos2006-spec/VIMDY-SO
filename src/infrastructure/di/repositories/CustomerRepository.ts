@@ -2,6 +2,7 @@ import { Customer } from "../../../core/entities/Entities";
 import { SupabaseRepository } from "./SupabaseRepository";
 import { CustomerLocalRepository } from "./CustomerLocalRepository";
 import { connectionStore } from "../../../core/store/connectionStore";
+import { logWarning } from "../../logging/opsLogger";
 
 /**
  * CustomerRepository
@@ -36,10 +37,7 @@ export class CustomerRepository extends SupabaseRepository<Customer> {
         .findAll()
         .then((fresh) => this.local.replaceAll(fresh))
         .catch((error) => {
-          console.warn(
-            "[CustomerRepository] No se pudo refrescar los clientes desde Supabase:",
-            error
-          );
+          logWarning("[CustomerRepository] No se pudo refrescar los clientes desde Supabase", { category: "offline", context: { error: String(error) } });
         });
     }
 
@@ -60,19 +58,13 @@ export class CustomerRepository extends SupabaseRepository<Customer> {
 
         if (fresh) {
           void this.local.save(fresh).catch((error) => {
-            console.warn(
-              "[CustomerRepository] No se pudo guardar el cliente en caché local:",
-              error
-            );
+            logWarning("[CustomerRepository] No se pudo guardar el cliente en caché local", { category: "offline", context: { error: String(error) } });
           });
         }
 
         return fresh;
       } catch (error) {
-        console.warn(
-          "[CustomerRepository] Falló findById contra Supabase, se usa caché local:",
-          error
-        );
+        logWarning("[CustomerRepository] Falló findById contra Supabase, se usa caché local", { category: "offline", context: { error: String(error) } });
         return this.local.findById(id);
       }
     }

@@ -6,6 +6,7 @@ import { isNetworkFailure } from "../services/offlineSale";
 import { pendingSalesStore } from "./pendingSalesStore";
 import type { PendingSale } from "./PendingSale";
 import type { Sale } from "../entities/Entities";
+import { logError } from "../../infrastructure/logging/opsLogger";
 
 /**
  * syncPendingSales.ts
@@ -108,7 +109,7 @@ export async function syncPendingSales(): Promise<void> {
     // que falta es que el catálogo cacheado en esta pantalla se entere
     // del stock nuevo.
     productCatalogStore.refresh().catch((error) => {
-      console.error("No se pudo refrescar el catálogo tras sincronizar ventas offline:", error);
+      logError("No se pudo refrescar el catálogo tras sincronizar ventas offline", { category: "offline", context: { error: String(error) } });
     });
 
     toast.success(

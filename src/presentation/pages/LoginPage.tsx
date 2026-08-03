@@ -1,5 +1,6 @@
 import React, { useState, FormEvent } from "react";
 import { useNavigate, Navigate, Link } from "react-router-dom";
+import { Eye, EyeOff } from "lucide-react";
 
 import { useAuth } from "../context/AuthContext";
 import { VimdyBackground } from "../components/ui/VimdyBackground";
@@ -25,6 +26,7 @@ export function LoginPage() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
   // Si ya hay una sesión activa, no tiene sentido mostrar el login.
@@ -85,16 +87,28 @@ export function LoginPage() {
               <label htmlFor="password" className="text-sm text-slate-300">
                 Contraseña
               </label>
-              <input
-                id="password"
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                disabled={!isReady || isLoading}
-                className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-3 text-white placeholder-slate-500 outline-none transition-colors focus:border-cyan-400 disabled:opacity-50"
-                placeholder="••••••••"
-              />
+              <div className="relative">
+                <input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  disabled={!isReady || isLoading}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-3 pr-11 text-white placeholder-slate-500 outline-none transition-colors focus:border-cyan-400 disabled:opacity-50"
+                  placeholder="••••••••"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  disabled={!isReady || isLoading}
+                  aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                  aria-pressed={showPassword}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition-colors hover:text-cyan-400 disabled:opacity-50"
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
               <Link
                 to="/recuperar-password"
                 className="self-end text-xs text-slate-400 hover:text-cyan-400 transition-colors"

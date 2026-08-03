@@ -2,6 +2,7 @@ import { Category } from "../../../core/entities/Entities";
 import { SupabaseRepository } from "./SupabaseRepository";
 import { CategoryLocalRepository } from "./CategoryLocalRepository";
 import { connectionStore } from "../../../core/store/connectionStore";
+import { logWarning } from "../../logging/opsLogger";
 
 /**
  * CategoryRepository
@@ -35,10 +36,7 @@ export class CategoryRepository extends SupabaseRepository<Category> {
         .findAll()
         .then((fresh) => this.local.replaceAll(fresh))
         .catch((error) => {
-          console.warn(
-            "[CategoryRepository] No se pudo refrescar las categorías desde Supabase:",
-            error
-          );
+          logWarning("[CategoryRepository] No se pudo refrescar las categorías desde Supabase", { category: "offline", context: { error: String(error) } });
         });
     }
 
@@ -59,19 +57,13 @@ export class CategoryRepository extends SupabaseRepository<Category> {
 
         if (fresh) {
           void this.local.save(fresh).catch((error) => {
-            console.warn(
-              "[CategoryRepository] No se pudo guardar la categoría en caché local:",
-              error
-            );
+            logWarning("[CategoryRepository] No se pudo guardar la categoría en caché local", { category: "offline", context: { error: String(error) } });
           });
         }
 
         return fresh;
       } catch (error) {
-        console.warn(
-          "[CategoryRepository] Falló findById contra Supabase, se usa caché local:",
-          error
-        );
+        logWarning("[CategoryRepository] Falló findById contra Supabase, se usa caché local", { category: "offline", context: { error: String(error) } });
         return this.local.findById(id);
       }
     }

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { container } from "../infrastructure/di/CompositionRoot";
 import { useVimdyEvent } from "./useVimdyCore";
 import { enrichKitchenOrders, KitchenOrderView } from "../core/services/kitchenOrderEnrichment";
+import { logWarning } from "../infrastructure/logging/opsLogger";
 
 /**
  * Historial de comandas ENTREGADAS. Lee de `container.kitchenService.getHistory()`,
@@ -37,7 +38,7 @@ export function useKitchenHistory() {
 
       setOrders(enriched);
     } catch (error) {
-      console.warn("[useKitchenHistory] No se pudo cargar el historial de cocina:", error);
+      logWarning("[useKitchenHistory] No se pudo cargar el historial de cocina", { category: "kitchen", context: { error: String(error) } });
     } finally {
       setLoading(false);
     }

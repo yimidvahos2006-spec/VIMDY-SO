@@ -4,6 +4,7 @@ import { IProductRepository } from "./IProductRepository";
 import { supabase } from "../../supabase/supabaseClient";
 import { ProductLocalRepository } from "./ProductLocalRepository";
 import { connectionStore } from "../../../core/store/connectionStore";
+import { logWarning } from "../../logging/opsLogger";
 
 /**
  * ProductRepository
@@ -64,10 +65,7 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
         .findAll()
         .then((fresh) => this.local.replaceAll(fresh))
         .catch((error) => {
-          console.warn(
-            "[ProductRepository] No se pudo refrescar el catálogo desde Supabase:",
-            error
-          );
+          logWarning("[ProductRepository] No se pudo refrescar el catálogo desde Supabase", { category: "offline", context: { error: String(error) } });
         });
     }
 
@@ -97,19 +95,13 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
 
         if (fresh) {
           void this.local.save(fresh).catch((error) => {
-            console.warn(
-              "[ProductRepository] No se pudo guardar el producto en caché local:",
-              error
-            );
+            logWarning("[ProductRepository] No se pudo guardar el producto en caché local", { category: "offline", context: { error: String(error) } });
           });
         }
 
         return fresh;
       } catch (error) {
-        console.warn(
-          "[ProductRepository] Falló findById contra Supabase, se usa caché local:",
-          error
-        );
+        logWarning("[ProductRepository] Falló findById contra Supabase, se usa caché local", { category: "offline", context: { error: String(error) } });
         return this.local.findById(id);
       }
     }
@@ -136,10 +128,7 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
     try {
       await this.local.save(product);
     } catch (error) {
-      console.warn(
-        "[ProductRepository] No se pudo guardar el producto nuevo en caché local:",
-        error
-      );
+      logWarning("[ProductRepository] No se pudo guardar el producto nuevo en caché local", { category: "offline", context: { error: String(error) } });
     }
   }
 
@@ -152,10 +141,7 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
     try {
       await this.local.save(cached);
     } catch (error) {
-      console.warn(
-        "[ProductRepository] No se pudo actualizar el producto en caché local:",
-        error
-      );
+      logWarning("[ProductRepository] No se pudo actualizar el producto en caché local", { category: "offline", context: { error: String(error) } });
     }
   }
 
@@ -164,10 +150,7 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
     try {
       await this.local.delete(id);
     } catch (error) {
-      console.warn(
-        "[ProductRepository] No se pudo eliminar el producto de la caché local:",
-        error
-      );
+      logWarning("[ProductRepository] No se pudo eliminar el producto de la caché local", { category: "offline", context: { error: String(error) } });
     }
   }
 
@@ -212,10 +195,7 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
     try {
       await this.local.save(result);
     } catch (error) {
-      console.warn(
-        "[ProductRepository] No se pudo actualizar el stock en caché local:",
-        error
-      );
+      logWarning("[ProductRepository] No se pudo actualizar el stock en caché local", { category: "offline", context: { error: String(error) } });
     }
 
     return result;

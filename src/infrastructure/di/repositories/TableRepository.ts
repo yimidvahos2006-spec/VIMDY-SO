@@ -2,6 +2,7 @@ import { Table } from "../../../core/entities/Entities";
 import { SupabaseRepository } from "./SupabaseRepository";
 import { TableLocalRepository } from "./TableLocalRepository";
 import { connectionStore } from "../../../core/store/connectionStore";
+import { logWarning } from "../../logging/opsLogger";
 
 /**
  * TableRepository
@@ -34,11 +35,11 @@ export class TableRepository extends SupabaseRepository<Table> {
       void super
         .findAll()
         .then((fresh) => this.local.replaceAll(fresh))
-        .catch((error) => {
-          console.warn(
-            "[TableRepository] No se pudo refrescar las mesas desde Supabase:",
-            error
-          );
+        .catch((error: unknown) => {
+          logWarning("[TableRepository] No se pudo refrescar las mesas desde Supabase", {
+            category: "offline",
+            context: { error: String(error) },
+          });
         });
     }
 
@@ -58,20 +59,20 @@ export class TableRepository extends SupabaseRepository<Table> {
         const fresh = await super.findById(id);
 
         if (fresh) {
-          void this.local.save(fresh).catch((error) => {
-            console.warn(
-              "[TableRepository] No se pudo guardar la mesa en caché local:",
-              error
-            );
+          void this.local.save(fresh).catch((error: unknown) => {
+            logWarning("[TableRepository] No se pudo guardar la mesa en caché local", {
+              category: "offline",
+              context: { error: String(error) },
+            });
           });
         }
 
         return fresh;
-      } catch (error) {
-        console.warn(
-          "[TableRepository] Falló findById contra Supabase, se usa caché local:",
-          error
-        );
+      } catch (error: unknown) {
+        logWarning("[TableRepository] Falló findById contra Supabase, se usa caché local", {
+          category: "offline",
+          context: { error: String(error) },
+        });
         return this.local.findById(id);
       }
     }

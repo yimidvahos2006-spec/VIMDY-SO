@@ -1,3 +1,5 @@
+import { logError } from "../infrastructure/logging/opsLogger";
+
 export type EventType =
   | "sale"
   | "inventory"
@@ -106,13 +108,7 @@ class VimdyCore {
 
       } catch (error) {
 
-        console.error(
-
-          `[VIMDY CORE] Error en evento "${event}"`,
-
-          error
-
-        );
+        logError(error, { category: "unknown", context: { event } });
 
       }
 

@@ -1,5 +1,6 @@
 import { ObservableStore } from "./ObservableStore";
 import { container } from "../../infrastructure/di/CompositionRoot";
+import { logError } from "../../infrastructure/logging/opsLogger";
 
 /**
  * Categoría de negocio de la notificación (PASO 5 — Centro de notificaciones).
@@ -96,7 +97,7 @@ class NotificationStore extends ObservableStore<Notification[]> {
 
   private persist(notification: Notification) {
     container.notificationRepo.save(notification).catch((err) => {
-      console.error("[notificationStore] No se pudo guardar la notificación en Supabase:", err);
+      logError("[notificationStore] No se pudo guardar la notificación en Supabase", { category: "sync", context: { error: String(err) } });
     });
   }
 
@@ -117,7 +118,7 @@ class NotificationStore extends ObservableStore<Notification[]> {
         this.notifications = this.dedupeByKey(sorted).slice(0, MAX_NOTIFICATIONS);
         this.sync();
       } catch (err) {
-        console.error("[notificationStore] No se pudo cargar notificaciones de Supabase:", err);
+        logError("[notificationStore] No se pudo cargar notificaciones de Supabase", { category: "sync", context: { error: String(err) } });
       } finally {
         this.loaded = true;
       }
@@ -140,7 +141,7 @@ class NotificationStore extends ObservableStore<Notification[]> {
       this.notifications = this.dedupeByKey(sorted).slice(0, MAX_NOTIFICATIONS);
       this.sync();
     } catch (err) {
-      console.error("[notificationStore] No se pudo refrescar notificaciones desde Supabase:", err);
+      logError("[notificationStore] No se pudo refrescar notificaciones desde Supabase", { category: "sync", context: { error: String(err) } });
     }
   }
 
@@ -245,7 +246,7 @@ class NotificationStore extends ObservableStore<Notification[]> {
     this.notifications = this.notifications.filter((n) => n.id !== id);
     this.sync();
     container.notificationRepo.delete(id).catch((err) => {
-      console.error("[notificationStore] No se pudo borrar la notificación en Supabase:", err);
+      logError("[notificationStore] No se pudo borrar la notificación en Supabase", { category: "sync", context: { error: String(err) } });
     });
   }
 
@@ -255,7 +256,7 @@ class NotificationStore extends ObservableStore<Notification[]> {
     this.sync();
     if (ids.length === 0) return;
     container.notificationRepo.deleteMany(ids).catch((err) => {
-      console.error("[notificationStore] No se pudo vaciar las notificaciones en Supabase:", err);
+      logError("[notificationStore] No se pudo vaciar las notificaciones en Supabase", { category: "sync", context: { error: String(err) } });
     });
   }
 }

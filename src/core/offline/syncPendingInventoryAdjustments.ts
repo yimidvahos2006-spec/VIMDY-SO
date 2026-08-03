@@ -6,6 +6,7 @@ import { isNetworkFailure } from "../services/offlineSale";
 import { pendingInventoryAdjustmentsStore } from "./pendingInventoryAdjustmentsStore";
 import type { PendingInventoryAdjustment } from "./PendingInventoryAdjustment";
 import { vimdyCore } from "../VimdyCore";
+import { logError } from "../../infrastructure/logging/opsLogger";
 
 /**
  * syncPendingInventoryAdjustments.ts
@@ -105,7 +106,7 @@ export async function syncPendingInventoryAdjustments(): Promise<void> {
     // real (reemplaza el valor optimista que había puesto
     // offlineInventory.ts al encolar).
     await productCatalogStore.refresh().catch((error) => {
-      console.error("No se pudo refrescar el catálogo tras sincronizar ajustes offline:", error);
+      logError("No se pudo refrescar el catálogo tras sincronizar ajustes offline", { category: "offline", context: { error: String(error) } });
     });
 
     // Mismo evento que ya escuchan useInventory/InventoryDashboard para

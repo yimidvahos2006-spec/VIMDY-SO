@@ -18,6 +18,7 @@ import {
   isNetworkFailure,
   reconstructCreateSaleInputFromSale
 } from "./offlineSale";
+import { logError } from "../../infrastructure/logging/opsLogger";
 
 const PAYMENT_METHOD_MAP: Record<string, PaymentMethod> = {
   cash: "CASH",
@@ -353,11 +354,11 @@ export async function chargeSale(
     // todas formas se reconcilia solo con datos reales vía useDashboardSync
     // (evento "sale"), así que no se pierde ni se inventa ningún número.
     productCatalogStore.refresh().catch((error) => {
-      console.error("No se pudo refrescar el catálogo tras la venta:", error);
+      logError("No se pudo refrescar el catálogo tras la venta", { category: "sync", context: { error: String(error) } });
     });
 
     syncDashboardAfterSale(paidSale).catch((error) => {
-      console.error("No se pudo sincronizar el Dashboard tras la venta:", error);
+      logError("No se pudo sincronizar el Dashboard tras la venta", { category: "sync", context: { error: String(error) } });
     });
 
     cartStore.clear();

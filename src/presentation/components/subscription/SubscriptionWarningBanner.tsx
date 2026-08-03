@@ -12,6 +12,10 @@ const DISMISS_KEY_PREFIX = "vimdy.subscription.warning.dismissed";
  * VIMDY — FASE 7, PASO 4: "Cuando falten 7 / 3 / 1 días, mostrar un aviso
  * elegante. Nunca mostrar mensajes agresivos."
  *
+ * Aplica tanto al trial de 30 días como al plan pagado (mensual/anual)
+ * que el negocio haya elegido: en ambos casos avisa cuando faltan 7, 3 o
+ * 1 día para la fecha relevante (trialEndsAt o renewalDate).
+ *
  * Vive en VimdyAppLayout (toda la app), así que aparece en Dashboard,
  * Configuración, Perfil del negocio — donde sea que el usuario esté.
  *
@@ -20,16 +24,19 @@ const DISMISS_KEY_PREFIX = "vimdy.subscription.warning.dismissed";
  * vez no significa "nunca más avisar", solo "ya lo vi por hoy".
  */
 export function SubscriptionWarningBanner() {
-  const { isTrial, warningThreshold, daysRemaining } = useSubscription();
+  const { plan, isTrial, warningThreshold, daysRemaining } = useSubscription();
   const [dismissedThreshold, setDismissedThreshold] = useState<number | null>(null);
   const [upgrading, setUpgrading] = useState(false);
 
   const dismissKey = useMemo(
-    () => `${DISMISS_KEY_PREFIX}:${new Date().toDateString()}:${warningThreshold ?? ""}`,
-    [warningThreshold]
+    () => `${DISMISS_KEY_PREFIX}:${new Date().toDateString()}:${plan ?? ""}:${warningThreshold ?? ""}`,
+    [plan, warningThreshold]
   );
 
-  if (!isTrial || warningThreshold === null) return null;
+  // Aplica tanto al trial como a un plan pagado (mensual/anual) que ya
+  // cumplió con su fecha de renovación — un negocio "suspended" no recibe
+  // este aviso (ya ve la pantalla de PASO 5, no tiene sentido avisarle).
+  if (!plan || plan === "suspended" || warningThreshold === null) return null;
   if (dismissedThreshold === warningThreshold) return null;
 
   function handleDismiss() {
@@ -51,18 +58,24 @@ export function SubscriptionWarningBanner() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-vimdy-text text-sm font-semibold">
-                {daysRemaining === 1
-                  ? "Tu prueba termina mañana."
-                  : `Tu prueba termina en ${daysRemaining} días.`}
+                {isTrial
+                  ? daysRemaining === 1
+                    ? "Tu prueba termina mañana."
+                    : `Tu prueba termina en ${daysRemaining} días.`
+                  : daysRemaining === 1
+                  ? "Tu plan termina mañana."
+                  : `Tu plan termina en ${daysRemaining} días.`}
               </p>
               <p className="text-vimdy-text-secondary text-xs mt-1 leading-relaxed">
-                Actualiza tu plan para seguir utilizando VIMDY sin interrupciones.
+                {isTrial
+                  ? "Actualiza tu plan para seguir utilizando VIMDY sin interrupciones."
+                  : "Renueva tu plan para seguir utilizando VIMDY sin interrupciones."}
               </p>
               <button
                 onClick={() => setUpgrading(true)}
                 className="mt-3 bg-vimdy-accent hover:bg-vimdy-accent-hover transition text-white text-xs font-bold px-3.5 py-2 rounded-lg"
               >
-                Ver planes
+                {isTrial ? "Ver planes" : "Renovar ahora"}
               </button>
             </div>
             <button onClick={handleDismiss} className="text-vimdy-text-tertiary hover:text-vimdy-text flex-shrink-0">

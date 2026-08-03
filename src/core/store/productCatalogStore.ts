@@ -1,6 +1,7 @@
 import { ObservableStore } from "./ObservableStore";
 import { Product } from "../entities/Entities";
 import { container, productsReady } from "../../infrastructure/di/CompositionRoot";
+import { logWarning } from "../../infrastructure/logging/opsLogger";
 
 /* ===========================================================================
    ProductCatalogStore
@@ -68,10 +69,7 @@ class ProductCatalogStore extends ObservableStore<Product[]> {
       this.publish(products);
       this.loaded = true;
     } catch (error) {
-      console.warn(
-        "[productCatalogStore] No se pudo hidratar el catálogo al iniciar:",
-        error
-      );
+      logWarning("[productCatalogStore] No se pudo hidratar el catálogo al iniciar", { category: "offline", context: { error: String(error) } });
     } finally {
       this.initPromise = null;
     }

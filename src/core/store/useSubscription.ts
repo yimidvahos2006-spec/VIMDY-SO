@@ -64,15 +64,17 @@ export function useSubscription(): UseSubscriptionResult {
     };
   }
 
-  const daysRemaining = subscriptionEngine.daysRemaining(subscription.trialEndsAt);
-  const status = subscriptionEngine.effectiveStatus(subscription);
+  const now = new Date();
+  const relevantDate = subscription.plan === "trial" ? subscription.trialEndsAt : subscription.renewalDate;
+  const daysRemaining = subscriptionEngine.daysRemaining(relevantDate, now);
+  const status = subscriptionEngine.effectiveStatus(subscription, now);
 
   return {
     loading,
     plan: status,
     daysRemaining,
     countdownLabel: subscriptionEngine.countdownLabel(daysRemaining),
-    warningThreshold: status === "trial" ? subscriptionEngine.warningThreshold(daysRemaining) : null,
+    warningThreshold: status === "suspended" ? null : subscriptionEngine.warningThreshold(daysRemaining),
     isTrial: status === "trial",
     isSuspended: status === "suspended",
     trialEndsAt: subscription.trialEndsAt,

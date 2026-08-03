@@ -1,5 +1,3 @@
-import { supabase, getCurrentBusinessId } from "../supabase/supabaseClient";
-
 /* =============================================================================
    opsLogger
    -----------------------------------------------------------------------------
@@ -49,19 +47,6 @@ interface LogOptions {
   context?: Record<string, unknown>;
 }
 
-function currentBusinessIdFallback(): string | null {
-  // Si el call site no pasa businessId explícito, intenta tomarlo del
-  // mismo contexto en memoria que ya usa toda la app (setCurrentBusinessId
-  // se llama al iniciar sesión, ver authBusinessContext.ts). getCurrentBusinessId()
-  // lanza si todavía no hay negocio activo (ej. pantalla de login) — por
-  // eso va en try/catch, es mejor esfuerzo, no crítico si falla.
-  try {
-    return getCurrentBusinessId();
-  } catch {
-    return null;
-  }
-}
-
 async function persist(
   severity: "error" | "warning",
   message: string,
@@ -69,13 +54,33 @@ async function persist(
   options: LogOptions
 ) {
   try {
+    // Import dinámico A PROPÓSITO, no al tope del archivo: opsLogger se
+    // importa desde engines de src/core que los smoke tests (tests/smoke/)
+    // corren en entorno "node" puro, sin DOM (ver vitest.config.ts). Si
+    // supabaseClient.ts se cargara al tope de este archivo, su código de
+    // inicialización (que toca `window` en modo DEV) tumbaría CUALQUIER
+    // test que use un engine que loguee algo — aunque el test nunca llame
+    // a logError/logWarning. Con import() perezoso, ese código solo se
+    // ejecuta si de verdad se llega a persistir un error (en el navegador
+    // real, nunca en los tests, que no llaman a esto).
+    const { supabase, getCurrentBusinessId } = await import("../supabase/supabaseClient");
+
+    let businessId = options.businessId ?? null;
+    if (!businessId) {
+      try {
+        businessId = getCurrentBusinessId();
+      } catch {
+        businessId = null;
+      }
+    }
+
     const { data: userData } = await supabase.auth.getUser();
     await supabase.from("system_errors").insert({
       severity,
       category: options.category ?? "unknown",
       message: message.slice(0, 4000), // evita filas gigantes por errores con payloads enormes
       stack: stack?.slice(0, 8000) ?? null,
-      business_id: options.businessId ?? currentBusinessIdFallback(),
+      business_id: businessId,
       user_id: userData?.user?.id ?? null,
       context: options.context ?? {},
       source: "web"

@@ -12,6 +12,7 @@ import {
 
 import { IRepository } from "../../infrastructure/di/repositories/IRepository";
 import { SaleRepository } from "../../infrastructure/di/repositories/SaleRepository";
+import { logWarning } from "../../infrastructure/logging/opsLogger";
 
 import { CartEngine } from "./CartEngine";
 import { InventoryEngine } from "./InventoryEngine";
@@ -1740,9 +1741,10 @@ export class SalesEngine {
       const hasTrail = history.some(movement => movement.reason.includes(reference));
 
       if (!hasTrail) {
-        console.warn(
-          `[SalesEngine] Sin trazabilidad en Kardex para el producto ${item.productId} de la venta ${reference}.`
-        );
+        logWarning(`Sin trazabilidad en Kardex para el producto ${item.productId} de la venta ${reference}.`, {
+          category: "inventory",
+          context: { productId: item.productId, saleReference: reference }
+        });
       }
     }
   }

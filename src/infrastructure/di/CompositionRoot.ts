@@ -66,6 +66,7 @@ import { QuestionRouter } from '../../core/engines/QuestionRouter';
 import { PatternLearningEngine } from '../../core/engines/PatternLearningEngine';
 import { CommandEngine } from '../../core/engines/CommandEngine';
 import { CopilotApiClient } from './CopilotApiClient';
+import { logError } from "../logging/opsLogger";
 
 // --------------------
 // REPOS
@@ -281,7 +282,7 @@ vimdyCore.on("shift", (payload) => {
   patternLearningEngine
     .recordTodaySnapshot("VIMDY", companyConfigStore.get().currency)
     .catch((error) => {
-      console.error("[PASO 9] No se pudo guardar la foto diaria del negocio:", error);
+      logError("[PASO 9] No se pudo guardar la foto diaria del negocio", { category: "sync", context: { error: String(error) } });
     });
 });
 

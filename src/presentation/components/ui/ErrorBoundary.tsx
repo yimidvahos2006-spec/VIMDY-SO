@@ -2,6 +2,7 @@ import React from "react";
 import { AlertTriangle, RotateCcw, RefreshCcw, Home } from "lucide-react";
 
 import { useAuth } from "../../context/AuthContext";
+import { logError } from "../../../infrastructure/logging/opsLogger";
 
 /**
  * ErrorBoundary.tsx
@@ -60,8 +61,14 @@ class ErrorBoundaryClass extends React.Component<ErrorBoundaryClassProps, ErrorB
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo): void {
-    // Siempre queda en la consola, pase lo que pase con lo de abajo.
-    console.error("[VIMDY] Error no controlado atrapado por ErrorBoundary:", error, info.componentStack);
+    // Manda a system_errors (ver opsLogger.ts) — este es el punto más
+    // importante de todos para loguear, porque atrapa CUALQUIER crash no
+    // controlado de cualquier parte de la app, no solo los que alguien se
+    // acordó de envolver en try/catch.
+    logError(error, {
+      category: "unknown",
+      context: { scope: this.props.scope, componentStack: info.componentStack?.slice(0, 2000) }
+    });
 
     // Mejor esfuerzo: deja rastro en auditoría para poder revisar después
     // qué tronó y a quién le pasó. Va envuelto en su propio try/catch y

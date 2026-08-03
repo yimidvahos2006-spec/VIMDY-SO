@@ -6,6 +6,7 @@ import { useVimdyEvent } from "./useVimdyCore";
 import { announceNewKitchenOrders } from "../core/services/kitchenAlertService";
 import { enrichKitchenOrders, KitchenOrderView } from "../core/services/kitchenOrderEnrichment";
 import { useAuth } from "../presentation/context/AuthContext";
+import { logWarning } from "../infrastructure/logging/opsLogger";
 
 export type { KitchenOrderItemView, KitchenOrderView } from "../core/services/kitchenOrderEnrichment";
 
@@ -89,7 +90,7 @@ export function useKitchenOrders() {
 
       setOrders(enriched);
     } catch (error) {
-      console.warn("[useKitchenOrders] No se pudieron cargar las comandas:", error);
+      logWarning("[useKitchenOrders] No se pudieron cargar las comandas", { category: "kitchen", context: { error: String(error) } });
     } finally {
       setLoading(false);
     }

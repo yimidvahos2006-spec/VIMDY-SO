@@ -4,6 +4,7 @@ import { IRepository } from '../../infrastructure/di/repositories/IRepository';
 import { IProductRepository } from '../../infrastructure/di/repositories/IProductRepository';
 import { KardexEngine } from './KardexEngine';
 import { companyConfigStore } from '../store/companyConfigStore';
+import { logError } from '../../infrastructure/logging/opsLogger';
 
 /** Un item de venta (o devolución) sobre el que hay que mover inventario. */
 export interface SaleStockItem {
@@ -613,10 +614,10 @@ export class InventoryEngine {
             // aquí — se deja constancia explícita en consola en vez de
             // tragarse un segundo error en silencio (eso sí dejaría el
             // inventario inconsistente de verdad).
-            console.error(
-              `[InventoryEngine] No se pudo revertir "${done.productId}" tras un descuento fallido en la misma venta:`,
-              rollbackError
-            );
+            logError(rollbackError, {
+              category: "inventory",
+              context: { productId: done.productId, situation: "rollback_fallido_descuento_venta" }
+            });
           }
         }
 
@@ -767,10 +768,10 @@ export class InventoryEngine {
               performedBy
             );
           } catch (rollbackError) {
-            console.error(
-              `[InventoryEngine] No se pudo revertir "${done.productId}" tras una tanda de producción fallida:`,
-              rollbackError
-            );
+            logError(rollbackError, {
+              category: "inventory",
+              context: { productId: done.productId, situation: "rollback_fallido_tanda_produccion" }
+            });
           }
         }
 

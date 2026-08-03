@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { container } from "../infrastructure/di/CompositionRoot";
 import { useVimdyEvent } from "./useVimdyCore";
 import { computeWaiterLeaderboard, WaiterRankingEntry } from "../core/services/waiterLeaderboard";
+import { logWarning } from "../infrastructure/logging/opsLogger";
 
 /**
  * Ranking de meseros de HOY (00:00 a ahora), para la tarjeta "Mesero del
@@ -32,7 +33,7 @@ export function useWaiterLeaderboard() {
       setEntries(computeWaiterLeaderboard(sales, waiters));
       setTotalActiveWaiters(waiters.length);
     } catch (error) {
-      console.warn("[useWaiterLeaderboard] No se pudo cargar el ranking de meseros:", error);
+      logWarning("[useWaiterLeaderboard] No se pudo cargar el ranking de meseros", { category: "sync", context: { error: String(error) } });
     } finally {
       setLoading(false);
     }
