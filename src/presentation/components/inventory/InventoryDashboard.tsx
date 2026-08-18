@@ -26,7 +26,8 @@ import {
   Copy,
   ChefHat,
   Flame,
-  Clock3
+  Clock3,
+  Scale
 } from "lucide-react";
 
 import { useInventory, getStockStatus, StockStatus } from "../../../core/store/useInventory";
@@ -38,9 +39,11 @@ import { readMenuImage, MenuOcrItem } from "../../../core/ia/MenuVisionAI";
 import { generateRecipeWithAI } from "../../../core/ia/RecipeAI";
 import { Product, InventoryMovement, Category, Supplier, RecipeItem, LossCategory, ProductSizeOption, ProductExtraOption } from "../../../core/entities/Entities";
 import { ProductInput } from "../../../core/engines/InventoryEngine";
+import { ProductType, inferProductType, resolveProductFlags } from "../../../core/types/productType";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { fileToProductImage } from "../../utils/imageUtils";
 import { ProductionIntelligencePanel } from "./ProductionIntelligencePanel";
+import { buildProductInputFromImportRow, inferUnitFromProductName, ImportedProductRow } from "./importHelpers";
 import { LOSS_CATEGORY_LABEL } from "../../../core/engines/lossCategoryLabels";
 
 const UNIT_OPTIONS = ["unidad", "kg", "g", "litro", "ml", "libra", "servicio", "paquete", "caja"];
@@ -73,31 +76,10 @@ type SortKey = "name" | "stock" | "price";
  * - cocina: se prepara en cocina al venderlo, sin descontar stock propio (ej: hamburguesa).
  * - cocina_receta: se prepara en cocina Y descuenta ingredientes de una receta/BOM.
  * - servicio: no maneja stock ni preparación (ej: domicilio, propina, cover).
- * Por ahora es un derivado de los flags que ya existen (requiresKitchen, hasRecipe)
- * para no romper nada existente; los pasos siguientes lo usarán para mostrar/ocultar
- * secciones completas del formulario (stock, ingredientes, etc.).
- */
-type ProductType = "inventario" | "cocina" | "cocina_receta" | "servicio";
-
-/**
- * Infiere el tipo de producto a partir de un producto existente (o el
- * default para uno nuevo).
  *
- * BLOQUEANTE #2 (auditoría Fase 2) — fix: antes "Inventario" y "Servicio"
- * se guardaban con los MISMOS flags (requiresKitchen=false, sin receta),
- * así que esta función no tenía forma de distinguirlos y un producto
- * Servicio volvía a aparecer como Inventario al reabrirlo. Ahora se
- * revisa primero `trackStock === false` (lo único que un producto
- * Servicio manda de forma explícita e inequívoca) antes de caer al resto
- * de la inferencia por flags compartidos.
+ * La inferencia y la resolución de flags viven en core/types/productType.ts
+ * (fuente única de verdad, testeable). Este archivo solo las consume.
  */
-function inferProductType(product?: Product): ProductType {
-  if (!product) return "cocina"; // nuevo producto: mismo default seguro que ya usa requiresKitchen.
-  if (product.trackStock === false) return "servicio";
-  if (product.recipe && product.recipe.length > 0) return "cocina_receta";
-  if (product.requiresKitchen) return "cocina";
-  return "inventario";
-}
 
 export function InventoryDashboard() {
   const {
@@ -112,7 +94,8 @@ export function InventoryDashboard() {
     produceBatch,
     createProduct,
     updateProduct,
-    deleteProduct
+    deleteProduct,
+    productsWithCost
   } = useInventory();
 
   const { categories } = useCategories();
@@ -130,6 +113,7 @@ export function InventoryDashboard() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StockStatus | "todos">("todos");
   const [categoryFilter, setCategoryFilter] = useState<string>("todos");
+  const [productTypeFilter, setProductTypeFilter] = useState<ProductType | "todos">("todos");
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [selected, setSelected] = useState<Product | null>(null);
@@ -213,6 +197,10 @@ export function InventoryDashboard() {
 
     if (categoryFilter !== "todos") {
       list = list.filter((p) => p.categoryId === categoryFilter);
+    }
+
+    if (productTypeFilter !== "todos") {
+      list = list.filter((p) => inferProductType(p) === productTypeFilter);
     }
 
     const sorted = [...list].sort((a, b) => {
@@ -372,7 +360,7 @@ export function InventoryDashboard() {
         <KpiCard
           icon={<DollarSign size={20} className="text-vimdy-success" />}
           label="Valor del inventario"
-          value={money(kpis.totalValue)}
+          value={kpis.productsWithCost > 0 ? money(kpis.totalValue) : "Sin costo configurado"}
         />
       </div>
 
@@ -399,6 +387,19 @@ export function InventoryDashboard() {
               <option value="normal">Normal</option>
               <option value="bajo">Stock bajo</option>
               <option value="agotado">Agotado</option>
+            </select>
+
+            <select
+              value={productTypeFilter}
+              onChange={(e) => setProductTypeFilter(e.target.value as ProductType | "todos")}
+              className="h-10 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-accent"
+            >
+              <option value="todos">Todos los tipos</option>
+              <option value="inventario">Producto para vender</option>
+              <option value="ingrediente">Ingrediente</option>
+              <option value="cocina">Producto preparado</option>
+              <option value="cocina_receta">Producto con receta</option>
+              <option value="servicio">Servicio</option>
             </select>
           </div>
 
@@ -724,7 +725,7 @@ function AiImportModal({
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
-  const [rows, setRows] = useState<ReviewRow[]>([]);
+  const [rows, setRows] = useState<ImportedProductRow[]>([]);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [readingPhase, setReadingPhase] = useState(0);
 
@@ -835,7 +836,10 @@ function AiImportModal({
           requiresKitchen: true,
           stock: "0",
           recipeRows: [],
-          taxRate: ""
+          taxRate: "",
+          unit: inferUnitFromProductName(item.name),
+          productionMode: "NONE",
+          isIngredient: false
         }))
       );
     } catch (err: any) {
@@ -950,7 +954,10 @@ function AiImportModal({
         requiresKitchen: true,
         stock: "0",
         recipeRows: [],
-        taxRate: ""
+        taxRate: "",
+        unit: "unidad",
+        productionMode: "NONE",
+        isIngredient: false
       }
     ]);
   }
@@ -1020,50 +1027,8 @@ function AiImportModal({
         continue;
       }
 
-      // Paso 2.7: si la fila tiene su propio % de IVA, se usa ese; si no,
-      // se cae al % general de "Antes de importar" (por defecto todos los
-      // productos importan con el mismo IVA, y el negocio solo toca la
-      // fila del producto que sea distinto).
-      const taxValue = row.taxRate.trim()
-        ? Number(row.taxRate)
-        : batchTax.trim()
-          ? Number(batchTax)
-          : undefined;
-
-      // Paso 2.6: si la fila tiene Cocina activada, el stock lo dan los
-      // ingredientes (recipe), no un número manual — igual que "Producto
-      // con receta" en el formulario normal. Si no tiene Cocina, se usa el
-      // stock inicial que el negocio cargó en esa fila.
-      let recipeValue: RecipeItem[] | undefined;
-      let stockValue = 0;
-
-      if (row.requiresKitchen) {
-        const validIngredientRows = row.recipeRows.filter(
-          (ing) => ing.productId && ing.quantity.trim() && Number(ing.quantity) > 0
-        );
-        if (validIngredientRows.length > 0) {
-          recipeValue = validIngredientRows.map((ing) => ({
-            productId: ing.productId,
-            quantity: Number(ing.quantity)
-          }));
-        }
-      } else {
-        stockValue = row.stock.trim() ? Number(row.stock) : 0;
-        if (isNaN(stockValue) || stockValue < 0) stockValue = 0;
-      }
-
-      const ok = await createProduct({
-        name,
-        categoryId: row.categoryId,
-        price,
-        stock: stockValue,
-        minStock: 0,
-        taxRate: taxValue,
-        unit: "unidad",
-        active: true,
-        requiresKitchen: row.requiresKitchen,
-        recipe: recipeValue
-      });
+      const input = buildProductInputFromImportRow(row, batchTax);
+      const ok = await createProduct(input);
 
       if (ok) success++;
       else failed.push(name);
@@ -1656,7 +1621,10 @@ function ProductFormModal({
   // PASO 1 (rediseño formulario de producto): el campo más importante, va
   // arriba de todo. Los pasos siguientes lo usarán para decidir qué otras
   // secciones del formulario se muestran u ocultan.
-  const [productType, setProductType] = useState<ProductType>(inferProductType(product));
+  const [productType, setProductType] = useState<ProductType>(() => {
+    if (product?.isIngredient) return "ingrediente";
+    return inferProductType(product);
+  });
 
   const [name, setName] = useState(product?.name ?? "");
   // PASO 2 (rediseño formulario de producto — Información General): campos
@@ -1780,6 +1748,11 @@ function ProductFormModal({
         setHasRecipe(false);
         setProductionMode("ON_DEMAND");
         break;
+      case "ingrediente":
+        setRequiresKitchen(false);
+        setHasRecipe(false);
+        setProductionMode("ON_DEMAND");
+        break;
       case "inventario":
       default:
         setRequiresKitchen(false);
@@ -1788,6 +1761,17 @@ function ProductFormModal({
         break;
     }
   }
+
+  // FASE 1: sincronizar el selector de tipo con la receta. Si el usuario
+  // activa "Producto con receta", el tipo debe pasar a cocina_receta.
+  // Si la desactiva, volver a cocina o inventario según corresponda.
+  React.useEffect(() => {
+    if (hasRecipe && productType !== "cocina_receta") {
+      setProductType("cocina_receta");
+    } else if (!hasRecipe && productType === "cocina_receta") {
+      setProductType(requiresKitchen ? "cocina" : "inventario");
+    }
+  }, [hasRecipe, productType, requiresKitchen]);
 
   function addRecipeRow() {
     setRecipeRows((prev) => [
@@ -2100,25 +2084,21 @@ function ProductFormModal({
       printStationOverride: printStationOverride.trim() || undefined,
       sizes: sizesValue,
       extras: extrasValue,
-      // BLOQUEANTE (bug reportado en video 2026-07-31): antes esto era
-      // `productType !== "servicio"`, así que "Cocina" (sin receta) se
-      // guardaba con trackStock=true — contradiciendo el propio texto de
-      // ayuda de este formulario ("Los productos de Cocina se preparan al
-      // venderse: no manejan stock propio") y dejando esos productos
-      // atrapados en stock 0 para siempre porque InventoryEngine sí les
-      // exigía/descontaba stock. Solo "Inventario" maneja stock propio de
-      // verdad; "Cocina con receta" no necesita esto porque su propio
-      // stock nunca se toca (consumeForSale descuenta los ingredientes de
-      // la receta, no el producto) — ver inferProductType() más arriba.
+      // FASE 1 (arreglo cocina_receta ON_DEMAND): los flags persistidos
+      // salen de resolveProductFlags(), la ÚNICA fuente de verdad que es
+      // inversa exacta de inferProductType(). Así el estado guardado es
+      // ESTABLE y al recargar/editar el tipo se recupera idéntico.
       //
-      // BLOQUEANTE (auditoría Fase 2 — Panadería): excepción a lo de
-      // arriba — un producto "cocina_receta" en modo BATCH (ej. Pan) SÍ
-      // tiene stock propio real (lo que ya se produjo y no se ha vendido),
-      // así que también necesita trackStock=true. Sin esto, produceBatch()
-      // aumentaría el stock pero InventoryEngine.consumeForSale() nunca lo
-      // descontaría en la venta (ver buildConsumptionTargets), dejando el
-      // POS sin ningún control real de cuánto pan queda.
-      trackStock: productType === "inventario" || (hasRecipe && productionMode === "BATCH")
+      // Reglas (ver core/types/productType.ts):
+      //  - inventario:     trackStock=true,  requiresKitchen=false
+      //  - ingrediente:    trackStock=true,  requiresKitchen=false
+      //  - cocina:         trackStock=false, requiresKitchen=true
+      //  - cocina_receta:  requiresKitchen=true; trackStock=false si
+      //                    ON_DEMAND (consume ingredientes directo), true
+      //                    si BATCH (maneja stock propio de tandas).
+      //  - servicio:       trackStock=false, requiresKitchen=false
+      trackStock: resolveProductFlags(productType, productionMode).trackStock,
+      isIngredient: productType === "ingrediente"
     });
 
     setSaving(false);
@@ -2166,18 +2146,21 @@ function ProductFormModal({
               onChange={(e) => handleProductTypeChange(e.target.value as ProductType)}
               className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-accent"
             >
-              <option value="inventario">Inventario</option>
-              <option value="cocina">Cocina</option>
-              <option value="cocina_receta">Cocina con receta</option>
+              <option value="inventario">Producto para vender</option>
+              <option value="ingrediente">Ingrediente</option>
+              <option value="cocina">Producto preparado</option>
+              <option value="cocina_receta">Producto preparado con receta</option>
               <option value="servicio">Servicio</option>
             </select>
             <p className="text-vimdy-text-tertiary text-xs mt-1">
               {productType === "inventario" &&
                 "Se vende y descuenta directo del stock. Ej: gaseosa, cerveza, snack empacado."}
+              {productType === "ingrediente" &&
+                "Existencias usadas para preparar otros productos. No aparece en Caja por defecto. Ej: carne, harina, tomate."}
               {productType === "cocina" &&
-                "Se prepara en cocina al venderlo; no maneja stock propio. Ej: hamburguesa, plato del día."}
+                "Se prepara en cocina al venderlo; no maneja stock propio ni receta fija. Ej: plato del día, caldo de costilla."}
               {productType === "cocina_receta" &&
-                "Se prepara en cocina y descuenta los ingredientes de su receta. Ej: pizza con receta de insumos."}
+                "Se prepara en cocina y descuenta los ingredientes de su receta. Ej: hamburguesa, pizza."}
               {productType === "servicio" &&
                 "No maneja stock ni preparación en cocina. Ej: domicilio, propina, cover."}
             </p>
@@ -3475,10 +3458,11 @@ function ProductDetailModal({
 }) {
   const [history, setHistory] = useState<InventoryMovement[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
-  const [mode, setMode] = useState<"increase" | "decrease" | null>(null);
+  const [mode, setMode] = useState<"increase" | "decrease" | "adjust" | null>(null);
   const [quantity, setQuantity] = useState("");
   const [reason, setReason] = useState("");
   const [lossCategory, setLossCategory] = useState<LossCategory | "">("");
+  const [newStock, setNewStock] = useState("");
   const [saving, setSaving] = useState(false);
 
   // PASO 2 (Motor de Producción): costo real, rentabilidad y capacidad de
@@ -3509,40 +3493,64 @@ function ProductDetailModal({
   }, [product.id, getHistory]);
 
   async function handleConfirm() {
-    const qty = Number(quantity);
-
-    if (!qty || qty <= 0) {
-      toast.warning("Ingresa una cantidad válida.");
-      return;
-    }
-
-    if (!reason.trim()) {
-      toast.warning("El motivo del movimiento es obligatorio.");
-      return;
-    }
-
-    if (mode === "decrease" && !lossCategory) {
-      toast.warning("Selecciona la categoría de la pérdida (merma, vencido, consumo interno, robo o error).");
-      return;
-    }
-
     setSaving(true);
 
-    const ok =
-      mode === "increase"
-        ? await increaseStock(product.id, qty, reason.trim())
-        : await decreaseStock(product.id, qty, reason.trim(), lossCategory || undefined);
+    try {
+      let ok = false;
 
-    setSaving(false);
+      if (mode === "increase") {
+        const qty = Number(quantity);
+        if (!qty || qty <= 0) {
+          toast.warning("Ingresa una cantidad válida.");
+          setSaving(false);
+          return;
+        }
+        ok = await increaseStock(product.id, qty, reason.trim() || "Entrada de inventario");
+      } else if (mode === "decrease") {
+        const qty = Number(quantity);
+        if (!qty || qty <= 0) {
+          toast.warning("Ingresa una cantidad válida.");
+          setSaving(false);
+          return;
+        }
+        if (!lossCategory) {
+          toast.warning("Selecciona la categoría de la pérdida (merma, vencido, consumo interno, robo o error).");
+          setSaving(false);
+          return;
+        }
+        ok = await decreaseStock(product.id, qty, reason.trim() || "Salida de inventario", lossCategory || undefined);
+      } else if (mode === "adjust") {
+        const target = Number(newStock);
+        if (Number.isNaN(target) || target < 0) {
+          toast.warning("Ingresa un stock nuevo válido.");
+          setSaving(false);
+          return;
+        }
+        const diff = target - product.stock;
+        if (diff === 0) {
+          toast.info("El stock nuevo es igual al actual.");
+          setSaving(false);
+          return;
+        }
+        if (diff > 0) {
+          ok = await increaseStock(product.id, diff, reason.trim() || "Ajuste de inventario");
+        } else {
+          ok = await decreaseStock(product.id, Math.abs(diff), reason.trim() || "Ajuste de inventario", "AJUSTE_ADMINISTRATIVO");
+        }
+      }
 
-    if (ok) {
-      setMode(null);
-      setQuantity("");
-      setReason("");
-      setLossCategory("");
-      const fresh = await getHistory(product.id);
-      setHistory(fresh);
-      onUpdated({ ...product, stock: mode === "increase" ? product.stock + qty : product.stock - qty });
+      if (ok) {
+        setMode(null);
+        setQuantity("");
+        setReason("");
+        setLossCategory("");
+        setNewStock("");
+        const fresh = await getHistory(product.id);
+        setHistory(fresh);
+        onUpdated({ ...product, stock: mode === "increase" ? product.stock + Number(quantity) : mode === "decrease" ? product.stock - Number(quantity) : Number(newStock) });
+      }
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -3594,6 +3602,15 @@ function ProductDetailModal({
           <InfoBox label="Stock actual" value={product.stock.toString()} />
           <InfoBox label="Mínimo" value={product.minStock.toString()} />
           <InfoBox label="Precio" value={money(product.price)} />
+          {product.purchasePrice !== undefined && (
+            <InfoBox label="Costo unitario" value={money(product.purchasePrice)} />
+          )}
+          {product.purchasePrice !== undefined && (
+            <InfoBox label="Valor en inventario" value={money(product.purchasePrice * product.stock)} />
+          )}
+          {product.purchasePrice === undefined && product.trackStock !== false && (
+            <InfoBox label="Valor en inventario" value="Sin costo configurado" />
+          )}
         </div>
 
         <span className={`inline-block text-xs px-2 py-1 rounded-vimdy-sm mb-5 ${STATUS_CLASS[status]}`}>
@@ -3681,29 +3698,72 @@ function ProductDetailModal({
               className="flex-1 h-11 rounded-vimdy-md bg-vimdy-success/15 border border-vimdy-success/40 text-vimdy-success font-semibold hover:bg-vimdy-success/25 flex items-center justify-center gap-2"
             >
               <ArrowUpCircle size={18} />
-              Aumentar stock
+              Entrada
             </button>
             <button
               onClick={() => setMode("decrease")}
               className="flex-1 h-11 rounded-vimdy-md bg-vimdy-danger/15 border border-vimdy-danger/40 text-vimdy-danger font-semibold hover:bg-vimdy-danger/25 flex items-center justify-center gap-2"
             >
               <ArrowDownCircle size={18} />
-              Disminuir stock
+              Salida / Merma
+            </button>
+            <button
+              onClick={() => setMode("adjust")}
+              className="flex-1 h-11 rounded-vimdy-md bg-vimdy-warning/15 border border-vimdy-warning/40 text-vimdy-warning font-semibold hover:bg-vimdy-warning/25 flex items-center justify-center gap-2"
+            >
+              <Scale size={18} />
+              Ajuste
             </button>
           </div>
         ) : (
           <div className="rounded-vimdy-md border border-vimdy-border bg-vimdy-surface p-4 mb-6 space-y-3">
             <p className="text-vimdy-text font-semibold text-sm">
-              {mode === "increase" ? "Registrar entrada" : "Registrar salida"}
+              {mode === "increase" && "Registrar entrada"}
+              {mode === "decrease" && "Registrar salida / merma"}
+              {mode === "adjust" && "Ajuste de inventario"}
             </p>
-            <input
-              type="number"
-              min={1}
-              value={quantity}
-              onChange={(e) => setQuantity(e.target.value)}
-              placeholder="Cantidad"
-              className="w-full h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-accent"
-            />
+
+            {mode === "adjust" ? (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-vimdy-text-secondary mb-1">Stock actual</label>
+                    <input
+                      type="text"
+                      value={product.stock.toString()}
+                      disabled
+                      className="w-full h-10 px-3 rounded-vimdy-sm bg-vimdy-background/60 border border-vimdy-border text-vimdy-text-tertiary text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-vimdy-text-secondary mb-1">Stock nuevo</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={newStock}
+                      onChange={(e) => setNewStock(e.target.value)}
+                      placeholder="Cantidad final"
+                      className="w-full h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-accent"
+                    />
+                  </div>
+                </div>
+                {newStock && !Number.isNaN(Number(newStock)) && (
+                  <p className="text-xs text-vimdy-text-secondary">
+                    Diferencia: <span className={Number(newStock) - product.stock >= 0 ? "text-vimdy-success" : "text-vimdy-danger"}>{Number(newStock) - product.stock >= 0 ? "+" : ""}{Number(newStock) - product.stock}</span>
+                  </p>
+                )}
+              </>
+            ) : (
+              <input
+                type="number"
+                min={1}
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+                placeholder="Cantidad"
+                className="w-full h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-accent"
+              />
+            )}
+
             {mode === "decrease" && (
               <select
                 value={lossCategory}
@@ -3718,10 +3778,17 @@ function ProductDetailModal({
                 ))}
               </select>
             )}
+
             <input
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder={mode === "increase" ? "Motivo (ej: compra a proveedor)" : "Detalle (ej: se cayó al piso)"}
+              placeholder={
+                mode === "increase"
+                  ? "Motivo (ej: compra a proveedor)"
+                  : mode === "decrease"
+                  ? "Detalle (ej: se cayó al piso)"
+                  : "Motivo del ajuste (ej: conteo físico)"
+              }
               className="w-full h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-accent"
             />
             <div className="flex gap-2">
@@ -3739,6 +3806,8 @@ function ProductDetailModal({
                 onClick={() => {
                   setMode(null);
                   setLossCategory("");
+                  setQuantity("");
+                  setNewStock("");
                 }}
                 variant="secondary"
                 size="sm"

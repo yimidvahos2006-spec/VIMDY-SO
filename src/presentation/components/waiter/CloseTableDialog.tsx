@@ -109,7 +109,13 @@ export function CloseTableDialog({ table, onClose, onClosed }: Props) {
       const printableItems = paidSale.items.map((item) => ({
         name: productCatalogStore.getById(item.productId)?.name ?? item.productId,
         quantity: item.quantity,
-        price: item.price
+        price: item.price,
+        unit: item.unit,
+        quantityRaw: item.quantityRaw,
+        selectedSizeId: item.selectedSizeId,
+        selectedExtraIds: item.selectedExtraIds,
+        discount: item.discount,
+        taxRate: item.taxRate
       }));
       printReceiptIfEnabled(receipt, printableItems);
 

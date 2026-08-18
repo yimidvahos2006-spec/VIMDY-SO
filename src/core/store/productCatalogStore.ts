@@ -101,27 +101,33 @@ class ProductCatalogStore extends ObservableStore<Product[]> {
     this.publish(next);
   }
 
+  private getSellableSnapshot(): Product[] {
+    return this.snapshot.filter((product) => product.isIngredient !== true);
+  }
+
   getById(id: string): Product | undefined {
-    return this.snapshot.find((product) => product.id === id);
+    return this.getSellableSnapshot().find((product) => product.id === id);
   }
 
   getByBarcode(code: string): Product | undefined {
-    return this.snapshot.find((product) => product.barcode === code);
+    return this.getSellableSnapshot().find((product) => product.barcode === code);
   }
 
   getByCategory(categoryId: string): Product[] {
+    const sellable = this.getSellableSnapshot();
+
     if (categoryId === "Todos" || categoryId === "" || categoryId.toLowerCase() === "todos") {
-      return [...this.snapshot];
+      return [...sellable];
     }
 
     // Categoría virtual: no existe en la tabla de categorías, filtra sobre
     // el flag real product.favorite (el mismo que ya usaba el badge de
     // estrella en la tarjeta de producto).
     if (categoryId === "Favoritos") {
-      return this.snapshot.filter((product) => product.favorite);
+      return sellable.filter((product) => product.favorite);
     }
 
-    return this.snapshot.filter(
+    return sellable.filter(
       (product) => product.categoryId.toLowerCase() === categoryId.toLowerCase()
     );
   }
@@ -129,12 +135,13 @@ class ProductCatalogStore extends ObservableStore<Product[]> {
   /** Mismo comportamiento de búsqueda que tenía productStore.search(). */
   search(text: string): Product[] {
     const value = text.trim().toLowerCase();
+    const sellable = this.getSellableSnapshot();
 
     if (value === "") {
-      return [...this.snapshot];
+      return [...sellable];
     }
 
-    return this.snapshot.filter((product) => {
+    return sellable.filter((product) => {
       if (product.name.toLowerCase().includes(value)) return true;
       if (product.categoryId.toLowerCase().includes(value)) return true;
       if (product.barcode && product.barcode.includes(value)) return true;

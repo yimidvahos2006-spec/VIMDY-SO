@@ -20,11 +20,27 @@ export function OpenTableDialog({ table, waiterId, onClose, onOpened }: Props) {
   const [busy, setBusy] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // IDEMPOTENCIA: la misma apertura de mesa puede reintentarse si la
+  // red falla después de enviar el request, o si la operación queda en
+  // la cola offline y se reintenta más tarde. El `operationId` debe
+  // generarse una sola vez por intento y permanecer igual durante todo
+  // el ciclo de ese intento.
+  const openAttemptIdRef = React.useRef<string | null>(null);
+
   async function handleOpen() {
     setBusy(true);
     setErrorMsg(null);
 
-    const input = { tableId: table.id, peopleCount, waiterId };
+    if (!openAttemptIdRef.current) {
+      openAttemptIdRef.current = crypto.randomUUID();
+    }
+
+    const input = {
+      tableId: table.id,
+      peopleCount,
+      waiterId,
+      operationId: openAttemptIdRef.current
+    };
 
     try {
       // PASO 1.8 (Cola offline): sin conexión real no tiene sentido
@@ -36,6 +52,7 @@ export function OpenTableDialog({ table, waiterId, onClose, onOpened }: Props) {
       } else {
         await container.tableEngine.openTable(input);
       }
+      openAttemptIdRef.current = null;
       onOpened();
     } catch (err) {
       if (isNetworkFailure(err)) {
@@ -44,6 +61,7 @@ export function OpenTableDialog({ table, waiterId, onClose, onOpened }: Props) {
         // sincroniza sola cuando vuelva internet (ver
         // syncPendingTableOperations.ts).
         await queueOpenTableOffline({ table, input });
+        openAttemptIdRef.current = null;
         onOpened();
       } else {
         setErrorMsg(translateBusinessError(err, "No se pudo abrir la mesa."));

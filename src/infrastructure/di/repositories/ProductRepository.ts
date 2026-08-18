@@ -5,6 +5,7 @@ import { supabase } from "../../supabase/supabaseClient";
 import { ProductLocalRepository } from "./ProductLocalRepository";
 import { connectionStore } from "../../../core/store/connectionStore";
 import { logWarning } from "../../logging/opsLogger";
+import { getCurrentBusinessId, getCurrentBranchId } from "../../supabase/supabaseClient";
 
 /**
  * ProductRepository
@@ -58,9 +59,6 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
     const cached = await this.local.findAll();
 
     if (connectionStore.isOnline()) {
-      // Fire-and-forget a propósito: no bloquea la respuesta local, y un
-      // error de red acá no debe tumbar la pantalla de Productos (que ya
-      // tiene el catálogo local para mostrar).
       void super
         .findAll()
         .then((fresh) => this.local.replaceAll(fresh))
@@ -69,7 +67,14 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
         });
     }
 
-    return cached;
+    const currentBusinessId = getCurrentBusinessId();
+    const currentBranchId = getCurrentBranchId();
+
+    return cached.filter((product) => {
+      if (currentBusinessId && product.businessId && product.businessId !== currentBusinessId) return false;
+      if (currentBranchId && product.branchId && product.branchId !== currentBranchId) return false;
+      return true;
+    });
   }
 
   /**
@@ -170,10 +175,6 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
       p_product_id: id,
       p_delta: delta,
       p_extra_fields: extraFields,
-      // BLOQUEANTE #4 (auditoría Fase 2): antes la función SQL rechazaba
-      // CUALQUIER descuento que dejara el stock en negativo, sin importar
-      // el switch "Permitir stock negativo" de Ajustes — por eso el switch
-      // "no hacía nada". Ver migración negative_stock_migration.sql.
       p_allow_negative: allowNegative
     });
 

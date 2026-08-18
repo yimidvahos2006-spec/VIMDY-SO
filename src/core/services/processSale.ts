@@ -141,7 +141,7 @@ export async function sendOrderToKitchen(params: ProcessSaleParams): Promise<Sal
   // Se genera (o reutiliza) el saleId ANTES de saber si se podrá ir por
   // el camino online: así el mismo id sirve de clave de idempotencia sin
   // importar cuál de los dos caminos termine tomando esta venta.
-  const saleId = params.saleId ?? crypto.randomUUID();
+  const saleId = (params.saleId && params.saleId.trim() !== "") ? params.saleId : crypto.randomUUID();
 
   if (!connectionStore.isOnline()) {
     return queueOrderOffline(saleId, items, params);
@@ -165,7 +165,10 @@ export async function sendOrderToKitchen(params: ProcessSaleParams): Promise<Sal
       id: saleId,
       source: items.map((item) => ({
         productId: item.id,
-        quantity: item.quantity
+        quantity: item.quantity,
+        price: item.price,
+        note: item.note,
+        requiresKitchen: item.requiresKitchen
       })),
       customerId: payment.customerId ?? undefined,
       cashierId: params.cashierId,
@@ -201,6 +204,16 @@ async function chargeSaleOffline(
   itemNames: Map<string, string>
 ): Promise<boolean> {
   const payment = paymentStore.get();
+
+  if (method === "CASH") {
+    const received = payment.received ?? sale.total;
+    if (received < sale.total) {
+      toast.warning(
+        `El efectivo recibido ($${(received).toLocaleString("es-CO")}) no cubre el total ($${(sale.total).toLocaleString("es-CO")}).`
+      );
+      return false;
+    }
+  }
 
   const alreadyQueued = pendingSalesStore.list().find((pending) => pending.id === sale.id);
 
@@ -239,7 +252,13 @@ async function chargeSaleOffline(
   const printableItems = sale.items.map((item) => ({
     name: itemNames.get(item.productId) ?? item.productId,
     quantity: item.quantity,
-    price: item.price
+    price: item.price,
+    unit: item.unit,
+    quantityRaw: item.quantityRaw,
+    selectedSizeId: item.selectedSizeId,
+    selectedExtraIds: item.selectedExtraIds,
+    discount: item.discount,
+    taxRate: item.taxRate
   }));
 
   printReceiptIfEnabled(receipt, printableItems);
@@ -294,6 +313,16 @@ export async function chargeSale(
     }
   }
 
+  const requiresPaymentReference =
+    payment.method === "card" ||
+    payment.method === "transfer" ||
+    (payment.method === "mixed" && (payment.mixedCard > 0 || payment.mixedTransfer > 0));
+
+  if (requiresPaymentReference && !payment.reference.trim()) {
+    toast.warning("Debe ingresar una referencia de pago para la tarjeta/transferencia.");
+    return false;
+  }
+
   const mixed: MixedPayment | undefined =
     method === "MIXED"
       ? {
@@ -335,7 +364,13 @@ export async function chargeSale(
     const printableItems = paidSale.items.map((item) => ({
       name: itemNames.get(item.productId) ?? item.productId,
       quantity: item.quantity,
-      price: item.price
+      price: item.price,
+      unit: item.unit,
+      quantityRaw: item.quantityRaw,
+      selectedSizeId: item.selectedSizeId,
+      selectedExtraIds: item.selectedExtraIds,
+      discount: item.discount,
+      taxRate: item.taxRate
     }));
 
     printReceiptIfEnabled(receipt, printableItems);

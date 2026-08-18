@@ -67,6 +67,12 @@ export interface PrintableSaleItem {
   name: string;
   quantity: number;
   price: number;
+  unit?: string;
+  quantityRaw?: number;
+  selectedSizeId?: string;
+  selectedExtraIds?: readonly string[];
+  discount?: { type: "PERCENT" | "FIXED"; value: number };
+  taxRate?: number;
 }
 
 /**

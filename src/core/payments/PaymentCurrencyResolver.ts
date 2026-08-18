@@ -10,13 +10,13 @@ import type { CountryCode, CurrencyCode } from "./types/payment.types";
 const COUNTRY_CURRENCY_MAP: Record<string, CurrencyCode> = {
   CO: "COP",
   MX: "MXN",
-  BR: "BRL",
   AR: "ARS",
   CL: "CLP",
   PE: "PEN",
-  UY: "UYU",
-  EC: "USD", // Ecuador tiene al dólar como moneda oficial.
+  EC: "USD",
   US: "USD",
+  PA: "USD",
+  VE: "USD",
   ES: "EUR"
 };
 

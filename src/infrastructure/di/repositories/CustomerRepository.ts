@@ -3,6 +3,7 @@ import { SupabaseRepository } from "./SupabaseRepository";
 import { CustomerLocalRepository } from "./CustomerLocalRepository";
 import { connectionStore } from "../../../core/store/connectionStore";
 import { logWarning } from "../../logging/opsLogger";
+import { getCurrentBusinessId, getCurrentBranchId } from "../../../infrastructure/supabase/supabaseClient";
 
 /**
  * CustomerRepository
@@ -30,9 +31,6 @@ export class CustomerRepository extends SupabaseRepository<Customer> {
     const cached = await this.local.findAll();
 
     if (connectionStore.isOnline()) {
-      // Fire-and-forget a propósito: no bloquea la respuesta local, y un
-      // error de red acá no debe tumbar la pantalla de Clientes (que ya
-      // tiene el catálogo local para mostrar).
       void super
         .findAll()
         .then((fresh) => this.local.replaceAll(fresh))
@@ -41,7 +39,15 @@ export class CustomerRepository extends SupabaseRepository<Customer> {
         });
     }
 
-    return cached;
+    return cached.filter((customer) => {
+      if (customer.businessId && customer.businessId !== getCurrentBusinessId()) {
+        return false;
+      }
+      if (customer.branchId && customer.branchId !== getCurrentBranchId()) {
+        return false;
+      }
+      return true;
+    });
   }
 
   /**

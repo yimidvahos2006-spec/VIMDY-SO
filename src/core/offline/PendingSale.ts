@@ -37,14 +37,15 @@ export type PendingSaleStatus =
   | "PENDING_SYNC"
   /** El proceso de sincronización (Parte 4) la está enviando ahora mismo. */
   | "SYNCING"
-  /**
-   * Se intentó sincronizar y falló por algo que NO es falta de red (ej.
-   * el producto ya no existe, quedó sin stock y así se decidió tratarlo
-   * en la Parte 4, etc.). Se saca de la cola automática y espera revisión
-   * manual — no se reintenta sola para no repetir el mismo error para
-   * siempre.
-   */
-  | "FAILED";
+   /**
+    * Se intentó sincronizar y falló por algo que NO es falta de red (ej.
+    * el producto ya no existe, quedó sin stock y así se decidió tratarlo
+    * en la Parte 4, etc.). Se saca de la cola automática y espera revisión
+    * manual — no se reintenta sola para no repetir el mismo error para
+    * siempre.
+    */
+   | "FAILED"
+   | "PERMANENT_FAILURE";
 
 /**
  * Datos de cobro que el cajero ya completó offline (efectivo, tarjeta,
@@ -74,6 +75,8 @@ export interface PendingSale {
   /** Cuántas veces se ha intentado sincronizar esta venta (éxito o no). */
   readonly attempts: number;
   readonly lastAttemptAt?: Date;
-  /** Mensaje del último error, solo con fines de diagnóstico/soporte. */
   readonly lastError?: string;
+  /** FASE 7 (Multi-tenant): contexto de negocio/sucursal al momento de encolar. */
+  readonly businessId: string;
+  readonly branchId: string;
 }

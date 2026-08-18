@@ -2,6 +2,7 @@ import { ObservableStore } from "../store/ObservableStore";
 import { PendingCustomerOperation } from "./PendingCustomerOperation";
 import { PendingCustomerOperationRepository } from "../../infrastructure/di/repositories/PendingCustomerOperationRepository";
 import { Customer } from "../entities/Entities";
+import { getCurrentBranchId, requireCurrentBusinessId } from "../../infrastructure/supabase/supabaseClient";
 
 const repository = new PendingCustomerOperationRepository();
 
@@ -41,6 +42,11 @@ class PendingCustomerOperationsStore extends ObservableStore<PendingCustomerOper
     this.publish({ items, loaded: true });
   }
 
+  /** Vuelve a leer directamente de la cola persistida para obtener solo los clientes pendientes. */
+  async findSyncable(): Promise<PendingCustomerOperation[]> {
+    return repository.findSyncable();
+  }
+
   /**
    * Guarda un cliente creado offline en la cola local. `customer.id` debe
    * venir ya generado por el llamador (crypto.randomUUID(), igual que hace
@@ -49,12 +55,18 @@ class PendingCustomerOperationsStore extends ObservableStore<PendingCustomerOper
    * sincronice de verdad.
    */
   async enqueue(customer: Customer): Promise<PendingCustomerOperation> {
+    const existing = await repository.findById(customer.id);
+
     const pendingOperation: PendingCustomerOperation = {
       id: customer.id,
       customer,
       status: "PENDING_SYNC",
-      queuedAt: new Date(),
-      attempts: 0
+      queuedAt: existing?.queuedAt ?? new Date(),
+      attempts: existing?.attempts ?? 0,
+      lastAttemptAt: existing?.lastAttemptAt,
+      lastError: existing?.lastError,
+      businessId: requireCurrentBusinessId(),
+      branchId: getCurrentBranchId() ?? ""
     };
 
     await repository.save(pendingOperation);
@@ -64,9 +76,9 @@ class PendingCustomerOperationsStore extends ObservableStore<PendingCustomerOper
   }
 
   /** Antes de reintentar contra el servidor: marca "sincronizando" y suma un intento. */
-  async markSyncing(id: string): Promise<void> {
+  async markSyncing(id: string): Promise<boolean> {
     const current = await repository.findById(id);
-    if (!current) return;
+    if (!current) return false;
 
     await repository.update({
       ...current,
@@ -75,6 +87,7 @@ class PendingCustomerOperationsStore extends ObservableStore<PendingCustomerOper
       lastAttemptAt: new Date()
     });
     await this.refresh();
+    return true;
   }
 
   /** El intento de sincronización falló: registra el motivo y la saca del ciclo automático. */
@@ -85,6 +98,20 @@ class PendingCustomerOperationsStore extends ObservableStore<PendingCustomerOper
     await repository.update({
       ...current,
       status: "FAILED",
+      lastError: error,
+      lastAttemptAt: new Date()
+    });
+    await this.refresh();
+  }
+
+  /** Error permanente de negocio: ya no se reintentará automáticamente. */
+  async markPermanentFailure(id: string, error: string): Promise<void> {
+    const current = await repository.findById(id);
+    if (!current) return;
+
+    await repository.update({
+      ...current,
+      status: "PERMANENT_FAILURE",
       lastError: error,
       lastAttemptAt: new Date()
     });
@@ -106,6 +133,20 @@ class PendingCustomerOperationsStore extends ObservableStore<PendingCustomerOper
     await this.refresh();
   }
 
+  /** Vuelve a poner en cola los clientes que quedaron en SYNCING por un cierre/recarga abrupta. */
+  async recoverStuckSyncing(): Promise<void> {
+    const items = await repository.findAll();
+    const stuck = items.filter((op) => op.status === "SYNCING");
+
+    if (stuck.length === 0) return;
+
+    await Promise.all(
+      stuck.map((op) => repository.update({ ...op, status: "PENDING_SYNC" }))
+    );
+
+    await this.refresh();
+  }
+
   /** Clientes que siguen esperando turno para sincronizarse (no los que ya están en curso). */
   syncable(): PendingCustomerOperation[] {
     return this.snapshot.items.filter((op) => op.status === "PENDING_SYNC");
@@ -118,6 +159,11 @@ class PendingCustomerOperationsStore extends ObservableStore<PendingCustomerOper
   /** Cuántos clientes hay en la cola en total. */
   count(): number {
     return this.snapshot.items.length;
+  }
+
+  async clear(): Promise<void> {
+    await repository.clear();
+    await this.refresh();
   }
 }
 

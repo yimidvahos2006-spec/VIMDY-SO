@@ -1,10 +1,8 @@
 /* ===========================================================================
    subscriptionContext
    ---------------------------------------------------------------------------
-   VIMDY — FASE 7, PASO 7. Misma idea que authBusinessContext.ts: funciones
-   sueltas que hablan directo con Supabase, sin estado propio (el estado
-   vive en subscriptionStore.ts). Se separa de authBusinessContext.ts para
-   no mezclar "a qué negocio pertenezco" con "qué tan vigente está mi plan".
+   VIMDY — FASE 7.1. Funciones sueltas que hablan directo con Supabase,
+   sin estado propio (el estado vive en subscriptionStore.ts).
 
    MISIÓN 2 — Seguridad de suscripciones: `plan`, `trial_ends_at`,
    `payment_status`, `renewal_date` y `next_charge_at` en `businesses` NO
@@ -12,24 +10,24 @@
    supabase/schema.sql, sección 8: esas columnas ni siquiera tienen GRANT
    de UPDATE para el rol `authenticated`).
 
-   MISIÓN 3 — este archivo ya NO expone ninguna función que active un plan
-   directamente. La única vía de activación real es wompi-webhook (Edge
-   Function servidor a servidor, firmada por Wompi con WOMPI_EVENTS_SECRET,
-   ver supabase/functions/wompi-webhook/index.ts). Este módulo se queda
-   estrictamente en LECTURA: leer el estado de la suscripción y su
-   historial de pagos, nunca escribirlo.
-=========================================================================== */
+   MISIÓN 3 — este archivo expone funciones de LECTURA y funciones que
+   delegan en funciones SQL server-side. La única vía de activación real
+   es wompi-webhook / paypal-webhook / mercadopago-webhook (Edge
+   Functions servidor a servidor, firmadas por el proveedor).
+   =========================================================================== */
 
 import { supabase } from "./supabaseClient";
-import { Subscription, SubscriptionPayment, SubscriptionPlan } from "../../core/entities/SubscriptionTypes";
+import { Subscription, SubscriptionPayment, SubscriptionPlan, SubscriptionAuditEntry } from "../../core/entities/SubscriptionTypes";
 
 interface BusinessSubscriptionRow {
   plan: string;
   trial_ends_at: string | null;
+  trial_used_at: string | null;
   renewal_date: string | null;
   next_charge_at: string | null;
   payment_method: string | null;
   payment_status: string | null;
+  subscription_status: string | null;
 }
 
 function toDate(value: string | null): Date | null {
@@ -52,15 +50,11 @@ function toSubscription(businessId: string, row: BusinessSubscriptionRow): Subsc
  * Lee el estado de suscripción del negocio activo. Se llama junto con
  * resolveBusinessSession() en AuthContext.tsx (login, registro y
  * restauración de sesión) para hidratar subscriptionStore.
- *
- * Es una simple LECTURA (select) — no está sujeta a la Misión 2, que solo
- * restringe ESCRITURAS. La policy `businesses_member_access` ya garantiza
- * que un negocio solo puede leer su propia fila.
  */
 export async function fetchSubscription(businessId: string): Promise<Subscription | null> {
   const { data, error } = await supabase
     .from("businesses")
-    .select("plan, trial_ends_at, renewal_date, next_charge_at, payment_method, payment_status")
+    .select("plan, trial_ends_at, trial_used_at, renewal_date, next_charge_at, payment_method, payment_status, subscription_status")
     .eq("id", businessId)
     .single();
 
@@ -69,17 +63,13 @@ export async function fetchSubscription(businessId: string): Promise<Subscriptio
 }
 
 /**
- * PASO 8 — Historial de pagos en Configuración > Suscripción. Vacío hasta
- * que exista al menos un cobro real por Wompi. También es solo lectura;
- * `subscription_payments` ya tiene `grant select` para `authenticated` y
- * ningún `grant insert/update` (ver subscriptions_migration.sql) — el
- * cliente nunca escribe su propio historial de pagos.
+ * PASO 8 — Historial de pagos en Configuración > Suscripción.
  */
 export async function fetchSubscriptionPayments(businessId: string): Promise<SubscriptionPayment[]> {
   const { data, error } = await supabase
     .from("subscription_payments")
     .select(
-      "id, plan, amount, currency, status, payment_method, wompi_reference, mercadopago_reference, paypal_order_id, paid_at"
+      "id, plan, amount, currency, status, payment_method, wompi_reference, mercadopago_reference, paypal_order_id, paid_at, renewal_number, provider_refund_id, refunded_at"
     )
     .eq("business_id", businessId)
     .order("paid_at", { ascending: false });
@@ -96,6 +86,48 @@ export async function fetchSubscriptionPayments(businessId: string): Promise<Sub
     wompiReference: (row.wompi_reference as string | null) ?? null,
     mercadopagoReference: (row.mercadopago_reference as string | null) ?? null,
     paypalOrderId: (row.paypal_order_id as string | null) ?? null,
-    paidAt: new Date(row.paid_at as string)
+    paidAt: new Date(row.paid_at as string),
+    renewalNumber: (row.renewal_number as number | null) ?? 0,
+    providerRefundId: (row.provider_refund_id as string | null) ?? null,
+    refundedAt: row.refunded_at ? new Date(row.refunded_at as string) : null
+  }));
+}
+
+/**
+ * Verifica si un negocio puede iniciar trial (no lo ha usado antes).
+ */
+export async function canStartTrial(businessId: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc("can_start_trial", {
+    p_business_id: businessId
+  });
+
+  if (error) {
+    return false;
+  }
+
+  return data as boolean;
+}
+
+/**
+ * Obtiene el historial de auditoría de suscripciones de un negocio.
+ */
+export async function fetchSubscriptionAuditLog(businessId: string, limit = 100): Promise<SubscriptionAuditEntry[]> {
+  const { data, error } = await supabase
+    .from("subscription_audit_log")
+    .select("id, business_id, action, actor_type, actor_id, details, created_at")
+    .eq("business_id", businessId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error || !data) return [];
+
+  return data.map((row) => ({
+    id: row.id as string,
+    businessId: row.business_id as string,
+    action: row.action as string,
+    actorType: row.actor_type as string,
+    actorId: row.actor_id as string | null,
+    details: row.details as Record<string, unknown>,
+    createdAt: new Date(row.created_at as string)
   }));
 }

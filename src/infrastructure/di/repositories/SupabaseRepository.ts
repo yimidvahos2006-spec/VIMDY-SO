@@ -1,5 +1,5 @@
 import { IRepository } from "./IRepository";
-import { supabase, getCurrentBusinessId } from "../../supabase/supabaseClient";
+import { supabase, getCurrentBusinessId, getCurrentBranchId } from "../../supabase/supabaseClient";
 import { OptimisticLockError } from "../../../core/errors/OptimisticLockError";
 import { DuplicateNameError } from "../../../core/errors/DuplicateNameError";
 
@@ -53,6 +53,19 @@ export abstract class SupabaseRepository<T extends { id: string; version?: numbe
     return supabase.from(this.tableName);
   }
 
+  private applyScope(query: any) {
+    const businessId = getCurrentBusinessId();
+    const branchId = getCurrentBranchId();
+    if (!businessId || typeof businessId !== "string" || businessId.trim() === "") return query;
+    let scoped = query.eq("business_id", businessId);
+
+    if (branchId) {
+      scoped = scoped.eq("branch_id", branchId);
+    }
+
+    return scoped;
+  }
+
   /**
    * Quita `version` del objeto antes de guardarlo dentro de la columna
    * `data jsonb`: la versión vive SOLO en su propia columna (fuente de
@@ -69,19 +82,21 @@ export abstract class SupabaseRepository<T extends { id: string; version?: numbe
   }
 
   public async findAll(): Promise<T[]> {
-    const { data, error } = await this.table()
-      .select("data, version")
-      .eq("business_id", getCurrentBusinessId());
+    const { data, error } = await this.applyScope(
+      this.table().select("data, version")
+    );
 
     if (error) throw new Error(`SUPABASE_FIND_ALL_FAILED (${this.tableName}): ${error.message}`);
 
-    return (data ?? []).map((row) => this.reviveRow(row));
+    return (data ?? []).map((row: { data: unknown; version: number }) => this.reviveRow(row));
   }
 
   public async findById(id: string): Promise<T | null> {
-    const { data, error } = await this.table()
-      .select("data, version")
-      .eq("business_id", getCurrentBusinessId())
+    if (!id) return null;
+
+    const { data, error } = await this.applyScope(
+      this.table().select("data, version")
+    )
       .eq("id", id)
       .maybeSingle();
 
@@ -93,33 +108,38 @@ export abstract class SupabaseRepository<T extends { id: string; version?: numbe
   public async findMany(ids: string[]): Promise<T[]> {
     if (ids.length === 0) return [];
 
-    const { data, error } = await this.table()
-      .select("data, version")
-      .eq("business_id", getCurrentBusinessId())
+    const { data, error } = await this.applyScope(
+      this.table().select("data, version")
+    )
       .in("id", ids);
 
     if (error) throw new Error(`SUPABASE_FIND_MANY_FAILED (${this.tableName}): ${error.message}`);
 
-    return (data ?? []).map((row) => this.reviveRow(row));
+    return (data ?? []).map((row: { data: unknown; version: number }) => this.reviveRow(row));
   }
 
   public async save(item: T): Promise<void> {
+    if (!item.id || typeof item.id !== "string") {
+      throw new Error(`ITEM_MISSING_ID: no se puede guardar ${this.tableName} sin id`);
+    }
+
+    const businessId = getCurrentBusinessId();
+    if (!businessId) {
+      throw new Error("NO_BUSINESS_CONTEXT: no hay un negocio activo. No se puede guardar.");
+    }
+
+    const scopeBranchId = (item as unknown as { branchId?: string | null }).branchId ?? getCurrentBranchId();
+
     const { error } = await this.table().upsert({
       id: item.id,
-      business_id: getCurrentBusinessId(),
+      business_id: businessId,
+      branch_id: scopeBranchId,
       data: this.stripVersion(item),
-      // save() es para CREAR (o reemplazar sin condición). Si el objeto ya
-      // traía versión (ej. un re-save intencional) se respeta esa; si es
-      // nuevo, arranca en 1 — nunca queda en NULL.
       version: item.version ?? 1,
       updated_at: new Date().toISOString()
     });
 
     if (error) {
-      // 23505 = "unique_violation" en Postgres. Hoy solo `categories` tiene
-      // un índice único de nombre (ver categories_dedupe_migration.sql),
-      // pero cualquier tabla que lo tenga en el futuro cae en el mismo
-      // camino sin tener que tocar este archivo otra vez.
       if (error.code === "23505") {
         const name = (item as unknown as { name?: string }).name ?? item.id;
         throw new DuplicateNameError(this.tableName, name);
@@ -131,10 +151,21 @@ export abstract class SupabaseRepository<T extends { id: string; version?: numbe
   public async saveMany(items: T[]): Promise<void> {
     if (items.length === 0) return;
 
+    for (const item of items) {
+      if (!item.id || typeof item.id !== "string") {
+        throw new Error(`ITEM_MISSING_ID: no se puede guardar ${this.tableName} sin id`);
+      }
+    }
+
     const businessId = getCurrentBusinessId();
+    if (!businessId) {
+      throw new Error("NO_BUSINESS_CONTEXT: no hay un negocio activo. No se puede guardar.");
+    }
+
     const rows = items.map((item) => ({
       id: item.id,
       business_id: businessId,
+      branch_id: (item as unknown as { branchId?: string | null }).branchId ?? getCurrentBranchId(),
       data: this.stripVersion(item),
       version: item.version ?? 1,
       updated_at: new Date().toISOString()
@@ -156,6 +187,10 @@ export abstract class SupabaseRepository<T extends { id: string; version?: numbe
    * 0 filas, y se lanza OptimisticLockError en vez de pisar ese cambio.
    */
   public async update(item: T): Promise<void> {
+    if (!item.id || typeof item.id !== "string") {
+      throw new Error(`ITEM_MISSING_ID: no se puede actualizar ${this.tableName} sin id`);
+    }
+
     let expectedVersion = item.version;
 
     // Caso raro: el objeto llegó sin version (ej. código viejo que todavía
@@ -170,13 +205,13 @@ export abstract class SupabaseRepository<T extends { id: string; version?: numbe
 
     const newVersion = expectedVersion + 1;
 
-    const { data, error } = await this.table()
-      .update({
+    const { data, error } = await this.applyScope(
+      this.table().update({
         data: this.stripVersion(item),
         version: newVersion,
         updated_at: new Date().toISOString()
       })
-      .eq("business_id", getCurrentBusinessId())
+    )
       .eq("id", item.id)
       .eq("version", expectedVersion)
       .select("id");
@@ -204,9 +239,7 @@ export abstract class SupabaseRepository<T extends { id: string; version?: numbe
   }
 
   public async delete(id: string): Promise<void> {
-    const { error } = await this.table()
-      .delete()
-      .eq("business_id", getCurrentBusinessId())
+    const { error } = await this.applyScope(this.table().delete())
       .eq("id", id);
 
     if (error) throw new Error(`SUPABASE_DELETE_FAILED (${this.tableName}): ${error.message}`);
@@ -215,9 +248,7 @@ export abstract class SupabaseRepository<T extends { id: string; version?: numbe
   public async deleteMany(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
 
-    const { error } = await this.table()
-      .delete()
-      .eq("business_id", getCurrentBusinessId())
+    const { error } = await this.applyScope(this.table().delete())
       .in("id", ids);
 
     if (error) throw new Error(`SUPABASE_DELETE_MANY_FAILED (${this.tableName}): ${error.message}`);
@@ -229,9 +260,9 @@ export abstract class SupabaseRepository<T extends { id: string; version?: numbe
   }
 
   public async count(): Promise<number> {
-    const { count, error } = await this.table()
-      .select("id", { count: "exact", head: true })
-      .eq("business_id", getCurrentBusinessId());
+    const { count, error } = await this.applyScope(
+      this.table().select("id", { count: "exact", head: true })
+    );
 
     if (error) throw new Error(`SUPABASE_COUNT_FAILED (${this.tableName}): ${error.message}`);
 

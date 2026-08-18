@@ -4,150 +4,58 @@ interface Props {
   size?: number;
 }
 
+/**
+ * VimdyLogo — isotipo oficial de VIMDY OS.
+ * Solo el ícono (nunca renderiza texto): en cada pantalla donde
+ * aparece, el nombre "VIMDY" / "VIMDY OS" se agrega aparte, junto
+ * a este componente (ver Header, Sidebar, LoginPage, etc.).
+ *
+ * Marca: cuadrado redondeado en superficie oscura con un
+ * chevron ("V") trazado en degradé de marca (vimdy-blue -> accent).
+ * Único lugar del sistema donde se permite un degradé — el resto de
+ * la UI usa color plano, según el spec del design system.
+ */
 export function VimdyLogo({ size = 80 }: Props) {
+  const gradientId = React.useId();
 
   return (
-
     <div
-      className="relative flex items-center justify-center animate-vimdy-float"
-      style={{
-        width: size,
-        height: size
-      }}
+      className="relative shrink-0 select-none"
+      style={{ width: size, height: size }}
+      aria-hidden="true"
     >
-
-      {/* Halo */}
-
-      <div
-        className="absolute inset-0 rounded-full blur-[45px] opacity-60 animate-vimdy-breath"
-        style={{
-          background:
-            "radial-gradient(circle,#8FD7FF 0%,#2B5E78 45%,transparent 80%)"
-        }}
-      />
-
-      <svg
-        width={size}
-        height={size}
-        viewBox="0 0 512 512"
-        fill="none"
-      >
-
+      <svg viewBox="0 0 100 100" width={size} height={size}>
         <defs>
-
-          <linearGradient
-            id="vimdyFlow"
-            x1="0%"
-            y1="0%"
-            x2="100%"
-            y2="100%"
-          >
-
-            <stop offset="0%">
-
-              <animate
-                attributeName="stop-color"
-                values="#8FD7FF;#D9F6FF;#2B5E78;#8FD7FF"
-                dur="4s"
-                repeatCount="indefinite"
-              />
-
-            </stop>
-
-            <stop offset="50%">
-
-              <animate
-                attributeName="stop-color"
-                values="#2B5E78;#8FD7FF;#D9F6FF;#2B5E78"
-                dur="4s"
-                repeatCount="indefinite"
-              />
-
-            </stop>
-
-            <stop offset="100%">
-
-              <animate
-                attributeName="stop-color"
-                values="#12384A;#8FD7FF;#2B5E78;#12384A"
-                dur="4s"
-                repeatCount="indefinite"
-              />
-
-            </stop>
-
+          <linearGradient id={`${gradientId}-bg`} x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#141417" />
+            <stop offset="100%" stopColor="#0A0A0C" />
           </linearGradient>
-
-          <filter id="glow">
-
-            <feGaussianBlur stdDeviation="8" result="coloredBlur"/>
-
-            <feMerge>
-
-              <feMergeNode in="coloredBlur"/>
-
-              <feMergeNode in="SourceGraphic"/>
-
-            </feMerge>
-
-          </filter>
-
+          <linearGradient id={`${gradientId}-stroke`} x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#38BDF8" />
+            <stop offset="100%" stopColor="#2563EB" />
+          </linearGradient>
         </defs>
 
+        <rect
+          x="1.5"
+          y="1.5"
+          width="97"
+          height="97"
+          rx="24"
+          fill={`url(#${gradientId}-bg)`}
+          stroke="#27272F"
+          strokeWidth="1.5"
+        />
+
         <path
-
-          d="M80 70L256 430L432 70"
-
-          stroke="url(#vimdyFlow)"
-
-          strokeWidth="42"
-
+          d="M30 30 L50 66 L70 30"
+          fill="none"
+          stroke={`url(#${gradientId}-stroke)`}
+          strokeWidth="9"
           strokeLinecap="round"
-
           strokeLinejoin="round"
-
-          filter="url(#glow)"
-
-        >
-
-          <animate
-            attributeName="stroke-dasharray"
-            values="0 900;450 450;900 0;0 900"
-            dur="7s"
-            repeatCount="indefinite"
-          />
-
-          <animate
-            attributeName="stroke-dashoffset"
-            values="0;-900"
-            dur="7s"
-            repeatCount="indefinite"
-          />
-
-        </path>
-
+        />
       </svg>
-
-      {/* Reflejo */}
-
-      <div
-        className="absolute w-3 h-3 rounded-full bg-white blur-sm animate-ping"
-        style={{
-          top: "18%",
-          left: "60%"
-        }}
-      />
-
-      <div
-        className="absolute w-2 h-2 rounded-full bg-cyan-300 blur-sm animate-pulse"
-        style={{
-          bottom: "18%",
-          right: "25%"
-        }}
-      />
-
     </div>
-
   );
-
 }

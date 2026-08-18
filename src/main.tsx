@@ -6,8 +6,14 @@ import { App } from './routes/App';
 import { AuthProvider } from './presentation/context/AuthContext';
 import { ToastContainer } from './presentation/components/ui/ToastContainer';
 import { ErrorBoundary } from './presentation/components/ui/ErrorBoundary';
+import { installGlobalErrorHandlers } from './infrastructure/logging/globalErrorHandlers';
 
 import './styles/index.css';
+
+// Complementa a ErrorBoundary (que solo atrapa errores de render): captura
+// errores sueltos (onClick, async sin catch, promesas rechazadas) para que
+// también lleguen a system_errors. Ver globalErrorHandlers.ts.
+installGlobalErrorHandlers();
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>

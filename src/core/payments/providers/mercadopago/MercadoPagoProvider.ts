@@ -31,10 +31,8 @@ import { generatePaymentId, nowIso } from "../../utils/paymentUtils";
 const MERCADOPAGO_CURRENCY_MAP: Record<string, CurrencyCode> = {
   MX: "MXN",
   AR: "ARS",
-  BR: "BRL",
   CL: "CLP",
   PE: "PEN",
-  UY: "UYU",
   EC: "USD"
 };
 
@@ -62,7 +60,7 @@ async function extractFunctionErrorMessage(fnError: unknown, fallback: string): 
       // El body no era JSON válido; nos quedamos con el mensaje genérico.
     }
   }
-  return (fnError as { message?: string })?.message ?? fallback;
+  return (fnError as { message?: string })?.message?? fallback;
 }
 
 export class MercadoPagoProvider implements IPaymentProvider {
@@ -76,7 +74,7 @@ export class MercadoPagoProvider implements IPaymentProvider {
    * navegador a `checkoutUrl` para completar el pago.
    */
   async createPayment(request: PaymentRequest): Promise<PaymentResult> {
-    if (request.plan !== "monthly" && request.plan !== "yearly") {
+    if (request.plan!== "monthly" && request.plan!== "yearly") {
       throw new Error(`MercadoPagoProvider: plan no facturable por Mercado Pago ("${request.plan}").`);
     }
 
@@ -89,7 +87,7 @@ export class MercadoPagoProvider implements IPaymentProvider {
       throw new Error(await extractFunctionErrorMessage(error, "No se pudo iniciar el pago con Mercado Pago."));
     }
 
-    if (!data?.checkoutUrl || !data.reference) {
+    if (!data?.checkoutUrl ||!data.reference) {
       throw new Error("MercadoPagoProvider: la Edge Function no devolvió una sesión de pago válida.");
     }
 
@@ -106,47 +104,90 @@ export class MercadoPagoProvider implements IPaymentProvider {
   }
 
   async getPayment(paymentId: string): Promise<PaymentResult> {
-    // TODO: consultar el estado real del pago en Mercado Pago.
+    const { data, error } = await supabase.functions.invoke<{ ok: true; payment: any }>(
+      "mercadopago-get-transaction",
+      { body: { paymentId } }
+    );
+
+    if (error) {
+      throw new Error(await extractFunctionErrorMessage(error, "No se pudo consultar el pago en Mercado Pago."));
+    }
+    if (!data?.payment) {
+      throw new Error("MercadoPagoProvider: la Edge Function no devolvió el pago consultado.");
+    }
+
+    const payment = data.payment;
     return {
-      id: paymentId,
+      id: payment.id ?? paymentId,
       provider: this.name,
-      status: "pending",
-      amount: 0,
-      currency: "USD",
-      createdAt: nowIso()
+      status: this.getStatus(payment.status),
+      amount: Number(payment.transaction_amount ?? 0),
+      currency: (payment.currency_id as CurrencyCode) ?? "USD",
+      createdAt: payment.date_created ?? nowIso(),
+      reference: payment.reference_id ?? paymentId,
+      raw: payment
     };
   }
 
   async cancelPayment(paymentId: string): Promise<PaymentResult> {
-    // TODO: cancelar el pago en Mercado Pago.
+    const { data, error } = await supabase.functions.invoke<{ ok: true; payment: any }>(
+      "mercadopago-cancel",
+      { body: { paymentId } }
+    );
+
+    if (error) {
+      throw new Error(await extractFunctionErrorMessage(error, "No se pudo cancelar el pago en Mercado Pago."));
+    }
+    if (!data?.payment) {
+      throw new Error("MercadoPagoProvider: la Edge Function no devolvió la cancelación.");
+    }
+
+    const payment = data.payment;
     return {
-      id: paymentId,
+      id: payment.id ?? paymentId,
       provider: this.name,
-      status: "cancelled",
-      amount: 0,
-      currency: "USD",
-      createdAt: nowIso()
+      status: this.getStatus(payment.status),
+      amount: Number(payment.transaction_amount ?? 0),
+      currency: (payment.currency_id as CurrencyCode) ?? "USD",
+      createdAt: payment.date_created ?? nowIso(),
+      reference: payment.reference_id ?? paymentId,
+      raw: payment
     };
   }
 
   async refundPayment(request: RefundRequest): Promise<RefundResult> {
-    // TODO: reembolsar en Mercado Pago.
+    const { data, error } = await supabase.functions.invoke<{ ok: true; refund: { id?: string; status?: string; amount?: number; source?: any } }>(
+      "mercadopago-refund",
+      { body: { paymentId: request.paymentId, amount: request.amount, reason: request.reason } }
+    );
+
+    if (error) {
+      throw new Error(await extractFunctionErrorMessage(error, "No se pudo reembolsar el pago en Mercado Pago."));
+    }
+    if (!data?.refund) {
+      throw new Error("MercadoPagoProvider: la Edge Function no devolvió el reembolso.");
+    }
+
+    const refund = data.refund;
+    const refundStatus = this.getStatus(refund.status ?? "pending");
+
     return {
-      id: generatePaymentId("mp_refund"),
+      id: refund.id ?? generatePaymentId("mp_refund"),
       paymentId: request.paymentId,
       provider: this.name,
-      status: "refunded",
-      amount: request.amount ?? 0,
-      createdAt: nowIso()
+      status: refundStatus,
+      amount: refund.amount ?? request.amount ?? 0,
+      createdAt: nowIso(),
+      raw: refund
     };
   }
 
   getAvailableMethods(country: CountryCode): PaymentMethodCode[] {
-    return MERCADOPAGO_METHODS_MAP[country] ?? DEFAULT_METHODS;
+    return MERCADOPAGO_METHODS_MAP[country]?? DEFAULT_METHODS;
   }
 
   getCurrency(country: CountryCode): CurrencyCode {
-    return MERCADOPAGO_CURRENCY_MAP[country] ?? "USD";
+    return MERCADOPAGO_CURRENCY_MAP[country]?? "USD";
   }
 
   getStatus(providerStatus: string): PaymentStatus {
@@ -155,15 +196,60 @@ export class MercadoPagoProvider implements IPaymentProvider {
       in_process: "pending",
       approved: "approved",
       authorized: "approved",
+      completed: "approved",
       rejected: "declined",
       cancelled: "cancelled",
       refunded: "refunded"
     };
-    return map[providerStatus] ?? "error";
+    return map[providerStatus]?? "error";
   }
 
-  validateResponse(_payload: unknown, _signature?: string): boolean {
-    // TODO: validar la firma x-signature de Mercado Pago cuando se conecten las llaves.
-    return true;
+  /**
+   * Valida la firma del webhook de Mercado Pago (x-signature).
+   * Por seguridad, en el navegador donde no hay claves secretas, este método
+   * devuelve false. En entornos con acceso al secret (como tests o servidor),
+   * realiza la verificación HMAC-SHA256 según la especificación oficial.
+   */
+  validateResponse(payload: unknown, signature?: string): boolean {
+    if (!signature) return false;
+
+    const secret = typeof import.meta !== "undefined" ? import.meta.env.MERCADOPAGO_WEBHOOK_SECRET : undefined;
+
+    if (!secret) {
+      return false;
+    }
+
+    try {
+      const parts = Object.fromEntries(
+        signature.split(",").map((part) => {
+          const [key, value] = part.split("=");
+          return [key?.trim(), value?.trim()];
+        })
+      );
+      const ts = parts["ts"];
+      const v1 = parts["v1"];
+      if (!ts || !v1) return false;
+
+      const typedPayload = payload as { id?: string; requestId?: string; dataId?: string; "request-id"?: string };
+      const dataId = typedPayload.dataId || typedPayload.id || "";
+      const requestId = typedPayload.requestId || typedPayload["request-id"] || "";
+
+      if (!dataId || !requestId) return false;
+
+      const manifest = `id:${dataId.toLowerCase()};request-id:${requestId};ts:${ts};`;
+
+      if (typeof require !== "undefined" || (typeof process !== "undefined" && process.versions && process.versions.node)) {
+        const crypto = require("crypto");
+        const expected = crypto.createHmac("sha256", secret).update(manifest).digest("hex");
+        if (expected !== v1) {
+          throw new Error("Invalid signature");
+        }
+        return true;
+      }
+
+      return false;
+    } catch {
+      return false;
+    }
   }
 }

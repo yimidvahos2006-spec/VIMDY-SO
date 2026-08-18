@@ -1,25 +1,35 @@
 import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
 
-import { supabase, setCurrentBusinessId } from "../../infrastructure/supabase/supabaseClient";
+import { useNavigate } from "react-router-dom";
+
+import { supabase, setCurrentBusinessId, setCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
 import { startRealtimeSync, stopRealtimeSync } from "../../infrastructure/supabase/realtimeSync";
 import { startOfflineSalesSync, stopOfflineSalesSync } from "../../core/offline/syncPendingSales";
 import { startOfflineInventorySync, stopOfflineInventorySync } from "../../core/offline/syncPendingInventoryAdjustments";
 import { startOfflineTableSync, stopOfflineTableSync } from "../../core/offline/syncPendingTableOperations";
 import { startOfflineCustomerSync, stopOfflineCustomerSync } from "../../core/offline/syncPendingCustomerOperations";
+import { pendingSalesStore } from "../../core/offline/pendingSalesStore";
+import { pendingCustomerOperationsStore } from "../../core/offline/pendingCustomerOperationsStore";
+import { pendingTableOperationsStore } from "../../core/offline/pendingTableOperationsStore";
+import { pendingInventoryAdjustmentsStore } from "../../core/offline/pendingInventoryAdjustmentsStore";
 import {
   signIn,
   signOut,
   beginRegistration,
   completeRegistration,
   resolveBusinessSession,
+  getUserBusinesses,
   getPendingRegistration,
   clearPendingRegistration,
   markOnboardingCompleted,
   requestPasswordReset,
   updatePassword,
+  resolveDefaultBranchId,
   type BusinessSession,
   type RegisterBusinessInput
 } from "../../infrastructure/supabase/authBusinessContext";
+import { ensureIdentity } from "../../infrastructure/di/seedIdentity";
+import { container } from "../../infrastructure/di/CompositionRoot";
 import {
   verifyRegistrationOtp,
   resendRegistrationOtp,
@@ -89,6 +99,7 @@ interface AuthContextValue {
   can: (permissionId: string) => boolean;
   /** Marca el onboarding como terminado, real en Supabase (PASO 11 del asistente). */
   completeOnboarding: () => Promise<void>;
+  switchBusiness: (businessSession: BusinessSession) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -168,6 +179,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isReady, setIsReady] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   // Al montar: si Supabase Auth ya tiene una sesión guardada (localStorage,
   // la maneja el propio SDK), la restauramos y resolvemos el business_id
@@ -184,35 +196,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       const ownerName = (authUser.user_metadata?.full_name as string | undefined) ?? "";
-      const businessSession = await resolveBusinessSession(authUser.id, ownerName);
+      const businesses = await getUserBusinesses(authUser.id);
 
       if (cancelled) return;
 
-      if (businessSession) {
-        setCurrentBusinessId(businessSession.businessId);
-        hydrateBusinessConfig(businessSession);
-        hydrateSubscription(businessSession.businessId);
-        // Reconecta la sincronización en vivo con este dispositivo: si
-        // Computador A/Tablet/Celular ya tenían sesión guardada al abrir
-        // la app, quedan escuchando cambios sin tener que volver a loguearse.
-        startRealtimeSync(businessSession.businessId);
-        // Parte 4 del plan de ventas offline: si quedaron ventas en la
-        // cola local de una sesión anterior (ver pendingSalesStore), esto
-        // las intenta sincronizar apenas hay sesión + conexión, sin que
-        // el cajero tenga que hacer nada.
-        startOfflineSalesSync();
-        startOfflineInventorySync();
-        startOfflineTableSync();
-        startOfflineCustomerSync();
-        const { user: u, role: r } = toAuthState(businessSession, authUser.email ?? "");
+      if (businesses.length === 0) {
+        if (!cancelled) setIsReady(true);
+        return;
+      }
+
+      if (businesses.length === 1) {
+        const session = businesses[0];
+        setCurrentBusinessId(session.businessId);
+
+        try {
+          const [resolvedBranchId] = await Promise.all([
+            resolveDefaultBranchId(session.businessId),
+            hydrateBusinessConfig(session),
+            hydrateSubscription(session.businessId),
+            ensureIdentity(container.permissionEngine, container.roleEngine)
+          ]);
+          setCurrentBranchId(resolvedBranchId);
+          startRealtimeSync(session.businessId);
+          startOfflineSalesSync();
+          startOfflineInventorySync();
+          startOfflineTableSync();
+          startOfflineCustomerSync();
+        } catch (error) {
+          console.error("[AuthContext] Fallo en bootstrap de sesión:", error);
+        }
+
+        const { user: u, role: r } = toAuthState(session, authUser.email ?? "");
         setUser(u);
         setRole(r);
         setSessionId(authUser.id);
-        setBusinessId(businessSession.businessId);
-        setOnboardingCompleted(businessSession.onboardingCompleted);
-      }
+        setBusinessId(session.businessId);
+        setOnboardingCompleted(session.onboardingCompleted);
 
-      setIsReady(true);
+        if (!cancelled) setIsReady(true);
+      } else {
+        if (!cancelled) setIsReady(true);
+      }
+    }).catch((error) => {
+      console.error("[AuthContext] Fallo al restaurar sesión:", error);
+      if (!cancelled) setIsReady(true);
     });
 
     // Mantiene la sesión sincronizada si Supabase la cierra por su cuenta
@@ -224,6 +251,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         stopOfflineInventorySync();
         stopOfflineTableSync();
         stopOfflineCustomerSync();
+        void pendingSalesStore.clear();
+        void pendingCustomerOperationsStore.clear();
+        void pendingTableOperationsStore.clear();
+        void pendingInventoryAdjustmentsStore.clear();
+        setCurrentBusinessId(null);
+        setCurrentBranchId(null);
         setUser(null);
         setRole(null);
         setSessionId(null);
@@ -241,10 +274,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setError(null);
 
     try {
-      const businessSession = await signIn(email, password);
+      const result = await signIn(email, password);
+
+      if (result === null) {
+        navigate("/onboarding", { replace: true });
+        return;
+      }
+
+      if (Array.isArray(result)) {
+        navigate("/business-selector", { replace: true, state: { businesses: result } });
+        return;
+      }
+
+      const businessSession = result;
       setCurrentBusinessId(businessSession.businessId);
       hydrateBusinessConfig(businessSession);
       hydrateSubscription(businessSession.businessId);
+      void ensureIdentity(container.permissionEngine, container.roleEngine);
       const { user: u, role: r } = toAuthState(businessSession, email);
 
       startRealtimeSync(businessSession.businessId);
@@ -257,6 +303,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSessionId(businessSession.userId);
       setBusinessId(businessSession.businessId);
       setOnboardingCompleted(businessSession.onboardingCompleted);
+      navigate("/dashboard", { replace: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : "No se pudo iniciar sesión.";
       setError(message);
@@ -264,7 +311,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [navigate]);
+
+  const switchBusiness = useCallback(async (businessSession: BusinessSession) => {
+    setCurrentBusinessId(businessSession.businessId);
+    const resolvedBranchId = await resolveDefaultBranchId(businessSession.businessId);
+    setCurrentBranchId(resolvedBranchId);
+    hydrateBusinessConfig(businessSession);
+    hydrateSubscription(businessSession.businessId);
+    void ensureIdentity(container.permissionEngine, container.roleEngine);
+    setUser({ id: businessSession.userId, name: businessSession.ownerName, email: user?.email ?? "" });
+    setRole({ id: businessSession.role, name: businessSession.role, permissions: permissionsForRole(businessSession.role) });
+    setSessionId(businessSession.userId);
+    setBusinessId(businessSession.businessId);
+    setOnboardingCompleted(businessSession.onboardingCompleted);
+    navigate("/dashboard", { replace: true });
+  }, [navigate, user?.email]);
 
   const register = useCallback(async (input: RegisterBusinessInput) => {
     setIsLoading(true);
@@ -297,6 +359,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       hydrateBusinessConfig(businessSession);
       hydrateSubscription(businessSession.businessId);
+      void ensureIdentity(container.permissionEngine, container.roleEngine);
       const pending = getPendingRegistration();
       const { user: u, role: r } = toAuthState(businessSession, pending?.email ?? "");
 
@@ -347,13 +410,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     stopOfflineInventorySync();
     stopOfflineTableSync();
     stopOfflineCustomerSync();
+    void pendingSalesStore.clear();
+    void pendingCustomerOperationsStore.clear();
+    void pendingTableOperationsStore.clear();
+    void pendingInventoryAdjustmentsStore.clear();
     enabledModulesStore.clear();
     subscriptionStore.clear();
     setUser(null);
     setRole(null);
     setSessionId(null);
-    setBusinessId(null);
-    setOnboardingCompleted(false);
   }, []);
 
   const handleRequestPasswordReset = useCallback(async (email: string) => {
@@ -427,7 +492,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       requestPasswordReset: handleRequestPasswordReset,
       updatePassword: handleUpdatePassword,
       can,
-      completeOnboarding
+      completeOnboarding,
+      switchBusiness
     }),
     [
       user,
@@ -449,7 +515,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       handleRequestPasswordReset,
       handleUpdatePassword,
       can,
-      completeOnboarding
+      completeOnboarding,
+      switchBusiness
     ]
   );
 

@@ -1,6 +1,6 @@
 import { InventoryMovement } from "../../../core/entities/Entities";
 import { SupabaseRepository, reviveDates } from "./SupabaseRepository";
-import { supabase, getCurrentBusinessId } from "../../supabase/supabaseClient";
+import { supabase, getCurrentBusinessId, getCurrentBranchId } from "../../supabase/supabaseClient";
 
 /**
  * MovementRepository
@@ -26,6 +26,7 @@ export class MovementRepository extends SupabaseRepository<InventoryMovement> {
       .select("data")
       .eq("business_id", getCurrentBusinessId())
       .eq("movement_product_id", productId)
+      .eq("branch_id", getCurrentBranchId())
       .order("movement_date", { ascending: false });
 
     if (error) throw new Error(`SUPABASE_FIND_BY_PRODUCT_FAILED (inventory_movements): ${error.message}`);
@@ -46,6 +47,7 @@ export class MovementRepository extends SupabaseRepository<InventoryMovement> {
       .from("inventory_movements")
       .select("data")
       .eq("business_id", getCurrentBusinessId())
+      .eq("branch_id", getCurrentBranchId())
       .eq("movement_type", type)
       .gte("movement_date", start.toISOString())
       .lte("movement_date", end.toISOString())

@@ -19,7 +19,7 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 
-import { Product, Sale, Table, CashMovement, KitchenOrder } from "../../src/core/entities/Entities";
+import { Product, Sale, Table, CashMovement, KitchenOrder, Order } from "../../src/core/entities/Entities";
 
 import { CartEngine } from "../../src/core/engines/CartEngine";
 import { InventoryEngine } from "../../src/core/engines/InventoryEngine";
@@ -34,6 +34,7 @@ import { KardexEngine } from "../../src/core/engines/KardexEngine";
 import { AuditEngine } from "../../src/core/engines/AuditEngine";
 import { SalesEngine } from "../../src/core/engines/SalesEngine";
 import { TableEngine } from "../../src/core/engines/TableEngine";
+import { OrderEngine } from "../../src/core/engines/OrderEngine";
 import { PosCore } from "../../src/core/engines/PosCore";
 
 import { InMemoryRepository } from "../fakes/InMemoryRepository";
@@ -70,6 +71,7 @@ function buildContext() {
   const customers = new InMemoryRepository("customers");
   const movements = new InMemoryRepository("inventory_movements");
   const auditLogs = new InMemoryRepository("audit_logs");
+  const orders = new InMemoryRepository<Order>("orders");
 
   // Una sola fila de mesas "en el servidor" — ambos dispositivos apuntan
   // al MISMO repositorio, tal como ambos apuntarían al mismo Supabase.
@@ -101,10 +103,11 @@ function buildContext() {
   // TableEngine que corre en un dispositivo distinto. Nada se comparte
   // entre ellas salvo `tables` (el repositorio), exactamente como en
   // producción nada se comparte entre dos navegadores salvo Supabase.
-  const deviceMesero = new TableEngine(tables, kitchen, salesEngine);
-  const deviceCaja = new TableEngine(tables, kitchen, salesEngine);
+  const orderEngine = new OrderEngine(orders as never, kitchen, salesEngine);
+  const deviceMesero = new TableEngine(tables, kitchen, salesEngine, orderEngine);
+  const deviceCaja = new TableEngine(tables, kitchen, salesEngine, orderEngine);
 
-  return { deviceMesero, deviceCaja, products, tables, kitchenOrders, cashMovements };
+  return { deviceMesero, deviceCaja, products, tables, kitchenOrders, cashMovements, orders };
 }
 
 describe("Smoke: la cuenta de mesa es la misma para cualquier dispositivo", () => {

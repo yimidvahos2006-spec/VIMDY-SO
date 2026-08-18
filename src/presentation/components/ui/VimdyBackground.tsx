@@ -4,81 +4,71 @@ interface Props {
   children: React.ReactNode;
 }
 
+/**
+ * VimdyBackground — fondo oficial para pantallas de autenticación
+ * (Login, Registro, OTP, Recuperar/Actualizar contraseña, Selección
+ * de país) y la intro.
+ *
+ * Reemplaza la versión anterior, que usaba un `linear-gradient` de
+ * 500% animado que en varios momentos de su ciclo llenaba toda la
+ * pantalla de azul sólido (bug visual reportado). Aquí el movimiento
+ * vuelve, pero acotado: los resplandores respiran y se desplazan
+ * unos pocos px en un ciclo largo (14-22s) sin salir nunca de su
+ * zona ni subir de opacidad más allá de lo ambiental — nunca pueden
+ * llegar a cubrir la pantalla. Respeta prefers-reduced-motion.
+ */
 export function VimdyBackground({ children }: Props) {
-
   return (
+    <div className="relative min-h-screen overflow-hidden bg-vimdy-background">
+      <style>{`
+        @keyframes vimdy-bg-drift-a {
+          0%, 100% { transform: translate3d(-50%, 0, 0) scale(1); opacity: 0.85; }
+          50% { transform: translate3d(-46%, 3%, 0) scale(1.08); opacity: 1; }
+        }
+        @keyframes vimdy-bg-drift-b {
+          0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.7; }
+          50% { transform: translate3d(-3%, -4%, 0) scale(1.12); opacity: 1; }
+        }
+        .vimdy-bg-glow-a { animation: vimdy-bg-drift-a 18s ease-in-out infinite; }
+        .vimdy-bg-glow-b { animation: vimdy-bg-drift-b 22s ease-in-out infinite; animation-delay: -6s; }
+        @media (prefers-reduced-motion: reduce) {
+          .vimdy-bg-glow-a, .vimdy-bg-glow-b { animation: none; }
+        }
+      `}</style>
 
-    <div className="relative min-h-screen overflow-hidden bg-[#070C14]">
-
-      {/* Fondo principal */}
-
-      <div className="absolute inset-0 vimdy-gradient" />
-
-      {/* Luz superior */}
-
+      {/* Resplandor superior — marca, se desplaza y respira suavemente */}
       <div
-        className="absolute -top-64 left-1/2 -translate-x-1/2 w-[900px] h-[900px] rounded-full blur-[220px] opacity-20 animate-vimdy-breath"
-        style={{
-          background: "#8FD7FF"
-        }}
+        className="vimdy-bg-glow-a pointer-events-none absolute -top-[420px] left-1/2 h-[820px] w-[820px] rounded-full blur-[160px]"
+        style={{ background: "radial-gradient(circle, rgba(56,189,248,0.13), transparent 70%)" }}
       />
 
-      {/* Luz inferior derecha */}
-
+      {/* Resplandor inferior — acento, ciclo distinto para que no se sincronicen */}
       <div
-        className="absolute -bottom-60 -right-48 w-[700px] h-[700px] rounded-full blur-[220px] opacity-10 animate-vimdy-breath"
-        style={{
-          background: "#2B5E78",
-          animationDelay: "2s"
-        }}
+        className="vimdy-bg-glow-b pointer-events-none absolute -bottom-[360px] -right-[280px] h-[700px] w-[700px] rounded-full blur-[160px]"
+        style={{ background: "radial-gradient(circle, rgba(37,99,235,0.10), transparent 70%)" }}
       />
 
-      {/* Luz izquierda */}
-
+      {/* Rejilla fina, enmascarada para que solo se insinúe cerca del centro */}
       <div
-        className="absolute top-1/3 -left-48 w-[500px] h-[500px] rounded-full blur-[180px] opacity-10 animate-vimdy-breath"
-        style={{
-          background: "#12384A",
-          animationDelay: "4s"
-        }}
-      />
-
-      {/* Neblina */}
-
-      <div
-        className="absolute inset-0 opacity-30"
-        style={{
-          background: `
-          radial-gradient(circle at 20% 20%, rgba(143,215,255,.15), transparent 30%),
-          radial-gradient(circle at 80% 70%, rgba(43,94,120,.12), transparent 35%),
-          radial-gradient(circle at 50% 100%, rgba(18,56,74,.18), transparent 40%)
-          `
-        }}
-      />
-
-      {/* Rejilla futurista */}
-
-      <div
-        className="absolute inset-0 opacity-[0.03]"
+        className="pointer-events-none absolute inset-0 opacity-[0.05]"
         style={{
           backgroundImage: `
-          linear-gradient(rgba(255,255,255,.12) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(255,255,255,.12) 1px, transparent 1px)
+            linear-gradient(rgba(245,245,244,.5) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(245,245,244,.5) 1px, transparent 1px)
           `,
-          backgroundSize: "70px 70px"
+          backgroundSize: "64px 64px",
+          maskImage: "radial-gradient(ellipse 60% 50% at 50% 35%, black, transparent)",
+          WebkitMaskImage: "radial-gradient(ellipse 60% 50% at 50% 35%, black, transparent)"
         }}
       />
 
-      {/* Contenido */}
+      {/* Viñeta — profundidad hacia los bordes, foco hacia el centro */}
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{ boxShadow: "inset 0 0 220px 40px rgba(0,0,0,0.55)" }}
+      />
 
-      <div className="relative z-10">
-
-        {children}
-
-      </div>
-
+      <div className="relative z-10">{children}</div>
     </div>
-
   );
-
 }

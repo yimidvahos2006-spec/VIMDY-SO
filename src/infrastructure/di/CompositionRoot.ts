@@ -51,7 +51,7 @@ import { AuditEngine } from '../../core/engines/AuditEngine';
 import { UserEngine } from '../../core/engines/UserEngine';
 import { AccessEngine } from '../../core/engines/AccessEngine';
 
-import { seedIdentity } from './seedIdentity';
+import { seedIdentity, ensureIdentity } from "./seedIdentity";
 import { companyConfigStore } from '../../core/store/companyConfigStore';
 import { vimdyCore } from '../../core/VimdyCore';
 
@@ -116,7 +116,9 @@ const accessEngine = new AccessEngine(userEngine, roleEngine);
  * el PASO 6 del onboarding (EmployeesStep) o desde Configuración — crear
  * aquí un admin con credenciales fijas sería un usuario falso e inseguro.
  */
-export const identityReady = seedIdentity(permissionEngine, roleEngine);
+export const identityReady = (async () => {
+  await seedIdentity(permissionEngine, roleEngine);
+})();
 
 /**
  * Antes esta promesa sembraba un catálogo GENÉRICO de categorías
@@ -222,10 +224,17 @@ const salesEngine = new SalesEngine(
   }
 );
 
+const orderEngine = new OrderEngine(
+  orderRepo,
+  kitchenEngine,
+  salesEngine
+);
+
 const tableEngine = new TableEngine(
   tableRepo,
   kitchenEngine,
-  salesEngine
+  salesEngine,
+  orderEngine
 );
 
 /**
@@ -239,12 +248,6 @@ const tableEngine = new TableEngine(
  * TableEngine (Meseros, Dashboard).
  */
 export const tablesReady: Promise<void> = Promise.resolve();
-
-const orderEngine = new OrderEngine(
-  orderRepo,
-  kitchenEngine,
-  salesEngine
-);
 
 // --------------------
 // ENGINES / SERVICES — VIMDY Intelligence Engine (FASE 2)

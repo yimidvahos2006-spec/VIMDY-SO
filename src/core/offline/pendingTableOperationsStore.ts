@@ -2,6 +2,7 @@ import { ObservableStore } from "../store/ObservableStore";
 import { PendingTableOperation, PendingTableOperationType } from "./PendingTableOperation";
 import { PendingTableOperationRepository } from "../../infrastructure/di/repositories/PendingTableOperationRepository";
 import { OpenTableInput, CloseTableInput } from "../engines/TableEngine";
+import { getCurrentBranchId, requireCurrentBusinessId } from "../../infrastructure/supabase/supabaseClient";
 
 const repository = new PendingTableOperationRepository();
 
@@ -41,6 +42,11 @@ class PendingTableOperationsStore extends ObservableStore<PendingTableOperations
     this.publish({ items, loaded: true });
   }
 
+  /** Vuelve a leer directamente de la cola persistida para obtener solo las operaciones de mesa pendientes. */
+  async findSyncable(): Promise<PendingTableOperation[]> {
+    return repository.findSyncable();
+  }
+
   /**
    * Guarda una apertura o un cierre de mesa hecho offline en la cola
    * local. Para CLOSE, `closeInput.saleId` debe venir ya generado por el
@@ -54,6 +60,8 @@ class PendingTableOperationsStore extends ObservableStore<PendingTableOperations
     openInput?: OpenTableInput;
     closeInput?: CloseTableInput;
   }): Promise<PendingTableOperation> {
+    const existing = await repository.findById(params.id);
+
     const pendingOperation: PendingTableOperation = {
       id: params.id,
       tableId: params.tableId,
@@ -62,8 +70,12 @@ class PendingTableOperationsStore extends ObservableStore<PendingTableOperations
       openInput: params.openInput,
       closeInput: params.closeInput,
       status: "PENDING_SYNC",
-      queuedAt: new Date(),
-      attempts: 0
+      queuedAt: existing?.queuedAt ?? new Date(),
+      attempts: existing?.attempts ?? 0,
+      lastAttemptAt: existing?.lastAttemptAt,
+      lastError: existing?.lastError,
+      businessId: requireCurrentBusinessId(),
+      branchId: getCurrentBranchId() ?? ""
     };
 
     await repository.save(pendingOperation);
@@ -73,9 +85,9 @@ class PendingTableOperationsStore extends ObservableStore<PendingTableOperations
   }
 
   /** Antes de reintentar contra el servidor: marca "sincronizando" y suma un intento. */
-  async markSyncing(id: string): Promise<void> {
+  async markSyncing(id: string): Promise<boolean> {
     const current = await repository.findById(id);
-    if (!current) return;
+    if (!current) return false;
 
     await repository.update({
       ...current,
@@ -84,6 +96,7 @@ class PendingTableOperationsStore extends ObservableStore<PendingTableOperations
       lastAttemptAt: new Date()
     });
     await this.refresh();
+    return true;
   }
 
   /** El intento de sincronización falló: registra el motivo y la saca del ciclo automático. */
@@ -94,6 +107,20 @@ class PendingTableOperationsStore extends ObservableStore<PendingTableOperations
     await repository.update({
       ...current,
       status: "FAILED",
+      lastError: error,
+      lastAttemptAt: new Date()
+    });
+    await this.refresh();
+  }
+
+  /** Error permanente de negocio: ya no se reintentará automáticamente. */
+  async markPermanentFailure(id: string, error: string): Promise<void> {
+    const current = await repository.findById(id);
+    if (!current) return;
+
+    await repository.update({
+      ...current,
+      status: "PERMANENT_FAILURE",
       lastError: error,
       lastAttemptAt: new Date()
     });
@@ -115,6 +142,20 @@ class PendingTableOperationsStore extends ObservableStore<PendingTableOperations
     await this.refresh();
   }
 
+  /** Vuelve a poner en cola las operaciones de mesa que quedaron en SYNCING por un cierre/recarga abrupta. */
+  async recoverStuckSyncing(): Promise<void> {
+    const items = await repository.findAll();
+    const stuck = items.filter((op) => op.status === "SYNCING");
+
+    if (stuck.length === 0) return;
+
+    await Promise.all(
+      stuck.map((op) => repository.update({ ...op, status: "PENDING_SYNC" }))
+    );
+
+    await this.refresh();
+  }
+
   /** Operaciones que siguen esperando turno para sincronizarse (no las que ya están en curso). */
   syncable(): PendingTableOperation[] {
     return this.snapshot.items.filter((op) => op.status === "PENDING_SYNC");
@@ -127,6 +168,11 @@ class PendingTableOperationsStore extends ObservableStore<PendingTableOperations
   /** Cuántas operaciones hay en la cola en total. */
   count(): number {
     return this.snapshot.items.length;
+  }
+
+  async clear(): Promise<void> {
+    await repository.clear();
+    await this.refresh();
   }
 }
 

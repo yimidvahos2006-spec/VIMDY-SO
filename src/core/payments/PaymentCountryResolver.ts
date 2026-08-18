@@ -13,15 +13,17 @@ import type { CountryCode, PaymentProviderName } from "./types/payment.types";
 const COUNTRY_PROVIDER_MAP: Record<string, PaymentProviderName> = {
   CO: "wompi",
   AR: "mercadopago",
-  BR: "mercadopago",
   CL: "mercadopago",
   PE: "mercadopago",
-  UY: "mercadopago",
-  EC: "mercadopago",
-  MX: "mercadopago"
+  MX: "mercadopago",
+  US: "paypal",
+  EC: "paypal",
+  PA: "paypal",
+  VE: "paypal",
+  ES: "paypal"
 };
 
-/** Proveedor usado cuando el país no tiene una regla explícita ("todo lo demás"). */
+/** Proveedor usado cuando el país no tiene una regla explícita. */
 const DEFAULT_PROVIDER: PaymentProviderName = "paypal";
 
 export class PaymentCountryResolver {

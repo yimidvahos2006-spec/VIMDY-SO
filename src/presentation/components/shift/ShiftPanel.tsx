@@ -182,11 +182,13 @@ export function ShiftPanel() {
 
     setRegisteringMovement(true);
 
+    const manualMovementId = `manual-movement-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
     try {
       if (movementType === "OUT") {
-        await container.cashEngine.registerExpense(amount, movementReason.trim());
+        await container.cashEngine.registerExpense(amount, movementReason.trim(), manualMovementId);
       } else {
-        await container.cashEngine.registerIncome(amount, movementReason.trim(), "CASH");
+        await container.cashEngine.registerIncome(amount, movementReason.trim(), "CASH", undefined, manualMovementId);
       }
       setMovementAmount("");
       setMovementReason("");

@@ -25,7 +25,13 @@ export const DEFAULT_CATEGORIES_BY_BUSINESS_TYPE: Record<BusinessTypeId, string[
   tienda: ["Aseo", "Bebidas", "Snacks", "Lácteos"],
   heladeria: ["Helados", "Toppings", "Bebidas", "Postres"],
   hotel: ["Habitaciones", "Restaurante", "Bebidas", "Servicios"],
-  food_truck: ["Platos Principales", "Bebidas", "Snacks", "Postres"]
+  food_truck: ["Platos Principales", "Bebidas", "Snacks", "Postres"],
+  comida_rapida: ["Hamburguesas", "Pollo", "Bebidas", "Snacks"],
+  minimercado: ["Aseo", "Bebidas", "Snacks", "Lácteos"],
+  pequeno_supermercado: ["Aseo", "Bebidas", "Snacks", "Lácteos", "Frutas", "Verduras"],
+  negocio_bebidas: ["Bebidas Frías", "Bebidas Calientes", "Snacks", "Licores"],
+  negocio_productos: ["Productos", "Accesorios", "Snacks", "Bebidas"],
+  negocio_servicios: ["Servicios", "Productos", "Snacks", "Bebidas"]
 };
 
 export function getDefaultCategoriesForBusinessType(businessType: BusinessTypeId): string[] {

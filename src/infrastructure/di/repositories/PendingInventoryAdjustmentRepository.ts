@@ -16,6 +16,8 @@ export class PendingInventoryAdjustmentRepository extends IndexedDbRepository<Pe
   /** Solo los que siguen esperando o fallaron — no los que están sincronizando ahora mismo. */
   public async findSyncable(): Promise<PendingInventoryAdjustment[]> {
     const all = await this.findAll();
-    return all.filter((adjustment) => adjustment.status === "PENDING_SYNC");
+    return all
+      .filter((adjustment) => adjustment.status === "PENDING_SYNC")
+      .sort((a, b) => a.queuedAt.getTime() - b.queuedAt.getTime());
   }
 }

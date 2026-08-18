@@ -57,7 +57,8 @@ const BUSINESS_ERROR_PREFIXES = [
   "INVALID_AMOUNT:",
   "INVALID_ITEM:",
   "INVALID_SPLIT:",
-  "PENDING_SALE_REQUIRES_ID:"
+  "PENDING_SALE_REQUIRES_ID:",
+  "CONTEXT_MISMATCH:"
 ];
 
 /**
@@ -110,7 +111,9 @@ export function buildOfflineSaleInput(params: {
     items: params.items.map((item) => ({
       productId: item.id,
       quantity: item.quantity,
-      price: item.price
+      price: item.price,
+      note: item.note,
+      requiresKitchen: item.requiresKitchen
     })),
     customerId: payment.customerId ?? undefined,
     cashierId: params.cashierId,

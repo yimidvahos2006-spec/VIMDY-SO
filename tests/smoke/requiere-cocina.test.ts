@@ -22,7 +22,7 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 
-import { Product, Sale, Table, CashMovement, KitchenOrder } from "../../src/core/entities/Entities";
+import { Product, Sale, Table, CashMovement, KitchenOrder, Order } from "../../src/core/entities/Entities";
 
 import { CartEngine } from "../../src/core/engines/CartEngine";
 import { InventoryEngine } from "../../src/core/engines/InventoryEngine";
@@ -37,6 +37,7 @@ import { KardexEngine } from "../../src/core/engines/KardexEngine";
 import { AuditEngine } from "../../src/core/engines/AuditEngine";
 import { SalesEngine } from "../../src/core/engines/SalesEngine";
 import { TableEngine } from "../../src/core/engines/TableEngine";
+import { OrderEngine } from "../../src/core/engines/OrderEngine";
 import { PosCore } from "../../src/core/engines/PosCore";
 
 import { InMemoryRepository } from "../fakes/InMemoryRepository";
@@ -73,6 +74,7 @@ function buildContext() {
   const customers = new InMemoryRepository("customers");
   const movements = new InMemoryRepository("inventory_movements");
   const auditLogs = new InMemoryRepository("audit_logs");
+  const orders = new InMemoryRepository<Order>("orders");
   const tables = new InMemoryRepository<Table>("tables");
 
   const kardex = new KardexEngine(movements as any);
@@ -98,9 +100,10 @@ function buildContext() {
     audit
   );
 
-  const tableEngine = new TableEngine(tables as any, kitchen, salesEngine);
+  const orderEngine = new OrderEngine(orders as never, kitchen, salesEngine);
+  const tableEngine = new TableEngine(tables as any, kitchen, salesEngine, orderEngine);
 
-  return { salesEngine, tableEngine, products, cart, kitchenOrders, tables };
+  return { salesEngine, tableEngine, products, cart, kitchenOrders, tables, orders };
 }
 
 describe("Smoke: requiresKitchen filtra qué llega a Cocina", () => {

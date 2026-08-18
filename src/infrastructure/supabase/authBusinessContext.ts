@@ -1,7 +1,8 @@
-import { supabase, setCurrentBusinessId } from "./supabaseClient";
+import { supabase, setCurrentBusinessId, setCurrentBranchId } from "./supabaseClient";
 import type { BusinessTypeId } from "../../core/config/businessTypes";
 import type { ModuleId } from "../../core/config/modules";
 import type { KitchenOutputMode } from "../../core/services/kitchenOutput";
+import { getCountryDefaults } from "../../core/config/globalization";
 
 /* ===========================================================================
    authBusinessContext
@@ -89,7 +90,7 @@ function translateAuthError(rawMessage: string | undefined): string {
     return "Este correo todavía no ha sido verificado.";
   }
   if (message.includes("user already registered") || message.includes("already registered")) {
-    return "Ya existe una cuenta con este correo. Intenta iniciar sesión.";
+    return "Este correo ya tiene una cuenta. Si ya la verificaste, inicia sesión. Si no la recuerdas, usa '¿Olvidaste tu contraseña?'.";
   }
   if (message.includes("password should be at least") || message.includes("password should contain")) {
     return "La contraseña debe tener al menos 6 caracteres.";
@@ -133,6 +134,8 @@ interface BusinessRow {
   enabled_modules: string[] | null;
   salida_cocina: string | null;
 }
+
+const TRIAL_PERIOD_DAYS = 30;
 
 function toBusinessSession(
   userId: string,
@@ -291,7 +294,11 @@ export async function beginRegistration(input: RegisterBusinessInput): Promise<v
   // están registrados). Lo detectamos igual para no dejar al usuario
   // esperando un código que nunca le servirá.
   if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
-    throw new Error("Ya existe una cuenta con este correo. Intenta iniciar sesión.");
+    throw new Error(
+      "Este correo ya está registrado. Si ya verificaste tu cuenta, inicia sesión. " +
+      "Si no la recuerdas, usa '¿Olvidaste tu contraseña?'. " +
+      "Si crees que es un error, contacta a soporte."
+    );
   }
 
   savePendingRegistration({
@@ -355,6 +362,8 @@ export async function completeRegistration(): Promise<BusinessSession> {
   }
 
   clearPendingRegistration();
+  setCurrentBusinessId(businessSession.businessId);
+  setCurrentBranchId(await resolveDefaultBranchId(businessSession.businessId));
   return businessSession;
 }
 
@@ -362,7 +371,59 @@ export async function completeRegistration(): Promise<BusinessSession> {
  * Inicia sesión y resuelve el negocio activo del usuario. Se llama al
  * cargar la app (si ya hay sesión guardada) y en la pantalla de Login.
  */
-export async function signIn(email: string, password: string): Promise<BusinessSession> {
+export async function resolveDefaultBranchId(businessId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("branches")
+    .select("id")
+    .eq("business_id", businessId)
+    .eq("is_main", true)
+    .maybeSingle();
+
+  if (error) {
+    return null;
+  }
+
+  if (data?.id) {
+    return data.id as string | null;
+  }
+
+  const { data: insertedBranch, error: insertError } = await supabase
+    .from("branches")
+    .insert({
+      business_id: businessId,
+      name: "Sucursal principal",
+      is_main: true,
+      active: true
+    })
+    .select("id")
+    .maybeSingle();
+
+  if (insertError || !insertedBranch?.id) {
+    return null;
+  }
+
+  return insertedBranch.id as string | null;
+}
+
+export async function getUserBusinesses(userId: string): Promise<BusinessSession[]> {
+  const { data: memberships, error } = await supabase
+    .from("business_members")
+    .select(
+      "business_id, role, businesses(name, country, currency, language, timezone, tax_rate, onboarding_completed, business_type, enabled_modules, salida_cocina)"
+    )
+    .eq("user_id", userId);
+
+  if (error || !memberships || memberships.length === 0) {
+    return [];
+  }
+
+  return memberships.map((membership: Record<string, unknown>) => {
+    const businessRow = membership.businesses as unknown as BusinessRow | undefined;
+    return toBusinessSession(userId, membership.business_id as string, membership.role as string, "", businessRow);
+  });
+}
+
+export async function signIn(email: string, password: string): Promise<BusinessSession | BusinessSession[] | null> {
   const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
     email,
     password
@@ -373,18 +434,26 @@ export async function signIn(email: string, password: string): Promise<BusinessS
   }
 
   const ownerName = (authData.user.user_metadata?.full_name as string | undefined) ?? "";
-  const businessSession = await resolveBusinessSession(authData.user.id, ownerName);
+  const businesses = await getUserBusinesses(authData.user.id);
 
-  if (!businessSession) {
-    throw new Error("Este usuario no está asociado a ningún negocio.");
+  if (businesses.length === 0) {
+    return null;
   }
 
-  setCurrentBusinessId(businessSession.businessId);
-  return businessSession;
+  if (businesses.length === 1) {
+    const session = businesses[0];
+    setCurrentBusinessId(session.businessId);
+    setCurrentBranchId(await resolveDefaultBranchId(session.businessId));
+    return session;
+  }
+
+  return businesses;
 }
 
 export async function signOut(): Promise<void> {
   await supabase.auth.signOut();
+  setCurrentBusinessId(null);
+  setCurrentBranchId(null);
 }
 
 /**
@@ -466,4 +535,112 @@ export async function setEnabledModules(businessId: string, modules: ModuleId[])
   if (error) {
     throw new Error(error.message ?? "No se pudieron guardar los módulos del negocio.");
   }
+}
+
+/**
+ * Crea un negocio adicional para un usuario ya autenticado, reutilizando el
+ * mismo auth.uid(). No requiere OTP porque la cuenta ya está confirmada.
+ */
+export async function createAdditionalBusiness(
+  userId: string,
+  input: { businessName: string; ownerName: string; country: string }
+): Promise<BusinessSession> {
+  const countryDefaults = getCountryDefaults(input.country);
+  if (!countryDefaults) {
+    throw new Error("COUNTRY_INVALID: país no reconocido.");
+  }
+
+  const now = new Date();
+  const trialEndsAt = new Date(now);
+  trialEndsAt.setDate(trialEndsAt.getDate() + TRIAL_PERIOD_DAYS);
+
+  const { data: hasUsedTrial, error: hasUsedTrialError } = await supabase.rpc("has_user_used_trial", {
+    p_user_id: userId
+  });
+
+  if (hasUsedTrialError || hasUsedTrial) {
+    throw new Error("TRIAL_YA_USADO: ya utilizaste tu prueba gratuita de 30 días. Puedes contratar un plan mensual o anual para continuar.");
+  }
+
+  const { data: existingBusinesses, error: existingError } = await supabase
+    .from("business_members")
+    .select("business_id")
+    .eq("user_id", userId);
+
+  if (existingError) {
+    throw new Error("BUSINESS_LOOKUP_FAILED: " + existingError.message);
+  }
+
+  if (existingBusinesses && existingBusinesses.length > 0) {
+    const { data: existingBizData, error: existingBizError } = await supabase
+      .from("businesses")
+      .select("id, plan, payment_status, subscription_status")
+      .in("id", existingBusinesses.map((b: { business_id: string }) => b.business_id))
+      .or("plan.eq.trial,plan.eq.suspended,payment_status.eq.none,payment_status.eq.pending");
+
+    if (existingBizError) {
+      throw new Error("EXISTING_BUSINESS_LOOKUP_FAILED: " + existingBizError.message);
+    }
+
+    if (existingBizData && existingBizData.length > 0) {
+      throw new Error("TRIAL_DUPLICADO: ya tienes un negocio en periodo de prueba o suspendido. Activa un plan para ese negocio antes de crear uno nuevo.");
+    }
+  }
+
+  const { data: business, error: businessInsertError } = await supabase
+    .from("businesses")
+    .insert({
+      name: input.businessName.trim(),
+      plan: "trial",
+      trial_ends_at: trialEndsAt.toISOString(),
+      trial_used_at: now.toISOString(),
+      country: input.country,
+      currency: countryDefaults.currency,
+      language: countryDefaults.language,
+      timezone: countryDefaults.timezone,
+      tax_rate: countryDefaults.taxRate
+    })
+    .select("id")
+    .single();
+
+  if (businessInsertError || !business) {
+    throw new Error(businessInsertError?.message ?? "No se pudo crear el negocio.");
+  }
+
+  const { error: memberInsertError } = await supabase.from("business_members").insert({
+    user_id: userId,
+    business_id: business.id,
+    role: "ADMIN"
+  });
+
+  if (memberInsertError) {
+    await supabase.from("businesses").delete().eq("id", business.id);
+    throw new Error(memberInsertError.message ?? "No se pudo asociar el usuario al negocio.");
+  }
+
+  const { error: trialUsageError } = await supabase.rpc("record_trial_usage", {
+    p_user_id: userId,
+    p_business_id: business.id
+  });
+
+  if (trialUsageError) {
+    await supabase.from("business_members").delete().eq("user_id", userId).eq("business_id", business.id);
+    await supabase.from("businesses").delete().eq("id", business.id);
+    throw new Error("TRIAL_USAGE_RECORD_FAILED: " + trialUsageError.message);
+  }
+
+  const session = toBusinessSession(userId, business.id, "ADMIN", input.ownerName, {
+    name: input.businessName,
+    country: input.country,
+    currency: countryDefaults.currency,
+    language: countryDefaults.language,
+    timezone: countryDefaults.timezone,
+    tax_rate: countryDefaults.taxRate,
+    onboarding_completed: false,
+    business_type: null,
+    enabled_modules: [],
+    salida_cocina: "pantalla"
+  });
+
+  return session;
 }

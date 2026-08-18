@@ -7,6 +7,8 @@
 
 import type { PaymentRoutingInput } from "./models/PaymentModels";
 
+const ALLOWED_COUNTRIES = new Set(["CO", "MX", "PE", "CL", "AR", "ES", "EC", "PA", "US", "VE"]);
+
 export class PaymentValidator {
   static validateRoutingInput(input: PaymentRoutingInput): void {
     if (!input.businessId) {
@@ -14,6 +16,9 @@ export class PaymentValidator {
     }
     if (!input.country) {
       throw new Error("PaymentValidator: el país es obligatorio.");
+    }
+    if (!ALLOWED_COUNTRIES.has(input.country)) {
+      throw new Error(`PaymentValidator: país no soportado: ${input.country}. Solo se permite: ${Array.from(ALLOWED_COUNTRIES).join(", ")}.`);
     }
     if (!input.businessType) {
       throw new Error("PaymentValidator: el tipo de negocio es obligatorio.");

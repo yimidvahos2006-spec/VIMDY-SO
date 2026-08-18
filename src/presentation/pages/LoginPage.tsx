@@ -1,11 +1,11 @@
 import React, { useState, FormEvent } from "react";
 import { useNavigate, Navigate, Link } from "react-router-dom";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, AlertCircle } from "lucide-react";
 
 import { useAuth } from "../context/AuthContext";
 import { VimdyBackground } from "../components/ui/VimdyBackground";
 import { VimdyLogo } from "../components/ui/VimdyLogo";
-import { GlassCard } from "../components/ui/GlassCard";
+import { VimdyCard } from "../components/ui/VimdyCard";
 import { VimdyButton } from "../components/ui/VimdyButton";
 
 /**
@@ -52,93 +52,152 @@ export function LoginPage() {
     }
   }
 
+  const disabled = !isReady || isLoading;
+  const shownError = localError || error;
+
   return (
     <VimdyBackground>
-      <div className="min-h-screen flex flex-col items-center justify-center px-4">
-        <div className="mb-8 flex flex-col items-center gap-4">
-          <VimdyLogo size={90} />
-          <h1 className="text-2xl font-bold text-white tracking-wide">
-            VIMDY OS
-          </h1>
-          <p className="text-sm text-slate-400">
-            Inicia sesión para continuar
+      <div className="min-h-screen flex flex-col items-center justify-center px-4 py-16">
+        <div className="w-full max-w-[400px] flex flex-col items-center">
+          {/* Marca */}
+          <div className="mb-vimdy-xl flex flex-col items-center gap-vimdy-md animate-vimdy-fade-in">
+            <VimdyLogo size={56} />
+
+            <div className="flex flex-col items-center gap-1">
+              <p className="text-vimdy-micro uppercase text-vimdy-text-tertiary">
+                Vimdy OS
+              </p>
+              <h1 className="text-vimdy-h2 text-vimdy-text">
+                Bienvenido de nuevo
+              </h1>
+            </div>
+
+            <p className="text-vimdy-small text-vimdy-text-secondary text-center">
+              Inicia sesión para gestionar tu negocio
+            </p>
+          </div>
+
+          {/* Formulario */}
+          <VimdyCard padding="lg" className="w-full animate-vimdy-slide-up">
+            <form onSubmit={handleSubmit} className="flex flex-col gap-vimdy-lg" noValidate>
+              <div className="flex flex-col gap-vimdy-xs">
+                <label
+                  htmlFor="email"
+                  className="text-vimdy-small font-medium text-vimdy-text-secondary"
+                >
+                  Correo electrónico
+                </label>
+                <input
+                  id="email"
+                  type="email"
+                  autoComplete="username"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  disabled={disabled}
+                  className="
+                    w-full rounded-vimdy-sm border border-vimdy-border
+                    bg-vimdy-background px-4 py-3
+                    text-vimdy-body text-vimdy-text placeholder-vimdy-text-tertiary
+                    outline-none transition-colors duration-vimdy-fast
+                    focus:border-vimdy-accent focus:shadow-vimdy-accent
+                    disabled:opacity-50
+                  "
+                  placeholder="tucorreo@vimdy.com"
+                />
+              </div>
+
+              <div className="flex flex-col gap-vimdy-xs">
+                <label
+                  htmlFor="password"
+                  className="text-vimdy-small font-medium text-vimdy-text-secondary"
+                >
+                  Contraseña
+                </label>
+                <div className="relative">
+                  <input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    disabled={disabled}
+                    className="
+                      w-full rounded-vimdy-sm border border-vimdy-border
+                      bg-vimdy-background px-4 py-3 pr-11
+                      text-vimdy-body text-vimdy-text placeholder-vimdy-text-tertiary
+                      outline-none transition-colors duration-vimdy-fast
+                      focus:border-vimdy-accent focus:shadow-vimdy-accent
+                      disabled:opacity-50
+                    "
+                    placeholder="••••••••"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    disabled={disabled}
+                    aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                    aria-pressed={showPassword}
+                    className="
+                      absolute right-3 top-1/2 -translate-y-1/2
+                      text-vimdy-text-tertiary transition-colors duration-vimdy-fast
+                      hover:text-vimdy-accent-hover disabled:opacity-50
+                    "
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+                <Link
+                  to="/recuperar-password"
+                  className="
+                    self-end text-vimdy-micro text-vimdy-text-secondary
+                    transition-colors duration-vimdy-fast hover:text-vimdy-accent-hover
+                  "
+                >
+                  ¿Olvidaste tu contraseña?
+                </Link>
+              </div>
+
+              {shownError && (
+                <div
+                  role="alert"
+                  className="
+                    flex items-start gap-2 rounded-vimdy-sm border border-vimdy-danger/25
+                    bg-vimdy-danger-bg px-4 py-3 text-vimdy-small text-vimdy-danger
+                  "
+                >
+                  <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                  <span>{shownError}</span>
+                </div>
+              )}
+
+              <VimdyButton
+                type="submit"
+                variant="primary"
+                size="lg"
+                fullWidth
+                loading={isLoading}
+                disabled={!isReady}
+                className="mt-vimdy-xs"
+              >
+                {!isReady ? "Preparando..." : "Iniciar sesión"}
+              </VimdyButton>
+
+              <p className="text-center text-vimdy-small text-vimdy-text-secondary">
+                ¿Tu negocio no tiene cuenta?{" "}
+                <Link
+                  to="/registro"
+                  className="font-medium text-vimdy-accent transition-colors duration-vimdy-fast hover:text-vimdy-accent-hover"
+                >
+                  Créala aquí
+                </Link>
+              </p>
+            </form>
+          </VimdyCard>
+
+          <p className="mt-vimdy-xl text-vimdy-micro text-vimdy-text-tertiary text-center">
+            © {new Date().getFullYear()} VIMDY OS · Gestión inteligente para negocios de comida y bebida
           </p>
         </div>
-
-        <GlassCard className="w-full max-w-sm p-8">
-          <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-            <div className="flex flex-col gap-2">
-              <label htmlFor="email" className="text-sm text-slate-300">
-                Correo electrónico
-              </label>
-              <input
-                id="email"
-                type="email"
-                autoComplete="username"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                disabled={!isReady || isLoading}
-                className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-3 text-white placeholder-slate-500 outline-none transition-colors focus:border-cyan-400 disabled:opacity-50"
-                placeholder="tucorreo@vimdy.com"
-              />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label htmlFor="password" className="text-sm text-slate-300">
-                Contraseña
-              </label>
-              <div className="relative">
-                <input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  disabled={!isReady || isLoading}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-3 pr-11 text-white placeholder-slate-500 outline-none transition-colors focus:border-cyan-400 disabled:opacity-50"
-                  placeholder="••••••••"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((prev) => !prev)}
-                  disabled={!isReady || isLoading}
-                  aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
-                  aria-pressed={showPassword}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition-colors hover:text-cyan-400 disabled:opacity-50"
-                >
-                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
-              </div>
-              <Link
-                to="/recuperar-password"
-                className="self-end text-xs text-slate-400 hover:text-cyan-400 transition-colors"
-              >
-                ¿Olvidaste tu contraseña?
-              </Link>
-            </div>
-
-            {(localError || error) && (
-              <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-300">
-                {localError || error}
-              </div>
-            )}
-
-            <VimdyButton
-              type="submit"
-              disabled={!isReady || isLoading}
-              className="w-full mt-2"
-            >
-              {!isReady ? "Preparando..." : isLoading ? "Ingresando..." : "Iniciar sesión"}
-            </VimdyButton>
-
-            <Link
-              to="/registro"
-              className="text-center text-sm text-slate-400 hover:text-cyan-400 transition-colors"
-            >
-              ¿Tu negocio no tiene cuenta? Créala aquí
-            </Link>
-          </form>
-        </GlassCard>
       </div>
     </VimdyBackground>
   );

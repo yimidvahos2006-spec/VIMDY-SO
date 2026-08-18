@@ -1,6 +1,7 @@
 import { CashMovement } from "../entities/Entities";
 import { IRepository } from "../../infrastructure/di/repositories/IRepository";
 import { vimdyCore } from "../VimdyCore";
+import { getCurrentBusinessId, getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
 
 /**
  * CashEngine
@@ -60,7 +61,9 @@ export class CashEngine {
       description,
       date: new Date(),
       paymentMethod: method,
-      cashAmount: resolvedCashAmount
+      cashAmount: resolvedCashAmount,
+      businessId: getCurrentBusinessId() ?? undefined,
+      branchId: getCurrentBranchId() ?? undefined
     };
 
     await this.repository.save(movement);
@@ -72,23 +75,32 @@ export class CashEngine {
   /**
    * Registra un egreso de dinero (reembolso, gasto, retiro).
    * Los egresos siempre salen del efectivo físico del cajón.
+   *
+   * IDEMPOTENCIA (checklist crítico #4): `id` es opcional y, cuando se
+   * provee, debe ser determinístico (ej. `sale-change-<saleId>`). save() en
+   * SupabaseRepository hace `upsert` por id, así que si el mismo egreso se
+   * reintenta con el mismo id, esta llamada PISA el mismo movimiento en vez
+   * de crear uno nuevo.
    */
   public async registerExpense(
     amount: number,
-    description: string
+    description: string,
+    id?: string
   ): Promise<CashMovement> {
     if (amount <= 0) {
       throw new Error("INVALID_AMOUNT");
     }
 
     const movement: CashMovement = {
-      id: crypto.randomUUID(),
+      id: id ?? crypto.randomUUID(),
       amount,
       type: "OUT",
       description,
       date: new Date(),
       paymentMethod: "CASH",
-      cashAmount: amount
+      cashAmount: amount,
+      businessId: getCurrentBusinessId() ?? undefined,
+      branchId: getCurrentBranchId() ?? undefined
     };
 
     await this.repository.save(movement);
@@ -101,7 +113,15 @@ export class CashEngine {
    * Lista todos los movimientos registrados.
    */
   public async getAllMovements(): Promise<CashMovement[]> {
-    return await this.repository.findAll();
+    const businessId = getCurrentBusinessId();
+    const branchId = getCurrentBranchId();
+    const movements = await this.repository.findAll();
+
+    return movements.filter(movement => {
+      if (movement.businessId && movement.businessId !== businessId) return false;
+      if (movement.branchId && movement.branchId !== branchId) return false;
+      return true;
+    });
   }
 
   /**
@@ -109,7 +129,7 @@ export class CashEngine {
    */
   public async getTodayMovements(): Promise<CashMovement[]> {
     const today = new Date().toDateString();
-    const movements = await this.repository.findAll();
+    const movements = await this.getAllMovements();
 
     return movements.filter(
       movement => movement.date.toDateString() === today
@@ -120,7 +140,7 @@ export class CashEngine {
    * Saldo total de caja (ingresos - egresos).
    */
   public async getBalance(): Promise<number> {
-    const movements = await this.repository.findAll();
+    const movements = await this.getAllMovements();
 
     return movements.reduce((balance, movement) => {
       return movement.type === "IN"
@@ -151,7 +171,7 @@ export class CashEngine {
     start: Date,
     end: Date = new Date()
   ): Promise<CashMovement[]> {
-    const movements = await this.repository.findAll();
+    const movements = await this.getAllMovements();
 
     return movements.filter(
       movement => movement.date >= start && movement.date <= end

@@ -25,12 +25,13 @@ export type PendingCustomerOperationStatus =
   | "PENDING_SYNC"
   /** El proceso de sincronización la está enviando ahora mismo. */
   | "SYNCING"
-  /**
-   * Se intentó sincronizar y falló por algo que NO es falta de red (ej. un
-   * dato inválido). Se saca de la cola automática y espera revisión manual
-   * — no se reintenta sola para no repetir el mismo error para siempre.
-   */
-  | "FAILED";
+   /**
+    * Se intentó sincronizar y falló por algo que NO es falta de red (ej. un
+    * dato inválido). Se saca de la cola automática y espera revisión manual
+    * — no se reintenta sola para no repetir el mismo error para siempre.
+    */
+   | "FAILED"
+   | "PERMANENT_FAILURE";
 
 export interface PendingCustomerOperation {
   /** Mismo id que el Customer — clave de idempotencia real (ver arriba). */
@@ -42,4 +43,7 @@ export interface PendingCustomerOperation {
   readonly attempts: number;
   readonly lastAttemptAt?: Date;
   readonly lastError?: string;
+  /** FASE 7 (Multi-tenant): contexto de negocio/sucursal al momento de encolar. */
+  readonly businessId: string;
+  readonly branchId: string;
 }

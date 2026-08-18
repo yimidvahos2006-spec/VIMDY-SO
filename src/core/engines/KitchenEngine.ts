@@ -2,6 +2,7 @@ import { KitchenOrder } from '../entities/Entities';
 import { IRepository } from '../../infrastructure/di/repositories/IRepository';
 import { AuditEngine } from './AuditEngine';
 import { vimdyCore } from '../VimdyCore';
+import { getCurrentBusinessId, getCurrentBranchId } from '../../infrastructure/supabase/supabaseClient';
 
 /** Motivos de cancelación permitidos desde la pantalla de Cocina. */
 export const KITCHEN_CANCEL_REASONS = [
@@ -21,23 +22,27 @@ export class KitchenEngine {
 
   public async getActiveOrders(): Promise<KitchenOrder[]> {
     const orders = await this.repository.findAll();
+    const currentBusinessId = getCurrentBusinessId();
+    const currentBranchId = getCurrentBranchId();
 
-    return orders.filter(
-      order => order.status !== 'ENTREGADO'
-    );
+    return orders.filter(order => {
+      if (currentBusinessId && order.businessId && order.businessId !== currentBusinessId) return false;
+      if (currentBranchId && order.branchId && order.branchId !== currentBranchId) return false;
+      return order.status !== 'ENTREGADO';
+    });
   }
 
-  /**
-   * Historial de comandas ya entregadas. Nunca se borran (ver `delete`,
-   * que ninguna pantalla invoca para comandas reales): solo cambian de
-   * estado, así que este método simplemente filtra sobre el mismo
-   * repositorio, más reciente primero.
-   */
   public async getDeliveredOrders(): Promise<KitchenOrder[]> {
     const orders = await this.repository.findAll();
+    const currentBusinessId = getCurrentBusinessId();
+    const currentBranchId = getCurrentBranchId();
 
     return orders
-      .filter(order => order.status === 'ENTREGADO')
+      .filter(order => {
+        if (currentBusinessId && order.businessId && order.businessId !== currentBusinessId) return false;
+        if (currentBranchId && order.branchId && order.branchId !== currentBranchId) return false;
+        return order.status === 'ENTREGADO';
+      })
       .sort((a, b) => {
         const aTime = new Date(a.deliveredAt ?? a.createdAt).getTime();
         const bTime = new Date(b.deliveredAt ?? b.createdAt).getTime();
@@ -46,16 +51,42 @@ export class KitchenEngine {
   }
 
   public async getAll(): Promise<KitchenOrder[]> {
-    return await this.repository.findAll();
+    const orders = await this.repository.findAll();
+    const currentBusinessId = getCurrentBusinessId();
+    const currentBranchId = getCurrentBranchId();
+
+    return orders.filter(order => {
+      if (currentBusinessId && order.businessId && order.businessId !== currentBusinessId) return false;
+      if (currentBranchId && order.branchId && order.branchId !== currentBranchId) return false;
+      return true;
+    });
   }
 
   public async getById(id: string): Promise<KitchenOrder | null> {
-    return await this.repository.findById(id);
+    const order = await this.repository.findById(id);
+    if (!order) return null;
+
+    const currentBusinessId = getCurrentBusinessId();
+    const currentBranchId = getCurrentBranchId();
+    if (currentBusinessId && order.businessId && order.businessId !== currentBusinessId) return null;
+    if (currentBranchId && order.branchId && order.branchId !== currentBranchId) return null;
+
+    return order;
   }
 
   public async save(order: KitchenOrder): Promise<void> {
     await this.repository.save(order);
     this.emit('kitchen.order_created', order);
+  }
+
+  public async getByTableId(tableId: string): Promise<KitchenOrder[]> {
+    const orders = await this.getAll();
+    return orders.filter(order => order.tableId === tableId);
+  }
+
+  public async getByOrderId(orderId: string): Promise<KitchenOrder[]> {
+    const orders = await this.getAll();
+    return orders.filter(order => order.orderId === orderId);
   }
 
   public async updateStatus(

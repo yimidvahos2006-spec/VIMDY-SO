@@ -1,29 +1,20 @@
 import React, { useState } from "react";
 import { Check, Loader2, ShieldCheck } from "lucide-react";
 
-import { SUBSCRIPTION_PLANS, PlanDefinition } from "../../../core/entities/SubscriptionTypes";
+import { SUBSCRIPTION_PLANS, PlanDefinition, getPlanPrice, getPlanCurrency } from "../../../core/entities/SubscriptionTypes";
 import { formatMoney } from "../../../core/utils/formatMoney";
 
-/**
- * PlansShowcase
- * ---------------------------------------------------------------------------
- * VIMDY — FASE 7, PASO 6: muestra Plan Mensual ($79.000 COP) y Plan Anual
- * ($790.000 COP, ahorra dos meses), cada uno con sus funciones incluidas,
- * soporte, actualizaciones y acceso completo.
- *
- * PASO 7 — Wompi: el botón de cada tarjeta ya está listo para conectarse
- * al checkout de Wompi (recibe onSelectPlan). Mientras Wompi esté en
- * revisión, onSelectPlan puede simplemente mostrar un aviso — el día que
- * se apruebe, solo hay que reemplazar esa función por la apertura real
- * del checkout, sin tocar nada de este componente.
- */
-export function PlansShowcase({
-  onSelectPlan,
-  currentPlan
-}: {
+interface PlansShowcaseProps {
   onSelectPlan: (plan: PlanDefinition) => Promise<void> | void;
   currentPlan?: string | null;
-}) {
+  countryCode?: string;
+}
+
+export function PlansShowcase({
+  onSelectPlan,
+  currentPlan,
+  countryCode = "US"
+}: PlansShowcaseProps) {
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
 
   async function handleSelect(plan: PlanDefinition) {
@@ -40,6 +31,8 @@ export function PlansShowcase({
       {SUBSCRIPTION_PLANS.map((plan) => {
         const isCurrent = currentPlan === plan.id;
         const isYearly = plan.id === "yearly";
+        const displayPrice = getPlanPrice(plan.id, countryCode);
+        const displayCurrency = getPlanCurrency(plan.id, countryCode);
 
         return (
           <div
@@ -60,8 +53,8 @@ export function PlansShowcase({
             <p className="text-vimdy-text-secondary text-xs">{plan.billingLabel}</p>
 
             <p className="text-vimdy-text text-3xl font-extrabold mt-3">
-              {formatMoney(plan.price, plan.currency)}
-              <span className="text-vimdy-text-secondary text-sm font-normal"> {plan.currency}</span>
+              {formatMoney(displayPrice, displayCurrency)}
+              <span className="text-vimdy-text-secondary text-sm font-normal"> {displayCurrency}</span>
             </p>
 
             <ul className="mt-4 space-y-2 flex-1">

@@ -110,7 +110,8 @@ export function KitchenCard({
         items.map((item) => ({
           name: item.productName,
           quantity: item.quantity,
-          estimatedPrepMinutes: item.estimatedPrepMinutes
+          estimatedPrepMinutes: item.estimatedPrepMinutes,
+          note: item.note
         })),
         {
           orderNumber: order.orderNumber ? `#${order.orderNumber}` : undefined,
@@ -265,15 +266,23 @@ export function KitchenCard({
             key={`${item.productId}-${index}`}
             className={`flex justify-between bg-vimdy-surface-hover rounded-xl ${tvMode ? "p-5" : "p-3"}`}
           >
-            <p className={`text-vimdy-text font-semibold ${tvMode ? "text-2xl" : ""}`}>
-              {item.productName}
-              {!!item.estimatedPrepMinutes && (
-                <span className={`ml-2 text-vimdy-accent font-normal ${tvMode ? "text-base" : "text-xs"}`}>
-                  ~{item.estimatedPrepMinutes} min
-                </span>
+            <div className="flex-1 min-w-0">
+              <p className={`text-vimdy-text font-semibold ${tvMode ? "text-2xl" : ""}`}>
+                {item.productName}
+                {!!item.estimatedPrepMinutes && (
+                  <span className={`ml-2 text-vimdy-accent font-normal ${tvMode ? "text-base" : "text-xs"}`}>
+                    ~{item.estimatedPrepMinutes} min
+                  </span>
+                )}
+              </p>
+              {item.note && (
+                <div className={`mt-2 flex items-start gap-2 ${tvMode ? "text-base" : "text-xs"}`}>
+                  <MessageSquareText size={tvMode ? 18 : 14} className="text-vimdy-warning mt-0.5 shrink-0" />
+                  <span className="text-vimdy-warning break-words">{item.note}</span>
+                </div>
               )}
-            </p>
-            <span className={`text-vimdy-accent font-bold ${tvMode ? "text-2xl" : ""}`}>
+            </div>
+            <span className={`text-vimdy-accent font-bold ${tvMode ? "text-2xl" : ""} ml-4`}>
               x{item.quantity}
             </span>
           </div>

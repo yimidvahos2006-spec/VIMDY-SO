@@ -4,6 +4,7 @@ export interface PrintableKitchenTicketItem {
   name: string;
   quantity: number;
   estimatedPrepMinutes?: number;
+  note?: string;
 }
 
 /**
@@ -39,6 +40,7 @@ export function printKitchenTicketDocument(
           <td class="item-name">
             ${escapeHtml(item.name)}
             ${item.estimatedPrepMinutes ? `<span class="time">~${item.estimatedPrepMinutes} min</span>` : ""}
+            ${item.note ? `<div class="note">${escapeHtml(item.note)}</div>` : ""}
           </td>
         </tr>`
     )
@@ -67,6 +69,7 @@ export function printKitchenTicketDocument(
   .qty { width: 42px; font-weight: bold; vertical-align: top; padding: 4px 0; }
   .item-name { font-weight: bold; padding: 4px 0; }
   .time { display: block; font-weight: normal; font-size: 11px; color: #333; }
+  .note { margin-top: 4px; font-size: 11px; color: #333; font-style: italic; }
   .notes { margin-top: 8px; font-size: 12px; }
   .footer { text-align: center; margin-top: 14px; font-size: 10px; }
   @media print {

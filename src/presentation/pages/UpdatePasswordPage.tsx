@@ -6,6 +6,7 @@ import { VimdyBackground } from "../components/ui/VimdyBackground";
 import { VimdyLogo } from "../components/ui/VimdyLogo";
 import { GlassCard } from "../components/ui/GlassCard";
 import { VimdyButton } from "../components/ui/VimdyButton";
+import { PasswordField } from "../components/ui/PasswordField";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -82,38 +83,25 @@ export function UpdatePasswordPage() {
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-              <div className="flex flex-col gap-2">
-                <label htmlFor="password" className="text-sm text-slate-300">
-                  Nueva contraseña
-                </label>
-                <input
-                  id="password"
-                  type="password"
-                  autoComplete="new-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  disabled={isLoading}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-3 text-white placeholder-slate-500 outline-none transition-colors focus:border-cyan-400 disabled:opacity-50"
-                  placeholder="••••••••"
-                  autoFocus
-                />
-              </div>
+              <PasswordField
+                id="password"
+                label="Nueva contraseña"
+                value={password}
+                onChange={setPassword}
+                disabled={isLoading}
+                placeholder="••••••••"
+                autoComplete="new-password"
+              />
 
-              <div className="flex flex-col gap-2">
-                <label htmlFor="confirmPassword" className="text-sm text-slate-300">
-                  Confirma la contraseña
-                </label>
-                <input
-                  id="confirmPassword"
-                  type="password"
-                  autoComplete="new-password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  disabled={isLoading}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-3 text-white placeholder-slate-500 outline-none transition-colors focus:border-cyan-400 disabled:opacity-50"
-                  placeholder="••••••••"
-                />
-              </div>
+              <PasswordField
+                id="confirmPassword"
+                label="Confirma la contraseña"
+                value={confirmPassword}
+                onChange={setConfirmPassword}
+                disabled={isLoading}
+                placeholder="••••••••"
+                autoComplete="new-password"
+              />
 
               {(localError || serverError) && (
                 <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-300">

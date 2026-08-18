@@ -92,7 +92,8 @@ const CODE_MESSAGES: Record<string, (detail: string) => string> = {
 
   // Usuarios, roles y permisos
   ACCESS_DENIED: () => "No tienes permiso para hacer esto. Pide ayuda a un administrador.",
-  EMAIL_ALREADY_IN_USE: (detail) => detail || "Ya existe un usuario con ese correo.",
+  EMAIL_ALREADY_IN_USE: (detail) =>
+    detail || "Este correo ya está registrado. Usa otro correo o inicia sesión si ya tienes cuenta.",
   ROLE_ALREADY_EXISTS: (detail) => detail || "Ya existe un rol con ese identificador.",
   ROLE_IS_SYSTEM: (detail) => detail || "Este rol es del sistema y no se puede eliminar.",
   PERMISSION_NOT_FOUND: () => "Uno de los permisos seleccionados no existe.",

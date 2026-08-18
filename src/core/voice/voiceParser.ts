@@ -4,6 +4,10 @@ export interface VoiceOrder {
 
   product: string;
 
+  /** Modificadores extraídos del pedido (ej: "sin arroz", "al punto"). */
+
+  modifiers: string[];
+
 }
 
 const numbers: Record<string, number> = {
@@ -32,6 +36,80 @@ const numbers: Record<string, number> = {
 
 };
 
+const MODIFIER_PREFIXES = [
+
+  "sin",
+  "sin.",
+  "sin,",
+  "no",
+  "no.",
+  "no,",
+  "con",
+  "con.",
+  "con,",
+  "al",
+  "a",
+  "poco",
+  "mucho",
+  "extra",
+  "media",
+  "medio",
+  "mitad",
+  "bien",
+  "crudo",
+  "término",
+  "termino",
+  "dorado",
+  "quemado",
+  "frío",
+  "frio",
+  "caliente",
+  "helado"
+
+];
+
+function extractModifiers(words: string[]): { productWords: string[]; modifiers: string[] } {
+
+  const modifiers: string[] = [];
+
+  const productWords: string[] = [];
+
+  let i = 0;
+
+  while (i < words.length) {
+
+    const word = words[i];
+
+    const normalized = word.replace(/[.,]/g, "");
+
+    if (MODIFIER_PREFIXES.includes(normalized) && i + 1 < words.length) {
+
+      const next = words[i + 1];
+
+      const nextClean = next.replace(/[.,]/g, "");
+
+      if (nextClean && nextClean.length > 1) {
+
+        modifiers.push(`${normalized} ${nextClean}`);
+
+        i += 2;
+
+        continue;
+
+      }
+
+    }
+
+    productWords.push(word);
+
+    i++;
+
+  }
+
+  return { productWords, modifiers };
+
+}
+
 function normalize(text: string) {
 
   return text
@@ -53,29 +131,41 @@ export function parseVoice(text: string): VoiceOrder[] {
 
   for (const part of parts) {
 
-    const words = part.trim().split(" ");
+    const words = part.trim().split(" ").filter(Boolean);
 
     let quantity = 1;
 
-    if (!isNaN(Number(words[0]))) {
+    let productWords = words;
 
-      quantity = Number(words.shift());
+    if (words.length > 1) {
+
+      const first = words[0].replace(/[.,]/g, "");
+
+      if (!isNaN(Number(words[0]))) {
+
+        quantity = Number(words.shift()!);
+
+        productWords = words;
+
+      } else if (numbers[first] !== undefined) {
+
+        quantity = numbers[first];
+
+        productWords = words.slice(1);
+
+      }
 
     }
 
-    else if (numbers[words[0]] !== undefined) {
-
-      quantity = numbers[words[0]];
-
-      words.shift();
-
-    }
+    const { productWords: cleanProduct, modifiers } = extractModifiers(productWords);
 
     result.push({
 
       quantity,
 
-      product: words.join(" ").trim()
+      product: cleanProduct.join(" ").trim(),
+
+      modifiers
 
     });
 

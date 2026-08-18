@@ -90,7 +90,8 @@ const BURGER: Product = {
   price: 18000,
   stock: 10,
   minStock: 2,
-  lastUpdated: new Date()
+  lastUpdated: new Date(),
+  requiresKitchen: true
 };
 
 describe("Smoke: venta completa (mostrador)", () => {
@@ -136,6 +137,25 @@ describe("Smoke: venta completa (mostrador)", () => {
 
     const movementsAfterRetry = await ctx.cashMovements.findAll();
     expect(movementsAfterRetry).toHaveLength(1);
+  });
+
+  it("revierte inventario cuando la creación de la venta falla después de descontarlo", async () => {
+    ctx.cart.addItem(BURGER, 2);
+
+    const engine = ctx.salesEngine as any;
+    engine.kitchen.save = async () => {
+      throw new Error("KITCHEN_SAVE_FAILED");
+    };
+
+    await expect(ctx.salesEngine.quickSale({ cashierId: "cashier-1" })).rejects.toThrow(
+      "KITCHEN_SAVE_FAILED"
+    );
+
+    const productAfterFailure = await ctx.products.findById(BURGER.id);
+    expect(productAfterFailure?.stock).toBe(10);
+
+    const persistedSales = await engine.saleRepository.findAll();
+    expect(persistedSales).toHaveLength(0);
   });
 
   it("rechaza la venta si no hay stock suficiente (no deja el carrito a medias)", async () => {

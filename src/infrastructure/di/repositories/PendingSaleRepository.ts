@@ -16,6 +16,8 @@ export class PendingSaleRepository extends IndexedDbRepository<PendingSale> {
   /** Solo las que siguen esperando o fallaron — no las que están sincronizando ahora mismo. */
   public async findSyncable(): Promise<PendingSale[]> {
     const all = await this.findAll();
-    return all.filter((sale) => sale.status === "PENDING_SYNC");
+    return all
+      .filter((sale) => sale.status === "PENDING_SYNC")
+      .sort((a, b) => a.queuedAt.getTime() - b.queuedAt.getTime());
   }
 }

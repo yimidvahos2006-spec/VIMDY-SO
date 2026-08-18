@@ -81,6 +81,11 @@ export function PosPayment() {
   ];
 
   const mixedMissing = Math.max(0, total - mixedReceived);
+  const needsReference =
+    method === "card" ||
+    method === "transfer" ||
+    (method === "mixed" && (mixedCard > 0 || mixedTransfer > 0));
+  const referenceMissing = needsReference && !reference.trim();
 
   return (
     <div className="space-y-4">
@@ -207,6 +212,11 @@ export function PosPayment() {
             placeholder={method === "card" ? t("pos.payment.cardRefPlaceholder") : t("pos.payment.transferRefPlaceholder")}
             className="mt-1 w-full h-12 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border px-4 text-vimdy-text outline-none focus:border-vimdy-accent"
           />
+          {referenceMissing && (
+            <p className="mt-2 text-vimdy-danger text-vimdy-small">
+              {t("pos.payment.referenceRequired")}
+            </p>
+          )}
           <p className="mt-2 text-vimdy-micro text-vimdy-text-tertiary">
             {t("pos.payment.amountToCharge")} <span className="text-vimdy-text font-semibold">{money(total)}</span>
           </p>
@@ -255,14 +265,20 @@ export function PosPayment() {
           </div>
 
           {(mixedCard > 0 || mixedTransfer > 0) && (
-            <input
-              value={reference}
-              onChange={(e) => setReference(e.target.value)}
-              placeholder={t("pos.payment.mixedRefPlaceholder")}
-              className="w-full h-11 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border px-4 text-vimdy-text text-vimdy-small outline-none focus:border-vimdy-accent"
-            />
+            <>
+              <input
+                value={reference}
+                onChange={(e) => setReference(e.target.value)}
+                placeholder={t("pos.payment.mixedRefPlaceholder")}
+                className="w-full h-11 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border px-4 text-vimdy-text text-vimdy-small outline-none focus:border-vimdy-accent"
+              />
+              {referenceMissing && (
+                <p className="mt-2 text-vimdy-danger text-vimdy-small">
+                  {t("pos.payment.referenceRequired")}
+                </p>
+              )}
+            </>
           )}
-
           <div
             className={`rounded-vimdy-md border p-3 flex justify-between ${
               mixedMissing > 0

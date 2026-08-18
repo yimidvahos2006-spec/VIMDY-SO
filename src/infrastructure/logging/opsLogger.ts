@@ -39,6 +39,7 @@ export type OpsErrorCategory =
   | "inventory"
   | "offline"
   | "ai"
+  | "sales"
   | "unknown";
 
 interface LogOptions {
@@ -68,20 +69,25 @@ async function persist(
     let businessId = options.businessId ?? null;
     if (!businessId) {
       try {
-        businessId = getCurrentBusinessId();
+        businessId = getCurrentBusinessId() ?? null;
       } catch {
         businessId = null;
       }
     }
 
     const { data: userData } = await supabase.auth.getUser();
+    if (!userData?.user) {
+      console.warn(`[opsLogger] Sin sesión activa, no se puede persistir en system_errors: ${message}`);
+      return;
+    }
+
     await supabase.from("system_errors").insert({
       severity,
       category: options.category ?? "unknown",
-      message: message.slice(0, 4000), // evita filas gigantes por errores con payloads enormes
+      message: message.slice(0, 4000),
       stack: stack?.slice(0, 8000) ?? null,
       business_id: businessId,
-      user_id: userData?.user?.id ?? null,
+      user_id: userData.user.id,
       context: options.context ?? {},
       source: "web"
     });

@@ -30,7 +30,15 @@ export class PermissionEngine {
     if (existing) return existing;
 
     const permission: Permission = { id, module, description };
-    await this.repository.save(permission);
+    try {
+      await this.repository.save(permission);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("23505") || message.includes("duplicate key")) {
+        return permission;
+      }
+      throw error;
+    }
 
     return permission;
   }

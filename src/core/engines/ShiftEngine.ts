@@ -3,6 +3,7 @@ import { IRepository } from "../../infrastructure/di/repositories/IRepository";
 
 import { CashEngine } from "./CashEngine";
 import { vimdyCore } from "../VimdyCore";
+import { getCurrentBusinessId, getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
 
 /* ===========================================================================
    ShiftEngine
@@ -65,7 +66,9 @@ export class ShiftEngine {
       status: "OPEN",
       openingAmount,
       openedAt: new Date(),
-      openingNotes: notes
+      openingNotes: notes,
+      businessId: getCurrentBusinessId() ?? undefined,
+      branchId: getCurrentBranchId() ?? undefined
     };
 
     await this.repository.save(shift);
@@ -81,14 +84,19 @@ export class ShiftEngine {
    * a ese cajero.
    */
   public async getCurrentShift(cashierId?: string): Promise<Shift | null> {
+    const businessId = getCurrentBusinessId();
+    const branchId = getCurrentBranchId();
     const shifts = await this.repository.findAll();
 
-    const open = shifts.find(shift => shift.status === "OPEN");
+    const open = shifts.find(shift => {
+      if (shift.status !== "OPEN") return false;
+      if (shift.businessId && shift.businessId !== businessId) return false;
+      if (shift.branchId && shift.branchId !== branchId) return false;
+      if (cashierId && shift.cashierId !== cashierId) return false;
+      return true;
+    });
 
-    if (!open) return null;
-    if (cashierId && open.cashierId !== cashierId) return null;
-
-    return open;
+    return open ?? null;
   }
 
   /**

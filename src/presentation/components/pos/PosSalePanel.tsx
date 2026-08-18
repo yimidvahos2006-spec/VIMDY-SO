@@ -44,7 +44,7 @@ export function PosSalePanel() {
   const { t, language } = useTranslation();
 
   const { items } = useCart();
-  const { total, method, received, mixedReceived, requiresInvoice } = usePayment();
+  const { total, method, received, mixedReceived, requiresInvoice, reference, mixedCard, mixedTransfer } = usePayment();
   const { user } = useAuth();
 
   const [processing, setProcessing] = useState(false);
@@ -86,11 +86,17 @@ export function PosSalePanel() {
     };
   }, []);
 
+  const needsReference =
+    method === "card" ||
+    method === "transfer" ||
+    (method === "mixed" && (mixedCard > 0 || mixedTransfer > 0));
+
   const canCharge =
     shiftOpen &&
     items.length > 0 &&
     (method !== "cash" || received >= total) &&
-    (method !== "mixed" || mixedReceived >= total);
+    (method !== "mixed" || mixedReceived >= total) &&
+    (!needsReference || reference.trim().length > 0);
 
   async function handleCharge() {
 

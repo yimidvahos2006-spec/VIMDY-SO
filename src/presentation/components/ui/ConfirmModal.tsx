@@ -35,7 +35,7 @@ export function ConfirmModal({
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
-      onClick={onCancel}
+      onClick={(e) => e.target === e.currentTarget && onCancel()}
     >
       <div
         className="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-800 p-6"

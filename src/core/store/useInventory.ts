@@ -31,6 +31,7 @@ export interface InventoryKpis {
   lowStockCount: number;
   outOfStockCount: number;
   totalValue: number;
+  productsWithCost: number;
 }
 
 export function useInventory() {
@@ -71,11 +72,22 @@ export function useInventory() {
   }, [load]);
 
   const kpis: InventoryKpis = useMemo(() => {
+    let totalValue = 0;
+    let productsWithCost = 0;
+
+    for (const p of products) {
+      if (p.trackStock !== false && p.purchasePrice !== undefined) {
+        totalValue += p.purchasePrice * p.stock;
+        productsWithCost += 1;
+      }
+    }
+
     return {
       totalProducts: products.length,
       lowStockCount: products.filter((p) => getStockStatus(p) === "bajo").length,
       outOfStockCount: products.filter((p) => getStockStatus(p) === "agotado").length,
-      totalValue: products.reduce((sum, p) => sum + p.price * p.stock, 0),
+      totalValue,
+      productsWithCost,
     };
   }, [products]);
 
@@ -116,6 +128,7 @@ export function useInventory() {
     purchasePrice?: number
   ) {
     setError(null);
+    const movementId = crypto.randomUUID();
 
     // PASO 1.7 (Cola offline para escrituras) — sin conexión real ni
     // siquiera se intenta hablar con Supabase: se va directo al camino
@@ -123,6 +136,7 @@ export function useInventory() {
     if (!connectionStore.isOnline()) {
       const productName = products.find((p) => p.id === productId)?.name ?? productId;
       await queueIncreaseStockOffline({
+        id: movementId,
         productId,
         productName,
         quantity,
@@ -142,7 +156,8 @@ export function useInventory() {
         reason,
         performedBy,
         supplierId,
-        purchasePrice
+        purchasePrice,
+        movementId
       );
       await load();
       return true;
@@ -152,6 +167,7 @@ export function useInventory() {
         // al usuario, se encola igual que arriba.
         const productName = products.find((p) => p.id === productId)?.name ?? productId;
         await queueIncreaseStockOffline({
+          id: movementId,
           productId,
           productName,
           quantity,
@@ -171,10 +187,12 @@ export function useInventory() {
 
   async function decreaseStock(productId: string, quantity: number, reason: string, lossCategory?: LossCategory) {
     setError(null);
+    const movementId = crypto.randomUUID();
 
     if (!connectionStore.isOnline()) {
       const productName = products.find((p) => p.id === productId)?.name ?? productId;
       await queueDecreaseStockOffline({
+        id: movementId,
         productId,
         productName,
         quantity,
@@ -187,13 +205,14 @@ export function useInventory() {
     }
 
     try {
-      await container.inventoryEngine.decreaseStock(productId, quantity, reason, performedBy, lossCategory);
+      await container.inventoryEngine.decreaseStock(productId, quantity, reason, performedBy, lossCategory, movementId);
       await load();
       return true;
     } catch (e: any) {
       if (isNetworkFailure(e)) {
         const productName = products.find((p) => p.id === productId)?.name ?? productId;
         await queueDecreaseStockOffline({
+          id: movementId,
           productId,
           productName,
           quantity,
@@ -222,10 +241,14 @@ export function useInventory() {
     } catch (e: any) {
       const messages: Record<string, string> = {
         NOMBRE_REQUERIDO: "El nombre del producto es obligatorio.",
+        NOMBRE_DUPLICADO: "Ya existe un producto con ese nombre. Usa otro nombre o edita el actual.",
         CATEGORIA_REQUERIDA: "Selecciona una categoría.",
         PRECIO_INVALIDO: "El precio de venta no es válido.",
         SKU_DUPLICADO: "Ya existe un producto con ese SKU.",
         BARCODE_DUPLICADO: "Ya existe un producto con ese código de barras.",
+        INGREDIENTE_INEXISTENTE: "Uno de los ingredientes de la receta ya no existe en el inventario.",
+        INGREDIENTE_DUPLICADO: "No puedes repetir el mismo ingrediente dentro de una receta.",
+        INGREDIENTE_CANTIDAD_INVALIDA: "La cantidad de los ingredientes debe ser mayor a cero.",
       };
       setError(messages[e?.message] ?? "No se pudo crear el producto. Intenta de nuevo.");
       return false;
@@ -243,11 +266,15 @@ export function useInventory() {
     } catch (e: any) {
       const messages: Record<string, string> = {
         NOMBRE_REQUERIDO: "El nombre del producto es obligatorio.",
+        NOMBRE_DUPLICADO: "Ya existe un producto con ese nombre. Usa otro nombre o edita el actual.",
         CATEGORIA_REQUERIDA: "Selecciona una categoría.",
         PRECIO_INVALIDO: "El precio de venta no es válido.",
         SKU_DUPLICADO: "Ya existe un producto con ese SKU.",
         BARCODE_DUPLICADO: "Ya existe un producto con ese código de barras.",
         PRODUCT_NOT_FOUND: "Este producto ya no existe.",
+        INGREDIENTE_INEXISTENTE: "Uno de los ingredientes de la receta ya no existe en el inventario.",
+        INGREDIENTE_DUPLICADO: "No puedes repetir el mismo ingrediente dentro de una receta.",
+        INGREDIENTE_CANTIDAD_INVALIDA: "La cantidad de los ingredientes debe ser mayor a cero.",
       };
       setError(messages[e?.message] ?? "No se pudo actualizar el producto. Intenta de nuevo.");
       return false;
@@ -265,6 +292,7 @@ export function useInventory() {
     } catch (e: any) {
       const messages: Record<string, string> = {
         PRODUCT_NOT_FOUND: "Este producto ya no existe.",
+        PRODUCT_IN_USE: "No se puede eliminar porque este producto sigue siendo usado en una receta.",
       };
       setError(messages[e?.message] ?? "No se pudo eliminar el producto. Intenta de nuevo.");
       return false;
@@ -326,5 +354,6 @@ export function useInventory() {
     createProduct,
     updateProduct,
     deleteProduct,
+    productsWithCost: kpis.productsWithCost,
   };
 }

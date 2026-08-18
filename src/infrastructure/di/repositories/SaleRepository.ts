@@ -1,6 +1,6 @@
 import { Sale } from "../../../core/entities/Entities";
 import { SupabaseRepository, reviveDates } from "./SupabaseRepository";
-import { supabase, getCurrentBusinessId } from "../../supabase/supabaseClient";
+import { supabase, getCurrentBusinessId, getCurrentBranchId } from "../../supabase/supabaseClient";
 
 /**
  * SaleRepository
@@ -25,6 +25,7 @@ export class SaleRepository extends SupabaseRepository<Sale> {
       .from("sales")
       .select("data")
       .eq("business_id", getCurrentBusinessId())
+      .eq("branch_id", getCurrentBranchId())
       .gte("sale_date", start.toISOString())
       .lte("sale_date", end.toISOString())
       .order("sale_date", { ascending: false });
@@ -45,6 +46,7 @@ export class SaleRepository extends SupabaseRepository<Sale> {
       .from("sales")
       .select("sale_total")
       .eq("business_id", getCurrentBusinessId())
+      .eq("branch_id", getCurrentBranchId())
       .gte("sale_date", start.toISOString())
       .lte("sale_date", end.toISOString());
 
@@ -67,6 +69,7 @@ export class SaleRepository extends SupabaseRepository<Sale> {
       .from("sales")
       .select("data")
       .eq("business_id", getCurrentBusinessId())
+      .eq("branch_id", getCurrentBranchId())
       .eq("sale_customer_id", customerId)
       .order("sale_date", { ascending: false });
 

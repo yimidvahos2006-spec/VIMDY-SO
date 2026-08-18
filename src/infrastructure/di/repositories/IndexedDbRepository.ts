@@ -1,5 +1,6 @@
 import { IRepository } from "./IRepository";
 import { openDatabase, STORE_NAMES } from "./indexedDbCore";
+import { getCurrentBusinessId, getCurrentBranchId } from "../../supabase/supabaseClient";
 
 function promisify<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -27,15 +28,40 @@ export abstract class IndexedDbRepository<T extends { id: string }> implements I
     return db.transaction(this.storeName, mode).objectStore(this.storeName);
   }
 
+  private matchesScope(item: T): boolean {
+    const businessId = getCurrentBusinessId();
+    const branchId = getCurrentBranchId();
+
+    const itemBusinessId = (item as unknown as { businessId?: string | null }).businessId;
+    const itemBranchId = (item as unknown as { branchId?: string | null }).branchId;
+
+    if (itemBusinessId && itemBusinessId !== businessId) {
+      return false;
+    }
+
+    if (branchId && itemBranchId && itemBranchId !== branchId) {
+      return false;
+    }
+
+    return true;
+  }
+
   public async findAll(): Promise<T[]> {
     const store = await this.getStore("readonly");
-    return promisify(store.getAll());
+    const rows = await promisify(store.getAll());
+    return rows.filter((item) => this.matchesScope(item as T));
   }
 
   public async findById(id: string): Promise<T | null> {
     const store = await this.getStore("readonly");
     const result = await promisify(store.get(id));
-    return (result as T | undefined) ?? null;
+    const item = result as T | undefined;
+
+    if (!item) {
+      return null;
+    }
+
+    return this.matchesScope(item) ? item : null;
   }
 
   public async findMany(ids: string[]): Promise<T[]> {
@@ -55,8 +81,9 @@ export abstract class IndexedDbRepository<T extends { id: string }> implements I
   }
 
   /**
-   * Reemplaza TODO el contenido del store por `items`, en una sola
-   * transacción (borra lo viejo + escribe lo nuevo).
+   * Reemplaza el contenido del store para el negocio/sucursal ACTUAL por
+   * `items`, en una sola transacción (borra lo viejo del scope + escribe
+   * lo nuevo).
    *
    * Se agregó para el Paso 1.2 (Catálogo sin internet): a diferencia de
    * `saveMany` (que solo agrega/actualiza), esto también elimina del
@@ -64,11 +91,23 @@ export abstract class IndexedDbRepository<T extends { id: string }> implements I
    * de Supabase — por ejemplo un producto borrado en otro dispositivo.
    * Si solo hiciéramos `saveMany`, un producto borrado en la nube
    * quedaría "resucitado" para siempre en el caché offline.
+   *
+   * BLOQUEANTE (FASE 7 — Multi-tenant): la versión anterior hacía
+   * `store.clear()` GLOBAL, borrando los datos de TODOS los negocios y
+   * sucursales que compartieran el dispositivo. Ahora solo se borran los
+   * registros que pertenecen al scope actual (businessId + branchId),
+   * dejando intactos los de otros tenants.
    */
   public async replaceAll(items: T[]): Promise<void> {
     const store = await this.getStore("readwrite");
-    await promisify(store.clear());
-    await Promise.all(items.map((item) => promisify(store.put(item))));
+    const scopedItems = items.filter((item) => this.matchesScope(item));
+
+    // Borrar SOLO los registros del scope actual, no el store completo.
+    const allRows = await promisify(store.getAll());
+    const rowsToDelete = allRows.filter((row) => this.matchesScope(row as T));
+    await Promise.all(rowsToDelete.map((row) => promisify(store.delete((row as T).id))));
+
+    await Promise.all(scopedItems.map((item) => promisify(store.put(item))));
   }
 
   public async update(item: T): Promise<void> {
@@ -100,5 +139,12 @@ export abstract class IndexedDbRepository<T extends { id: string }> implements I
   public async count(): Promise<number> {
     const store = await this.getStore("readonly");
     return promisify(store.count());
+  }
+
+  public async clear(): Promise<void> {
+    const store = await this.getStore("readwrite");
+    const allRows = await promisify(store.getAll());
+    const rowsToDelete = allRows.filter((row) => this.matchesScope(row as T));
+    await Promise.all(rowsToDelete.map((row) => promisify(store.delete((row as T).id))));
   }
 }

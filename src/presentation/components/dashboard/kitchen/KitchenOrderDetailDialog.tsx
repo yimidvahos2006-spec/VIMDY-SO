@@ -114,10 +114,18 @@ export function KitchenOrderDetailDialog({ order, onClose }: Props) {
               {order.items.map((item, index) => (
                 <div
                   key={`${item.productId}-${index}`}
-                  className="flex justify-between items-center bg-vimdy-surface-hover rounded-2xl px-5 py-4"
+                  className="flex justify-between items-start bg-vimdy-surface-hover rounded-2xl px-5 py-4"
                 >
-                  <p className="text-vimdy-text font-semibold text-xl">{item.productName}</p>
-                  <span className="text-vimdy-accent font-bold text-xl">x{item.quantity}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-vimdy-text font-semibold text-xl">{item.productName}</p>
+                    {item.note && (
+                      <div className="mt-2 flex items-start gap-2 text-base">
+                        <MessageSquareText size={18} className="text-vimdy-warning mt-0.5 shrink-0" />
+                        <span className="text-vimdy-warning break-words">{item.note}</span>
+                      </div>
+                    )}
+                  </div>
+                  <span className="text-vimdy-accent font-bold text-xl ml-4">x{item.quantity}</span>
                 </div>
               ))}
             </div>

@@ -17,6 +17,8 @@ import { ForgotPasswordPage } from "../presentation/pages/ForgotPasswordPage";
 import { UpdatePasswordPage } from "../presentation/pages/UpdatePasswordPage";
 import { OnboardingPage } from "../presentation/pages/OnboardingPage";
 import { CountrySelectionPage } from "../presentation/pages/CountrySelectionPage";
+import { BusinessSelectorPage } from "../presentation/pages/BusinessSelectorPage";
+import { CreateBusinessPage } from "../presentation/pages/CreateBusinessPage";
 import { RequireCountry } from "../presentation/navigation/RequireCountry";
 
 // Lazy loading: cada módulo solo se descarga y se ejecuta cuando el
@@ -327,6 +329,22 @@ export function App() {
         element={
           <ProtectedRoute>
             <OnboardingPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/business-selector"
+        element={
+          <ProtectedRoute>
+            <BusinessSelectorPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/crear-negocio"
+        element={
+          <ProtectedRoute>
+            <CreateBusinessPage />
           </ProtectedRoute>
         }
       />

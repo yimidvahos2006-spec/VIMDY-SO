@@ -47,7 +47,7 @@ export function PosProducts() {
   // el cajero prende "Solo disponibles" -- un producto marcado Agotado a
   // mano desaparece SIEMPRE de Caja, sin excepción: el negocio ya decidió
   // que no se puede vender.
-  const sellable = filtered.filter((product) => product.active !== false);
+  const sellable = filtered.filter((product) => product.active !== false && product.isIngredient !== true);
 
   // BLOQUEANTE (bug reportado en video 2026-07-31): igual que en
   // InventoryEngine/SalesEngine, un producto con trackStock === false

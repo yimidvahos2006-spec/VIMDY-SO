@@ -25,6 +25,8 @@ export interface KitchenOrderItemView {
    * configuró estaciones — el ticket no se separa.
    */
   station?: string;
+  /** Nota específica del item (ej. "sin arroz", "sin cebolla", "con hielo"). */
+  note?: string;
 }
 
 export interface KitchenOrderView extends Omit<KitchenOrder, "items"> {
@@ -103,7 +105,8 @@ export function enrichKitchenOrders(
         quantity: item.quantity,
         price: item.price,
         estimatedPrepMinutes: product?.estimatedPrepMinutes,
-        station: product?.printStationOverride ?? category?.printStation
+        station: product?.printStationOverride ?? category?.printStation,
+        note: item.note
       };
     });
 

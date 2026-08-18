@@ -144,6 +144,20 @@ export async function readMenuImage(
     } catch {
       // Si el cuerpo no es JSON legible, nos quedamos con el mensaje genérico.
     }
+
+    // Gemini puede devolver errores de modelo no soportado o formato de
+    // imagen inválido. Esos no son bugs de VIMDY: se muestran como
+    // mensaje amigable en la UI, no como error crudo.
+    const lowerDetail = detail.toLowerCase();
+    if (
+      lowerDetail.includes("model does not support image input") ||
+      lowerDetail.includes("cannot read") ||
+      lowerDetail.includes("invalid image") ||
+      lowerDetail.includes("unsupported")
+    ) {
+      throw new Error("MENU_VISION_IMAGE_ERROR: La imagen no se pudo procesar. Verifica que sea un menú claro y legible, e intenta de nuevo.");
+    }
+
     throw new Error(`MENU_VISION_UNAVAILABLE: ${detail}`);
   }
 

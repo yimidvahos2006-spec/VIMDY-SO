@@ -17,6 +17,8 @@ export class PendingCustomerOperationRepository extends IndexedDbRepository<Pend
   /** Solo las que siguen esperando o fallaron — no las que están sincronizando ahora mismo. */
   public async findSyncable(): Promise<PendingCustomerOperation[]> {
     const all = await this.findAll();
-    return all.filter((op) => op.status === "PENDING_SYNC");
+    return all
+      .filter((operation) => operation.status === "PENDING_SYNC")
+      .sort((a, b) => a.queuedAt.getTime() - b.queuedAt.getTime());
   }
 }

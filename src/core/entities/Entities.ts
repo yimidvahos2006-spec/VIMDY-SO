@@ -79,8 +79,9 @@ export interface Product {
   readonly createdAt?: Date;
   /** Se destaca con una estrella en el POS. Antes vivía solo en productStore. */
   readonly favorite?: boolean;
-  /** Frases que el reconocimiento de voz asocia a este producto (ver voiceMatcher). */
   readonly aliases?: readonly string[];
+  readonly businessId?: string;
+  readonly branchId?: string;
   /**
    * Receta / BOM (Bill of Materials). Si tiene items, este producto es
    * "elaborado": al venderlo, InventoryEngine.consumeForSale() NO descuenta
@@ -179,6 +180,8 @@ export interface Product {
    * para no romper ningún producto ya creado.
    */
   readonly trackStock?: boolean;
+  /** Marca explícita de productos no vendibles usados solo como insumos. */
+  readonly isIngredient?: boolean;
 }
 
 /** Un ingrediente de una receta: cuánto de `productId` se consume por CADA unidad vendida del producto elaborado. */
@@ -228,6 +231,12 @@ export interface SaleItem {
   readonly quantity: number;
   readonly price: number;
   /**
+   * Nota libre del cajero/mesero para este item específico (ej. "sin cebolla",
+   * "con hielo", "para llevar"). Se captura en el carrito de Caja y viaja
+   * hasta la comanda de Cocina y el recibo.
+   */
+  readonly note?: string;
+  /**
    * Copia de Product.requiresKitchen tomada en el momento en que el
    * producto se agregó al carrito/pedido (ver CartEngine.addItem y
    * OrderEngine.addItem). Existe para que TableEngine y OrderEngine
@@ -239,6 +248,35 @@ export interface SaleItem {
    * el carrito), se trata como `true` — mismo default que Product.
    */
   readonly requiresKitchen?: boolean;
+  /**
+   * Tamaño elegido por el cliente (ej. "chico", "mediano", "grande").
+   * Opcional: si no se usa variantes, se omite.
+   */
+  readonly selectedSizeId?: string;
+  /**
+   * Extras elegidos por el cliente (ej. queso, tocineta).
+   * Opcional: si no se usa variantes, se omite.
+   */
+  readonly selectedExtraIds?: readonly string[];
+  /**
+   * Unidad física del item vendido (ej. "kg", "litro", "unidad").
+   * Se persiste para trazabilidad en recibos/reportes.
+   */
+  readonly unit?: string;
+  /**
+   * Cantidad física vendida (ej. 0.75 para 0.75 kg).
+   * Si se envía, el recibo muestra magnitud física + precio por unidad.
+   */
+  readonly quantityRaw?: number;
+  /**
+   * Descuento aplicado solo a esta línea. Opcional.
+   */
+  readonly discount?: { type: "PERCENT" | "FIXED"; value: number };
+  /**
+   * Tasa de impuesto específica de esta línea. Si se envía, se usa para
+   * calcular el IVA del item; si falta, se usa la tasa global de la venta.
+   */
+  readonly taxRate?: number;
 }
 
 /** Una línea reembolsada dentro de un SaleRefundRecord: qué producto y cuánto. */
@@ -280,6 +318,8 @@ export type SaleStatus =
 
 export interface Sale {
   readonly id: string;
+  readonly businessId?: string;
+  readonly branchId?: string;
   /**
    * Bloqueo optimista (CRÍTICO #6 del checklist): número de versión
    * de este registro en la base de datos. Lo asigna/incrementa
@@ -363,6 +403,8 @@ export interface Customer {
   readonly phone?: string;
   readonly points?: number;
   readonly createdAt?: Date;
+  readonly businessId?: string;
+  readonly branchId?: string;
 }
 
 /**
@@ -509,6 +551,8 @@ export interface AuditLog {
 
 export interface CashMovement {
   readonly id: string;
+  readonly businessId?: string;
+  readonly branchId?: string;
   /**
    * Bloqueo optimista (CRÍTICO #6 del checklist): número de versión
    * de este registro en la base de datos. Lo asigna/incrementa
@@ -656,6 +700,12 @@ export interface KitchenOrder {
    * este campo; toda comanda nueva siempre lo trae.
    */
   readonly orderNumber?: number;
+  /** id de la mesa asociada, si aplica. */
+  readonly tableId?: string;
+  /** id del pedido (Order) asociado, si aplica. */
+  readonly orderId?: string;
+  readonly businessId?: string;
+  readonly branchId?: string;
 }
 
 export interface Alert {
@@ -799,12 +849,15 @@ export type TableStatus =
   | "BUSY"
   | "WAITING_FOOD"
   | "EATING"
+  | "CUENTA_SOLICITADA"
   | "WAITING_BILL"
   | "PAYING"
   | "CLOSED";
 
 export interface Table {
   readonly id: string;
+  readonly businessId?: string;
+  readonly branchId?: string;
   /**
    * Bloqueo optimista (CRÍTICO #6 del checklist): número de versión
    * de este registro en la base de datos. Lo asigna/incrementa
@@ -831,6 +884,9 @@ export interface Table {
   /** id de la mesa con la que fue unida, si aplica. */
   readonly mergedInto?: string;
   readonly openedAt?: Date;
+  readonly openOperationId?: string;
+  /** id del pedido (Order) asociado a esta mesa, si existe. */
+  readonly orderId?: string;
   readonly updatedAt: Date;
 }
 
@@ -882,6 +938,8 @@ export interface Order {
   readonly cancelReason?: string;
   readonly createdAt: Date;
   readonly updatedAt: Date;
+  readonly businessId?: string;
+  readonly branchId?: string;
 }
 
 export interface Company {
@@ -927,6 +985,8 @@ export type ShiftStatus = "OPEN" | "CLOSED";
  */
 export interface Shift {
   readonly id: string;
+  readonly businessId?: string;
+  readonly branchId?: string;
   /**
    * Bloqueo optimista (CRÍTICO #6 del checklist): número de versión
    * de este registro en la base de datos. Lo asigna/incrementa

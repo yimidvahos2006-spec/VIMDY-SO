@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from "react";
-import { Minus, Plus, Trash2, X, ChefHat, Receipt, Wallet, AlertTriangle, ArrowUpCircle, CircleDot } from "lucide-react";
+import { Minus, Plus, Trash2, X, ChefHat, Receipt, Wallet, AlertTriangle, ArrowUpCircle, CircleDot, Search, Mic, MicOff, CheckCircle2, MessageSquarePlus } from "lucide-react";
 
 import { Table, Product, OrderPriority } from "../../../core/entities/Entities";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { isOptimisticLockError } from "../../../core/errors/OptimisticLockError";
 import { translateBusinessError } from "../../../core/errors/translateBusinessError";
+import { useVoiceOrder, VoiceOrder } from "../../../core/voice/useVoiceOrder";
 import { CloseTableDialog } from "./CloseTableDialog";
 
 interface Props {
@@ -32,10 +33,43 @@ export function TableDetailPanel({
   onOrderSent
 }: Props) {
   const [category, setCategory] = useState<string>("Todos");
+  const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showCloseDialog, setShowCloseDialog] = useState(false);
   const [priority, setPriority] = useState<OrderPriority>("NORMAL");
+  const [voiceSuccess, setVoiceSuccess] = useState<string | null>(null);
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
+
+  const { listening, result, listen } = useVoiceOrder({
+    onSuccess: (voiceResult) => {
+      if (voiceResult.added.length > 0) {
+        setVoiceSuccess(voiceResult.added.join(", "));
+        setTimeout(() => setVoiceSuccess(null), 3000);
+        onChanged();
+      }
+    },
+    onError: (error) => {
+      setErrorMsg(error);
+    },
+    onAddItem: (order: VoiceOrder, match) => {
+      const note = order.modifiers.length > 0 ? order.modifiers.join(", ") : undefined;
+      run(() =>
+        container.tableEngine.addItem({
+          tableId: table.id,
+          product: {
+            id: match.product.id,
+            name: match.product.name,
+            price: match.product.price,
+            requiresKitchen: true
+          },
+          quantity: order.quantity,
+          note
+        })
+      );
+    }
+  });
 
   const productMap = useMemo(() => {
     const map = new Map<string, Product>();
@@ -48,10 +82,26 @@ export function TableDetailPanel({
     return ["Todos", ...Array.from(set)];
   }, [products]);
 
+  const sellable = useMemo(() => {
+    return products.filter(
+      (product) => product.active !== false && product.isIngredient !== true
+    );
+  }, [products]);
+
   const visibleProducts = useMemo(() => {
-    if (category === "Todos") return products;
-    return products.filter(p => p.categoryId === category);
-  }, [products, category]);
+    let filtered = category === "Todos" ? sellable : sellable.filter(p => p.categoryId === category);
+
+    if (search.trim()) {
+      const term = search.trim().toLowerCase();
+      filtered = filtered.filter((product) => {
+        const name = product.name.toLowerCase();
+        const aliases = (product.aliases ?? []).join(" ").toLowerCase();
+        return name.includes(term) || aliases.includes(term);
+      });
+    }
+
+    return filtered;
+  }, [sellable, category, search]);
 
   async function run(action: () => Promise<unknown>) {
     setBusy(true);
@@ -62,11 +112,6 @@ export function TableDetailPanel({
     } catch (err) {
       setErrorMsg(translateBusinessError(err, "Ocurrió un error."));
 
-      // CRÍTICO #6 (bloqueo optimista): si el conflicto fue porque otro
-      // mesero/cajero ya guardó un cambio sobre esta misma mesa, no basta
-      // con mostrar el mensaje — hay que refrescar la mesa para que este
-      // panel deje de mostrar datos viejos y el usuario pueda reintentar
-      // su acción ya sobre la versión actual.
       if (isOptimisticLockError(err)) {
         onChanged();
       }
@@ -101,15 +146,32 @@ export function TableDetailPanel({
     run(() => container.tableEngine.removeItem(table.id, productId));
   }
 
+  function startEditNote(itemId: string, currentNote?: string) {
+    setEditingNoteId(itemId);
+    setNoteDraft(currentNote ?? "");
+  }
+
+  function saveNote(itemId: string) {
+    const trimmed = noteDraft.trim();
+    run(async () => {
+      const table = await container.tableEngine.getTable(table.id);
+      const items = table.items.map(item =>
+        item.productId === itemId
+          ? { ...item, note: trimmed || undefined }
+          : item
+      );
+      await container.tableEngine.updateTable(table.id, { items });
+    });
+    setEditingNoteId(null);
+    setNoteDraft("");
+  }
+
   async function sendToKitchen() {
     setBusy(true);
     setErrorMsg(null);
     try {
       await container.tableEngine.sendToKitchen(table.id, priority);
       setPriority("NORMAL");
-      // onChanged refresca el estado de mesas por si acaso; onOrderSent
-      // es quien realmente cierra el panel y devuelve a la pantalla de
-      // meseros (si no se pasa, el panel simplemente se queda abierto).
       onChanged();
       onOrderSent?.();
     } catch (err) {
@@ -128,6 +190,7 @@ export function TableDetailPanel({
   }
 
   const hasItems = table.items.length > 0;
+  const hasKitchenItems = table.items.some(item => item.requiresKitchen !== false);
 
   return (
     <div className="fixed inset-0 z-[999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
@@ -138,7 +201,21 @@ export function TableDetailPanel({
             <h2 className="text-2xl font-bold text-white">{table.name}</h2>
             <p className="text-slate-400 text-sm mt-1">
               {table.peopleCount} personas • {table.zone ?? "Sin zona"} •{" "}
-              {table.status}
+              {table.status === "CUENTA_SOLICITADA"
+                ? "Cuenta solicitada"
+                : table.status === "WAITING_BILL"
+                  ? "Esperando cuenta"
+                  : table.status === "WAITING_FOOD"
+                    ? "Esperando comida"
+                    : table.status === "EATING"
+                      ? "Comiendo"
+                      : table.status === "PAYING"
+                        ? "Pagando"
+                        : table.status === "BUSY"
+                          ? "Ocupada"
+                          : table.status === "RESERVED"
+                            ? "Reservada"
+                            : "Disponible"}
             </p>
           </div>
           <button
@@ -155,6 +232,13 @@ export function TableDetailPanel({
           </div>
         )}
 
+        {voiceSuccess && (
+          <div className="mx-6 mt-4 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-emerald-300 px-4 py-3 text-sm flex items-center gap-2">
+            <CheckCircle2 size={16} />
+            {voiceSuccess}
+          </div>
+        )}
+
         <div className="flex-1 grid grid-cols-3 gap-4 p-6 overflow-hidden">
           {/* Pedido actual */}
           <div className="flex flex-col overflow-hidden">
@@ -162,11 +246,14 @@ export function TableDetailPanel({
             <div className="flex-1 overflow-y-auto space-y-3 pr-1">
               {!hasItems && (
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-6 text-center text-slate-500">
-                  Esta mesa aún no tiene productos.
+                  {search.trim() || category !== "Todos"
+                    ? "No se encontraron productos con ese filtro."
+                    : "Toca un producto para agregarlo a esta mesa."}
                 </div>
               )}
               {table.items.map(item => {
                 const product = productMap.get(item.productId);
+                const isEditing = editingNoteId === item.productId;
                 return (
                   <div
                     key={item.productId}
@@ -177,6 +264,37 @@ export function TableDetailPanel({
                         <p className="text-white font-semibold">
                           {product?.name ?? item.productId}
                         </p>
+                        {isEditing ? (
+                          <input
+                            autoFocus
+                            value={noteDraft}
+                            onChange={(e) => setNoteDraft(e.target.value)}
+                            onBlur={() => saveNote(item.productId)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") saveNote(item.productId);
+                              if (e.key === "Escape") setEditingNoteId(null);
+                            }}
+                            placeholder="Ej: sin arroz, al punto..."
+                            className="mt-1 w-full h-9 rounded-lg bg-slate-800 border border-slate-700 text-white text-sm px-2 outline-none focus:border-cyan-500"
+                          />
+                        ) : (
+                          <>
+                            {item.note && (
+                              <p className="text-amber-400 text-xs mt-1">
+                                {item.note}
+                              </p>
+                            )}
+                            {!item.note && (
+                              <button
+                                onClick={() => startEditNote(item.productId)}
+                                className="text-slate-500 hover:text-slate-300 text-xs mt-1 flex items-center gap-1"
+                              >
+                                <MessageSquarePlus size={12} />
+                                Agregar nota
+                              </button>
+                            )}
+                          </>
+                        )}
                         <p className="text-cyan-400 text-sm">
                           ${item.price.toLocaleString("es-CO")}
                         </p>
@@ -232,6 +350,30 @@ export function TableDetailPanel({
 
           {/* Catálogo de productos */}
           <div className="col-span-2 flex flex-col overflow-hidden">
+            <div className="flex gap-2 mb-3 flex-shrink-0">
+              <div className="relative flex-1">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Buscar producto..."
+                  className="w-full h-10 pl-9 pr-4 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm outline-none focus:border-cyan-500 transition"
+                />
+              </div>
+              <button
+                onClick={listen}
+                disabled={listening}
+                className={`h-10 px-4 rounded-xl flex items-center gap-2 text-sm font-bold transition ${
+                  listening
+                    ? "bg-red-500 text-white animate-pulse"
+                    : "bg-cyan-500 hover:bg-cyan-400 text-slate-950"
+                }`}
+              >
+                {listening ? <MicOff size={16} /> : <Mic size={16} />}
+                {listening ? "Escuchando..." : "Voz"}
+              </button>
+            </div>
+
             <div className="flex gap-2 mb-3 overflow-x-auto pb-1 flex-shrink-0">
               {categories.map(cat => (
                 <button
@@ -253,7 +395,7 @@ export function TableDetailPanel({
                   key={product.id}
                   disabled={busy}
                   onClick={() => addProduct(product)}
-                  className="bg-slate-950/60 border border-slate-800 hover:border-cyan-500 rounded-2xl p-4 text-left transition disabled:opacity-40"
+                  className="bg-slate-950/60 border border-slate-800 hover:border-cyan-500 rounded-2xl p-4 text-left transition disabled:opacity-40 active:scale-[0.98]"
                 >
                   <h4 className="text-white font-semibold">{product.name}</h4>
                   <p className="text-cyan-400 mt-2 font-bold">
@@ -301,7 +443,7 @@ export function TableDetailPanel({
         {/* Acciones */}
         <div className="flex items-center justify-end gap-3 px-6 py-5 border-t border-slate-700 flex-shrink-0">
           <button
-            disabled={busy || !hasItems}
+            disabled={busy || !hasKitchenItems}
             onClick={sendToKitchen}
             className="flex items-center gap-2 h-12 px-6 rounded-xl bg-orange-500 hover:bg-orange-400 disabled:opacity-40 disabled:hover:bg-orange-500 text-slate-950 font-bold transition"
           >

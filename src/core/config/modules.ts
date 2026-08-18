@@ -68,7 +68,13 @@ export const DEFAULT_MODULES_BY_BUSINESS_TYPE: Record<BusinessTypeId, ModuleId[]
   food_truck: ["cocina", "pedidos", "caja", "inventario", "clientes", "ia"],
   panaderia: ["caja", "inventario", "clientes", "ia"],
   heladeria: ["caja", "inventario", "clientes", "ia"],
-  tienda: ["caja", "inventario", "clientes", "ia"]
+  tienda: ["caja", "inventario", "clientes", "ia"],
+  comida_rapida: ["cocina", "pedidos", "caja", "inventario", "clientes", "ia"],
+  minimercado: ["caja", "inventario", "clientes", "ia"],
+  pequeno_supermercado: ["caja", "inventario", "clientes", "ia"],
+  negocio_bebidas: ["caja", "inventario", "clientes", "ia"],
+  negocio_productos: ["caja", "inventario", "clientes", "ia"],
+  negocio_servicios: ["caja", "clientes", "ia"]
 };
 
 export function getDefaultModulesForBusinessType(businessType: BusinessTypeId): ModuleId[] {

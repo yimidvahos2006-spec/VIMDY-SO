@@ -3,6 +3,7 @@ import { useState, type FormEvent } from "react";
 import { GlassCard } from "../ui/GlassCard";
 import { VimdyButton } from "../ui/VimdyButton";
 import { VimdyInput } from "../ui/VimdyInput";
+import { PasswordField } from "../ui/PasswordField";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { useAuth } from "../../context/AuthContext";
 import type { ModuleId } from "../../../core/config/modules";
@@ -132,12 +133,14 @@ export function EmployeesStep({ enabledModules, onDone }: EmployeesStepProps) {
           onChange={(e) => setEmail(e.target.value)}
           disabled={saving}
         />
-        <VimdyInput
-          type="password"
-          placeholder="Contraseña"
+        <PasswordField
+          id="employee-password"
+          label="Contraseña"
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={setPassword}
           disabled={saving}
+          placeholder="Contraseña"
+          inputClassName="rounded-2xl"
         />
 
         <select

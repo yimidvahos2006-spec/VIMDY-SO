@@ -13,7 +13,9 @@ import {
   RotateCcw,
   DownloadCloud,
   AlertTriangle,
-  Globe2
+  Globe2,
+  Eye,
+  EyeOff
 } from "lucide-react";
 
 import { WaitersSettingsSection } from "./WaitersSettingsSection";
@@ -692,6 +694,7 @@ function CreateUserModal({
   const [password, setPassword] = useState("");
   const [roleId, setRoleId] = useState(roles[0]?.id ?? "");
   const [saving, setSaving] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   async function handleSubmit() {
     if (!name.trim() || !email.trim() || password.length < 6 || !roleId) return;
@@ -730,12 +733,23 @@ function CreateUserModal({
             <input className={inputClass} value={email} onChange={(e) => setEmail(e.target.value)} />
           </Field>
           <Field label="Contraseña (mínimo 6 caracteres)">
-            <input
-              type="password"
-              className={inputClass}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? "text" : "password"}
+                className={inputClass}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((prev) => !prev)}
+                aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                aria-pressed={showPassword}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition-colors hover:text-white"
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
           </Field>
           <Field label="Rol">
             <select className={inputClass} value={roleId} onChange={(e) => setRoleId(e.target.value)}>

@@ -14,16 +14,16 @@
    Supabase (no hay red real ni proyecto que configurar) y prueba SOLO esa
    lógica propia:
 
-     1. Credenciales inválidas -> error claro, sin resolver ningún negocio.
-     2. Login válido pero el usuario no pertenece a ningún negocio -> error
-        claro ("no está asociado a ningún negocio"), no una sesión a medias.
-     3. Login válido y con negocio -> BusinessSession completa y
-        `setCurrentBusinessId()` se llama con el business_id correcto (todo
-        el resto de repositorios depende de que esto se haya llamado).
+    1. Credenciales inválidas -> error claro, sin resolver ningún negocio.
+    2. Login válido pero el usuario no pertenece a ningún negocio -> error
+       claro ("no está asociado a ningún negocio"), no una sesión a medias.
+    3. Login válido y con negocio -> BusinessSession completa y
+       `setCurrentBusinessId()` se llama con el business_id correcto (todo
+       el resto de repositorios depende de que esto se haya llamado).
 
    Si `signIn()` se rompe, nadie puede entrar a VIMDY — es, literalmente,
    el flujo más crítico de los 4.
-=========================================================================== */
+ =========================================================================== */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -39,22 +39,44 @@ vi.mock("../../src/infrastructure/supabase/supabaseClient", () => ({
     from: vi.fn()
   },
   setCurrentBusinessId: vi.fn(),
-  getCurrentBusinessId: vi.fn()
+  getCurrentBusinessId: vi.fn(),
+  setCurrentBranchId: vi.fn(),
+  getCurrentBranchId: vi.fn()
 }));
 
 import { signIn } from "../../src/infrastructure/supabase/authBusinessContext";
-import { supabase, setCurrentBusinessId } from "../../src/infrastructure/supabase/supabaseClient";
+import { supabase, setCurrentBusinessId, setCurrentBranchId } from "../../src/infrastructure/supabase/supabaseClient";
 
-/** Arma el mock de `supabase.from("business_members").select(...).eq(...).limit(...).maybeSingle()`. */
-function mockBusinessMembership(result: { data: unknown; error: unknown }) {
-  (supabase.from as ReturnType<typeof vi.fn>).mockReturnValue({
-    select: () => ({
-      eq: () => ({
-        limit: () => ({
-          maybeSingle: async () => result
+/** Arma el mock de `supabase.from("business_members").select(...).eq(...)`. */
+function mockBusinessMemberships(result: { data: unknown; error: unknown }) {
+  (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+    if (table === "business_members") {
+      return {
+        select: () => ({
+          eq: () => result
+        })
+      };
+    }
+
+    if (table === "branches") {
+      return {
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: { id: "branch-1" }, error: null })
+            })
+          })
+        })
+      };
+    }
+
+    return {
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({ data: null, error: null })
         })
       })
-    })
+    };
   });
 }
 
@@ -73,23 +95,20 @@ describe("Smoke: login", () => {
       /Correo o contraseña incorrectos/
     );
 
-    // Nunca debió intentar averiguar a qué negocio pertenece: no hubo sesión.
     expect(supabase.from).not.toHaveBeenCalled();
     expect(setCurrentBusinessId).not.toHaveBeenCalled();
   });
 
-  it("rechaza el login si el usuario no está asociado a ningún negocio", async () => {
+  it("devuelve null cuando el usuario no está asociado a ningún negocio", async () => {
     (supabase.auth.signInWithPassword as ReturnType<typeof vi.fn>).mockResolvedValue({
       data: { user: { id: "user-huerfano", user_metadata: { full_name: "Sin Negocio" } } },
       error: null
     });
 
-    mockBusinessMembership({ data: null, error: null });
+    mockBusinessMemberships({ data: [], error: null });
 
-    await expect(signIn("sinnegocio@ejemplo.com", "clave-correcta")).rejects.toThrow(
-      /no está asociado a ningún negocio/
-    );
-
+    const result = await signIn("sinnegocio@ejemplo.com", "clave-correcta");
+    expect(result).toBeNull();
     expect(setCurrentBusinessId).not.toHaveBeenCalled();
   });
 
@@ -104,36 +123,38 @@ describe("Smoke: login", () => {
       error: null
     });
 
-    mockBusinessMembership({
-      data: {
-        business_id: "business-1",
-        role: "CASHIER",
-        businesses: {
-          name: "Restaurante La 14",
-          country: "CO",
-          currency: "COP",
-          language: "es",
-          timezone: "America/Bogota",
-          tax_rate: 19,
-          onboarding_completed: true,
-          business_type: "restaurant",
-          enabled_modules: ["pos", "kitchen"]
+    mockBusinessMemberships({
+      data: [
+        {
+          business_id: "business-1",
+          role: "CASHIER",
+          businesses: {
+            name: "Restaurante La 14",
+            country: "CO",
+            currency: "COP",
+            language: "es",
+            timezone: "America/Bogota",
+            tax_rate: 19,
+            onboarding_completed: true,
+            business_type: "restaurant",
+            enabled_modules: ["pos", "kitchen"],
+            salida_cocina: "pantalla"
+          }
         }
-      },
+      ],
       error: null
     });
 
-    const session = await signIn("ana@la14.com", "clave-correcta");
+    const result = await signIn("ana@la14.com", "clave-correcta");
 
-    expect(session.userId).toBe("user-1");
-    expect(session.businessId).toBe("business-1");
-    expect(session.businessName).toBe("Restaurante La 14");
-    expect(session.role).toBe("CASHIER");
-    expect(session.currency).toBe("COP");
-    expect(session.onboardingCompleted).toBe(true);
+    expect(result).not.toBeNull();
+    expect((result as any).userId).toBe("user-1");
+    expect((result as any).businessId).toBe("business-1");
+    expect((result as any).businessName).toBe("Restaurante La 14");
+    expect((result as any).role).toBe("CASHIER");
+    expect((result as any).currency).toBe("COP");
+    expect((result as any).onboardingCompleted).toBe(true);
 
-    // El resto de la app (todos los repositorios) depende de que esto se
-    // haya llamado con el negocio correcto.
     expect(setCurrentBusinessId).toHaveBeenCalledWith("business-1");
   });
 });

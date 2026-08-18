@@ -1,6 +1,7 @@
 import { Sale, SaleItem } from "../entities/Entities";
 import { IRepository } from "../../infrastructure/di/repositories/IRepository";
 import { roundMoney } from "../config/globalization";
+import { companyConfigStore } from "../store/companyConfigStore";
 
 export interface Receipt {
   id: string;
@@ -69,7 +70,7 @@ export class ReceiptEngine {
     paymentMethod: string,
     received: number,
     discount: number = 0,
-    taxRate: number = 0.19,
+    taxRate: number = companyConfigStore.get().tax / 100,
     currency: string = "COP"
   ): Promise<Receipt> {
     // BLOQUEANTE (auditoría Fase 2 — rama Bar): sale.total ya incluye la

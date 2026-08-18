@@ -9,7 +9,8 @@ import {
   X,
   Mic,
   Loader2,
-  Users
+  Users,
+  CheckCircle2
 } from "lucide-react";
 
 import { VimdyButton } from "../ui/VimdyButton";
@@ -20,8 +21,7 @@ import { useEnabledModules } from "../../../core/store/useEnabledModules";
 import { toastStore } from "../../../core/store/toastStore";
 import { weightEntryStore } from "../../../core/store/weightEntryStore";
 import { isVariableQuantityUnit } from "../../../core/utils/weightUnits";
-import { startSpeechRecognition } from "../../../core/voice/speechRecognition";
-import { processVoice } from "../../../core/voice/voiceProcessor";
+import { useVoiceOrder } from "../../../core/voice/useVoiceOrder";
 import { useTranslation } from "../../../core/i18n/useTranslation";
 import { PosTableSearchModal } from "./PosTableSearchModal";
 
@@ -42,11 +42,21 @@ export function PosTopBar() {
   const enabledModules = useEnabledModules();
   const hasTablesModule = (enabledModules ?? []).includes("mesas");
 
-  const [listening, setListening] = useState(false);
   const [processing, setProcessing] = useState(false);
-  // Buscar/cobrar una mesa desde Caja (cliente que se paró del restaurante
-  // y va directo al mostrador a pagar, sin pasar por Meseros).
+  const [voiceSuccess, setVoiceSuccess] = useState<string | null>(null);
   const [showTableCharge, setShowTableCharge] = useState(false);
+
+  const { listening, listen } = useVoiceOrder({
+    onSuccess: (voiceResult) => {
+      if (voiceResult.added.length > 0) {
+        setVoiceSuccess(voiceResult.added.join(", "));
+        setTimeout(() => setVoiceSuccess(null), 3000);
+      }
+    },
+    onError: (error) => {
+      toastStore.warning(error);
+    }
+  });
 
   useEffect(() => {
 
@@ -68,15 +78,6 @@ export function PosTopBar() {
 
   }, [clearSearch]);
 
-  /**
-   * Escaneo rápido: un lector de código de barras escribe el código y
-   * manda Enter automáticamente. Antes esto solo filtraba la grilla y el
-   * cajero igual tenía que tocar la tarjeta — un paso de más por cada
-   * producto en un mostrador con lector físico. Ahora, si el texto
-   * coincide EXACTO con el código de barras de un producto, se agrega
-   * directo al carrito y se limpia la búsqueda, lista para el siguiente
-   * escaneo — cero toques adicionales.
-   */
   function handleSearchKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
     if (event.key !== "Enter") return;
 
@@ -86,34 +87,17 @@ export function PosTopBar() {
     const product = getByBarcode(code);
 
     if (!product) {
-      // No es necesariamente un error: puede ser una búsqueda normal por
-      // nombre que el cajero está afinando. Solo se avisa si el texto
-      // tiene pinta de código de barras (todo dígitos) para no molestar
-      // con un toast en cada Enter de una búsqueda por texto.
       if (/^\d+$/.test(code)) {
         toastStore.warning(t("pos.topbar.barcodeNotFound", { code }));
       }
       return;
     }
 
-    // PASO 2 (formulario de producto — Estado): un producto marcado
-    // "Agotado" a mano (product.active === false) tampoco se puede agregar
-    // escaneando su código de barras, igual que uno sin stock.
-    //
-    // BLOQUEANTE (bug reportado en video 2026-07-31): trackStock === false
-    // (Cocina sin receta, ej. Caldo de Costilla) no maneja stock propio y
-    // nace en 0 a propósito — sin este chequeo, escanear su código de
-    // barras lo rechazaba con "sin stock" para siempre. Mismo criterio que
-    // PosProducts.tsx (ProductCard.available).
     if ((product.stock <= 0 && product.trackStock !== false) || product.active === false) {
       toastStore.warning(t("pos.topbar.barcodeOutOfStock", { name: product.name }));
       return;
     }
 
-    // BLOQUEANTE (auditoría Fase 2 — Supermercado): un producto vendido por
-    // peso/volumen (Product.unit ∈ kg/g/libra/litro/ml) no se puede agregar
-    // con cantidad 1 fija — hay que pesarlo primero. Ver
-    // core/utils/weightUnits.ts y PosWeightEntryModal.tsx.
     if (isVariableQuantityUnit(product.unit)) {
       weightEntryStore.open({
         id: product.id,
@@ -132,31 +116,17 @@ export function PosTopBar() {
 
   async function handleVoice() {
 
-    setListening(true);
+    setProcessing(true);
 
-    const speech = await startSpeechRecognition();
+    await listen();
 
-    setListening(false);
-
-    if (speech.success) {
-
-      setProcessing(true);
-
-      // Un giro breve de ~1s mientras se interpreta el comando, para que
-      // el cajero vea que VIMDY está "pensando" y no que se quedó pegado.
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      processVoice(speech.text);
-
-      setProcessing(false);
-
-    }
+    setProcessing(false);
 
   }
 
   return (
 
-    <div className="flex items-center gap-4 bg-vimdy-surface border border-vimdy-border rounded-vimdy-lg pl-5 pr-[230px] py-3 flex-shrink-0">
+    <div className="flex items-center gap-4 bg-vimdy-surface border border-vimdy-border rounded-vimdy-lg pl-5 pr-[230px] py-3 flex-shrink-0 relative">
 
       <div className="min-w-fit">
         <div className="flex items-center gap-2">
@@ -223,9 +193,7 @@ export function PosTopBar() {
           flex items-center gap-2 h-11 px-4 rounded-vimdy-md border transition-all duration-vimdy-normal flex-shrink-0
 
           ${
-            listening
-              ? "bg-vimdy-accent/10 border-vimdy-accent"
-              : processing
+            listening || processing
               ? "bg-vimdy-accent/10 border-vimdy-accent"
               : "bg-vimdy-surface-active border-vimdy-border hover:border-vimdy-accent animate-voice-idle-glow"
           }
@@ -254,6 +222,13 @@ export function PosTopBar() {
         }
 
       </button>
+
+      {voiceSuccess && (
+        <div className="absolute -bottom-10 left-5 flex items-center gap-2 text-emerald-400 text-xs font-semibold bg-emerald-500/10 border border-emerald-500/40 px-3 py-1.5 rounded-lg">
+          <CheckCircle2 size={14} />
+          {voiceSuccess}
+        </div>
+      )}
 
       {showTableCharge && (
         <PosTableSearchModal onClose={() => setShowTableCharge(false)} />

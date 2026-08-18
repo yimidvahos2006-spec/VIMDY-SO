@@ -2,13 +2,14 @@ import React, { useState } from "react";
 import { X, Rocket } from "lucide-react";
 
 import { PlansShowcase } from "./PlansShowcase";
-import { PlanDefinition } from "../../../core/entities/SubscriptionTypes";
+import { PlanDefinition, getPlanPrice, getPlanCurrency } from "../../../core/entities/SubscriptionTypes";
 import { useAuth } from "../../context/AuthContext";
 import { toast } from "../../../core/store/toastStore";
 import { companyConfigStore } from "../../../core/store/companyConfigStore";
 import {
   VimdyPayments,
   PaymentCountryResolver,
+  PaymentCurrencyResolver,
   type PaymentProviderName,
   type CurrencyCode as PaymentsCurrencyCode
 } from "../../../core/payments";
@@ -44,45 +45,40 @@ const PROVIDER_LABELS: Record<PaymentProviderName, string> = {
  * quien decide si ese negocio paga con Wompi, Mercado Pago o PayPal. Aquí
  * no vive ningún if/else de país.
  *
- * MISIÓN 3: cuando el proveedor resuelto es Wompi, `VimdyPayments.pay`
- * devuelve un `checkoutUrl` real (armado por la Edge Function
- * wompi-create-checkout, firmado con la llave de integridad) y este
- * componente redirige el navegador ahí mismo — el pago real ocurre en la
- * página hospedada por Wompi, nunca dentro de VIMDY. Mercado Pago y PayPal
- * siguen en FASE 8.1 (sin credenciales reales todavía), así que para esos
- * proveedores `VimdyPayments.pay` sigue respondiendo "pending" sin
- * `checkoutUrl` y se muestra el aviso de "en proceso de aprobación".
+  * MISIÓN 3: cuando el proveedor resuelto es Wompi, `VimdyPayments.pay`
+  * devuelve un `checkoutUrl` real (armado por la Edge Function
+  * wompi-create-checkout, firmado con la llave de integridad) y este
+  * componente redirige el navegador ahí mismo — el pago real ocurre en la
+  * página hospedada por Wompi, nunca dentro de VIMDY. Mercado Pago y PayPal
+  * también redirigen a sus respectivos checkouts cuando las credenciales
+  * externas están configuradas; mientras tanto, si falta alguna configuración,
+  * se muestra el aviso de "en proceso de aprobación".
  */
 export function UpgradeModal({ onClose }: Props) {
   const { businessId } = useAuth();
   const [notice, setNotice] = useState<string | null>(null);
 
-  // País real del negocio ya en sesión. Se usa aquí solo para mostrar el
-  // proveedor correcto en el pie de página antes de que el usuario elija
-  // un plan — la decisión que de verdad importa la vuelve a tomar el
-  // Router en cada llamada a VimdyPayments.pay.
   const { country } = companyConfigStore.get();
   const providerForCountry = PaymentCountryResolver.resolve(country);
   const providerLabel = PROVIDER_LABELS[providerForCountry];
+  const currencyForCountry = PaymentCurrencyResolver.resolve(country);
 
   async function handleSelectPlan(plan: PlanDefinition) {
     if (!businessId) return;
 
     try {
+      const displayPrice = getPlanPrice(plan.id, country);
+      const displayCurrency = getPlanCurrency(plan.id, country);
+
       const result = await VimdyPayments.pay({
         businessId,
         country,
         businessType: "suscripcion_vimdy",
         plan: plan.id,
-        amount: plan.price,
-        currency: plan.currency as PaymentsCurrencyCode
+        amount: displayPrice,
+        currency: displayCurrency
       });
 
-      // MISIÓN 3: Wompi (y cualquier futuro proveedor con checkout
-      // hospedado) devuelve una URL real de pago — redirigir ahí mismo es
-      // lo único que le corresponde hacer a la UI. La activación real del
-      // plan la hace wompi-webhook cuando Wompi confirme el cobro, nunca
-      // este redirect.
       if (result.checkoutUrl) {
         window.location.href = result.checkoutUrl;
         return;
@@ -90,9 +86,6 @@ export function UpgradeModal({ onClose }: Props) {
 
       const resolvedLabel = PROVIDER_LABELS[result.provider];
 
-      // Proveedores todavía sin credenciales reales (Mercado Pago, PayPal
-      // — FASE 8.1): no hay checkout al que redirigir, así que se avisa en
-      // vez de simular una activación que no ocurrió de verdad.
       setNotice(
         `Estamos terminando de activar los pagos en línea con ${resolvedLabel}. Muy pronto podrás activar el ${plan.name} aquí mismo, sin salir de VIMDY.`
       );
@@ -134,7 +127,7 @@ export function UpgradeModal({ onClose }: Props) {
           </div>
         )}
 
-        <PlansShowcase onSelectPlan={handleSelectPlan} />
+        <PlansShowcase onSelectPlan={handleSelectPlan} countryCode={country} />
 
         <p className="text-vimdy-text-tertiary text-xs mt-5 text-center">
           Pagos procesados de forma segura por {providerLabel}. Puedes cambiar de plan cuando quieras.

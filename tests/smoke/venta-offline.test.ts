@@ -105,7 +105,7 @@ function buildSalesEngine() {
     audit
   );
 
-  return { salesEngine, products, sales, cashMovements };
+  return { salesEngine, products, sales, cashMovements, businessId: "biz-1", branchId: "branch-1" };
 }
 
 /**
@@ -113,14 +113,16 @@ function buildSalesEngine() {
  * (Parte 2): guarda la "receta" (createSaleInput), no una Sale ya armada,
  * porque offline no hay nada real todavía (ver PendingSale.ts).
  */
-function enqueue(queue: PendingSale[], input: CreateSaleInput): PendingSale {
+function enqueue(queue: PendingSale[], input: CreateSaleInput, businessId = "biz-1", branchId = "branch-1"): PendingSale {
   const pendingSale: PendingSale = {
     id: input.id!,
     createSaleInput: input,
     payment: { method: "CASH" },
     status: "PENDING_SYNC",
     queuedAt: new Date(),
-    attempts: 0
+    attempts: 0,
+    businessId,
+    branchId
   };
 
   queue.push(pendingSale);
@@ -180,7 +182,7 @@ describe("Smoke: venta offline (cola local + sincronización)", () => {
     const networkError = new TypeError("Failed to fetch");
     expect(isNetworkFailure(networkError)).toBe(true);
 
-    const pending = enqueue(queue, OFFLINE_SALE_INPUT);
+    const pending = enqueue(queue, OFFLINE_SALE_INPUT, ctx.businessId, ctx.branchId);
 
     expect(queue).toHaveLength(1);
     expect(pending.status).toBe("PENDING_SYNC");
@@ -198,7 +200,7 @@ describe("Smoke: venta offline (cola local + sincronización)", () => {
   });
 
   it("al reconectar, sincroniza la venta contra los engines reales y la cola queda vacía", async () => {
-    const pending = enqueue(queue, OFFLINE_SALE_INPUT);
+    const pending = enqueue(queue, OFFLINE_SALE_INPUT, ctx.businessId, ctx.branchId);
 
     const sale = await syncOne(ctx.salesEngine, pending);
     queue = queue.filter((item) => item.id !== pending.id);
@@ -221,7 +223,7 @@ describe("Smoke: venta offline (cola local + sincronización)", () => {
   });
 
   it("si la misma venta se sincroniza dos veces (reintento), no duplica inventario ni caja", async () => {
-    const pending = enqueue(queue, OFFLINE_SALE_INPUT);
+    const pending = enqueue(queue, OFFLINE_SALE_INPUT, ctx.businessId, ctx.branchId);
 
     // Primer intento: se sincroniza normal.
     await syncOne(ctx.salesEngine, pending);

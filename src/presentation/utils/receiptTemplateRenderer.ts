@@ -8,6 +8,12 @@ export interface PrintableReceiptItem {
   name: string;
   quantity: number;
   price: number;
+  unit?: string;
+  quantityRaw?: number;
+  selectedSizeId?: string;
+  selectedExtraIds?: readonly string[];
+  discount?: { type: "PERCENT" | "FIXED"; value: number };
+  taxRate?: number;
 }
 
 function escapeHtml(value: string): string {
@@ -78,14 +84,32 @@ function metaLine(label: string, value: string): string {
 function renderItemRows(items: PrintableReceiptItem[], money: (v: number) => string): string {
   return items
     .map(
-      (item) => `
-      <tr>
-        <td colspan="2" class="item-name">${escapeHtml(item.name)}</td>
-      </tr>
-      <tr>
-        <td class="qty">${item.quantity} x ${money(item.price)}</td>
-        <td class="line-total">${money(item.quantity * item.price)}</td>
-      </tr>`
+      (item) => {
+        const displayQty =
+          item.quantityRaw !== undefined && item.unit
+            ? `${item.quantityRaw} ${item.unit}`
+            : String(item.quantity);
+        const sizeLabel = item.selectedSizeId ? `[${item.selectedSizeId}] ` : "";
+        const extrasLabel =
+          item.selectedExtraIds && item.selectedExtraIds.length > 0
+            ? `+ ${item.selectedExtraIds.join(", ")}`
+            : "";
+        const label = [sizeLabel, item.name, extrasLabel].filter(Boolean).join(" ");
+        const discountLabel =
+          item.discount && item.discount.type === "PERCENT"
+            ? ` (${item.discount.value}% off)`
+            : item.discount && item.discount.type === "FIXED"
+              ? ` (-${money(item.discount.value)})`
+              : "";
+        return `
+        <tr>
+          <td colspan="2" class="item-name">${escapeHtml(label)}${discountLabel ? escapeHtml(discountLabel) : ""}</td>
+        </tr>
+        <tr>
+          <td class="qty">${displayQty} x ${money(item.price)}</td>
+          <td class="line-total">${money(item.quantity * item.price)}</td>
+        </tr>`;
+      }
     )
     .join("");
 }

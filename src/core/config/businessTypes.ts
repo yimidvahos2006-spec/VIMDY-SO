@@ -17,7 +17,13 @@ export type BusinessTypeId =
   | "tienda"
   | "heladeria"
   | "hotel"
-  | "food_truck";
+  | "food_truck"
+  | "comida_rapida"
+  | "minimercado"
+  | "pequeno_supermercado"
+  | "negocio_bebidas"
+  | "negocio_productos"
+  | "negocio_servicios";
 
 export interface BusinessTypeDefinition {
   id: BusinessTypeId;
@@ -35,9 +41,30 @@ export const BUSINESS_TYPES: BusinessTypeDefinition[] = [
   { id: "tienda", label: "Tienda", emoji: "🛒" },
   { id: "heladeria", label: "Heladería", emoji: "🍦" },
   { id: "hotel", label: "Hotel", emoji: "🏨" },
-  { id: "food_truck", label: "Food Truck", emoji: "🚚" }
+  { id: "food_truck", label: "Food Truck", emoji: "🚚" },
+  { id: "comida_rapida", label: "Comida rápida", emoji: "🍟" },
+  { id: "minimercado", label: "Minimercado", emoji: "🏪" },
+  { id: "pequeno_supermercado", label: "Pequeño supermercado", emoji: "🏬" },
+  { id: "negocio_bebidas", label: "Negocio de bebidas", emoji: "🥤" },
+  { id: "negocio_productos", label: "Negocio de productos", emoji: "📦" },
+  { id: "negocio_servicios", label: "Negocio de servicios", emoji: "🔧" }
 ];
 
 export function isBusinessTypeId(value: string): value is BusinessTypeId {
   return BUSINESS_TYPES.some((type) => type.id === value);
+}
+
+const BUSINESS_TYPES_WITH_KITCHEN = new Set<BusinessTypeId>([
+  "restaurante",
+  "cafeteria",
+  "pizzeria",
+  "asadero",
+  "food_truck",
+  "comida_rapida",
+  "heladeria",
+  "panaderia"
+]);
+
+export function requiresKitchenByDefaultForBusinessType(businessType: BusinessTypeId): boolean {
+  return BUSINESS_TYPES_WITH_KITCHEN.has(businessType);
 }

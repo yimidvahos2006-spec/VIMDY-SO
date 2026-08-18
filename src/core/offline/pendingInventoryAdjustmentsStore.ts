@@ -5,6 +5,7 @@ import {
 } from "./PendingInventoryAdjustment";
 import { PendingInventoryAdjustmentRepository } from "../../infrastructure/di/repositories/PendingInventoryAdjustmentRepository";
 import { LossCategory } from "../entities/Entities";
+import { getCurrentBranchId, requireCurrentBusinessId } from "../../infrastructure/supabase/supabaseClient";
 
 const repository = new PendingInventoryAdjustmentRepository();
 
@@ -43,6 +44,11 @@ class PendingInventoryAdjustmentsStore extends ObservableStore<PendingInventoryA
     this.publish({ items, loaded: true });
   }
 
+  /** Vuelve a leer directamente de la cola persistida para obtener solo los pendientes. */
+  async findSyncable(): Promise<PendingInventoryAdjustment[]> {
+    return repository.findSyncable();
+  }
+
   /**
    * Guarda un ajuste de inventario hecho offline en la cola local. `id` es
    * la misma clave de idempotencia que viaja hasta
@@ -61,6 +67,8 @@ class PendingInventoryAdjustmentsStore extends ObservableStore<PendingInventoryA
     purchasePrice?: number;
     lossCategory?: LossCategory;
   }): Promise<PendingInventoryAdjustment> {
+    const existing = await repository.findById(params.id);
+
     const pendingAdjustment: PendingInventoryAdjustment = {
       id: params.id,
       productId: params.productId,
@@ -73,8 +81,12 @@ class PendingInventoryAdjustmentsStore extends ObservableStore<PendingInventoryA
       purchasePrice: params.purchasePrice,
       lossCategory: params.lossCategory,
       status: "PENDING_SYNC",
-      queuedAt: new Date(),
-      attempts: 0
+      queuedAt: existing?.queuedAt ?? new Date(),
+      attempts: existing?.attempts ?? 0,
+      lastAttemptAt: existing?.lastAttemptAt,
+      lastError: existing?.lastError,
+      businessId: requireCurrentBusinessId(),
+      branchId: getCurrentBranchId() ?? ""
     };
 
     await repository.save(pendingAdjustment);
@@ -84,9 +96,9 @@ class PendingInventoryAdjustmentsStore extends ObservableStore<PendingInventoryA
   }
 
   /** Antes de reintentar contra el servidor: marca "sincronizando" y suma un intento. */
-  async markSyncing(id: string): Promise<void> {
+  async markSyncing(id: string): Promise<boolean> {
     const current = await repository.findById(id);
-    if (!current) return;
+    if (!current) return false;
 
     await repository.update({
       ...current,
@@ -95,6 +107,7 @@ class PendingInventoryAdjustmentsStore extends ObservableStore<PendingInventoryA
       lastAttemptAt: new Date()
     });
     await this.refresh();
+    return true;
   }
 
   /** El intento de sincronización falló: registra el motivo y lo saca del ciclo automático. */
@@ -105,6 +118,20 @@ class PendingInventoryAdjustmentsStore extends ObservableStore<PendingInventoryA
     await repository.update({
       ...current,
       status: "FAILED",
+      lastError: error,
+      lastAttemptAt: new Date()
+    });
+    await this.refresh();
+  }
+
+  /** Error permanente de negocio: ya no se reintentará automáticamente. */
+  async markPermanentFailure(id: string, error: string): Promise<void> {
+    const current = await repository.findById(id);
+    if (!current) return;
+
+    await repository.update({
+      ...current,
+      status: "PERMANENT_FAILURE",
       lastError: error,
       lastAttemptAt: new Date()
     });
@@ -126,6 +153,22 @@ class PendingInventoryAdjustmentsStore extends ObservableStore<PendingInventoryA
     await this.refresh();
   }
 
+  /** Vuelve a poner en cola los ajustes que quedaron en SYNCING por un cierre/recarga abrupta. */
+  async recoverStuckSyncing(): Promise<void> {
+    const items = await repository.findAll();
+    const stuck = items.filter((adjustment) => adjustment.status === "SYNCING");
+
+    if (stuck.length === 0) return;
+
+    await Promise.all(
+      stuck.map((adjustment) =>
+        repository.update({ ...adjustment, status: "PENDING_SYNC" })
+      )
+    );
+
+    await this.refresh();
+  }
+
   /** Ajustes que siguen esperando turno para sincronizarse (no los que ya están en curso). */
   syncable(): PendingInventoryAdjustment[] {
     return this.snapshot.items.filter((adjustment) => adjustment.status === "PENDING_SYNC");
@@ -138,6 +181,11 @@ class PendingInventoryAdjustmentsStore extends ObservableStore<PendingInventoryA
   /** Cuántos ajustes hay en la cola en total. */
   count(): number {
     return this.snapshot.items.length;
+  }
+
+  async clear(): Promise<void> {
+    await repository.clear();
+    await this.refresh();
   }
 }
 

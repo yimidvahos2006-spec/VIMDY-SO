@@ -2,6 +2,7 @@ import { ObservableStore } from "../store/ObservableStore";
 import { PendingSale, QueuedSalePayment } from "./PendingSale";
 import { PendingSaleRepository } from "../../infrastructure/di/repositories/PendingSaleRepository";
 import { CreateSaleInput } from "../engines/SalesEngine";
+import { getCurrentBranchId, requireCurrentBusinessId } from "../../infrastructure/supabase/supabaseClient";
 
 const repository = new PendingSaleRepository();
 
@@ -39,6 +40,11 @@ class PendingSalesStore extends ObservableStore<PendingSalesSnapshot> {
     this.publish({ items, loaded: true });
   }
 
+  /** Vuelve a leer directamente de la cola persistida para obtener solo las ventas pendientes. */
+  async findSyncable(): Promise<PendingSale[]> {
+    return repository.findSyncable();
+  }
+
   /**
    * Guarda una venta cobrada offline en la cola local. Llamar UNA sola
    * vez por intento de cobro offline — `createSaleInput.id` es la misma
@@ -57,14 +63,20 @@ class PendingSalesStore extends ObservableStore<PendingSalesSnapshot> {
       );
     }
 
+    const existing = await repository.findById(params.createSaleInput.id);
+
     const pendingSale: PendingSale = {
       id: params.createSaleInput.id,
       createSaleInput: params.createSaleInput,
-      payment: params.payment,
-      cashierName: params.cashierName,
+      payment: params.payment ?? existing?.payment,
+      cashierName: params.cashierName ?? existing?.cashierName,
       status: "PENDING_SYNC",
-      queuedAt: new Date(),
-      attempts: 0
+      queuedAt: existing?.queuedAt ?? new Date(),
+      attempts: existing?.attempts ?? 0,
+      lastAttemptAt: existing?.lastAttemptAt,
+      lastError: existing?.lastError,
+      businessId: requireCurrentBusinessId(),
+      branchId: getCurrentBranchId() ?? ""
     };
 
     await repository.save(pendingSale);
@@ -74,9 +86,9 @@ class PendingSalesStore extends ObservableStore<PendingSalesSnapshot> {
   }
 
   /** Antes de reintentar contra el servidor (Parte 4): marca "sincronizando" y suma un intento. */
-  async markSyncing(id: string): Promise<void> {
+  async markSyncing(id: string): Promise<boolean> {
     const current = await repository.findById(id);
-    if (!current) return;
+    if (!current) return false;
 
     await repository.update({
       ...current,
@@ -85,6 +97,7 @@ class PendingSalesStore extends ObservableStore<PendingSalesSnapshot> {
       lastAttemptAt: new Date()
     });
     await this.refresh();
+    return true;
   }
 
   /** El intento de sincronización falló: registra el motivo y la saca del ciclo automático. */
@@ -95,6 +108,20 @@ class PendingSalesStore extends ObservableStore<PendingSalesSnapshot> {
     await repository.update({
       ...current,
       status: "FAILED",
+      lastError: error,
+      lastAttemptAt: new Date()
+    });
+    await this.refresh();
+  }
+
+  /** Error permanente de negocio: ya no se reintentará automáticamente. */
+  async markPermanentFailure(id: string, error: string): Promise<void> {
+    const current = await repository.findById(id);
+    if (!current) return;
+
+    await repository.update({
+      ...current,
+      status: "PERMANENT_FAILURE",
       lastError: error,
       lastAttemptAt: new Date()
     });
@@ -116,6 +143,20 @@ class PendingSalesStore extends ObservableStore<PendingSalesSnapshot> {
     await this.refresh();
   }
 
+  /** Vuelve a poner en cola las ventas que quedaron en SYNCING por un cierre/recarga abrupta. */
+  async recoverStuckSyncing(): Promise<void> {
+    const items = await repository.findAll();
+    const stuck = items.filter((sale) => sale.status === "SYNCING");
+
+    if (stuck.length === 0) return;
+
+    await Promise.all(
+      stuck.map((sale) => repository.update({ ...sale, status: "PENDING_SYNC" }))
+    );
+
+    await this.refresh();
+  }
+
   /** Ventas que siguen esperando turno para sincronizarse (no las que ya están en curso). */
   syncable(): PendingSale[] {
     return this.snapshot.items.filter((sale) => sale.status === "PENDING_SYNC");
@@ -128,6 +169,11 @@ class PendingSalesStore extends ObservableStore<PendingSalesSnapshot> {
   /** Cuántas ventas hay en la cola en total (para el banner de la Parte 5). */
   count(): number {
     return this.snapshot.items.length;
+  }
+
+  async clear(): Promise<void> {
+    await repository.clear();
+    await this.refresh();
   }
 }
 

@@ -14,11 +14,9 @@ export type CountryCode = string;
 export type CurrencyCode =
   | "COP"
   | "MXN"
-  | "BRL"
   | "ARS"
   | "CLP"
   | "PEN"
-  | "UYU"
   | "USD"
   | "EUR";
 

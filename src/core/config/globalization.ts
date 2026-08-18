@@ -5,22 +5,18 @@
  * Única fuente de verdad: en vez de que cada componente tenga su propia
  * lista de monedas o países sueltos, todos leen de acá.
  *
- * Los 246 países y 154 monedas de este archivo salen de datos reales ISO
- * 3166-1 / ISO 4217 (mismo origen que usan librerías como world-countries y
- * countries-and-timezones) — no hay nombres, códigos ni zonas horarias
- * inventados a mano.
- *
  * Los NOMBRES localizados de país y moneda (columna "México" vs "Mexico" vs
  * "México" en pt) no se guardan como texto fijo acá: se calculan en caliente
  * con Intl.DisplayNames, que es la base de datos CLDR real del navegador —
  * así el nombre siempre está bien traducido a es/en/pt sin mantener miles
  * de strings a mano.
  *
- * IVA / impuesto: solo los países donde VIMDY ya opera de verdad tienen una
- * tasa real verificada (CO, MX, PE, CL, AR, ES, EC, PA, US). El resto queda
- * en 0 a propósito — el impuesto varía según el tipo de negocio y cambia
- * con el tiempo, así que en vez de inventar una cifra, el negocio la
- * configura una sola vez en Ajustes → Impuestos y moneda.
+ * Los 10 países donde VIMDY opera de verdad tienen una tasa real verificada
+ * (CO, MX, PE, CL, AR, ES, EC, PA, US, VE). El resto queda en 0 a propósito
+ * — el impuesto varía según el tipo de negocio y cambia con el tiempo, así
+ * que en vez de inventar una cifra, el negocio la configura una sola vez
+ * en Ajustes → Impuestos y moneda. Se restringe el registro a estos 10
+ * países para no arrancar con un impuesto inventado.
  *
  * Al elegir un país (en el selector previo al login, o en Configuración) se
  * autocompletan moneda + idioma + zona horaria (getCountryDefaults) — el
@@ -471,7 +467,7 @@ export const COUNTRIES: CountryDefinition[] = [
   { code: "UZ", currency: "UZS", language: "en", timezone: "Asia/Samarkand", dialCode: "+998", taxRate: 0, dateFormat: "DD/MM/YYYY", timeFormat: "24h" },
   { code: "VA", currency: "EUR", language: "en", timezone: "Europe/Rome", dialCode: "+3", taxRate: 0, dateFormat: "DD/MM/YYYY", timeFormat: "24h" },
   { code: "VC", currency: "XCD", language: "en", timezone: "America/Puerto_Rico", dialCode: "+1784", taxRate: 0, dateFormat: "DD/MM/YYYY", timeFormat: "24h" },
-  { code: "VE", currency: "VES", language: "es", timezone: "America/Caracas", dialCode: "+58", taxRate: 0, dateFormat: "DD/MM/YYYY", timeFormat: "24h" },
+  { code: "VE", currency: "USD", language: "es", timezone: "America/Caracas", dialCode: "+58", taxRate: 0, dateFormat: "DD/MM/YYYY", timeFormat: "24h" },
   { code: "VG", currency: "USD", language: "en", timezone: "America/Puerto_Rico", dialCode: "+1284", taxRate: 0, dateFormat: "DD/MM/YYYY", timeFormat: "24h" },
   { code: "VI", currency: "USD", language: "en", timezone: "America/Puerto_Rico", dialCode: "+1340", taxRate: 0, dateFormat: "DD/MM/YYYY", timeFormat: "24h" },
   { code: "VN", currency: "VND", language: "en", timezone: "Asia/Bangkok", dialCode: "+84", taxRate: 0, dateFormat: "DD/MM/YYYY", timeFormat: "24h" },
@@ -483,7 +479,7 @@ export const COUNTRIES: CountryDefinition[] = [
   { code: "YT", currency: "EUR", language: "en", timezone: "Africa/Nairobi", dialCode: "+262", taxRate: 0, dateFormat: "DD/MM/YYYY", timeFormat: "24h" },
   { code: "ZA", currency: "ZAR", language: "en", timezone: "Africa/Johannesburg", dialCode: "+27", taxRate: 0, dateFormat: "DD/MM/YYYY", timeFormat: "24h" },
   { code: "ZM", currency: "ZMW", language: "en", timezone: "Africa/Maputo", dialCode: "+260", taxRate: 0, dateFormat: "DD/MM/YYYY", timeFormat: "24h" },
-  { code: "ZW", currency: "BWP", language: "en", timezone: "Africa/Maputo", dialCode: "+263", taxRate: 0, dateFormat: "DD/MM/YYYY", timeFormat: "24h" }
+  { code: "ZW", currency: "ZMW", language: "en", timezone: "Africa/Maputo", dialCode: "+263", taxRate: 0, dateFormat: "DD/MM/YYYY", timeFormat: "24h" }
 ];
 
 export function getCountry(code: string): CountryDefinition | undefined {
@@ -500,7 +496,7 @@ export function getCountry(code: string): CountryDefinition | undefined {
  * Para agregar un país nuevo: 1) verificar su IVA real y ponerlo en
  * `COUNTRIES` arriba (dejar de ser 0), 2) agregar su código acá.
  */
-export const AVAILABLE_COUNTRY_CODES: CountryCode[] = ["CO", "MX", "PE", "CL", "AR", "ES", "EC", "PA", "US"];
+export const AVAILABLE_COUNTRY_CODES: CountryCode[] = ["CO", "MX", "PE", "CL", "AR", "ES", "EC", "PA", "US", "VE"];
 
 /** Catálogo de países ya disponibles para registro (ver AVAILABLE_COUNTRY_CODES). */
 export const AVAILABLE_COUNTRIES: CountryDefinition[] = COUNTRIES.filter((c) =>

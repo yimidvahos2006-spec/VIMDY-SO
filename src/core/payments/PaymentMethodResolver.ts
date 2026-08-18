@@ -9,14 +9,14 @@ import type { CountryCode, PaymentMethodCode } from "./types/payment.types";
 
 const COUNTRY_METHODS_MAP: Record<string, PaymentMethodCode[]> = {
   CO: ["pse", "nequi", "card"],
-  MX: ["mercadopago_wallet", "bank_transfer", "card"],
   AR: ["mercadopago_wallet", "card"],
-  BR: ["mercadopago_wallet", "card"],
   CL: ["mercadopago_wallet", "card"],
   PE: ["mercadopago_wallet", "card"],
-  UY: ["mercadopago_wallet", "card"],
-  EC: ["mercadopago_wallet", "card"],
+  MX: ["mercadopago_wallet", "bank_transfer", "card"],
   US: ["paypal", "card"],
+  EC: ["paypal", "card"],
+  PA: ["paypal", "card"],
+  VE: ["paypal", "card"],
   ES: ["paypal", "card"]
 };
 

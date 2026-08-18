@@ -2,6 +2,8 @@ import { pendingInventoryAdjustmentsStore } from "../offline/pendingInventoryAdj
 import { productCatalogStore } from "../store/productCatalogStore";
 import { toast } from "../store/toastStore";
 import { LossCategory } from "../entities/Entities";
+import { ProductLocalRepository } from "../../infrastructure/di/repositories/ProductLocalRepository";
+import { logWarning } from "../../infrastructure/logging/opsLogger";
 
 /**
  * offlineInventory.ts
@@ -25,6 +27,7 @@ const OFFLINE_DECREASE_MESSAGE =
   "Sin conexión: la salida de stock quedó guardada en este dispositivo y se sincronizará sola cuando vuelva internet.";
 
 export async function queueIncreaseStockOffline(params: {
+  id?: string;
   productId: string;
   productName: string;
   quantity: number;
@@ -33,8 +36,10 @@ export async function queueIncreaseStockOffline(params: {
   supplierId?: string;
   purchasePrice?: number;
 }): Promise<void> {
+  const offlineId = params.id ?? crypto.randomUUID();
+
   await pendingInventoryAdjustmentsStore.enqueue({
-    id: crypto.randomUUID(),
+    id: offlineId,
     productId: params.productId,
     productName: params.productName,
     type: "INCREASE",
@@ -46,10 +51,29 @@ export async function queueIncreaseStockOffline(params: {
   });
 
   productCatalogStore.applyStockDelta(params.productId, params.quantity);
+
+  try {
+    const localRepository = new ProductLocalRepository();
+    const product = await localRepository.findById(params.productId);
+    if (product) {
+      await localRepository.save({
+        ...product,
+        stock: product.stock + params.quantity,
+        lastUpdated: new Date()
+      });
+    }
+  } catch (error) {
+    logWarning("No se pudo actualizar el stock optimista en el caché local", {
+      category: "offline",
+      context: { error: String(error), productId: params.productId, change: params.quantity }
+    });
+  }
+
   toast.warning(OFFLINE_INCREASE_MESSAGE);
 }
 
 export async function queueDecreaseStockOffline(params: {
+  id?: string;
   productId: string;
   productName: string;
   quantity: number;
@@ -57,8 +81,10 @@ export async function queueDecreaseStockOffline(params: {
   performedBy?: string;
   lossCategory?: LossCategory;
 }): Promise<void> {
+  const offlineId = params.id ?? crypto.randomUUID();
+
   await pendingInventoryAdjustmentsStore.enqueue({
-    id: crypto.randomUUID(),
+    id: offlineId,
     productId: params.productId,
     productName: params.productName,
     type: "DECREASE",
@@ -69,5 +95,23 @@ export async function queueDecreaseStockOffline(params: {
   });
 
   productCatalogStore.applyStockDelta(params.productId, -params.quantity);
+
+  try {
+    const localRepository = new ProductLocalRepository();
+    const product = await localRepository.findById(params.productId);
+    if (product) {
+      await localRepository.save({
+        ...product,
+        stock: product.stock - params.quantity,
+        lastUpdated: new Date()
+      });
+    }
+  } catch (error) {
+    logWarning("No se pudo actualizar el stock optimista en el caché local", {
+      category: "offline",
+      context: { error: String(error), productId: params.productId, change: -params.quantity }
+    });
+  }
+
   toast.warning(OFFLINE_DECREASE_MESSAGE);
 }

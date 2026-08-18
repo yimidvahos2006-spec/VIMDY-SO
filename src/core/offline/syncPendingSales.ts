@@ -7,6 +7,9 @@ import { pendingSalesStore } from "./pendingSalesStore";
 import type { PendingSale } from "./PendingSale";
 import type { Sale } from "../entities/Entities";
 import { logError } from "../../infrastructure/logging/opsLogger";
+import { vimdyCore } from "../VimdyCore";
+import { getCurrentBusinessId, getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
+import { MAX_OFFLINE_ATTEMPTS, isBusinessError } from "./offlineConstants";
 
 /**
  * syncPendingSales.ts
@@ -32,12 +35,28 @@ import { logError } from "../../infrastructure/logging/opsLogger";
  * igual que el resto de datos en pantalla.
  */
 
-let syncing = false;
+let syncPromise: Promise<void> | null = null;
 let unsubscribeConnection: (() => void) | null = null;
 let unsubscribePendingSales: (() => void) | null = null;
+let syncBackoffUntil = 0;
 
 /** Reproduce una única PendingSale contra Supabase usando los engines reales. */
 async function syncOne(pending: PendingSale): Promise<Sale> {
+  const currentBusinessId = getCurrentBusinessId();
+  const currentBranchId = getCurrentBranchId();
+
+  if (!currentBusinessId || !currentBranchId) {
+    throw new Error(
+      `CONTEXT_MISMATCH: no hay sesión activa (businessId=${currentBusinessId ?? "null"}, branchId=${currentBranchId ?? "null"}). No se puede sincronizar.`
+    );
+  }
+
+  if (pending.businessId !== currentBusinessId || pending.branchId !== currentBranchId) {
+    throw new Error(
+      `CONTEXT_MISMATCH: la venta offline pertenece a ${pending.businessId}/${pending.branchId}, pero la sesión actual es ${currentBusinessId}/${currentBranchId}.`
+    );
+  }
+
   const sale = await container.salesEngine.createSale(pending.createSaleInput);
 
   if (pending.payment) {
@@ -58,74 +77,112 @@ async function syncOne(pending: PendingSale): Promise<Sale> {
  * hace nada.
  */
 export async function syncPendingSales(): Promise<void> {
-  if (syncing) return;
-  if (!connectionStore.isOnline()) return;
+  if (syncPromise) return syncPromise;
 
-  const queue = pendingSalesStore.syncable();
-  if (queue.length === 0) return;
+  syncPromise = (async () => {
+    if (!connectionStore.isOnline()) return;
 
-  syncing = true;
+    if (Date.now() < syncBackoffUntil) return;
 
-  let syncedCount = 0;
-  let failedCount = 0;
+    await pendingSalesStore.recoverStuckSyncing();
+    const queue = await pendingSalesStore.findSyncable();
+    if (queue.length === 0) return;
 
-  try {
-    for (const pending of queue) {
-      // Si a mitad del lote se volvió a caer la conexión, no tiene caso
-      // seguir intentando las que faltan: se dejan tal cual (siguen
-      // PENDING_SYNC, ver requeue más abajo para la que se estaba
-      // procesando) para el próximo intento, sin generar una ráfaga de
-      // errores de red que en realidad no son culpa de esas ventas.
-      if (!connectionStore.isOnline()) break;
+    let syncedCount = 0;
+    let failedCount = 0;
 
-      await pendingSalesStore.markSyncing(pending.id);
+    try {
+      for (const pending of queue) {
+        if (!connectionStore.isOnline()) break;
 
-      try {
-        await syncOne(pending);
-        await pendingSalesStore.remove(pending.id);
-        syncedCount += 1;
-      } catch (error) {
-        if (isNetworkFailure(error)) {
-          await pendingSalesStore.requeue(pending.id);
-          break;
+        if ((pending.attempts ?? 0) >= MAX_OFFLINE_ATTEMPTS) {
+          await pendingSalesStore.markPermanentFailure(pending.id, "MAX_ATTEMPTS_REACHED");
+          failedCount += 1;
+          continue;
         }
 
-        // Error de NEGOCIO real (sin stock, producto eliminado, turno con
-        // conflicto, etc.) — ver Parte 6: no se reintenta sola, queda
-        // marcada para revisión manual (pendingSalesStore.requeue() la
-        // puede reintentar a mano una vez resuelto el problema de fondo).
-        const message = error instanceof Error ? error.message : "Error desconocido al sincronizar.";
-        await pendingSalesStore.markFailed(pending.id, message);
-        failedCount += 1;
+        const started = await pendingSalesStore.markSyncing(pending.id);
+        if (!started) continue;
+
+        try {
+          await syncOne(pending);
+          await pendingSalesStore.remove(pending.id);
+          syncedCount += 1;
+        } catch (error) {
+          if (isNetworkFailure(error)) {
+            syncBackoffUntil = Date.now() + 5000;
+            logError("Fallo de red al sincronizar venta offline", {
+              category: "offline",
+              context: {
+                pendingId: pending.id,
+                businessId: pending.businessId,
+                branchId: pending.branchId,
+                attempts: pending.attempts,
+                error: error instanceof Error ? error.message : String(error)
+              }
+            });
+            await pendingSalesStore.requeue(pending.id);
+            break;
+          }
+
+          if (isBusinessError(error)) {
+            logError("Error de negocio al sincronizar venta offline", {
+              category: "offline",
+              context: {
+                pendingId: pending.id,
+                businessId: pending.businessId,
+                branchId: pending.branchId,
+                error: error instanceof Error ? error.message : String(error)
+              }
+            });
+            await pendingSalesStore.markPermanentFailure(pending.id, error instanceof Error ? error.message : String(error));
+            failedCount += 1;
+            continue;
+          }
+
+          const message = error instanceof Error ? error.message : "Error desconocido al sincronizar.";
+          logError("Error desconocido al sincronizar venta offline", {
+            category: "offline",
+            context: {
+              pendingId: pending.id,
+              businessId: pending.businessId,
+              branchId: pending.branchId,
+              error: message
+            }
+          });
+          await pendingSalesStore.markFailed(pending.id, message);
+          failedCount += 1;
+        }
       }
+    } finally {
+      syncPromise = null;
     }
-  } finally {
-    syncing = false;
-  }
 
-  if (syncedCount > 0) {
-    // El stock y la caja ya se movieron de verdad (mismos engines que el
-    // cobro online, con sus mismos eventos del bus vimdyCore) — lo único
-    // que falta es que el catálogo cacheado en esta pantalla se entere
-    // del stock nuevo.
-    productCatalogStore.refresh().catch((error) => {
-      logError("No se pudo refrescar el catálogo tras sincronizar ventas offline", { category: "offline", context: { error: String(error) } });
-    });
+    if (syncedCount > 0) {
+      syncBackoffUntil = 0;
+      productCatalogStore.refresh().catch((error) => {
+        logError("No se pudo refrescar el catálogo tras sincronizar ventas offline", { category: "offline", context: { error: String(error) } });
+      });
 
-    toast.success(
-      syncedCount === 1
-        ? "1 venta sin conexión se sincronizó correctamente."
-        : `${syncedCount} ventas sin conexión se sincronizaron correctamente.`
-    );
-  }
+      vimdyCore.emit("inventory");
 
-  if (failedCount > 0) {
-    toast.error(
-      failedCount === 1
-        ? "1 venta sin conexión no se pudo sincronizar y quedó para revisión manual."
-        : `${failedCount} ventas sin conexión no se pudieron sincronizar y quedaron para revisión manual.`
-    );
-  }
+      toast.success(
+        syncedCount === 1
+          ? "1 venta sin conexión se sincronizó correctamente."
+          : `${syncedCount} ventas sin conexión se sincronizaron correctamente.`
+      );
+    }
+
+    if (failedCount > 0) {
+      toast.error(
+        failedCount === 1
+          ? "1 venta sin conexión no se pudo sincronizar y quedó para revisión manual."
+          : `${failedCount} ventas sin conexión no pudieron sincronizarse y quedaron para revisión manual.`
+      );
+    }
+  })();
+
+  return syncPromise;
 }
 
 /** Dispara una sincronización solo si de verdad hay algo que hacer. */
@@ -158,4 +215,5 @@ export function stopOfflineSalesSync(): void {
   unsubscribePendingSales?.();
   unsubscribeConnection = null;
   unsubscribePendingSales = null;
+  syncPromise = null;
 }

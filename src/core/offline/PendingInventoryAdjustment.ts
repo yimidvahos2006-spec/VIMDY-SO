@@ -34,13 +34,14 @@ export type PendingInventoryAdjustmentStatus =
   | "PENDING_SYNC"
   /** El proceso de sincronización lo está enviando ahora mismo. */
   | "SYNCING"
-  /**
-   * Se intentó sincronizar y falló por algo que NO es falta de red (ej.
-   * el producto ya no existe, o ya no queda stock suficiente para una
-   * salida). Se saca de la cola automática y espera revisión manual — no
-   * se reintenta sola para no repetir el mismo error para siempre.
-   */
-  | "FAILED";
+   /**
+    * Se intentó sincronizar y falló por algo que NO es falta de red (ej.
+    * el producto ya no existe, o ya no queda stock suficiente para una
+    * salida). Se saca de la cola automática y espera revisión manual — no
+    * se reintenta sola para no repetir el mismo error para siempre.
+    */
+   | "FAILED"
+   | "PERMANENT_FAILURE";
 
 export type PendingInventoryAdjustmentType = "INCREASE" | "DECREASE";
 
@@ -65,4 +66,7 @@ export interface PendingInventoryAdjustment {
   readonly attempts: number;
   readonly lastAttemptAt?: Date;
   readonly lastError?: string;
+  /** FASE 7 (Multi-tenant): contexto de negocio/sucursal al momento de encolar. */
+  readonly businessId: string;
+  readonly branchId: string;
 }

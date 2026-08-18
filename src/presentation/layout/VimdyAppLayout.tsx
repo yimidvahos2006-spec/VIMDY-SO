@@ -13,6 +13,7 @@ import { CopilotButton } from "../components/copilot/CopilotButton";
 import { CopilotPanel } from "../components/copilot/CopilotPanel";
 import { SubscriptionWarningBanner } from "../components/subscription/SubscriptionWarningBanner";
 import { TrialEndedOverlay } from "../components/subscription/TrialEndedOverlay";
+import { MobileBottomNav } from "../components/ui/MobileBottomNav";
 import { companyConfigStore } from "../../core/store/companyConfigStore";
 
 interface Props {
@@ -50,15 +51,15 @@ export function VimdyAppLayout({ children }: Props) {
             falta ahí. Sin esto, en pantallas angostas no había forma de
             abrir el menú: por eso "Configuración" y otros paneles no se
             veían. */}
-        <div className="md:hidden h-16 flex items-center gap-3 px-4 border-b border-[#202126] bg-[#0A0A0C]">
+        <div className="md:hidden h-16 flex items-center gap-3 px-4 border-b border-vimdy-border bg-vimdy-background">
           <button
             onClick={openMobileSidebar}
-            className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-300 hover:bg-[#18181B] transition-all flex-shrink-0"
+            className="w-10 h-10 rounded-xl flex items-center justify-center text-vimdy-text-secondary hover:bg-vimdy-surface hover:text-vimdy-text transition-all flex-shrink-0"
           >
             <Menu size={22} />
           </button>
           <VimdyLogo size={28} />
-          <span className="text-white font-semibold tracking-wide">VIMDY</span>
+          <span className="text-vimdy-text font-semibold tracking-wide">VIMDY</span>
         </div>
 
         {/* Contenido — en escritorio reserva el espacio del sidebar con
@@ -75,10 +76,14 @@ export function VimdyAppLayout({ children }: Props) {
             overflow-x-hidden
             transition-all
             duration-300
+            pb-16 md:pb-0
           `}
         >
           {children}
         </main>
+
+        {/* Navegación inferior — solo móvil/tablet */}
+        <MobileBottomNav />
 
       </div>
 

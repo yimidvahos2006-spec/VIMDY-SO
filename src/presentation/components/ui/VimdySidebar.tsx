@@ -112,9 +112,9 @@ export function VimdySidebar() {
           fixed
           top-0
           left-0
-          bg-[#0A0A0C]
+          bg-vimdy-background
           border-r
-          border-[#202126]
+          border-vimdy-border
           flex
           flex-col
           transition-all
@@ -126,7 +126,7 @@ export function VimdySidebar() {
         {/* Botón de cerrar, solo visible en el drawer móvil */}
         <button
           onClick={closeMobile}
-          className="md:hidden absolute top-4 right-4 w-9 h-9 rounded-xl flex items-center justify-center text-zinc-500 hover:bg-[#18181B] hover:text-white transition-all z-10"
+          className="md:hidden absolute top-4 right-4 w-9 h-9 rounded-xl flex items-center justify-center text-vimdy-text-secondary hover:bg-vimdy-surface hover:text-vimdy-text transition-all z-10"
         >
           <X size={18} />
         </button>
@@ -136,7 +136,7 @@ export function VimdySidebar() {
           className={`
             h-[92px]
             border-b
-            border-[#202126]
+            border-vimdy-border
             flex
             items-center
             justify-between
@@ -148,17 +148,17 @@ export function VimdySidebar() {
             <VimdyLogo size={42} />
 
             <div className={labelClass}>
-              <h2 className="text-white text-lg font-semibold tracking-wide">
+              <h2 className="text-vimdy-text text-lg font-semibold tracking-wide">
                 VIMDY
               </h2>
               <p
                 className={`text-xs font-medium flex items-center gap-1.5 ${
-                  shiftOpen ? "text-emerald-400" : "text-red-400"
+                  shiftOpen ? "text-vimdy-success" : "text-vimdy-danger"
                 }`}
               >
                 <span
                   className={`w-1.5 h-1.5 rounded-full ${
-                    shiftOpen ? "bg-emerald-400" : "bg-red-400"
+                    shiftOpen ? "bg-vimdy-success" : "bg-vimdy-danger"
                   }`}
                 />
                 {shiftOpen === null ? "..." : shiftOpen ? "En línea" : "Fuera de línea"}
@@ -169,7 +169,7 @@ export function VimdySidebar() {
           {/* Botón de colapsar — solo tiene sentido en escritorio */}
           <button
             onClick={toggle}
-            className={`hidden ${expanded ? "md:flex" : "md:hidden"} w-10 h-10 rounded-xl items-center justify-center text-zinc-500 hover:bg-[#18181B] hover:text-white transition-all`}
+            className={`hidden ${expanded ? "md:flex" : "md:hidden"} w-10 h-10 rounded-xl items-center justify-center text-vimdy-text-secondary hover:bg-vimdy-surface hover:text-vimdy-text transition-all`}
           >
             <PanelLeftClose size={18} />
           </button>
@@ -180,7 +180,7 @@ export function VimdySidebar() {
           <div className="hidden md:flex py-4 justify-center">
             <button
               onClick={toggle}
-              className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-500 hover:bg-[#18181B] hover:text-white transition-all"
+              className="w-10 h-10 rounded-xl flex items-center justify-center text-vimdy-text-secondary hover:bg-vimdy-surface hover:text-vimdy-text transition-all"
             >
               <PanelLeftOpen size={18} />
             </button>
@@ -210,7 +210,7 @@ export function VimdySidebar() {
             return (
               <React.Fragment key={item.title}>
                 {showSeparator && (
-                  <div className="h-px bg-[#202126] my-3" />
+                  <div className="h-px bg-vimdy-border my-3" />
                 )}
 
                 <NavLink
@@ -229,8 +229,8 @@ export function VimdySidebar() {
                     duration-200
                     ${
                       isActive
-                        ? "bg-[#202126] text-white"
-                        : "text-zinc-500 hover:bg-[#18181B] hover:text-white"
+                        ? "bg-vimdy-surface-hover text-vimdy-text"
+                        : "text-vimdy-text-secondary hover:bg-vimdy-surface hover:text-vimdy-text"
                     }
                   `}
                 >
@@ -241,7 +241,7 @@ export function VimdySidebar() {
                         className={`
                           flex-shrink-0
                           transition-all
-                          ${isActive ? "text-white" : "text-zinc-500"}
+                          ${isActive ? "text-vimdy-text" : "text-vimdy-text-secondary"}
                         `}
                       />
 

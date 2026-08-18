@@ -27,7 +27,8 @@ export function processVoice(text: string): VoiceProcessResult {
     const match = matches.find(
 
       item => item.product.name === order.product ||
-      item.product.aliases?.includes(order.product)
+
+        item.product.aliases?.includes(order.product)
 
     );
 
@@ -39,6 +40,8 @@ export function processVoice(text: string): VoiceProcessResult {
 
     }
 
+    const note = order.modifiers.length > 0 ? order.modifiers.join(", ") : undefined;
+
     for (let i = 0; i < match.quantity; i++) {
 
       cartStore.add({
@@ -47,15 +50,19 @@ export function processVoice(text: string): VoiceProcessResult {
 
         name: match.product.name,
 
-        price: match.product.price
+        price: match.product.price,
+
+        note
 
       });
 
     }
 
+    const noteText = note ? ` (${note})` : "";
+
     added.push(
 
-      `${match.quantity} x ${match.product.name}`
+      `${match.quantity} x ${match.product.name}${noteText}`
 
     );
 

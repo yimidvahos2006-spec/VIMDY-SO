@@ -30,12 +30,18 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+if (!supabase || typeof supabase.from !== "function") {
+  throw new Error(
+    "SUPABASE_CLIENT_INVALID: el cliente de Supabase no se inicializó correctamente. Verifica VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY."
+  );
+}
+
 // SOLO PARA PRUEBAS MANUALES (Fase 0 / Fase 5 de QA): expone el cliente en
 // window para poder probar los permisos de RLS desde la consola del
 // navegador (ej. supabase.from('businesses').update(...)). Nunca se activa
 // en producción porque import.meta.env.DEV es false en el build final —
 // no hace falta acordarse de quitar esto antes de publicar.
-if (import.meta.env.DEV) {
+if (import.meta.env.MODE === "development" && typeof window !== "undefined") {
   (window as unknown as { supabase: typeof supabase }).supabase = supabase;
 }
 
@@ -48,18 +54,32 @@ if (import.meta.env.DEV) {
  * servidor), es para que el propio cliente sepa a qué negocio escribir.
  */
 let currentBusinessId: string | null = null;
+let currentBranchId: string | null = null;
 
-export function setCurrentBusinessId(businessId: string): void {
+export function setCurrentBusinessId(businessId: string | null): void {
   currentBusinessId = businessId;
 }
 
-export function getCurrentBusinessId(): string {
-  if (!currentBusinessId) {
+export function getCurrentBusinessId(): string | undefined {
+  return currentBusinessId ?? undefined;
+}
+
+export function requireCurrentBusinessId(): string {
+  const id = getCurrentBusinessId();
+  if (!id) {
     throw new Error(
       "NO_BUSINESS_CONTEXT: no hay un negocio activo. Llama a setCurrentBusinessId() justo después de iniciar sesión."
     );
   }
-  return currentBusinessId;
+  return id;
+}
+
+export function setCurrentBranchId(branchId: string | null | undefined): void {
+  currentBranchId = branchId ?? null;
+}
+
+export function getCurrentBranchId(): string | undefined {
+  return currentBranchId ?? undefined;
 }
 
 /**

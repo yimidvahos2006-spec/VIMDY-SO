@@ -13,6 +13,7 @@ import {
 import { IRepository } from "../../infrastructure/di/repositories/IRepository";
 import { SaleRepository } from "../../infrastructure/di/repositories/SaleRepository";
 import { logWarning } from "../../infrastructure/logging/opsLogger";
+import { getCurrentBusinessId, getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
 
 import { CartEngine } from "./CartEngine";
 import { InventoryEngine } from "./InventoryEngine";
@@ -80,6 +81,8 @@ export interface CreateSaleItemInput {
   readonly quantity: number;
   /** Si se omite, se toma el precio vigente del catálogo de inventario. */
   readonly price?: number;
+  readonly note?: string;
+  readonly requiresKitchen?: boolean;
 }
 
 export interface DiscountInput {
@@ -129,6 +132,12 @@ export interface CreateSaleInput {
   readonly waiterId?: string;
   /** Prioridad manual elegida al crear el pedido. Sin selección = "NORMAL". */
   readonly priority?: OrderPriority;
+  /**
+   * FASE 3 (Cocina / Mesas): si es true, createSale() NO envía la comanda
+   * a cocina. Lo usa TableEngine.closeTable() cuando el mesero ya la envió
+   * desde TableEngine.sendToKitchen(), para no duplicar la comanda.
+   */
+  readonly skipKitchen?: boolean;
 }
 
 export type SaleSource = PosCore | CartEngine | CreateSaleItemInput[];
@@ -233,7 +242,7 @@ export class SalesEngine {
     // descontar inventario ni volver a mandar comanda a cocina (eso
     // duplicaría stock descontado y comandas). Solo aplica cuando el
     // llamador pide explícitamente idempotencia pasando un id.
-    if (input.id) {
+    if (input.id && input.id.trim() !== "") {
       const existing = await this.saleRepository.findById(input.id);
       if (existing) {
         return existing;
@@ -255,7 +264,15 @@ export class SalesEngine {
     // Configuracion > Impuestos) en vez del valor que quedó congelado en
     // this.config al arrancar la app, para que un cambio de IVA se refleje
     // de inmediato en la próxima venta sin reiniciar.
-    const taxRate = input.taxRate ?? companyConfigStore.get().tax / 100;
+    const taxRate = input.taxRate ?? (() => {
+      const rates = resolvedItems
+        .map((item) => item.taxRate)
+        .filter((rate): rate is number => typeof rate === "number");
+      if (rates.length === resolvedItems.length && rates.every((rate) => rate === rates[0])) {
+        return rates[0];
+      }
+      return companyConfigStore.get().tax / 100;
+    })();
     const tax = this.calculateTax(subtotal, taxRate);
     const discount = this.calculateDiscount(subtotal, input.discount);
     const deliveryFee =
@@ -290,7 +307,9 @@ export class SalesEngine {
       waiterId: input.waiterId,
       deliveryAddress: input.deliveryAddress,
       notes: input.notes,
-      priority: input.priority ?? "NORMAL"
+      priority: input.priority ?? "NORMAL",
+      businessId: getCurrentBusinessId() ?? undefined,
+      branchId: getCurrentBranchId() ?? undefined
     };
 
     await this.updateInventory(
@@ -299,11 +318,18 @@ export class SalesEngine {
       "DECREASE"
     );
 
-    // saveSale() y sendToKitchen() escriben a tablas distintas (sales y
-    // kitchen_orders, sin foreign key entre ellas) y ambas solo necesitan
-    // el objeto `sale` ya armado en memoria — no hay razón de negocio para
-    // que una espere a la otra. Antes iban en fila; ahora van a la vez.
-    await Promise.all([this.saveSale(sale), this.sendToKitchen(sale)]);
+    let kitchenOrderCreated = false;
+
+    try {
+      await this.saveSale(sale);
+      if (!input.skipKitchen) {
+        const kitchenOrder = await this.sendToKitchen(sale);
+        kitchenOrderCreated = kitchenOrder !== null;
+      }
+    } catch (error) {
+      await this.rollbackFailedSaleCreation(sale, kitchenOrderCreated);
+      throw error;
+    }
 
     // generateEvents() sí necesita que updateInventory() ya haya corrido
     // (revisa alertas de stock bajo sobre el inventario ya descontado), por
@@ -321,6 +347,41 @@ export class SalesEngine {
     ]);
 
     return sale;
+  }
+
+  private async rollbackFailedSaleCreation(sale: Sale, kitchenOrderCreated: boolean): Promise<void> {
+    const rollbackReason = `Reversión automática: falló la creación de la venta ${sale.code ?? sale.id}`;
+    const rollbackErrors: unknown[] = [];
+
+    if (kitchenOrderCreated) {
+      try {
+        await this.kitchen.delete(sale.id);
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError);
+      }
+    }
+
+    try {
+      await this.saleRepository.delete(sale.id);
+    } catch (rollbackError) {
+      rollbackErrors.push(rollbackError);
+    }
+
+    try {
+      await this.updateInventory(sale.items, rollbackReason, "INCREASE");
+    } catch (rollbackError) {
+      rollbackErrors.push(rollbackError);
+    }
+
+    if (rollbackErrors.length > 0) {
+      logWarning(
+        `Rollback parcial de la venta ${sale.id}: no se completaron todos los pasos de reversión.`,
+        {
+          category: "sales",
+          context: { saleId: sale.id, rollbackErrors }
+        }
+      );
+    }
   }
 
   /**
@@ -378,6 +439,10 @@ export class SalesEngine {
     taxRate?: number;
     notes?: string;
     priority?: OrderPriority;
+    /**
+     * FASE 3 (Cocina / Mesas): ver CreateSaleInput.skipKitchen.
+     */
+    skipKitchen?: boolean;
   }): Promise<Sale> {
     const source = params.source ?? this.posCore;
     const items = this.extractItems(source);
@@ -394,7 +459,8 @@ export class SalesEngine {
       tip: params.tip,
       taxRate: params.taxRate,
       notes: params.notes,
-      priority: params.priority
+      priority: params.priority,
+      skipKitchen: params.skipKitchen
     });
 
     this.clearSource(source);
@@ -545,7 +611,7 @@ export class SalesEngine {
         return;
       }
 
-      if (product.recipe && product.recipe.length > 0) {
+      if (product.recipe && product.recipe.length > 0 && product.productionMode !== 'BATCH') {
         for (const ingredient of product.recipe) {
           const needed = ingredient.quantity * item.quantity;
           const current = ingredientNeeded.get(ingredient.productId) ?? {
@@ -609,10 +675,15 @@ export class SalesEngine {
   ======================================================================= */
 
   public calculateSubtotal(items: SaleItem[]): number {
-    const subtotal = items.reduce(
-      (sum, item) => sum + item.price * item.quantity,
-      0
-    );
+    const subtotal = items.reduce((sum, item) => {
+      const itemTotal = item.price * item.quantity;
+      const itemDiscount = item.discount
+        ? item.discount.type === "PERCENT"
+          ? itemTotal * (item.discount.value / 100)
+          : Math.min(item.discount.value, itemTotal)
+        : 0;
+      return sum + itemTotal - itemDiscount;
+    }, 0);
 
     return roundMoney(subtotal, companyConfigStore.get().currency);
   }
@@ -813,16 +884,26 @@ export class SalesEngine {
     // hay algo que revertir ahí.
     const wasPaid = sale.status === "PAID";
 
+    const alreadyRefunded = this.getRefundedQuantities(sale);
+    const remainingItems: SaleItem[] = sale.items
+      .map(item => ({
+        ...item,
+        quantity: item.quantity - (alreadyRefunded[item.productId] ?? 0)
+      }))
+      .filter(item => item.quantity > 0);
+
     await this.updateInventory(
-      sale.items,
+      remainingItems,
       `Cancelación venta ${sale.code ?? sale.id}: ${reason}`,
       "INCREASE"
     );
 
     try {
       await this.kitchen.updateStatus(sale.id, "CANCELADO");
-    } catch {
-      // La comanda pudo no haberse registrado en cocina; se ignora de forma segura.
+    } catch (kitchenError) {
+      logWarning(`No se pudo cancelar la comanda en cocina para venta ${sale.id}`, {
+        context: { error: String(kitchenError) }
+      });
     }
 
     const cancelled = await this.updateSale({
@@ -833,6 +914,11 @@ export class SalesEngine {
 
     if (wasPaid) {
       this.reverseDashboardForSale(sale);
+      await this.cash.registerExpense(
+        sale.total,
+        `Cancelación venta ${sale.code ?? sale.id}: ${reason}`,
+        `sale-cancel-${sale.id}`
+      );
     }
 
     await this.updateDashboard();
@@ -1217,6 +1303,33 @@ export class SalesEngine {
      PAGO, RECIBO Y COCINA
   ======================================================================= */
 
+  private async ensureReceiptForPaidSale(
+    sale: Sale,
+    method: PaymentMethod,
+    options: PaymentOptions = {}
+  ): Promise<void> {
+    const existing = await this.getReceiptBySaleId(sale.id);
+    if (existing) {
+      return;
+    }
+
+    try {
+      await this.generateReceipt(
+        sale,
+        sale.customerId ?? "Cliente General",
+        sale.cashierId ?? "Administrador",
+        method,
+        options.received ?? sale.total,
+        sale.discount ?? 0
+      );
+    } catch (error) {
+      logWarning("No se pudo generar el recibo de la venta pagada", {
+        category: "sales",
+        context: { saleId: sale.id, error: String(error) }
+      });
+    }
+  }
+
   /**
    * Registra el cobro de una venta: procesa el pago, ingresa el dinero
    * a caja, marca la venta como pagada y aplica fidelización al cliente.
@@ -1245,36 +1358,30 @@ export class SalesEngine {
 
     const paymentResult = this.processPayment(current, method, options);
 
-    // Los 4 pasos de abajo usan datos que ya existen en `current` desde
-    // antes de empezar (total, code, cashierId, customerId, id) — ninguno
-    // depende del resultado de otro, así que van a la vez. updateCustomer y
-    // audit.log usan `current` (no `updatedSale`) a propósito: el único
-    // cambio entre ambos es status/paymentMethod, que ninguno de los dos
-    // lee.
-    //
-    // El movimiento de caja usa un id DETERMINÍSTICO (`sale-payment-<id>`,
-    // no aleatorio): si por una condición de carrera dos llamadas a
-    // registerPayment para la MISMA venta llegan a correr a la vez (ej. dos
-    // pestañas, o un reintento que alcanzó a pasar el check de arriba antes
-    // de que el primero terminara de escribir), el upsert por id en
-    // SupabaseRepository.save() pisa el mismo movimiento en vez de crear
-    // dos — el dinero registrado en caja no se duplica aunque el registro
-    // de auditoría sí pueda quedar dos veces en ese caso límite, que es
-    // inofensivo.
+    const changeExpense = paymentResult.change > 0
+      ? this.cash.registerExpense(
+          paymentResult.change,
+          `Cambio venta ${current.code ?? current.id}`,
+          `sale-change-${current.id}`
+        )
+      : Promise.resolve(null);
+
     try {
+      await changeExpense;
+      await this.cash.registerIncome(
+        current.total,
+        `Venta ${current.code ?? current.id} (${method})`,
+        method,
+        method === "MIXED" ? options.mixed?.cash ?? 0 : undefined,
+        `sale-payment-${current.id}`
+      );
+
       const [updatedSale] = await Promise.all([
         this.updateSale({
           ...current,
           status: "PAID",
           paymentMethod: method
         }),
-        this.cash.registerIncome(
-          current.total,
-          `Venta ${current.code ?? current.id} (${method})`,
-          method,
-          method === "MIXED" ? options.mixed?.cash ?? 0 : undefined,
-          `sale-payment-${current.id}`
-        ),
         this.updateCustomer(current.customerId, current),
         this.audit.log(
           current.cashierId ?? "system",
@@ -1282,7 +1389,8 @@ export class SalesEngine {
           "sales",
           `Venta ${current.code ?? current.id} cobrada (${method}) por $${current.total}.`,
           current.id
-        )
+        ),
+        this.ensureReceiptForPaidSale(current, method, options)
       ]);
 
       return { sale: updatedSale, payment: paymentResult };
@@ -1312,6 +1420,13 @@ export class SalesEngine {
   }
 
   /**
+   * Devuelve el recibo asociado a una venta, si ya existe.
+   */
+  public async getReceiptBySaleId(saleId: string): Promise<Receipt | null> {
+    return (await this.receipt.getByCode(saleId)) ?? null;
+  }
+
+  /**
    * Genera el recibo formal de una venta ya cobrada.
    */
   public async generateReceipt(
@@ -1321,7 +1436,7 @@ export class SalesEngine {
     paymentMethod: string,
     received: number,
     discount: number = sale.discount ?? 0,
-    taxRate: number = this.config.defaultTaxRate
+    taxRate: number = companyConfigStore.get().tax / 100
   ): Promise<Receipt> {
     return this.receipt.generate(
       sale,
@@ -1363,11 +1478,9 @@ export class SalesEngine {
 
     const kitchenItems = sale.items.filter(item => {
       const product = productMap.get(item.productId);
-      // Producto ya no existe en el catálogo (ej. borrado después de la
-      // venta): se trata como "sí requiere cocina" por seguridad, para
-      // no perder silenciosamente un item que sí necesitaba prepararse.
-      if (!product) return true;
-      return product.requiresKitchen !== false;
+      if (!product) return false;
+      if (product.isIngredient === true) return false;
+      return product.requiresKitchen === true;
     });
 
     if (kitchenItems.length === 0) {
@@ -1382,7 +1495,10 @@ export class SalesEngine {
       origin: this.describeSaleOrigin(sale),
       waiterId: sale.waiterId,
       notes: sale.notes,
-      priority: sale.priority ?? "NORMAL"
+      priority: sale.priority ?? "NORMAL",
+      businessId: sale.businessId,
+      branchId: sale.branchId,
+      tableId: sale.tableId
     };
 
     // Antes: await this.kitchen.save(order) directo. Ver mismo comentario
@@ -1498,9 +1614,14 @@ export class SalesEngine {
         ? `Venta ${sale.code ?? sale.id}`
         : `Reembolso venta ${sale.code ?? sale.id}`;
 
+    const id =
+      direction === "IN"
+        ? `sale-payment-${sale.id}`
+        : `sale-refund-${sale.id}`;
+
     return direction === "IN"
-      ? await this.cash.registerIncome(amount, description, sale.paymentMethod as CashMovement["paymentMethod"])
-      : await this.cash.registerExpense(amount, description);
+      ? await this.cash.registerIncome(amount, description, sale.paymentMethod as CashMovement["paymentMethod"], undefined, id)
+      : await this.cash.registerExpense(amount, description, id);
   }
 
   /**
@@ -1674,7 +1795,9 @@ export class SalesEngine {
     return items.map((item, index) => ({
       productId: item.productId,
       quantity: item.quantity,
-      price: item.price ?? lookups[index]?.price ?? 0
+      price: item.price ?? lookups[index]?.price ?? 0,
+      note: item.note,
+      requiresKitchen: item.requiresKitchen
     }));
   }
 
@@ -1697,7 +1820,8 @@ export class SalesEngine {
         return this.payment.payQR(sale.total, options.reference ?? "");
 
       case "MIXED":
-        return this.payment.payMixed(sale.total, options.mixed ?? {});
+        return this.payment.payMixed(sale.total, options.mixed ?? {}, options.reference ?? ""
+        );
 
       default:
         throw new Error("UNSUPPORTED_PAYMENT_METHOD");
@@ -1712,7 +1836,9 @@ export class SalesEngine {
     return source.getItems().map(item => ({
       productId: item.productId,
       quantity: item.quantity,
-      price: item.price
+      price: item.price,
+      note: item.note,
+      requiresKitchen: item.requiresKitchen
     }));
   }
 

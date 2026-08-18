@@ -6,6 +6,7 @@ import { weightEntryStore } from "../../../core/store/weightEntryStore";
 import { useCart } from "../../../core/store/useCart";
 import { toastStore } from "../../../core/store/toastStore";
 import { useTranslation } from "../../../core/i18n/useTranslation";
+import { roundWeight } from "../../../core/utils/weightUnits";
 
 /**
  * PosWeightEntryModal
@@ -72,7 +73,7 @@ export function PosWeightEntryModal() {
       requiresKitchen: product.requiresKitchen ?? true,
       unit: product.unit,
       soldByWeight: true,
-      quantity: parsedWeight
+      quantity: roundWeight(parsedWeight)
     });
 
     close();

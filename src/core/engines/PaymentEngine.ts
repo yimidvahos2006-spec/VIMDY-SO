@@ -125,6 +125,10 @@ export class PaymentEngine {
 
   ): PaymentResult {
 
+    if (!reference.trim()) {
+      throw new Error("PAYMENT_REFERENCE_REQUIRED");
+    }
+
     return {
 
       success: true,
@@ -157,6 +161,10 @@ export class PaymentEngine {
     reference: string
 
   ): PaymentResult {
+
+    if (!reference.trim()) {
+      throw new Error("PAYMENT_REFERENCE_REQUIRED");
+    }
 
     return {
 
@@ -191,6 +199,10 @@ export class PaymentEngine {
 
   ): PaymentResult {
 
+    if (!reference.trim()) {
+      throw new Error("PAYMENT_REFERENCE_REQUIRED");
+    }
+
     return {
 
       success: true,
@@ -220,7 +232,9 @@ export class PaymentEngine {
 
     total: number,
 
-    payments: MixedPayment
+    payments: MixedPayment,
+
+    reference?: string
 
   ): PaymentResult {
 
@@ -240,6 +254,15 @@ export class PaymentEngine {
 
     }
 
+    const needsReference =
+      (payments.card ?? 0) > 0 ||
+      (payments.transfer ?? 0) > 0 ||
+      (payments.qr ?? 0) > 0;
+
+    if (needsReference && !reference?.trim()) {
+      throw new Error("PAYMENT_REFERENCE_REQUIRED");
+    }
+
     return {
 
       success: true,
@@ -251,6 +274,8 @@ export class PaymentEngine {
       received,
 
       change: this.calculateChange(total, received),
+
+      reference,
 
       message: "Pago mixto aprobado.",
 

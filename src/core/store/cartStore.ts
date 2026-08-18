@@ -74,14 +74,19 @@ class CartStore extends ObservableStore<CartItem[]> {
     const { quantity: initialQuantity, ...rest } = item;
 
     const existing = this.items.find(
-      (i) => i.id === rest.id && i.note === rest.note && i.discount === rest.discount
+      (i) =>
+        i.id === rest.id &&
+        i.note === rest.note &&
+        i.discount === rest.discount &&
+        i.soldByWeight === rest.soldByWeight
     );
 
     if (existing) {
       const nextQuantity = existing.quantity + (initialQuantity ?? 1);
       existing.quantity = existing.soldByWeight ? roundWeight(nextQuantity) : nextQuantity;
     } else {
-      this.items.push({ ...rest, quantity: initialQuantity ?? 1 });
+      const quantity = rest.soldByWeight ? roundWeight(initialQuantity ?? 1) : initialQuantity ?? 1;
+      this.items.push({ ...rest, quantity });
     }
 
     this.sync();

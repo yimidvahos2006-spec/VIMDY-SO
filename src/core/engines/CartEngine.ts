@@ -3,7 +3,7 @@ import { Product, SaleItem } from '../entities/Entities';
 export class CartEngine {
   private items: SaleItem[] = [];
 
-  public addItem(product: Product, quantity = 1): void {
+  public addItem(product: Product, quantity = 1, note?: string): void {
     const index = this.items.findIndex(
       item => item.productId === product.id
     );
@@ -13,7 +13,8 @@ export class CartEngine {
 
       const updated: SaleItem = {
         ...current,
-        quantity: current.quantity + quantity
+        quantity: current.quantity + quantity,
+        ...(note ? { note } : {})
       };
 
       this.items = this.items.map((item, i) =>
@@ -29,9 +30,7 @@ export class CartEngine {
         productId: product.id,
         quantity,
         price: product.price,
-        // Se captura aquí, no se recalcula después: TableEngine.sendToKitchen
-        // filtra sobre este valor sin volver a consultar InventoryEngine
-        // (tiene prohibido tocarlo directamente — ver TableEngine.ts).
+        ...(note ? { note } : {}),
         requiresKitchen: product.requiresKitchen ?? true
       }
     ];

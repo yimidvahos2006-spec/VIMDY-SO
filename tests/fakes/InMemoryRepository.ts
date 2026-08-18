@@ -27,8 +27,15 @@ export class InMemoryRepository<T extends { id: string; version?: number }>
   implements IRepository<T>
 {
   private readonly rows = new Map<string, T>();
+  private scopeBusinessId?: string;
+  private scopeBranchId?: string;
 
   constructor(private readonly entityName: string = "entity") {}
+
+  public setScope(businessId?: string, branchId?: string): void {
+    this.scopeBusinessId = businessId;
+    this.scopeBranchId = branchId;
+  }
 
   /** Clona profundo para que los tests no puedan mutar el "disco" por accidente. */
   private clone(item: T): T {
@@ -36,7 +43,14 @@ export class InMemoryRepository<T extends { id: string; version?: number }>
   }
 
   public async findAll(): Promise<T[]> {
-    return Array.from(this.rows.values()).map((row) => this.clone(row));
+    let results = Array.from(this.rows.values()).map((row) => this.clone(row));
+    if (this.scopeBusinessId) {
+      results = results.filter((item: any) => item.businessId === this.scopeBusinessId || !item.businessId);
+    }
+    if (this.scopeBranchId) {
+      results = results.filter((item: any) => item.branchId === this.scopeBranchId || !item.branchId);
+    }
+    return results;
   }
 
   public async findById(id: string): Promise<T | null> {

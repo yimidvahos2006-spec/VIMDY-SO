@@ -12,6 +12,21 @@ export interface SaleStockItem {
   quantity: number;
 }
 
+export function isCompatibleRecipeQuantity(unit: string | undefined, quantity: number): boolean {
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    return false;
+  }
+
+  const discreteUnits = new Set(["unidad", "servicio", "paquete", "caja"]);
+  const ingredientUnit = (unit ?? "unidad").trim().toLowerCase();
+
+  if (discreteUnits.has(ingredientUnit)) {
+    return Number.isInteger(quantity);
+  }
+
+  return true;
+}
+
 /** Datos que el formulario de Productos puede enviar al crear/editar. */
 export interface ProductInput {
   name: string;
@@ -49,6 +64,8 @@ export interface ProductInput {
   extras?: readonly ProductExtraOption[];
   /** BLOQUEANTE #2 (auditoría Fase 2): ver Product.trackStock. `false` = producto tipo Servicio. */
   trackStock?: boolean;
+  /** Marca explícita de productos usados solo como ingredientes del inventario. */
+  isIngredient?: boolean;
 }
 
 export class InventoryEngine {
@@ -132,7 +149,21 @@ export class InventoryEngine {
     }
   }
 
-  private validate(input: ProductInput) {
+  private async assertUniqueName(name: string | undefined, excludeId?: string) {
+    const trimmed = name?.trim();
+    if (!trimmed) return;
+
+    const products = await this.repository.findAll();
+    const clash = products.some(
+      (p) => p.id !== excludeId && p.name.trim().toLowerCase() === trimmed.toLowerCase()
+    );
+
+    if (clash) {
+      throw new Error('NOMBRE_DUPLICADO');
+    }
+  }
+
+  private async validate(input: ProductInput) {
     if (!input.name || !input.name.trim()) {
       throw new Error('NOMBRE_REQUERIDO');
     }
@@ -159,6 +190,33 @@ export class InventoryEngine {
 
     if (input.taxRate !== undefined && (input.taxRate < 0 || input.taxRate > 100)) {
       throw new Error('IVA_INVALIDO');
+    }
+
+    if (input.recipe && input.recipe.length > 0) {
+      const allProducts = await this.repository.findAll();
+      const ingredientMap = new Map(allProducts.map((p) => [p.id, p]));
+      const seenIngredientIds = new Set<string>();
+
+      for (const item of input.recipe) {
+        const ingredient = item.productId ? ingredientMap.get(item.productId) : undefined;
+        if (!ingredient) {
+          throw new Error('INGREDIENTE_INEXISTENTE');
+        }
+
+        if (seenIngredientIds.has(item.productId)) {
+          throw new Error('INGREDIENTE_DUPLICADO');
+        }
+        seenIngredientIds.add(item.productId);
+
+        const quantity = Number(item.quantity);
+        if (!Number.isFinite(quantity) || quantity <= 0) {
+          throw new Error('INGREDIENTE_CANTIDAD_INVALIDA');
+        }
+
+        if (!isCompatibleRecipeQuantity(ingredient.unit, quantity)) {
+          throw new Error(`La cantidad de "${ingredient.name}" debe ser un número entero porque se mide por unidad.`);
+        }
+      }
     }
   }
 
@@ -196,7 +254,8 @@ export class InventoryEngine {
 
   /** Crea un producto nuevo. Este es el punto de entrada real del formulario "Nuevo producto". */
   public async createProduct(input: ProductInput, performedBy?: string): Promise<Product> {
-    this.validate(input);
+    await this.validate(input);
+    await this.assertUniqueName(input.name, undefined);
     await this.assertUnique('sku', input.sku);
     await this.assertUnique('barcode', input.barcode);
 
@@ -206,6 +265,9 @@ export class InventoryEngine {
       input.categoryId,
       input.requiresKitchen
     );
+
+    const effectiveRequiresKitchen = input.isIngredient ? false : requiresKitchen;
+    const effectiveTrackStock = input.isIngredient ? true : (input.trackStock ?? true);
 
     const product: Product = {
       id: crypto.randomUUID(),
@@ -227,22 +289,14 @@ export class InventoryEngine {
       favorite: input.favorite ?? false,
       aliases: input.aliases,
       recipe: input.recipe && input.recipe.length > 0 ? input.recipe : undefined,
-      // BLOQUEANTE (auditoría Fase 2 — Panadería): default explícito
-      // 'ON_DEMAND' para que un producto con receta que nunca pasó por
-      // el selector nuevo del formulario siga comportándose exactamente
-      // como antes de este campo (ingredientes se descuentan en cada venta).
       productionMode: input.productionMode ?? 'ON_DEMAND',
-      // Paso 3.2: ya no es un `true` fijo — sale de
-      // resolveRequiresKitchenDefault(), que hereda el default de la
-      // categoría cuando el formulario/import no mandó el flag a mano.
-      requiresKitchen,
+      requiresKitchen: effectiveRequiresKitchen,
       estimatedPrepMinutes: input.estimatedPrepMinutes,
       printStationOverride: input.printStationOverride?.trim() || undefined,
       sizes: input.sizes && input.sizes.length > 0 ? input.sizes : undefined,
       extras: input.extras && input.extras.length > 0 ? input.extras : undefined,
-      // BLOQUEANTE #2: default true (maneja stock) para no cambiar el
-      // comportamiento de siempre cuando el formulario no manda el flag.
-      trackStock: input.trackStock ?? true,
+      trackStock: effectiveTrackStock,
+      isIngredient: input.isIngredient ?? false,
       lastUpdated: now,
       createdAt: now
     };
@@ -275,7 +329,8 @@ export class InventoryEngine {
       throw new Error('PRODUCT_NOT_FOUND');
     }
 
-    this.validate(input);
+    await this.validate(input);
+    await this.assertUniqueName(input.name, id);
     await this.assertUnique('sku', input.sku, id);
     await this.assertUnique('barcode', input.barcode, id);
 
@@ -309,7 +364,7 @@ export class InventoryEngine {
             : undefined
           : current.recipe,
       productionMode: input.productionMode ?? current.productionMode ?? 'ON_DEMAND',
-      requiresKitchen: input.requiresKitchen ?? current.requiresKitchen ?? true,
+      requiresKitchen: input.isIngredient ? false : (input.requiresKitchen ?? current.requiresKitchen ?? true),
       estimatedPrepMinutes: input.estimatedPrepMinutes ?? current.estimatedPrepMinutes,
       printStationOverride:
         input.printStationOverride !== undefined
@@ -326,7 +381,8 @@ export class InventoryEngine {
       // siempre manda este flag explícitamente (ver InventoryDashboard
       // handleSave), así que si viene definido gana; si no, se conserva
       // el actual (ej. ediciones desde otro flujo que no lo toca).
-      trackStock: input.trackStock ?? current.trackStock ?? true,
+      trackStock: input.isIngredient ? true : (input.trackStock ?? current.trackStock ?? true),
+      isIngredient: input.isIngredient ?? current.isIngredient ?? false,
       lastUpdated: new Date()
     };
 
@@ -334,12 +390,31 @@ export class InventoryEngine {
     return updated;
   }
 
-  /** Elimina un producto de forma definitiva (no soft-delete: el negocio pidió borrado real). */
+  /**
+   * Elimina o desactiva un producto según su riesgo. Si el producto tiene
+   * dependencia de receta o historial de movimientos, se desactiva para
+   * preservar trazabilidad. Solo se borra físicamente cuando no hay riesgo.
+   */
   public async deleteProduct(id: string): Promise<void> {
     const current = await this.repository.findById(id);
 
     if (!current) {
       throw new Error('PRODUCT_NOT_FOUND');
+    }
+
+    const allProducts = await this.repository.findAll();
+    const isUsedInRecipe = allProducts.some(
+      (product) => product.id !== id && product.recipe?.some((item) => item.productId === id)
+    );
+    const hasInventoryHistory = (await this.kardex.getHistory(id)).length > 0;
+
+    if (isUsedInRecipe) {
+      throw new Error('PRODUCT_IN_USE');
+    }
+
+    if (hasInventoryHistory) {
+      await this.repository.update({ ...current, active: false, lastUpdated: new Date() });
+      return;
     }
 
     await this.repository.delete(id);
@@ -373,10 +448,6 @@ export class InventoryEngine {
 
     const now = new Date();
 
-    // Solo se incluyen los campos que sí cambian: igual que antes, si
-    // purchasePrice no viene definido o no hay supplierId, esos campos del
-    // producto quedan intactos (adjustStock solo fusiona lo que se le pasa
-    // aquí, nunca pisa el resto del producto).
     const extraFields: Record<string, unknown> = { lastUpdated: now.toISOString() };
     if (purchasePrice !== undefined) {
       extraFields.purchasePrice = purchasePrice;
@@ -385,7 +456,7 @@ export class InventoryEngine {
       extraFields.lastPurchaseDate = now.toISOString();
     }
 
-    const updated = await this.repository.adjustStock(id, quantity, extraFields);
+    const product = await this.repository.findById(id);
 
     let supplierName: string | undefined;
     if (supplierId) {
@@ -403,8 +474,10 @@ export class InventoryEngine {
       supplierName,
       undefined,
       movementId,
-      updated.name
+      product?.name
     );
+
+    const updated = await this.repository.adjustStock(id, quantity, extraFields);
   }
 
   /**
@@ -425,27 +498,7 @@ export class InventoryEngine {
       return;
     }
 
-    // Antes: leer stock -> comparar en JavaScript -> escribir. Entre la
-    // lectura y la escritura, otra venta concurrente podía colarse y
-    // descontar el mismo stock, permitiendo sobreventa.
-    //
-    // Ahora: adjustStock() hace la verificación Y el descuento en una sola
-    // sentencia SQL (ver adjust_product_stock en supabase/schema.sql), con
-    // bloqueo de fila real de Postgres. Lanza 'PRODUCT_NOT_FOUND' o
-    // 'INSUFFICIENT_STOCK' — mismos mensajes que antes, así que
-    // consumeForSale() (que atrapa y revierte estos errores) no necesitó
-    // cambios en su manejo de errores.
-    const updated = await this.repository.adjustStock(
-      id,
-      -quantity,
-      { lastUpdated: new Date().toISOString() },
-      // BLOQUEANTE #4 (auditoría Fase 2): el switch "Permitir stock
-      // negativo" de Ajustes (companyConfigStore) vive fuera de este
-      // engine, así que hasta ahora nunca llegaba a la validación real
-      // (la función SQL adjust_product_stock rechazaba negativos siempre,
-      // sin importar el switch). Ahora sí se lee y se propaga.
-      companyConfigStore.get().allowNegativeStock
-    );
+    const product = await this.repository.findById(id);
 
     await this.kardex.record(
       id,
@@ -457,7 +510,14 @@ export class InventoryEngine {
       undefined,
       lossCategory,
       movementId,
-      updated.name
+      product?.name
+    );
+
+    const updated = await this.repository.adjustStock(
+      id,
+      -quantity,
+      { lastUpdated: new Date().toISOString() },
+      companyConfigStore.get().allowNegativeStock
     );
   }
 
@@ -493,7 +553,10 @@ export class InventoryEngine {
           current.recipeNames.add(product.name);
           targets.set(ingredient.productId, current);
         }
-      } else if (product?.trackStock !== false) {
+      } else if (
+        product?.trackStock !== false ||
+        (product?.recipe && product.recipe.length > 0 && product.productionMode === 'BATCH')
+      ) {
         const current = targets.get(item.productId) ?? { quantity: 0, recipeNames: new Set<string>() };
         current.quantity += item.quantity;
         targets.set(item.productId, current);
@@ -509,6 +572,9 @@ export class InventoryEngine {
       // cobro. Los productos sin `trackStock` definido (undefined) siguen
       // comportándose como siempre (manejan stock), para no romper nada
       // ya creado.
+      // Nota: un producto con receta en modo BATCH siempre debe manejar
+      // stock propio, incluso si por algún dato legacy `trackStock` quedó
+      // marcado como false.
     }
 
     return [...targets.entries()].map(([productId, data]) => ({
@@ -657,10 +723,16 @@ export class InventoryEngine {
             performedBy
           );
         }
-      } else if (product?.trackStock !== false) {
+      } else if (
+        product?.trackStock !== false ||
+        (product?.recipe && product.recipe.length > 0 && product.productionMode === 'BATCH')
+      ) {
         // Simetría con buildConsumptionTargets: si trackStock === false,
         // consumeForSale nunca descontó este producto, así que reponerlo
         // aquí inflaría su stock sin motivo.
+        // En cambio, un producto con receta BATCH maneja stock propio y se
+        // debe restaurar incluso si `trackStock` quedó false por un caso
+        // legacy/incorrecto.
         await this.increaseStock(item.productId, item.quantity, reason, performedBy);
       }
     }

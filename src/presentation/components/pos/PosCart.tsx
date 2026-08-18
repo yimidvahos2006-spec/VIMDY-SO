@@ -7,7 +7,6 @@ import { usePayment } from "../../../core/store/usePayment";
 import { useProductCatalog } from "../../../core/store/useProductCatalog";
 import { paymentStore, DiscountType, TipType } from "../../../core/store/paymentStore";
 import { container } from "../../../infrastructure/di/CompositionRoot";
-import { PosCustomer } from "./PosCustomer";
 import { useTranslation } from "../../../core/i18n/useTranslation";
 import { formatMoney } from "../../../core/utils/formatMoney";
 import { companyConfigStore } from "../../../core/store/companyConfigStore";
@@ -394,12 +393,17 @@ export function PosCart() {
         )}
       </div>
 
-      {/* Bloque inferior: cliente -> observaciones -> descuento (el orden
-          real de cobro es Cliente -> Descuento -> Método -> Recibido ->
-          Cambio -> Total -> Cobrar, así que cliente va primero) */}
+      {/* Bloque inferior: observaciones -> descuento (el orden real de
+          cobro es Cliente -> Descuento -> Método -> Recibido -> Cambio ->
+          Total -> Cobrar; el cliente ya NO va acá — la tarjeta completa
+          ocupaba espacio vertical que le hacía falta a la lista de
+          productos en carritos largos. Ahora vive como botón compacto en
+          la barra de pestañas de Caja (ver PosCustomer compact en
+          CashOperationsPage.tsx), pero sigue siendo el mismo cliente de
+          siempre: usePayment().customerId/customerName no cambió, así que
+          processSale() sigue facturando al cliente que se haya elegido
+          ahí, exactamente igual que antes. */}
       <div className="px-4 pb-4 space-y-4">
-        <PosCustomer />
-
         <div>
           <label className="text-vimdy-micro text-vimdy-text-secondary">{t("pos.cart.observations")}</label>
           <textarea

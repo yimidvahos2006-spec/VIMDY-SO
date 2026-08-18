@@ -1,4 +1,4 @@
-import { supabase, getCurrentBusinessId } from "./supabaseClient";
+import { supabase, requireCurrentBusinessId } from "./supabaseClient";
 
 /* ===========================================================================
    backupService
@@ -36,7 +36,7 @@ export interface BackupSnapshot {
  * garantizan que solo se lea lo que le pertenece al negocio logueado.
  */
 export async function buildBackupSnapshot(): Promise<BackupSnapshot> {
-  const businessId = getCurrentBusinessId();
+  const businessId = requireCurrentBusinessId();
   const tables: Record<string, unknown[]> = {};
 
   for (const tableName of BACKUP_TABLES) {

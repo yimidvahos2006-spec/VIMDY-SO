@@ -4,6 +4,7 @@ import { GlassCard } from "../ui/GlassCard";
 import { VimdyButton } from "../ui/VimdyButton";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { getDefaultCategoriesForBusinessType } from "../../../core/config/onboardingCategories";
+import { requiresKitchenByDefaultForBusinessType } from "../../../core/config/businessTypes";
 import type { BusinessTypeId } from "../../../core/config/businessTypes";
 import type { Category } from "../../../core/entities/Entities";
 
@@ -44,7 +45,10 @@ export function CategoriesStep({ businessType, onSaved }: CategoriesStepProps) {
 
         for (const name of names) {
           if (existingNames.has(name.toLowerCase())) continue;
-          const category = await container.categoryEngine.create({ name });
+          const category = await container.categoryEngine.create({
+            name,
+            requiresKitchenByDefault: requiresKitchenByDefaultForBusinessType(businessType)
+          });
           if (cancelled) return;
           result.push(category);
         }

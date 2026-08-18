@@ -17,6 +17,7 @@ import { Receipt } from "./ReceiptEngine";
 import { vimdyCore } from "../VimdyCore";
 import { kitchenOutputModeStore } from "../store/kitchenOutputModeStore";
 import { createKitchenOutput } from "../services/KitchenOutputFactory";
+import { getCurrentBusinessId, getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
 
 /* ===========================================================================
    OrderEngine
@@ -107,7 +108,9 @@ export class OrderEngine {
       notes: input.notes,
       status: "DRAFT",
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
+      businessId: getCurrentBusinessId() ?? undefined,
+      branchId: getCurrentBranchId() ?? undefined
     };
 
     await this.orderRepository.save(order);
@@ -124,11 +127,28 @@ export class OrderEngine {
       throw new Error("ORDER_NOT_FOUND");
     }
 
+    const currentBusinessId = getCurrentBusinessId();
+    const currentBranchId = getCurrentBranchId();
+    if (currentBusinessId && order.businessId && order.businessId !== currentBusinessId) {
+      throw new Error("ORDER_NOT_FOUND");
+    }
+    if (currentBranchId && order.branchId && order.branchId !== currentBranchId) {
+      throw new Error("ORDER_NOT_FOUND");
+    }
+
     return order;
   }
 
   public async getAllOrders(): Promise<Order[]> {
-    return this.orderRepository.findAll();
+    const orders = await this.orderRepository.findAll();
+    const currentBusinessId = getCurrentBusinessId();
+    const currentBranchId = getCurrentBranchId();
+
+    return orders.filter(order => {
+      if (currentBusinessId && order.businessId && order.businessId !== currentBusinessId) return false;
+      if (currentBranchId && order.branchId && order.branchId !== currentBranchId) return false;
+      return true;
+    });
   }
 
   public async getActiveOrders(): Promise<Order[]> {
@@ -170,7 +190,9 @@ export class OrderEngine {
         // Se captura aquí, no se recalcula después: sendToKitchen() filtra
         // sobre este valor sin volver a consultar InventoryEngine (tiene
         // prohibido tocarlo directamente — ver cabecera de este archivo).
-        requiresKitchen: input.product.requiresKitchen ?? true
+        // FASE 1: un ingrediente nunca debe entrar a cocina, sin importar
+        // lo que diga el flag del producto en ese momento.
+        requiresKitchen: !input.product.isIngredient && (input.product.requiresKitchen ?? true)
       }
     );
 
@@ -262,21 +284,31 @@ export class OrderEngine {
     // comanda (ver SaleItem.requiresKitchen, capturado en addItem()). Un
     // pedido de solo bebidas embotelladas, por ejemplo, no genera ticket
     // en Cocina.
-    const kitchenItems = order.items.filter(item => item.requiresKitchen !== false);
+    const previousOrders = await this.kitchen.getByOrderId(order.id);
+    const sentQuantities = new Map<string, number>();
+    for (const prev of previousOrders) {
+      for (const item of prev.items) {
+        sentQuantities.set(item.productId, (sentQuantities.get(item.productId) ?? 0) + item.quantity);
+      }
+    }
+
+    const kitchenItems = order.items
+      .filter(item => item.requiresKitchen === true)
+      .map(item => {
+        const sent = sentQuantities.get(item.productId) ?? 0;
+        if (item.quantity <= sent) return null;
+        return { ...item, quantity: item.quantity - sent };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
 
     if (kitchenItems.length === 0) {
       throw new Error(
-        "NOTHING_REQUIRES_KITCHEN: ningún producto de este pedido necesita preparación en cocina."
+        "NOTHING_REQUIRES_KITCHEN: ningún producto nuevo de este pedido necesita preparación en cocina."
       );
     }
 
     const kitchenOrderId = crypto.randomUUID();
 
-    // Antes: await this.kitchen.save({...}) directo, que siempre iba a
-    // pantalla. Ahora, el mismo objeto se envía a través del KitchenOutput
-    // que corresponda según salidaCocina (ver 5.5) — hoy siempre pantalla
-    // en la práctica, porque es el default y ningún negocio de prueba usa
-    // impresora todavía.
     await createKitchenOutput(kitchenOutputModeStore.get(), this.kitchen).send({
       id: kitchenOrderId,
       items: kitchenItems,
@@ -284,7 +316,11 @@ export class OrderEngine {
       createdAt: new Date(),
       origin: this.describeOrderOrigin(order),
       waiterId: order.waiterId,
-      orderNumber: order.orderNumber
+      orderNumber: order.orderNumber,
+      businessId: getCurrentBusinessId(),
+      branchId: getCurrentBranchId() ?? undefined,
+      tableId: order.tableId,
+      orderId: order.id
     });
 
     const sent = await this.updateOrder(orderId, {
@@ -513,7 +549,7 @@ export class OrderEngine {
     return order;
   }
 
-  private async updateOrder(orderId: string, patch: Partial<Order>): Promise<Order> {
+  public async updateOrder(orderId: string, patch: Partial<Order>): Promise<Order> {
     const order = await this.getOrder(orderId);
 
     const updated: Order = {

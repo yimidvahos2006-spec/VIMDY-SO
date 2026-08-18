@@ -3,7 +3,8 @@ import {
   SaleItem,
   Product,
   Sale,
-  OrderPriority
+  OrderPriority,
+  Order
 } from "../entities/Entities";
 
 import { IRepository } from "../../infrastructure/di/repositories/IRepository";
@@ -12,12 +13,16 @@ import { isOptimisticLockError } from "../errors/OptimisticLockError";
 import { CartEngine } from "./CartEngine";
 import { SalesEngine, DiscountInput } from "./SalesEngine";
 import { KitchenEngine } from "./KitchenEngine";
+import { companyConfigStore } from "../store/companyConfigStore";
+import { OrderEngine } from "./OrderEngine";
 import { PaymentMethod, PaymentResult } from "./PaymentEngine";
 import { Receipt } from "./ReceiptEngine";
 
 import { vimdyCore } from "../VimdyCore";
+import { logWarning } from "../../infrastructure/logging/opsLogger";
 import { kitchenOutputModeStore } from "../store/kitchenOutputModeStore";
 import { createKitchenOutput } from "../services/KitchenOutputFactory";
+import { getCurrentBusinessId, getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
 
 /* ===========================================================================
    TableEngine
@@ -77,6 +82,8 @@ export interface CreateTableInput {
   readonly name: string;
   readonly capacity: number;
   readonly zone?: string;
+  readonly businessId?: string;
+  readonly branchId?: string;
 }
 
 export interface OpenTableInput {
@@ -85,12 +92,15 @@ export interface OpenTableInput {
   readonly waiterId?: string;
   readonly customerId?: string;
   readonly notes?: string;
+  readonly operationId?: string;
 }
 
 export interface AddProductInput {
   readonly tableId: string;
   readonly product: Product;
   readonly quantity?: number;
+  /** Nota/observación del mesero para este producto (ej: "sin arroz"). */
+  readonly note?: string;
 }
 
 export interface CloseTableInput {
@@ -119,8 +129,6 @@ export interface SplitBillResult {
   readonly total: number;
 }
 
-const DEFAULT_TAX_RATE = 0.19;
-
 /** Estados en los que una mesa NO tiene un pedido en curso editable. */
 const NOT_OPEN_STATUSES = new Set<Table["status"]>(["FREE", "CLOSED"]);
 
@@ -131,7 +139,8 @@ export class TableEngine {
   constructor(
     private readonly tableRepository: IRepository<Table>,
     private readonly kitchen: KitchenEngine,
-    private readonly sales: SalesEngine
+    private readonly sales: SalesEngine,
+    private readonly orders: OrderEngine
   ) {}
 
   /* =======================================================================
@@ -143,6 +152,8 @@ export class TableEngine {
 
     const table: Table = {
       id: crypto.randomUUID(),
+      businessId: input.businessId ?? getCurrentBusinessId(),
+      branchId: input.branchId ?? getCurrentBranchId() ?? undefined,
       name: input.name,
       capacity: input.capacity,
       peopleCount: 0,
@@ -179,12 +190,12 @@ export class TableEngine {
 
   public async getFreeTables(): Promise<Table[]> {
     const tables = await this.getAllTables();
-    return tables.filter(table => table.status === "FREE");
+    return tables.filter(table => table.status === "FREE" || table.status === "RESERVED");
   }
 
   public async getOccupiedTables(): Promise<Table[]> {
     const tables = await this.getAllTables();
-    return tables.filter(table => table.status !== "FREE" && table.status !== "CLOSED");
+    return tables.filter(table => table.status !== "FREE" && table.status !== "RESERVED" && table.status !== "CLOSED");
   }
 
   /* =======================================================================
@@ -201,23 +212,58 @@ export class TableEngine {
     const table = await this.getTable(input.tableId);
 
     if (table.status !== "FREE" && table.status !== "RESERVED") {
+      if (input.operationId && table.openOperationId === input.operationId) {
+        return table;
+      }
+
       throw new Error(
         `TABLE_NOT_AVAILABLE: la mesa "${table.name}" está en estado "${table.status}".`
       );
     }
 
-    const opened = await this.updateTable(table.id, {
-      status: "BUSY",
-      peopleCount: input.peopleCount,
-      waiterId: input.waiterId,
-      customerId: input.customerId,
-      notes: input.notes,
-      openedAt: new Date()
-    });
+    // Paso 1: crear el Order primero. Si falla, no tocamos la mesa.
+    let order: Order;
+    try {
+      order = await this.orders.createOrder({
+        source: "TABLE",
+        tableId: table.id,
+        waiterId: input.waiterId,
+        customerId: input.customerId,
+        notes: input.notes
+      });
+    } catch (orderError) {
+      throw new Error(
+        `ORDER_CREATION_FAILED: no se pudo crear el pedido para la mesa "${table.name}".`
+      );
+    }
 
-    this.emit(opened, "table.opened");
+    // Paso 2: abrir la mesa. Si falla, cancelar el Order para no dejarlo huérfano.
+    try {
+      const opened = await this.updateTable(table.id, {
+        status: "BUSY",
+        peopleCount: input.peopleCount,
+        waiterId: input.waiterId,
+        customerId: input.customerId,
+        notes: input.notes,
+        openedAt: new Date(),
+        openOperationId: input.operationId
+      });
 
-    return opened;
+      const withOrder = await this.updateTable(table.id, { orderId: order.id });
+
+      this.emit(withOrder, "table.opened");
+
+      return withOrder;
+    } catch (tableError) {
+      try {
+        await this.orders.updateOrder(order.id, { status: "CANCELLED" });
+      } catch (rollbackError) {
+        logWarning(`No se pudo cancelar el Order huérfano ${order.id} tras fallo en openTable`, {
+          context: { error: String(rollbackError) }
+        });
+      }
+      throw tableError;
+    }
   }
 
   public async reserveTable(tableId: string): Promise<Table> {
@@ -251,7 +297,7 @@ export class TableEngine {
    */
   public async addItem(input: AddProductInput): Promise<Table> {
     return this.mutateItems(input.tableId, cart =>
-      cart.addItem(input.product, input.quantity ?? 1)
+      cart.addItem(input.product, input.quantity ?? 1, input.note)
     );
   }
 
@@ -305,21 +351,29 @@ export class TableEngine {
       throw new Error("EMPTY_ORDER: no hay productos para enviar a cocina.");
     }
 
-    // Solo los productos que de verdad necesitan preparación entran a la
-    // comanda (ver SaleItem.requiresKitchen, capturado por CartEngine al
-    // agregar cada producto). Una gaseosa embotellada o una playera se
-    // cobran y se entregan directo — nunca generan un ticket en Cocina.
-    const kitchenItems = items.filter(item => item.requiresKitchen !== false);
+    const previousOrders = await this.kitchen.getByTableId(table.id);
+    const sentQuantities = new Map<string, number>();
+    for (const order of previousOrders) {
+      for (const item of order.items) {
+        sentQuantities.set(item.productId, (sentQuantities.get(item.productId) ?? 0) + item.quantity);
+      }
+    }
+
+    const kitchenItems = items
+      .filter(item => item.requiresKitchen === true)
+      .map(item => {
+        const sent = sentQuantities.get(item.productId) ?? 0;
+        if (item.quantity <= sent) return null;
+        return { ...item, quantity: item.quantity - sent };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
 
     if (kitchenItems.length === 0) {
       throw new Error(
-        "NOTHING_REQUIRES_KITCHEN: ningún producto de este pedido necesita preparación en cocina."
+        "NOTHING_REQUIRES_KITCHEN: ningún producto nuevo de este pedido necesita preparación en cocina."
       );
     }
 
-    // Antes: await this.kitchen.save({...}) directo. Ver mismo comentario
-    // en OrderEngine.sendToKitchen — esta es la ruta real que usa el
-    // mesero desde TableDetailPanel.
     await createKitchenOutput(kitchenOutputModeStore.get(), this.kitchen).send({
       id: crypto.randomUUID(),
       items: kitchenItems,
@@ -327,12 +381,14 @@ export class TableEngine {
       createdAt: new Date(),
       origin: table.name,
       waiterId: table.waiterId,
-      priority
+      priority,
+      businessId: table.businessId,
+      branchId: table.branchId,
+      tableId: table.id,
+      orderId: table.orderId
     });
 
-    if (table.status === "BUSY") {
-      await this.updateTable(tableId, { status: "WAITING_FOOD" });
-    }
+    await this.updateTable(tableId, { status: "CUENTA_SOLICITADA" });
 
     this.emit(await this.getTable(tableId), "table.sent_to_kitchen");
   }
@@ -437,7 +493,7 @@ export class TableEngine {
   }
 
   public async requestBill(tableId: string): Promise<Table> {
-    return this.updateTable(tableId, { status: "WAITING_BILL" });
+    return this.updateTable(tableId, { status: "CUENTA_SOLICITADA" });
   }
 
   /* =======================================================================
@@ -457,12 +513,42 @@ export class TableEngine {
   ): Promise<{ sale: Sale; payment: PaymentResult; receipt: Receipt }> {
     const table = await this.getTable(input.tableId);
 
+    if (table.items.length === 0 && input.saleId) {
+      const existingSale = await this.sales.getSale(input.saleId);
+      if (existingSale && (existingSale.status === "PAID" || existingSale.status === "CLOSED")) {
+        const existingReceipt = await this.sales.getReceiptBySaleId(existingSale.id);
+        const receipt = existingReceipt ?? await this.sales.generateReceipt(
+          existingSale,
+          input.customerName ?? "Cliente General",
+          input.cashier ?? "Administrador",
+          input.method,
+          input.received ?? existingSale.total,
+          existingSale.discount ?? 0
+        );
+
+        const payment: PaymentResult = {
+          success: true,
+          method: (existingSale.paymentMethod as PaymentMethod) || "CASH",
+          total: existingSale.total,
+          received: existingSale.total,
+          change: 0,
+          message: "Pago ya procesado (idempotente)",
+          date: existingSale.updatedAt
+        };
+
+        return { sale: existingSale, payment, receipt };
+      }
+    }
+
     if (table.items.length === 0) {
       throw new Error("EMPTY_TABLE: la mesa no tiene productos para cobrar.");
     }
 
+    const previousStatus = table.status;
+
     await this.updateTable(input.tableId, { status: "PAYING" });
 
+    try {
     const sale = await this.sales.tableSale({
       id: input.saleId,
       tableId: input.tableId,
@@ -470,31 +556,59 @@ export class TableEngine {
       cashierId: input.cashierId,
       waiterId: table.waiterId,
       discount: input.discount,
-      taxRate: DEFAULT_TAX_RATE
+      taxRate: companyConfigStore.get().tax / 100,
+      skipKitchen: true
     });
 
-    const { sale: paidSale, payment } = await this.sales.registerPayment(
-      sale,
-      input.method,
-      { received: input.received, reference: input.reference }
-    );
+      const { sale: paidSale, payment } = await this.sales.registerPayment(
+        sale,
+        input.method,
+        { received: input.received, reference: input.reference }
+      );
 
-    const receipt = await this.sales.generateReceipt(
-      paidSale,
-      input.customerName ?? "Cliente General",
-      input.cashier ?? "Administrador",
-      input.method,
-      input.received ?? paidSale.total,
-      paidSale.discount ?? 0
-    );
+      const existingReceipt = await this.sales.getReceiptBySaleId(paidSale.id);
+      const receipt = existingReceipt
+        ? existingReceipt
+        : await this.sales.generateReceipt(
+            paidSale,
+            input.customerName ?? "Cliente General",
+            input.cashier ?? "Administrador",
+            input.method,
+            input.received ?? paidSale.total,
+            paidSale.discount ?? 0
+          );
 
-    this.sales.printReceipt(receipt);
+      if (!existingReceipt) {
+        this.sales.printReceipt(receipt);
+      }
 
-    const closed = await this.resetTable(input.tableId);
+      if (table.orderId) {
+        try {
+          await this.orders.updateOrder(table.orderId, {
+            status: "COMPLETED",
+            saleId: paidSale.id
+          });
+        } catch (orderError) {
+          logWarning(`No se pudo marcar COMPLETED el Order ${table.orderId} tras cerrar mesa ${input.tableId}`, {
+            context: { error: String(orderError), saleId: paidSale.id }
+          });
+        }
+      }
 
-    this.emit(closed, "table.closed");
+      const closed = await this.resetTable(input.tableId);
 
-    return { sale: paidSale, payment, receipt };
+      this.emit(closed, "table.closed");
+
+      return { sale: paidSale, payment, receipt };
+    } catch (error) {
+      // Compensación: devolver la mesa a su estado anterior para que no quede atascada en PAYING
+      try {
+        await this.updateTable(input.tableId, { status: previousStatus });
+      } catch {
+        // No bloquear
+      }
+      throw error;
+    }
   }
 
   /* =======================================================================
@@ -532,6 +646,7 @@ export class TableEngine {
         return await this.persist(table, cart.getItems());
       } catch (err) {
         if (isOptimisticLockError(err) && attempt < MAX_CONFLICT_RETRIES) {
+          await new Promise(resolve => setTimeout(resolve, 50 * Math.pow(2, attempt - 1)));
           continue;
         }
         throw err;
@@ -549,7 +664,7 @@ export class TableEngine {
     const subtotal = Number(
       items.reduce((sum, item) => sum + item.price * item.quantity, 0).toFixed(2)
     );
-    const tax = Number((subtotal * DEFAULT_TAX_RATE).toFixed(2));
+    const tax = Number((subtotal * (companyConfigStore.get().tax / 100)).toFixed(2));
     const discount = table.discount ?? 0;
     const total = Number(Math.max(subtotal + tax - discount, 0).toFixed(2));
 
@@ -596,7 +711,9 @@ export class TableEngine {
       discount: 0,
       total: 0,
       notes: undefined,
-      openedAt: undefined
+      openedAt: undefined,
+      openOperationId: undefined,
+      orderId: undefined
     });
   }
 

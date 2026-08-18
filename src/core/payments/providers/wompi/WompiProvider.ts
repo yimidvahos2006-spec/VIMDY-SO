@@ -36,29 +36,6 @@ import type {
 } from "../../models/PaymentModels";
 import { nowIso } from "../../utils/paymentUtils";
 
-/** Clave pública de Wompi — segura de exponer en el navegador por diseño (igual que la anon key de Supabase). */
-const WOMPI_PUBLIC_KEY = import.meta.env.VITE_WOMPI_PUBLIC_KEY as string | undefined;
-
-/** Wompi resuelve sandbox/producción por el prefijo de la llave pública, nunca por una variable aparte que se pueda desincronizar. */
-function resolveWompiApiBase(): string {
-  const isSandbox = WOMPI_PUBLIC_KEY?.startsWith("pub_test_") ?? false;
-  return isSandbox ? "https://sandbox.wompi.co/v1" : "https://production.wompi.co/v1";
-}
-
-/** Extrae el mensaje detallado de un error de Edge Function, igual que en subscriptionContext.ts -> activatePlan(). */
-async function extractFunctionErrorMessage(fnError: unknown, fallback: string): Promise<string> {
-  const context = (fnError as { context?: Response })?.context;
-  if (context && typeof context.json === "function") {
-    try {
-      const body = await context.json();
-      if (body?.error) return body.error as string;
-    } catch {
-      // El body no era JSON válido; nos quedamos con el mensaje genérico.
-    }
-  }
-  return (fnError as { message?: string })?.message ?? fallback;
-}
-
 interface WompiCheckoutFunctionResponse {
   ok: true;
   checkoutUrl: string;
@@ -74,6 +51,20 @@ interface WompiTransactionApiResponse {
     created_at: string;
     reference: string;
   };
+}
+
+/** Extrae el mensaje detallado de un error de Edge Function. */
+async function extractFunctionErrorMessage(fnError: unknown, fallback: string): Promise<string> {
+  const context = (fnError as { context?: Response })?.context;
+  if (context && typeof context.json === "function") {
+    try {
+      const body = await context.json();
+      if (body?.error) return body.error as string;
+    } catch {
+      // El body no era JSON válido; nos quedamos con el mensaje genérico.
+    }
+  }
+  return (fnError as { message?: string })?.message ?? fallback;
 }
 
 export class WompiProvider implements IPaymentProvider {
@@ -118,21 +109,26 @@ export class WompiProvider implements IPaymentProvider {
   }
 
   /**
-   * Consulta el estado REAL de una transacción en Wompi. Este endpoint
-   * (GET /v1/transactions/:id) es público por diseño — no necesita llave
-   * alguna — así que sí puede llamarse directo desde el navegador. Se usa,
-   * por ejemplo, al volver del redirect-url del checkout para mostrarle al
-   * usuario el resultado mientras el webhook confirma el plan por detrás.
+   * Consulta el estado REAL de una transacción en Wompi. Ahora delega en la
+   * Edge Function `wompi-get-transaction` para no exponer la base URL de
+   * Wompi ni permitir consultas directas desde el navegador. La Edge Function
+   * valida autenticación/autorización y usa WOMPI_PUBLIC_KEY server-side.
    */
   async getPayment(paymentId: string): Promise<PaymentResult> {
-    const response = await fetch(`${resolveWompiApiBase()}/transactions/${paymentId}`);
+    const { data, error } = await supabase.functions.invoke<{ ok: true; transaction: WompiTransactionApiResponse["data"] }>(
+      "wompi-get-transaction",
+      { body: { transactionId: paymentId } }
+    );
 
-    if (!response.ok) {
-      throw new Error(`WompiProvider: no se pudo consultar la transacción "${paymentId}" (HTTP ${response.status}).`);
+    if (error) {
+      throw new Error(`WompiProvider: no se pudo consultar la transacción "${paymentId}" (${error.message}).`);
     }
 
-    const body = (await response.json()) as WompiTransactionApiResponse;
-    const transaction = body.data;
+    if (!data?.transaction) {
+      throw new Error(`WompiProvider: la Edge Function no devolvió la transacción "${paymentId}".`);
+    }
+
+    const transaction = data.transaction;
 
     return {
       id: transaction.id,
