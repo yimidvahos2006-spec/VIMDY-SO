@@ -18,7 +18,7 @@ export function useForecast() {
 
   const load = useCallback(async () => {
     await productsReady;
-    const result = await container.forecastEngine.getSummary();
+    const result = await container.forecastEngine.get().getSummary();
     setSummary(result);
   }, []);
 

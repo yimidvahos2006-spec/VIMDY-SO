@@ -138,12 +138,26 @@ interface VimdyInvoiceRequest {
   country: string;
   documentType: "INVOICE" | "CREDIT_NOTE" | "DEBIT_NOTE";
   customer: VimdyInvoiceCustomer;
-  items: Array<{ productId: string; quantity: number; price: number }>;
+  items: Array<{ productId: string; quantity: number; price: number; name?: string }>;
   subtotal: number;
   tax: number;
   discount?: number;
   total: number;
   currency: string;
+  paymentMethod?: string;
+}
+
+const PAYMENT_METHOD_TO_FACTUS: Record<string, string> = {
+  CASH: "10",
+  CARD: "13",
+  TRANSFER: "11",
+  QR: "13",
+  MIXED: "10"
+};
+
+function resolveFactusPaymentMethod(vimdyMethod: string | undefined): string {
+  if (!vimdyMethod) return "10";
+  return PAYMENT_METHOD_TO_FACTUS[vimdyMethod] ?? "10";
 }
 
 /** VIMDY solo maneja CC/NIT hoy en Colombia — mapa al código real de Factus. Ver tablas-de-referencia/tablas. */
@@ -156,18 +170,16 @@ const DOCUMENT_TYPE_TO_FACTUS: Record<VimdyInvoiceCustomer["documentType"], stri
 };
 
 function buildFactusPayload(request: VimdyInvoiceRequest) {
-  // reference_code debe ser único por factura — usamos el propio saleId de
-  // VIMDY, así Factus deduplica solo (ver nota oficial: reenviar el mismo
-  // reference_code devuelve la factura ya existente en vez de duplicarla).
   const isCompany = request.customer.documentType === "NIT";
+  const paymentMethodCode = resolveFactusPaymentMethod(request.paymentMethod);
 
   return {
     reference_code: `VIMDY-${request.saleId}`,
-    document: "01", // Factura electrónica de Venta
+    document: "01",
     payment_details: [
       {
-        payment_form: "1", // 1 = pago de contado (POS de VIMDY no vende a crédito hoy)
-        payment_method_code: "10", // 10 = Efectivo, valor por defecto razonable; ver nota abajo
+        payment_form: "1",
+        payment_method_code: paymentMethodCode,
         amount: request.total.toFixed(2)
       }
     ],
@@ -183,14 +195,14 @@ function buildFactusPayload(request: VimdyInvoiceRequest) {
     },
     items: request.items.map((item, index) => ({
       code_reference: item.productId || `ITEM-${index + 1}`,
-      name: item.productId, // TODO: cuando VIMDY tenga catálogo enriquecido acá, reemplazar por el nombre real del producto
+      name: item.name || item.productId,
       quantity: item.quantity.toFixed(2),
       price: item.price.toFixed(2),
-      unit_measure_code: "94", // 94 = Unidad, ver tablas-de-referencia/unit-measures
-      standard_code: "999", // 999 = Estándar de adopción del contribuyente (sin catálogo fiscal propio)
+      unit_measure_code: "94",
+      standard_code: "999",
       taxes: [
         {
-          code: "01", // 01 = IVA
+          code: "01",
           rate: request.tax > 0 && request.subtotal > 0
             ? ((request.tax / request.subtotal) * 100).toFixed(2)
             : "0.00"
@@ -222,7 +234,36 @@ interface FactusCreateResponse {
  */
 async function createFactusInvoice(request: VimdyInvoiceRequest): Promise<FactusCreateResponse> {
   const token = await getFactusAccessToken();
-  const payload = buildFactusPayload(request);
+
+  const productIds = request.items.map((item) => item.productId).filter(Boolean);
+  const { data: products } = await admin
+    .from("products")
+    .select("id, name")
+    .in("id", productIds);
+
+  const productNameMap = new Map((products ?? []).map((p) => [p.id, p.name]));
+
+  const enrichedItems = request.items.map((item) => ({
+    ...item,
+    name: productNameMap.get(item.productId) || item.name || item.productId
+  }));
+
+  const { data: saleRow } = await admin
+    .from("sales")
+    .select("data")
+    .eq("id", request.saleId)
+    .maybeSingle();
+
+  const saleData = (saleRow?.data as Record<string, unknown> | null) ?? null;
+  const paymentMethod = typeof saleData?.paymentMethod === "string" ? saleData.paymentMethod : undefined;
+
+  const enrichedRequest = {
+    ...request,
+    items: enrichedItems,
+    paymentMethod
+  };
+
+  const payload = buildFactusPayload(enrichedRequest);
 
   const response = await fetch(`${resolveFactusApiBase()}/v2/bills/validate`, {
     method: "POST",
@@ -325,6 +366,14 @@ Deno.serve(async (req: Request) => {
       }
 
       await assertMembership(request.businessId);
+
+      const { data: activeData, error: activeError } = await admin.rpc("is_business_subscription_active", {
+        p_business_id: request.businessId
+      });
+
+      if (activeError || !activeData) {
+        return json({ error: "SUBSCRIPTION_EXPIRED: la suscripción del negocio ha vencido. Selecciona un plan para continuar." }, 403);
+      }
 
       const factusResult = await createFactusInvoice(request);
       const invoice = toVimdyInvoice(request.businessId, request.saleId, factusResult.data);

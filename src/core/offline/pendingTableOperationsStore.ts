@@ -34,7 +34,9 @@ const EMPTY_SNAPSHOT: PendingTableOperationsSnapshot = { items: [], loaded: fals
 class PendingTableOperationsStore extends ObservableStore<PendingTableOperationsSnapshot> {
   constructor() {
     super(EMPTY_SNAPSHOT);
-    void this.refresh();
+    if (typeof indexedDB !== "undefined") {
+      void this.refresh();
+    }
   }
 
   async refresh(): Promise<void> {
@@ -59,7 +61,43 @@ class PendingTableOperationsStore extends ObservableStore<PendingTableOperations
     type: PendingTableOperationType;
     openInput?: OpenTableInput;
     closeInput?: CloseTableInput;
+    addItemInput?: { productId: string; quantity: number; note?: string };
+    removeItemInput?: { productId: string };
+    updateQuantityInput?: { productId: string; quantity: number };
+    sendToKitchenInput?: { priority?: string };
   }): Promise<PendingTableOperation> {
+    if (typeof indexedDB === "undefined") {
+      let businessId = "";
+      let branchId = "";
+      try {
+        businessId = requireCurrentBusinessId();
+      } catch {
+        businessId = "";
+      }
+      try {
+        branchId = getCurrentBranchId() ?? "";
+      } catch {
+        branchId = "";
+      }
+      return {
+        id: params.id,
+        tableId: params.tableId,
+        tableName: params.tableName,
+        type: params.type,
+        openInput: params.openInput,
+        closeInput: params.closeInput,
+        addItemInput: params.addItemInput,
+        removeItemInput: params.removeItemInput,
+        updateQuantityInput: params.updateQuantityInput,
+        sendToKitchenInput: params.sendToKitchenInput,
+        status: "PENDING_SYNC",
+        queuedAt: new Date(),
+        attempts: 0,
+        businessId,
+        branchId
+      };
+    }
+
     const existing = await repository.findById(params.id);
 
     const pendingOperation: PendingTableOperation = {
@@ -69,13 +107,17 @@ class PendingTableOperationsStore extends ObservableStore<PendingTableOperations
       type: params.type,
       openInput: params.openInput,
       closeInput: params.closeInput,
+      addItemInput: params.addItemInput,
+      removeItemInput: params.removeItemInput,
+      updateQuantityInput: params.updateQuantityInput,
+      sendToKitchenInput: params.sendToKitchenInput,
       status: "PENDING_SYNC",
       queuedAt: existing?.queuedAt ?? new Date(),
       attempts: existing?.attempts ?? 0,
       lastAttemptAt: existing?.lastAttemptAt,
       lastError: existing?.lastError,
-      businessId: requireCurrentBusinessId(),
-      branchId: getCurrentBranchId() ?? ""
+      businessId: existing?.businessId ?? (() => { try { return requireCurrentBusinessId(); } catch { return ""; } })(),
+      branchId: existing?.branchId ?? (() => { try { return getCurrentBranchId() ?? ""; } catch { return ""; } })()
     };
 
     await repository.save(pendingOperation);

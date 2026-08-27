@@ -20,7 +20,7 @@ const DEFAULT_TABLE_CAPACITY = 4;
  *
  * Solo se muestra si el negocio usa el módulo "mesas" (ver PASO 4). Al
  * elegir una cantidad, crea esa cantidad real de mesas ("Mesa 1"..."Mesa N")
- * a través de container.tableEngine.createTable — el mismo motor real que
+ * a través de container.tableEngine.get().createTable — el mismo motor real que
  * usa Meseros/Configuración, así cada mesa nace con su ciclo de vida
  * completo (evento "table.created", estado FREE, etc). No hay simulación:
  * si falla la creación de alguna mesa, se muestra el error real.
@@ -41,7 +41,7 @@ export function TablesStep({ onSaved }: TablesStepProps) {
 
     try {
       for (let i = 1; i <= count; i++) {
-        await container.tableEngine.createTable({
+        await container.tableEngine.get().createTable({
           name: `Mesa ${i}`,
           capacity: DEFAULT_TABLE_CAPACITY
         });

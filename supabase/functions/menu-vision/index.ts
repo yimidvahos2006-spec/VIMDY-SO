@@ -34,10 +34,16 @@
 //   supabase functions deploy menu-vision
 // ============================================================================
 
+import { createClient } from "npm:@supabase/supabase-js@2";
+
+const VIMDY_APP_URL = Deno.env.get("VIMDY_APP_URL");
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": VIMDY_APP_URL ?? "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type"
 };
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
 const SIN_CLASIFICAR = "Sin clasificar";
 
@@ -51,6 +57,7 @@ function json(body: unknown, status = 200) {
 interface RequestPayload {
   image?: string; // data URL: "data:image/jpeg;base64,...."
   categories?: string[]; // nombres de las categorías reales del negocio
+  businessId?: string; // id del negocio para verificar suscripción
 }
 
 interface RawMenuItem {
@@ -135,6 +142,22 @@ Deno.serve(async (req: Request) => {
     );
   }
 
+  const authHeader = req.headers.get("Authorization") ?? req.headers.get("authorization");
+  const accessToken = authHeader?.replace(/^Bearer\s+/i, "").trim();
+
+  if (!accessToken) {
+    return json({ error: "NO_AUTH: falta el token de sesión." }, 401);
+  }
+
+  const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+
+  const { data: userData, error: userError } = await admin.auth.getUser(accessToken);
+  if (userError || !userData.user) {
+    return json({ error: "SESSION_INVALID" }, 401);
+  }
+
+  const authUser = userData.user;
+
   let payload: RequestPayload;
 
   try {
@@ -143,7 +166,34 @@ Deno.serve(async (req: Request) => {
     return json({ error: "INVALID_JSON" }, 400);
   }
 
-  const { image } = payload;
+  const { image, businessId } = payload;
+
+  if (!businessId) {
+    return json({ error: "Falta el campo: businessId es obligatorio." }, 400);
+  }
+
+  const { data: membership, error: membershipError } = await admin
+    .from("business_members")
+    .select("role")
+    .eq("user_id", authUser.id)
+    .eq("business_id", businessId)
+    .maybeSingle();
+
+  if (membershipError) {
+    return json({ error: "MEMBERSHIP_CHECK_FAILED", detail: membershipError.message }, 500);
+  }
+
+  if (!membership) {
+    return json({ error: "NOT_A_MEMBER: no perteneces a este negocio." }, 403);
+  }
+
+  const { data: activeData, error: activeError } = await admin.rpc("is_business_subscription_active", {
+    p_business_id: businessId
+  });
+
+  if (activeError || !activeData) {
+    return json({ error: "SUBSCRIPTION_EXPIRED: la suscripción del negocio ha vencido. Selecciona un plan para continuar." }, 403);
+  }
 
   if (!image || !image.startsWith("data:image/")) {
     return json({ error: "IMAGE_REQUIRED" }, 400);

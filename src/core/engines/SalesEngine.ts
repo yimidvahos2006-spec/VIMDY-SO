@@ -36,11 +36,13 @@ import { isOptimisticLockError } from "../errors/OptimisticLockError";
 
 import { HealthResult } from "../types/HealthTypes";
 import { companyConfigStore } from "../store/companyConfigStore";
+import { InvoiceFactory } from "../invoicing/InvoiceFactory";
+import type { InvoiceRequest, InvoiceCustomer } from "../invoicing/models/InvoiceModels";
 import { roundMoney } from "../config/globalization";
 import { dashboardStore } from "../store/dashboardStore";
 import { kitchenOutputModeStore } from "../store/kitchenOutputModeStore";
 import { createKitchenOutput } from "../services/KitchenOutputFactory";
-import { getSaleNetTotal } from "../utils/saleRefunds";
+import { getSaleNetTotal, getSaleNetItems } from "../utils/saleRefunds";
 
 /* ===========================================================================
    SalesEngine
@@ -781,7 +783,7 @@ export class SalesEngine {
     const currency = companyConfigStore.get().currency;
 
     const totalSales = roundMoney(
-      sales.reduce((sum, sale) => sum + sale.total, 0),
+      sales.reduce((sum, sale) => sum + this.netTotal(sale), 0),
       currency
     );
     const totalOrders = sales.length;
@@ -789,11 +791,11 @@ export class SalesEngine {
       totalOrders === 0 ? 0 : roundMoney(totalSales / totalOrders, currency);
 
     const totalTax = roundMoney(
-      sales.reduce((sum, sale) => sum + (sale.tax ?? 0), 0),
+      sales.reduce((sum, sale) => sum + (sale.tax ?? 0) * (this.netTotal(sale) / (sale.total || 1)), 0),
       currency
     );
     const totalDiscount = roundMoney(
-      sales.reduce((sum, sale) => sum + (sale.discount ?? 0), 0),
+      sales.reduce((sum, sale) => sum + (sale.discount ?? 0) * (this.netTotal(sale) / (sale.total || 1)), 0),
       currency
     );
 
@@ -814,7 +816,8 @@ export class SalesEngine {
         byStatus[sale.status] = (byStatus[sale.status] ?? 0) + 1;
       }
 
-      for (const item of sale.items) {
+      const netItems = getSaleNetItems(sale);
+      for (const item of netItems) {
         const current = ranking.get(item.productId) ?? {
           quantity: 0,
           revenue: 0
@@ -1195,7 +1198,11 @@ export class SalesEngine {
     const refundedUnits = cleanItems.reduce((sum, line) => sum + line.quantity, 0);
 
     if (fullyRefundedNow) {
-      this.reverseDashboardForSale(sale);
+      const previouslyRefunded = (sale.refunds ?? [])
+        .filter(r => r.id !== refundRecord.id)
+        .reduce((sum, r) => sum + r.amount, 0);
+      const remainingToReverse = sale.total - previouslyRefunded;
+      this.reverseDashboardForSale(sale, remainingToReverse);
     } else {
       dashboardStore.partialReverseSale(refundAmount, refundedUnits);
     }
@@ -1347,7 +1354,11 @@ export class SalesEngine {
     // datos: si ya está PAID/CLOSED, se devuelve tal cual SIN volver a
     // ingresar el dinero a caja, sin duplicar puntos de fidelización y sin
     // duplicar el log de auditoría.
-    const current = (await this.getSale(sale.id)) ?? sale;
+    const current = await this.getSale(sale.id);
+
+    if (!current) {
+      throw new Error("SALE_NOT_FOUND: no se puede cobrar una venta que no existe en la base de datos.");
+    }
 
     if (current.status === "PAID" || current.status === "CLOSED") {
       return {
@@ -1393,7 +1404,69 @@ export class SalesEngine {
         this.ensureReceiptForPaidSale(current, method, options)
       ]);
 
-      return { sale: updatedSale, payment: paymentResult };
+      let finalSale = updatedSale;
+      const electronicInvoicing = companyConfigStore.get().electronicInvoicing;
+
+      if (electronicInvoicing.enabled) {
+        try {
+          const provider = InvoiceFactory.resolve({
+            enabled: electronicInvoicing.enabled,
+            provider: electronicInvoicing.provider
+          });
+
+          if (provider) {
+            let customer: InvoiceCustomer | undefined;
+            if (current.customerId && current.customerId !== this.config.defaultCustomerId) {
+              try {
+                const profile = await this.customer.getCustomerProfile(current.customerId);
+                customer = {
+                  documentType: "CC",
+                  documentNumber: profile.customer.id,
+                  fullName: profile.customer.name,
+                  email: profile.customer.email,
+                  phone: profile.customer.phone
+                };
+              } catch {
+                // No se pudo obtener el perfil del cliente, continuar sin datos de cliente
+              }
+            }
+
+            const request: InvoiceRequest = {
+              saleId: current.id,
+              businessId: current.businessId ?? "",
+              provider: electronicInvoicing.provider,
+              country: companyConfigStore.get().country,
+              documentType: "INVOICE",
+              customer: customer ?? {
+                documentType: "CC",
+                documentNumber: "000000000",
+                fullName: "Consumidor Final"
+              },
+              items: current.items,
+              subtotal: current.subtotal ?? current.total,
+              tax: current.tax ?? 0,
+              discount: current.discount,
+              total: current.total,
+              currency: companyConfigStore.get().currency
+            };
+
+            const result = await provider.createInvoice(request);
+            finalSale = await this.updateSale({
+              ...updatedSale,
+              invoiceId: result.id
+            });
+          }
+        } catch (error) {
+          const message = String(error);
+          logWarning("No se pudo generar la factura electrónica", {
+            category: "sales",
+            context: { saleId: current.id, error: message }
+          });
+          paymentResult.invoiceError = `No se pudo generar la factura electrónica: ${message}`;
+        }
+      }
+
+      return { sale: finalSale, payment: paymentResult };
     } catch (err) {
       // CIERRE DE LA VENTANA DE CARRERA: el chequeo de idempotencia de arriba
       // (current.status === "PAID"/"CLOSED") solo protege contra reintentos
@@ -1529,9 +1602,10 @@ export class SalesEngine {
    * (Punto de integración con el driver ESC/POS correspondiente).
    */
   public printReceipt(receipt: Receipt): boolean {
-    console.log(
-      `[SalesEngine] Imprimiendo recibo ${receipt.code} — total: ${receipt.total}`
-    );
+    logWarning(`Imprimiendo recibo ${receipt.code} — total: ${receipt.total}`, {
+      category: "print",
+      context: { receiptCode: receipt.code, total: receipt.total }
+    });
 
     return true;
   }
@@ -1792,13 +1866,23 @@ export class SalesEngine {
       )
     );
 
-    return items.map((item, index) => ({
-      productId: item.productId,
-      quantity: item.quantity,
-      price: item.price ?? lookups[index]?.price ?? 0,
-      note: item.note,
-      requiresKitchen: item.requiresKitchen
-    }));
+    return items.map((item, index) => {
+      const lookup = item.price === undefined ? lookups[index] : null;
+
+      if (item.price === undefined && !lookup) {
+        throw new Error(
+          `PRODUCT_NOT_FOUND: el producto ${item.productId} no existe o no tiene precio configurado.`
+        );
+      }
+
+      return {
+        productId: item.productId,
+        quantity: item.quantity,
+        price: item.price ?? lookup?.price ?? 0,
+        note: item.note,
+        requiresKitchen: item.requiresKitchen
+      };
+    });
   }
 
   private processPayment(
@@ -1880,14 +1964,11 @@ export class SalesEngine {
   }
 
   private generateSaleCode(type: SaleType): string {
-    this.saleCounter += 1;
-
     const prefix =
       type === "QUICK" ? "RAP" : type === "TABLE" ? "MSA" : "DEL";
 
-    const timestamp = Date.now().toString().slice(-6);
-    const sequence = this.saleCounter.toString().padStart(4, "0");
+    const timestamp = Date.now().toString().slice(-9);
 
-    return `${prefix}-${timestamp}-${sequence}`;
+    return `${prefix}-${timestamp}`;
   }
 }

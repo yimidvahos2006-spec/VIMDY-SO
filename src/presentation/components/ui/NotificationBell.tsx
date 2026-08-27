@@ -71,7 +71,7 @@ export function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-3 w-96 max-h-[70vh] overflow-hidden rounded-2xl border border-slate-700 bg-slate-900/95 backdrop-blur-xl shadow-2xl flex flex-col">
+        <div className="absolute right-0 mt-3 w-96 max-h-[70vh] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-700 bg-slate-900/95 backdrop-blur-xl shadow-2xl flex flex-col">
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
             <div>
               <h3 className="text-slate-100 font-bold">Alertas del negocio</h3>
@@ -95,7 +95,7 @@ export function NotificationBell() {
               </div>
             ) : (
               notifications.map((n) => {
-                const Icon = TYPE_ICON[n.type];
+                const Icon = TYPE_ICON[n.type] ?? Info;
                 return (
                   <div
                     key={n.id}

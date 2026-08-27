@@ -213,7 +213,7 @@ export class MercadoPagoProvider implements IPaymentProvider {
   validateResponse(payload: unknown, signature?: string): boolean {
     if (!signature) return false;
 
-    const secret = typeof import.meta !== "undefined" ? import.meta.env.MERCADOPAGO_WEBHOOK_SECRET : undefined;
+    const secret = import.meta.env.MERCADOPAGO_WEBHOOK_SECRET;
 
     if (!secret) {
       return false;

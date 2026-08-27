@@ -98,9 +98,9 @@ export function SalesHistoryPanel() {
     setIsLoading(true);
     try {
       const [allSales, products, customers] = await Promise.all([
-        container.salesEngine.getAllSales(),
-        container.inventoryEngine.listAll(),
-        container.customerEngine.getAllCustomers()
+        container.salesEngine.get().getAllSales(),
+        container.inventoryEngine.get().listAll(),
+        container.customerEngine.get().getAllCustomers()
       ]);
 
       const sorted = [...allSales].sort(
@@ -158,7 +158,7 @@ export function SalesHistoryPanel() {
   }
 
   function refundableQuantities(sale: Sale): Record<string, number> {
-    return container.salesEngine.getRefundableQuantities(sale);
+    return container.salesEngine.get().getRefundableQuantities(sale);
   }
 
   function openRefund(sale: Sale) {
@@ -197,7 +197,7 @@ export function SalesHistoryPanel() {
 
     setIsPartialRefunding(true);
     try {
-      const result = await container.salesEngine.partialRefundSale(
+      const result = await container.salesEngine.get().partialRefundSale(
         partialTarget.id,
         items,
         reason,
@@ -228,7 +228,7 @@ export function SalesHistoryPanel() {
 
     setIsRefunding(true);
     try {
-      await container.salesEngine.refundSale(refundTarget.id, reason, user?.id);
+      await container.salesEngine.get().refundSale(refundTarget.id, reason, user?.id);
       toast.success(`Venta ${refundTarget.code ?? refundTarget.id} reembolsada.`);
       setRefundTarget(null);
       await loadSales();
@@ -319,7 +319,7 @@ export function SalesHistoryPanel() {
                         <ul className="space-y-1.5">
                           {(() => {
                             const refundedQuantities =
-                              container.salesEngine.getRefundedQuantities(sale);
+                              container.salesEngine.get().getRefundedQuantities(sale);
 
                             return sale.items.map((item, index) => {
                               const refundedQty = refundedQuantities[item.productId] ?? 0;

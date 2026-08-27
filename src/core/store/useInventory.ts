@@ -9,6 +9,7 @@ import { useAuth } from "../../presentation/context/AuthContext";
 import { connectionStore } from "./connectionStore";
 import { isNetworkFailure } from "../services/offlineSale";
 import { queueIncreaseStockOffline, queueDecreaseStockOffline } from "../services/offlineInventory";
+import { getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
 
 export type StockStatus = "normal" | "bajo" | "agotado";
 
@@ -45,8 +46,8 @@ export function useInventory() {
   const load = useCallback(async () => {
     await productsReady;
     const [all, movements] = await Promise.all([
-      container.inventoryEngine.listAll(),
-      container.kardexEngine.getRecentHistory(15),
+      container.inventoryEngine.get().listAll(),
+      container.kardexEngine.get().getRecentHistory(15),
     ]);
     setProducts(all);
     setRecentMovements(movements);
@@ -97,7 +98,7 @@ export function useInventory() {
   );
 
   async function getHistory(productId: string): Promise<InventoryMovement[]> {
-    const history = await container.kardexEngine.getHistory(productId);
+    const history = await container.kardexEngine.get().getHistory(productId);
     return [...history].sort((a, b) => b.date.getTime() - a.date.getTime());
   }
 
@@ -150,14 +151,15 @@ export function useInventory() {
     }
 
     try {
-      await container.inventoryEngine.increaseStock(
+      await container.inventoryEngine.get().increaseStock(
         productId,
         quantity,
         reason,
         performedBy,
         supplierId,
         purchasePrice,
-        movementId
+        movementId,
+        getCurrentBranchId()
       );
       await load();
       return true;
@@ -205,7 +207,7 @@ export function useInventory() {
     }
 
     try {
-      await container.inventoryEngine.decreaseStock(productId, quantity, reason, performedBy, lossCategory, movementId);
+      await container.inventoryEngine.get().decreaseStock(productId, quantity, reason, performedBy, lossCategory, movementId, getCurrentBranchId());
       await load();
       return true;
     } catch (e: any) {
@@ -232,7 +234,7 @@ export function useInventory() {
   async function createProduct(input: ProductInput): Promise<boolean> {
     setError(null);
     try {
-      await container.inventoryEngine.createProduct(input, performedBy);
+      await container.inventoryEngine.get().createProduct(input, performedBy);
       // Recarga Inventario y sincroniza el catálogo que usa Caja de inmediato.
       await load();
       await productCatalogStore.refresh();
@@ -258,7 +260,7 @@ export function useInventory() {
   async function updateProduct(id: string, input: ProductInput): Promise<boolean> {
     setError(null);
     try {
-      await container.inventoryEngine.updateProduct(id, input);
+      await container.inventoryEngine.get().updateProduct(id, input);
       await load();
       await productCatalogStore.refresh();
       vimdyCore.emit("inventory");
@@ -284,7 +286,7 @@ export function useInventory() {
   async function deleteProduct(id: string): Promise<boolean> {
     setError(null);
     try {
-      await container.inventoryEngine.deleteProduct(id);
+      await container.inventoryEngine.get().deleteProduct(id);
       await load();
       await productCatalogStore.refresh();
       vimdyCore.emit("inventory");
@@ -318,7 +320,7 @@ export function useInventory() {
     }
 
     try {
-      await container.inventoryEngine.produceBatch(productId, quantity, performedBy);
+      await container.inventoryEngine.get().produceBatch(productId, quantity, performedBy);
       await load();
       await productCatalogStore.refresh();
       vimdyCore.emit("inventory");

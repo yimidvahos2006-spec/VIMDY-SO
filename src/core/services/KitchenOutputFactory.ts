@@ -21,7 +21,7 @@ export function createKitchenOutput(
   kitchen: KitchenEngine
 ): KitchenOutput {
   if (salidaCocina === "impresora") {
-    return new KitchenPrinterOutput();
+    return new KitchenPrinterOutput(kitchen);
   }
 
   return new KitchenScreenOutput(kitchen);

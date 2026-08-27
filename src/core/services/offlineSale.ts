@@ -175,14 +175,14 @@ export function buildOfflineSale(input: CreateSaleInput): Sale {
     price: item.price ?? 0
   }));
 
-  const subtotal = container.salesEngine.calculateSubtotal(items);
+  const subtotal = container.salesEngine.get().calculateSubtotal(items);
   const taxRate = input.taxRate ?? companyConfigStore.get().tax / 100;
-  const tax = container.salesEngine.calculateTax(subtotal, taxRate);
-  const discount = container.salesEngine.calculateDiscount(subtotal, input.discount);
+  const tax = container.salesEngine.get().calculateTax(subtotal, taxRate);
+  const discount = container.salesEngine.get().calculateDiscount(subtotal, input.discount);
   const deliveryFee = input.type === "DELIVERY" ? input.deliveryFee ?? 0 : 0;
   // BLOQUEANTE (auditoría Fase 2 — rama Bar): ver Sale.tip.
-  const tip = container.salesEngine.calculateTip(subtotal, input.tip);
-  const total = container.salesEngine.calculateTotal(subtotal, tax, discount, deliveryFee, tip);
+  const tip = container.salesEngine.get().calculateTip(subtotal, input.tip);
+  const total = container.salesEngine.get().calculateTotal(subtotal, tax, discount, deliveryFee, tip);
 
   const now = new Date();
 

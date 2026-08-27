@@ -16,7 +16,7 @@ import { VimdyButton } from "../components/ui/VimdyButton";
  *
  *   1. El usuario escribe el código -> verifyOtp(code) en AuthContext.
  *   2. Si es correcto: AuthContext confirma la sesión, crea el negocio +
- *      membresía ADMIN + trial de 30 días (Edge Function register-business)
+  *      membresía ADMIN + trial de 14 días (Edge Function register-business)
  *      y deja la sesión activa. Esta pantalla solo espera y navega.
  *   3. Si el usuario no recibió el código, "Reenviar código" (con
  *      enfriamiento de 30s manejado en authOtp.ts) dispara uno nuevo.

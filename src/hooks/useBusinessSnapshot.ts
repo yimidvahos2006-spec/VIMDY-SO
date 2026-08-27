@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 
 import { container } from "../infrastructure/di/CompositionRoot";
 import { useDashboard } from "../core/store/useDashboard";
@@ -24,22 +24,31 @@ import type { BusinessSnapshot } from "../core/types/CopilotTypes";
 export function useBusinessSnapshot() {
   const dashboard = useDashboard();
   const [snapshot, setSnapshot] = useState<BusinessSnapshot | null>(null);
+  const timeoutRef = React.useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
-    (async () => {
+    if (timeoutRef.current) {
+      window.clearTimeout(timeoutRef.current);
+    }
+
+    timeoutRef.current = window.setTimeout(async () => {
       const business = businessStore.get();
       const config = companyConfigStore.get();
-      const next = await container.businessAnalyzer.buildSnapshot(
+      const next = await container.businessAnalyzer.get().buildSnapshot(
         business.name || "Mi negocio",
         config.currency
       );
       if (!cancelled) setSnapshot(next);
-    })();
+    }, 150);
 
     return () => {
       cancelled = true;
+      if (timeoutRef.current) {
+        window.clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dashboard]);

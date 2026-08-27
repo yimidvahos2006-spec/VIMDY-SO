@@ -46,12 +46,12 @@ describe("SubscriptionEngine — cierre definitivo de trial por persona", () => 
         paymentMethod: null,
         paymentStatus: "none" as const
       };
-      expect(subscriptionEngine.effectiveStatus(sub, now)).toBe("suspended");
+      expect(subscriptionEngine.effectiveStatus(sub, now)).toBe("expired");
       expect(subscriptionEngine.isBlocked(sub, now)).toBe(true);
     });
 
     it("trial vencido → datos permanecen", () => {
-      // El engine no borra datos, solo cambia el estado a suspended.
+      // El engine no borra datos, solo cambia el estado a expired.
       // Los datos (ventas, inventario, etc.) viven en otras tablas.
       const sub = {
         businessId: "b1",
@@ -62,7 +62,7 @@ describe("SubscriptionEngine — cierre definitivo de trial por persona", () => 
         paymentMethod: null,
         paymentStatus: "none" as const
       };
-      expect(subscriptionEngine.effectiveStatus(sub, now)).toBe("suspended");
+      expect(subscriptionEngine.effectiveStatus(sub, now)).toBe("expired");
       // No hay método delete/clear en el engine
       expect(subscriptionEngine).not.toHaveProperty("deleteBusiness");
       expect(subscriptionEngine).not.toHaveProperty("clearData");

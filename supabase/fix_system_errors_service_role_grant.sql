@@ -1,0 +1,28 @@
+-- ============================================================================
+-- VIMDY — Fix: otorgar acceso a system_errors para service_role
+-- ============================================================================
+-- PROBLEMA:
+--   ops-health-check (Edge Function) corre con SERVICE_ROLE_KEY y necesita
+--   leer system_errors para el reporte de salud. La tabla existía y tenía
+--   RLS + policy de INSERT, pero nunca se le dio GRANT de SELECT a
+--   service_role. Por eso Postgres devolvía:
+--     "permission denied for table system_errors"
+--
+--   RLS y GRANT son DOS capas distintas (ver schema.sql sección 8):
+--   - RLS filtra QUÉ FILAS puede ver/tocar cada rol.
+--   - GRANT da el permiso base para tocar la tabla.
+--   service_role bypasea RLS, pero IGUAL necesita el GRANT.
+--
+-- SOLUCIÓN:
+--   Otorgar ALL sobre system_errors a service_role, igual que ya está
+--   hecho para subscription_payments (subscriptions_migration.sql:61)
+--   y para las tablas del loop de schema.sql (schema.sql:666).
+--
+-- SEGURIDAD:
+--   - RLS sigue activa en system_errors.
+--   - No se modifica ninguna policy.
+--   - No se concede acceso a anon ni authenticated.
+--   - service_role solo la usa el backend (Edge Functions), nunca el frontend.
+-- ============================================================================
+
+grant all on system_errors to service_role;

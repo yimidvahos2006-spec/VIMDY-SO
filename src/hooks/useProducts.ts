@@ -50,7 +50,7 @@ export function useProducts(): UseProductsResult {
 
   const reload = useCallback(async () => {
     await productsReady;
-    const all = await container.inventoryService.listAll();
+    const all = await container.inventoryService.get().listAll();
     setProducts(all);
   }, []);
 
@@ -73,7 +73,7 @@ export function useProducts(): UseProductsResult {
 
   const search = useCallback(async (query: string) => {
     await productsReady;
-    return await container.inventoryService.search(query);
+    return await container.inventoryService.get().search(query);
   }, []);
 
   /** Sincroniza la Caja y notifica al resto de la app que el catálogo cambió. */
@@ -86,7 +86,7 @@ export function useProducts(): UseProductsResult {
     async (input: ProductInput): Promise<Product | null> => {
       setError(null);
       try {
-        const created = await container.inventoryService.createProduct(input);
+        const created = await container.inventoryService.get().createProduct(input);
         await syncAfterWrite();
         return created;
       } catch (e: any) {
@@ -101,7 +101,7 @@ export function useProducts(): UseProductsResult {
     async (id: string, input: ProductInput): Promise<Product | null> => {
       setError(null);
       try {
-        const updated = await container.inventoryService.updateProduct(id, input);
+        const updated = await container.inventoryService.get().updateProduct(id, input);
         await syncAfterWrite();
         return updated;
       } catch (e: any) {
@@ -116,7 +116,7 @@ export function useProducts(): UseProductsResult {
     async (id: string): Promise<boolean> => {
       setError(null);
       try {
-        await container.inventoryService.deleteProduct(id);
+        await container.inventoryService.get().deleteProduct(id);
         await syncAfterWrite();
         return true;
       } catch (e: any) {
@@ -131,7 +131,7 @@ export function useProducts(): UseProductsResult {
     async (id: string, quantity: number, reason: string): Promise<boolean> => {
       setError(null);
       try {
-        await container.inventoryService.increaseStock(id, quantity, reason);
+        await container.inventoryService.get().increaseStock(id, quantity, reason);
         await syncAfterWrite();
         return true;
       } catch (e: any) {
@@ -146,7 +146,7 @@ export function useProducts(): UseProductsResult {
     async (id: string, quantity: number, reason: string): Promise<boolean> => {
       setError(null);
       try {
-        await container.inventoryService.decreaseStock(id, quantity, reason);
+        await container.inventoryService.get().decreaseStock(id, quantity, reason);
         await syncAfterWrite();
         return true;
       } catch (e: any) {

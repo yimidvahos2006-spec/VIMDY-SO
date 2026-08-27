@@ -135,4 +135,75 @@ describe("InventoryEngine", () => {
     expect(updatedBatchProduct?.stock).toBe(7);
     expect(updatedIngredient?.stock).toBe(20);
   });
+
+  it("transfers stock between branches using separate product records", async () => {
+    const repository = new FakeProductRepository();
+    const kardex = new KardexEngine(new InMemoryRepository("inventory_movements"));
+    const engine = new InventoryEngine(repository, kardex);
+
+    const origin = await engine.createProduct({
+      name: "Coca-Cola 400ml",
+      categoryId: "cat-bebidas",
+      price: 4000,
+      stock: 10,
+      minStock: 2,
+      unit: "unidad",
+      requiresKitchen: false,
+      trackStock: true,
+      sku: "COCA-400"
+    });
+
+    const originAtBranch = { ...origin, branchId: "branch-a" };
+    await repository.save(originAtBranch);
+
+    const destAtBranch = {
+      ...origin,
+      id: crypto.randomUUID(),
+      stock: 0,
+      branchId: "branch-b",
+      lastUpdated: new Date(),
+      createdAt: new Date(),
+      version: 1
+    };
+    await repository.save(destAtBranch);
+
+    await engine.transferStock(origin.id, "branch-a", "branch-b", 3);
+
+    const updatedOrigin = await repository.findById(origin.id);
+    const updatedDest = await repository.findById(destAtBranch.id);
+
+    expect(updatedOrigin?.stock).toBe(7);
+    expect(updatedDest?.stock).toBe(3);
+  });
+
+  it("creates destination product on transfer when it does not exist yet", async () => {
+    const repository = new FakeProductRepository();
+    const kardex = new KardexEngine(new InMemoryRepository("inventory_movements"));
+    const engine = new InventoryEngine(repository, kardex);
+
+    const origin = await engine.createProduct({
+      name: "Coca-Cola 400ml",
+      categoryId: "cat-bebidas",
+      price: 4000,
+      stock: 10,
+      minStock: 2,
+      unit: "unidad",
+      requiresKitchen: false,
+      trackStock: true,
+      sku: "COCA-400"
+    });
+
+    const originAtBranch = { ...origin, branchId: "branch-a" };
+    await repository.save(originAtBranch);
+
+    await engine.transferStock(origin.id, "branch-a", "branch-b", 3);
+
+    const updatedOrigin = await repository.findById(origin.id);
+    const allProducts = await repository.all();
+    const createdDest = allProducts.find((p) => p.sku === "COCA-400" && p.branchId === "branch-b");
+
+    expect(updatedOrigin?.stock).toBe(7);
+    expect(createdDest).toBeDefined();
+    expect(createdDest?.stock).toBe(3);
+  });
 });

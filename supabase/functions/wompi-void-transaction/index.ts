@@ -172,13 +172,17 @@ Deno.serve(async (req: Request) => {
     // 4) Anular en Wompi con la llave PRIVADA — esto es lo único que este
     //    endpoint le agrega a la operación (el navegador no puede hacerlo).
     const apiBase = resolveWompiApiBase(WOMPI_PRIVATE_KEY);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15_000);
     const wompiResponse = await fetch(`${apiBase}/transactions/${transactionId}/void`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${WOMPI_PRIVATE_KEY}`,
         "Content-Type": "application/json"
-      }
+      },
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
 
     const wompiBody = (await wompiResponse.json()) as WompiVoidApiResponse;
 

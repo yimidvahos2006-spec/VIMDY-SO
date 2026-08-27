@@ -29,8 +29,13 @@ const PING_INTERVAL_MS = 20_000;
 const PING_TIMEOUT_MS = 5_000;
 
 function buildInitialSnapshot(): ConnectionSnapshot {
+  const browserOnline =
+    typeof navigator !== "undefined"
+      ? navigator.onLine ?? true
+      : true;
+
   return {
-    browserOnline: typeof navigator !== "undefined" ? navigator.onLine : true,
+    browserOnline,
     serverReachable: null,
     lastCheckedAt: null,
     checking: false
@@ -86,7 +91,9 @@ class ConnectionStore extends ObservableStore<ConnectionSnapshot> {
     void this.checkNow();
 
     this.intervalId = setInterval(() => {
-      void this.checkNow();
+      if (this.snapshot.browserOnline) {
+        void this.checkNow();
+      }
     }, PING_INTERVAL_MS);
   }
 

@@ -20,17 +20,17 @@ import { UpgradeModal } from "./UpgradeModal";
  * core/services/checkout.ts), no aquí.
  */
 export function TrialEndedOverlay() {
-  const { isSuspended, loading } = useSubscription();
+  const { isExpired, isSuspended, loading } = useSubscription();
   const [dismissed, setDismissed] = useState(false);
   const [upgrading, setUpgrading] = useState(false);
 
-  // Si el estado cambia (ej. el usuario activa un plan en otra pestaña),
-  // el overlay debe poder volver a mostrarse si vuelve a vencer más adelante.
-  useEffect(() => {
-    if (!isSuspended) setDismissed(false);
-  }, [isSuspended]);
+  const isBlocked = isExpired || isSuspended;
 
-  if (loading || !isSuspended || dismissed) return null;
+  useEffect(() => {
+    if (!isBlocked) setDismissed(false);
+  }, [isBlocked]);
+
+  if (loading || !isBlocked || dismissed) return null;
 
   return (
     <>
@@ -40,10 +40,9 @@ export function TrialEndedOverlay() {
             <HeartHandshake size={30} className="text-vimdy-accent" />
           </div>
 
-          <h2 className="text-vimdy-text text-xl font-bold">Tu prueba gratuita ha finalizado.</h2>
+          <h2 className="text-vimdy-text text-xl font-bold">Tu prueba de VIMDY ha terminado</h2>
           <p className="text-vimdy-text-secondary text-sm mt-2 leading-relaxed">
-            Gracias por confiar en VIMDY. Para continuar administrando tu negocio, activa uno de
-            nuestros planes.
+            Para continuar utilizando VIMDY, selecciona un plan.
           </p>
 
           <div className="mt-6 space-y-2.5">
@@ -51,7 +50,7 @@ export function TrialEndedOverlay() {
               onClick={() => setUpgrading(true)}
               className="w-full h-12 rounded-xl bg-vimdy-accent hover:bg-vimdy-accent-hover transition text-white font-bold text-sm"
             >
-              Actualizar ahora
+              Elegir plan
             </button>
             <button
               onClick={() => setDismissed(true)}

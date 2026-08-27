@@ -21,7 +21,7 @@ describe("SubscriptionEngine — escenarios completos", () => {
       expect(subscriptionEngine.daysRemaining(sub.trialEndsAt, now)).toBe(30);
     });
 
-    it("al vencer el trial, el negocio queda suspendido", () => {
+    it("al vencer el trial, el negocio queda expirado", () => {
       const sub = {
         businessId: "b1",
         plan: "trial" as const,
@@ -32,7 +32,7 @@ describe("SubscriptionEngine — escenarios completos", () => {
         paymentStatus: "none" as const
       };
 
-      expect(subscriptionEngine.effectiveStatus(sub, now)).toBe("suspended");
+      expect(subscriptionEngine.effectiveStatus(sub, now)).toBe("expired");
       expect(subscriptionEngine.isBlocked(sub, now)).toBe(true);
       expect(subscriptionEngine.daysRemaining(sub.trialEndsAt, now)).toBe(0);
     });

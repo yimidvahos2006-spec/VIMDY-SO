@@ -41,23 +41,25 @@ async function syncOne(pending: PendingInventoryAdjustment): Promise<void> {
   }
 
   if (pending.type === "INCREASE") {
-    await container.inventoryEngine.increaseStock(
+    await container.inventoryEngine.get().increaseStock(
       pending.productId,
       pending.quantity,
       pending.reason,
       pending.performedBy,
       pending.supplierId,
       pending.purchasePrice,
-      pending.id
+      pending.id,
+      pending.branchId
     );
   } else {
-    await container.inventoryEngine.decreaseStock(
+    await container.inventoryEngine.get().decreaseStock(
       pending.productId,
       pending.quantity,
       pending.reason,
       pending.performedBy,
       pending.lossCategory,
-      pending.id
+      pending.id,
+      pending.branchId
     );
   }
 }

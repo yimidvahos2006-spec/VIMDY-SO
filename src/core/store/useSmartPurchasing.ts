@@ -20,7 +20,7 @@ export function useSmartPurchasing() {
 
   const load = useCallback(async () => {
     await productsReady;
-    const result = await container.purchaseIntelligenceEngine.getRecommendations();
+    const result = await container.purchaseIntelligenceEngine.get().getRecommendations();
     setRecommendations(result);
   }, []);
 

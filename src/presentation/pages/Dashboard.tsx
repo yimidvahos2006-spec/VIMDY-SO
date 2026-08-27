@@ -5,6 +5,7 @@ import { DashboardWelcome } from "../components/dashboard/DashboardWelcome";
 import { DashboardIndicators } from "../components/dashboard/DashboardIndicators";
 import { GerenteInteligente } from "../components/dashboard/GerenteInteligente";
 import { DashboardQuickActions } from "../components/dashboard/DashboardQuickActions";
+import { DailyReportButton } from "../components/dashboard/DailyReportButton";
 import { DashboardActivity } from "../components/dashboard/DashboardActivity";
 import { DashboardSection } from "../components/dashboard/DashboardSection";
 
@@ -51,6 +52,9 @@ export function Dashboard() {
           <DashboardSection title={t("dashboard.section.quickActions")} icon={Zap} accent="actions">
             <DashboardQuickActions />
           </DashboardSection>
+
+          {/* Bloque 4.1 — Reporte diario por WhatsApp */}
+          <DailyReportButton />
 
           {/* Bloque 5 — Actividad reciente */}
           <DashboardSection title={t("dashboard.section.activity")} icon={Activity} accent="activity">

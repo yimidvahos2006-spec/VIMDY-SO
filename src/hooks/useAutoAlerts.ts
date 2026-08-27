@@ -71,7 +71,7 @@ export function useAutoAlerts() {
 
       const business = businessStore.get();
       const config = companyConfigStore.get();
-      const snapshot = await container.businessAnalyzer.buildSnapshot(
+      const snapshot = await container.businessAnalyzer.get().buildSnapshot(
         business.name || "Mi negocio",
         config.currency
       );

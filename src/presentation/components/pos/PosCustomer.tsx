@@ -59,7 +59,7 @@ export function PosCustomer({ compact = false }: PosCustomerProps = {}) {
     let cancelled = false;
     setLoading(true);
 
-    container.customerEngine
+    container.customerEngine.get()
       .getAllCustomers()
       .then((list) => {
         if (!cancelled) setCustomers(list);
@@ -83,7 +83,7 @@ export function PosCustomer({ compact = false }: PosCustomerProps = {}) {
 
     let cancelled = false;
 
-    container.customerEngine
+    container.customerEngine.get()
       .getCustomerProfile(customerId)
       .then((profile) => {
         if (!cancelled) setSelectedProfile(profile.customer);
@@ -123,7 +123,7 @@ export function PosCustomer({ compact = false }: PosCustomerProps = {}) {
 
     // BLOQUEANTE (Fase 3 — Caja): antes no había ningún estado "saving" acá.
     // El botón quedaba clickeable y sin ningún indicador mientras
-    // container.customerEngine.save() esperaba respuesta de red — un
+    // container.customerEngine.get().save() esperaba respuesta de red — un
     // cajero con conexión lenta podía tocarlo dos veces y no tenía forma
     // de saber si estaba "pensando" o si el toque no había registrado.
     // Mismo patrón que el botón de Cobrar en PosSalePanel: disabled +
@@ -131,7 +131,7 @@ export function PosCustomer({ compact = false }: PosCustomerProps = {}) {
     setSaving(true);
 
     try {
-      await container.customerEngine.save(customer);
+      await container.customerEngine.get().save(customer);
       setCustomers((prev) => [...prev, customer]);
       handleSelect(customer);
       setCreating(false);

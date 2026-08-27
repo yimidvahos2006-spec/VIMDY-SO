@@ -10,6 +10,7 @@ export const NOTIFICATION_CATEGORIES: NotificationCategory[] = [
   "META_CUMPLIDA",
   "IA_COMPRA",
   "RECORDATORIO",
+  "SUSCRIPCION",
   "GENERAL"
 ];
 
@@ -47,6 +48,7 @@ export function useNotifications() {
     META_CUMPLIDA: [],
     IA_COMPRA: [],
     RECORDATORIO: [],
+    SUSCRIPCION: [],
     GENERAL: []
   };
   for (const n of notifications) {
@@ -60,6 +62,7 @@ export function useNotifications() {
     META_CUMPLIDA: 0,
     IA_COMPRA: 0,
     RECORDATORIO: 0,
+    SUSCRIPCION: 0,
     GENERAL: 0
   };
   for (const n of unread) {

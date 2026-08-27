@@ -53,7 +53,7 @@ export function buildProductInputFromImportRow(
       : undefined;
 
   const validIngredientRows = row.recipeRows.filter(
-    (ing) => ing.productId && ing.quantity.trim() && Number(ing.quantity) > 0
+    (ing) => ing.productId && ing.quantity?.trim() && Number(ing.quantity) > 0
   );
 
   const recipe: RecipeItem[] | undefined = validIngredientRows.length > 0

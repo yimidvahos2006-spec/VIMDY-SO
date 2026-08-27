@@ -50,7 +50,7 @@ export function OpenTableDialog({ table, waiterId, onClose, onOpened }: Props) {
       if (!connectionStore.isOnline()) {
         await queueOpenTableOffline({ table, input });
       } else {
-        await container.tableEngine.openTable(input);
+        await container.tableEngine.get().openTable(input);
       }
       openAttemptIdRef.current = null;
       onOpened();

@@ -15,7 +15,7 @@ export function useCashierShiftStatus(): boolean | null {
 
   async function reload() {
     try {
-      const shift = await container.shiftEngine.getCurrentShift();
+      const shift = await container.shiftEngine.get().getCurrentShift();
       setIsOpen(shift !== null);
     } catch {
       // Si falla la consulta (ej. sin sesión todavía), se trata como

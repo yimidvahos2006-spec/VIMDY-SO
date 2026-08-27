@@ -78,7 +78,7 @@ interface AuthContextValue {
   register: (input: RegisterBusinessInput) => Promise<void>;
   /**
    * Registro de negocio — PASO 2: verifica el código OTP de 6 dígitos y,
-   * si es correcto, crea el negocio + membresía ADMIN + trial de 30 días
+   * si es correcto, crea el negocio + membresía ADMIN + trial de 14 días
    * (Edge Function register-business) y deja la sesión activa.
    */
   verifyOtp: (code: string) => Promise<void>;
@@ -133,7 +133,7 @@ function hydrateBusinessConfig(session: BusinessSession) {
   businessStore.update({
     name: session.businessName,
     owner: session.ownerName,
-    country: session.country
+    country: session.country as CountryCode
   });
   companyConfigStore.update({
     country: session.country as CountryCode,
@@ -164,7 +164,11 @@ function hydrateBusinessConfig(session: BusinessSession) {
 async function hydrateSubscription(businessId: string): Promise<void> {
   try {
     const subscription = await fetchSubscription(businessId);
-    if (subscription) subscriptionStore.hydrate(subscription);
+    if (subscription) {
+      subscriptionStore.hydrate(subscription);
+      const { evaluateSubscriptionNotifications } = await import("../../core/store/subscriptionNotifications");
+      evaluateSubscriptionNotifications();
+    }
   } catch {
     // Sin conexión momentánea: no bloqueamos el login por esto.
   }
@@ -214,7 +218,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             resolveDefaultBranchId(session.businessId),
             hydrateBusinessConfig(session),
             hydrateSubscription(session.businessId),
-            ensureIdentity(container.permissionEngine, container.roleEngine)
+            ensureIdentity(container.permissionEngine.get(), container.roleEngine.get())
           ]);
           setCurrentBranchId(resolvedBranchId);
           startRealtimeSync(session.businessId);
@@ -290,7 +294,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setCurrentBusinessId(businessSession.businessId);
       hydrateBusinessConfig(businessSession);
       hydrateSubscription(businessSession.businessId);
-      void ensureIdentity(container.permissionEngine, container.roleEngine);
+      void ensureIdentity(container.permissionEngine.get(), container.roleEngine.get());
       const { user: u, role: r } = toAuthState(businessSession, email);
 
       startRealtimeSync(businessSession.businessId);
@@ -319,7 +323,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setCurrentBranchId(resolvedBranchId);
     hydrateBusinessConfig(businessSession);
     hydrateSubscription(businessSession.businessId);
-    void ensureIdentity(container.permissionEngine, container.roleEngine);
+    void ensureIdentity(container.permissionEngine.get(), container.roleEngine.get());
     setUser({ id: businessSession.userId, name: businessSession.ownerName, email: user?.email ?? "" });
     setRole({ id: businessSession.role, name: businessSession.role, permissions: permissionsForRole(businessSession.role) });
     setSessionId(businessSession.userId);
@@ -354,12 +358,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // PASO 2a: confirma el código -> deja la sesión activa y confirmada.
       await verifyRegistrationOtp(code);
       // PASO 2b: con la sesión ya confirmada, crea el negocio + membresía
-      // ADMIN + trial de 30 días, y resuelve la sesión de negocio completa.
+       // ADMIN + trial de 14 días, y resuelve la sesión de negocio completa.
       const businessSession = await completeRegistration();
 
       hydrateBusinessConfig(businessSession);
       hydrateSubscription(businessSession.businessId);
-      void ensureIdentity(container.permissionEngine, container.roleEngine);
+      void ensureIdentity(container.permissionEngine.get(), container.roleEngine.get());
       const pending = getPendingRegistration();
       const { user: u, role: r } = toAuthState(businessSession, pending?.email ?? "");
 

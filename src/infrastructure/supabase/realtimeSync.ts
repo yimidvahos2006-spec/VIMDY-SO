@@ -45,7 +45,8 @@ const TABLE_EVENT_MAP: Record<string, EventType> = {
   roles: "access",
   permissions: "access",
   app_users: "user",
-  audit_logs: "audit"
+  audit_logs: "audit",
+  businesses: "subscription"
 };
 
 let channel: RealtimeChannel | null = null;
@@ -83,13 +84,18 @@ export function startRealtimeSync(businessId: string): void {
   let builder = supabase.channel(`business-sync-${businessId}`);
 
   for (const table of Object.keys(TABLE_EVENT_MAP)) {
+    const filter =
+      table === "businesses"
+        ? { column: "id", value: businessId }
+        : { column: "business_id", value: businessId };
+
     builder = builder.on(
       "postgres_changes" as any,
       {
         event: "*",
         schema: "public",
         table,
-        filter: `business_id=eq.${businessId}`
+        filter: `${filter.column}=eq.${filter.value}`
       },
       () => emitDebounced(TABLE_EVENT_MAP[table])
     );
@@ -141,7 +147,7 @@ export function stopRealtimeSync(): void {
  *   [x] src/hooks/useCategories.ts          -> escuchar "inventory"
  *   [x] src/core/store/useCustomers.ts      -> escuchar "customer"
  *   [x] mesas -> Meseros.tsx ya escucha "table"
- *       via container.tableEngine (tableStore.ts/useTables.ts se borraron,
+ *       via container.tableEngine.get() (tableStore.ts/useTables.ts se borraron,
  *       eran datos falsos en memoria, nunca estuvieron conectados a esto)
  *   [x] src/hooks/useKitchenOrders.ts       -> escuchar "kitchen"
  *   [x] src/hooks/useKitchenHistory.ts      -> escuchar "kitchen"

@@ -100,7 +100,7 @@ export function CloseTableDialog({ table, onClose, onClosed }: Props) {
         return;
       }
 
-      const { sale: paidSale, receipt } = await container.tableEngine.closeTable(closeInput);
+      const { sale: paidSale, receipt } = await container.tableEngine.get().closeTable(closeInput);
 
       // Impresión real (window.print del sistema), igual que en Caja
       // mostrador, y respetando companyConfigStore.autoPrintReceipt

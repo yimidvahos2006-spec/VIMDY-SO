@@ -8,6 +8,10 @@ export interface UsePendingSalesQueueResult extends PendingSalesSnapshot {
   count: number;
   /** Solo las que están esperando su turno (útil para el banner de la Parte 5). */
   pending: PendingSale[];
+  /** Ventas que fallaron la sincronización y necesitan revisión manual. */
+  failed: PendingSale[];
+  /** Cantidad de ventas fallidas. */
+  failedCount: number;
 }
 
 /**
@@ -23,6 +27,8 @@ export function usePendingSalesQueue(): UsePendingSalesQueueResult {
   return {
     ...snapshot,
     count: snapshot.items.length,
-    pending: snapshot.items.filter((sale) => sale.status === "PENDING_SYNC")
+    pending: snapshot.items.filter((sale) => sale.status === "PENDING_SYNC"),
+    failed: snapshot.items.filter((sale) => sale.status === "FAILED" || sale.status === "PERMANENT_FAILURE"),
+    failedCount: snapshot.items.filter((sale) => sale.status === "FAILED" || sale.status === "PERMANENT_FAILURE").length
   };
 }

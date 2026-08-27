@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { AlertTriangle, X } from "lucide-react";
 
 import { useSubscription } from "../../../core/store/useSubscription";
@@ -12,7 +12,7 @@ const DISMISS_KEY_PREFIX = "vimdy.subscription.warning.dismissed";
  * VIMDY — FASE 7, PASO 4: "Cuando falten 7 / 3 / 1 días, mostrar un aviso
  * elegante. Nunca mostrar mensajes agresivos."
  *
- * Aplica tanto al trial de 30 días como al plan pagado (mensual/anual)
+  * Aplica tanto al trial de 14 días como al plan pagado (mensual/anual)
  * que el negocio haya elegido: en ambos casos avisa cuando faltan 7, 3 o
  * 1 día para la fecha relevante (trialEndsAt o renewalDate).
  *
@@ -29,9 +29,20 @@ export function SubscriptionWarningBanner() {
   const [upgrading, setUpgrading] = useState(false);
 
   const dismissKey = useMemo(
-    () => `${DISMISS_KEY_PREFIX}:${new Date().toDateString()}:${plan ?? ""}:${warningThreshold ?? ""}`,
+    () => `${DISMISS_KEY_PREFIX}:${plan ?? ""}:${warningThreshold ?? ""}`,
     [plan, warningThreshold]
   );
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(dismissKey);
+      if (stored === "1") {
+        setDismissedThreshold(warningThreshold);
+      }
+    } catch {
+      // localStorage no disponible
+    }
+  }, [dismissKey, warningThreshold]);
 
   // Aplica tanto al trial como a un plan pagado (mensual/anual) que ya
   // cumplió con su fecha de renovación — un negocio "suspended" no recibe
@@ -60,7 +71,11 @@ export function SubscriptionWarningBanner() {
               <p className="text-vimdy-text text-sm font-semibold">
                 {isTrial
                   ? daysRemaining === 1
-                    ? "Tu prueba termina mañana."
+                    ? "Tu prueba de VIMDY termina mañana."
+                    : daysRemaining === 2
+                    ? "Tu prueba de VIMDY termina en 2 días."
+                    : daysRemaining === 3
+                    ? "Tu prueba de VIMDY termina en 3 días."
                     : `Tu prueba termina en ${daysRemaining} días.`
                   : daysRemaining === 1
                   ? "Tu plan termina mañana."
@@ -68,14 +83,14 @@ export function SubscriptionWarningBanner() {
               </p>
               <p className="text-vimdy-text-secondary text-xs mt-1 leading-relaxed">
                 {isTrial
-                  ? "Actualiza tu plan para seguir utilizando VIMDY sin interrupciones."
+                  ? "Continúa utilizando VIMDY realizando tu suscripción antes de que finalice el período de prueba."
                   : "Renueva tu plan para seguir utilizando VIMDY sin interrupciones."}
               </p>
               <button
                 onClick={() => setUpgrading(true)}
                 className="mt-3 bg-vimdy-accent hover:bg-vimdy-accent-hover transition text-white text-xs font-bold px-3.5 py-2 rounded-lg"
               >
-                {isTrial ? "Ver planes" : "Renovar ahora"}
+                {isTrial ? "Elegir plan" : "Renovar ahora"}
               </button>
             </div>
             <button onClick={handleDismiss} className="text-vimdy-text-tertiary hover:text-vimdy-text flex-shrink-0">

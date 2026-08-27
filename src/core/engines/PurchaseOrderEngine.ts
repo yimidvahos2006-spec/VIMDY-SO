@@ -3,6 +3,7 @@ import { Product, PurchaseOrder, PurchaseOrderItem, PurchaseOrderStatus } from "
 import { IRepository } from "../../infrastructure/di/repositories/IRepository";
 import { InventoryEngine } from "./InventoryEngine";
 import { RecipeEngine } from "./RecipeEngine";
+import { getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
 
 /** Productos con receta cuya capacidad real de producción mejoró al recibir una compra. */
 export interface CapacityImprovement {
@@ -162,7 +163,9 @@ export class PurchaseOrderEngine {
         `Compra recibida (orden ${order.id})`,
         performedBy,
         order.supplierId,
-        item.unitPrice
+        item.unitPrice,
+        undefined,
+        getCurrentBranchId()
       );
     }
 

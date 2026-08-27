@@ -81,13 +81,159 @@ alter table businesses add column if not exists salida_cocina text not null defa
 create table if not exists business_members (
   user_id uuid not null references auth.users(id) on delete cascade,
   business_id uuid not null references businesses(id) on delete cascade,
-  role text not null default 'ADMIN', -- 'ADMIN' | 'CAJERO' | 'MESERO' | 'COCINA'
+  role text not null default 'MESERO', -- 'ADMIN' | 'CAJERO' | 'MESERO' | 'COCINA'
   created_at timestamptz not null default now(),
   primary key (user_id, business_id)
 );
 
 -- ----------------------------------------------------------------------------
--- 3. Función auxiliar: negocios a los que pertenece el usuario autenticado.
+-- 2.1. INVITACIONES A NEGOCIOS — sistema de invitaciones para unirse.
+-- ----------------------------------------------------------------------------
+create table if not exists business_invitations (
+  id uuid primary key default gen_random_uuid(),
+  business_id uuid not null references businesses(id) on delete cascade,
+  user_id uuid references auth.users(id) on delete cascade,
+  email text not null,
+  role text not null default 'MESERO',
+  token text not null unique,
+  invited_by uuid not null references auth.users(id) on delete cascade,
+  expires_at timestamptz not null,
+  accepted_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists business_invitations_business_id_idx on business_invitations (business_id);
+create index if not exists business_invitations_token_idx on business_invitations (token);
+create index if not exists business_invitations_email_idx on business_invitations (email);
+create index if not exists business_invitations_user_id_idx on business_invitations (user_id);
+
+alter table business_invitations enable row level security;
+drop policy if exists business_invitations_admin_read on business_invitations;
+create policy business_invitations_admin_read on business_invitations
+  for select
+  using (
+    business_id in (select auth_business_ids())
+    and public.has_business_role(business_id, array['ADMIN'])
+  );
+
+drop policy if exists business_invitations_admin_insert on business_invitations;
+create policy business_invitations_admin_insert on business_invitations
+  for insert
+  with check (
+    business_id in (select auth_business_ids())
+    and public.has_business_role(business_id, array['ADMIN'])
+    and public.is_business_subscription_active(business_id)
+  );
+
+drop policy if exists business_invitations_admin_update on business_invitations;
+create policy business_invitations_admin_update on business_invitations
+  for update
+  using (
+    business_id in (select auth_business_ids())
+    and public.has_business_role(business_id, array['ADMIN'])
+    and public.is_business_subscription_active(business_id)
+  )
+  with check (
+    business_id in (select auth_business_ids())
+    and public.has_business_role(business_id, array['ADMIN'])
+    and public.is_business_subscription_active(business_id)
+  );
+
+drop policy if exists business_invitations_admin_delete on business_invitations;
+create policy business_invitations_admin_delete on business_invitations
+  for delete
+  using (
+    business_id in (select auth_business_ids())
+    and public.has_business_role(business_id, array['ADMIN'])
+    and public.is_business_subscription_active(business_id)
+  );
+
+drop policy if exists business_invitations_self_accept on business_invitations;
+create policy business_invitations_self_accept on business_invitations
+  for select
+  using (
+    email = (select email from auth.users where id = auth.uid())
+    and expires_at > now()
+    and accepted_at is null
+  );
+
+-- ----------------------------------------------------------------------------
+-- 3. FUNCIONES SEGURAS (SECURITY DEFINER) — comprobación de membresía y rol.
+--    No confiar en datos enviados desde el frontend para decisiones de seguridad.
+-- ----------------------------------------------------------------------------
+create or replace function public.is_business_member(target_business_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  select exists(
+    select 1 from business_members
+    where business_id = target_business_id
+      and user_id = auth.uid()
+  );
+$$;
+
+create or replace function public.has_business_role(
+  target_business_id uuid,
+  allowed_roles text[]
+)
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  select exists(
+    select 1 from business_members
+    where business_id = target_business_id
+      and user_id = auth.uid()
+      and role = any(allowed_roles)
+  );
+$$;
+
+create or replace function public.accept_invitation(p_token text)
+returns uuid
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+  v_invitation business_invitations;
+  v_business_id uuid;
+begin
+  select * into v_invitation
+  from business_invitations
+  where token = p_token
+    and accepted_at is null
+    and expires_at > now()
+  limit 1;
+
+  if not found then
+    raise exception 'INVITATION_NOT_FOUND_OR_EXPIRED' using errcode = 'P0002';
+  end if;
+
+  if v_invitation.email != (select auth.email from auth.users where id = auth.uid()) then
+    raise exception 'INVITATION_EMAIL_MISMATCH' using errcode = 'P0002';
+  end if;
+
+  v_business_id := v_invitation.business_id;
+
+  insert into business_members (user_id, business_id, role)
+  values (auth.uid(), v_business_id, v_invitation.role)
+  on conflict (user_id, business_id) do update set role = excluded.role;
+
+  update business_invitations
+  set accepted_at = now()
+  where id = v_invitation.id;
+
+  return v_business_id;
+end;
+$$;
+
+revoke all on function public.accept_invitation(text) from public, anon;
+grant execute on function public.accept_invitation(text) to authenticated;
+
+-- ----------------------------------------------------------------------------
+-- 4. Función auxiliar: negocios a los que pertenece el usuario autenticado.
 --    Se usa en TODAS las políticas de seguridad de abajo.
 -- ----------------------------------------------------------------------------
 create or replace function auth_business_ids()
@@ -100,7 +246,95 @@ as $$
 $$;
 
 -- ----------------------------------------------------------------------------
--- 4. Tabla genérica reutilizada para cada "store" que ya tienes en
+-- 4. SUCURSALES DEL NEGOCIO — cada negocio puede tener una o más
+--    sucursales, y los datos operativos deben quedar aislados por negocio +
+--    sucursal. La sucursal principal es la que se usa por defecto cuando
+--    el usuario no selecciona explícitamente una sucursal distinta.
+-- ----------------------------------------------------------------------------
+create table if not exists branches (
+  id uuid primary key default gen_random_uuid(),
+  business_id uuid not null references businesses(id) on delete cascade,
+  name text not null,
+  is_main boolean not null default false,
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create or replace function public.ensure_branch_for_business(p_business_id uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_branch_id uuid;
+begin
+  select id into v_branch_id
+  from branches
+  where business_id = p_business_id and is_main = true
+  limit 1;
+
+  if v_branch_id is not null then
+    return v_branch_id;
+  end if;
+
+  insert into branches (business_id, name, is_main, active)
+  values (p_business_id, 'Sucursal principal', true, true)
+  returning id into v_branch_id;
+
+  return v_branch_id;
+end;
+$$;
+create index if not exists branches_business_id_idx on branches (business_id);
+alter table branches enable row level security;
+drop policy if exists branches_tenant_read on branches;
+create policy branches_tenant_read on branches
+  for select
+  using (business_id in (select auth_business_ids()));
+
+drop policy if exists branches_tenant_insert on branches;
+create policy branches_tenant_insert on branches
+  for insert
+  with check (
+    business_id in (select auth_business_ids())
+    and public.is_business_subscription_active(business_id)
+  );
+
+drop policy if exists branches_tenant_update on branches;
+create policy branches_tenant_update on branches
+  for update
+  using (
+    business_id in (select auth_business_ids())
+    and public.has_business_role(business_id, array['ADMIN'])
+  )
+  with check (
+    business_id in (select auth_business_ids())
+    and public.is_business_subscription_active(business_id)
+  );
+
+drop policy if exists branches_tenant_delete on branches;
+create policy branches_tenant_delete on branches
+  for delete
+  using (
+    business_id in (select auth_business_ids())
+    and public.has_business_role(business_id, array['ADMIN'])
+    and public.is_business_subscription_active(business_id)
+  );
+
+grant all on branches to service_role;
+
+create or replace function auth_branch_ids()
+returns setof uuid
+language sql
+security definer
+stable
+as $$
+  select id from branches where business_id in (select auth_business_ids());
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 5. Tabla genérica reutilizada para cada "store" que ya tienes en
 --    indexedDbCore.ts (products, sales, customers, kitchenOrders, etc).
 --    Se crea una tabla real por cada una, todas con la misma forma.
 -- ----------------------------------------------------------------------------
@@ -127,6 +361,8 @@ begin
       create table if not exists %I (
         id text primary key,
         business_id uuid not null references businesses(id) on delete cascade,
+        branch_id uuid references branches(id) on delete set null,
+        version integer not null default 1,
         data jsonb not null,
         created_at timestamptz not null default now(),
         updated_at timestamptz not null default now()
@@ -142,12 +378,75 @@ begin
     execute format('
       drop policy if exists %I on %I;
       create policy %I on %I
-        for all
-        using (business_id in (select auth_business_ids()))
-        with check (business_id in (select auth_business_ids()));
+        for select
+        using (
+          business_id in (select auth_business_ids())
+          and (
+            branch_id is null
+            or branch_id in (select auth_branch_ids())
+          )
+        );
     ',
-      store_name || '_tenant_isolation', store_name,
-      store_name || '_tenant_isolation', store_name
+      store_name || '_tenant_read', store_name,
+      store_name || '_tenant_read', store_name
+    );
+
+    execute format('
+      drop policy if exists %I on %I;
+      create policy %I on %I
+        for insert
+        with check (
+          business_id in (select auth_business_ids())
+          and (
+            branch_id is null
+            or branch_id in (select auth_branch_ids())
+          )
+          and public.is_business_subscription_active(business_id)
+        );
+    ',
+      store_name || '_tenant_insert', store_name,
+      store_name || '_tenant_insert', store_name
+    );
+
+    execute format('
+      drop policy if exists %I on %I;
+      create policy %I on %I
+        for update
+        using (
+          business_id in (select auth_business_ids())
+          and (
+            branch_id is null
+            or branch_id in (select auth_branch_ids())
+          )
+        )
+        with check (
+          business_id in (select auth_business_ids())
+          and (
+            branch_id is null
+            or branch_id in (select auth_branch_ids())
+          )
+          and public.is_business_subscription_active(business_id)
+        );
+    ',
+      store_name || '_tenant_update', store_name,
+      store_name || '_tenant_update', store_name
+    );
+
+    execute format('
+      drop policy if exists %I on %I;
+      create policy %I on %I
+        for delete
+        using (
+          business_id in (select auth_business_ids())
+          and (
+            branch_id is null
+            or branch_id in (select auth_branch_ids())
+          )
+          and public.is_business_subscription_active(business_id)
+        );
+    ',
+      store_name || '_tenant_delete', store_name,
+      store_name || '_tenant_delete', store_name
     );
   end loop;
 end $$;
@@ -161,17 +460,67 @@ end $$;
 create table if not exists app_users (
   id text primary key,
   business_id uuid not null references businesses(id) on delete cascade,
+  branch_id uuid references branches(id) on delete set null,
+  version integer not null default 1,
   data jsonb not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 create index if not exists app_users_business_id_idx on app_users (business_id);
 alter table app_users enable row level security;
-drop policy if exists app_users_tenant_isolation on app_users;
-create policy app_users_tenant_isolation on app_users
-  for all
-  using (business_id in (select auth_business_ids()))
-  with check (business_id in (select auth_business_ids()));
+drop policy if exists app_users_tenant_read on app_users;
+create policy app_users_tenant_read on app_users
+  for select
+  using (
+    business_id in (select auth_business_ids())
+    and (
+      branch_id is null
+      or branch_id in (select auth_branch_ids())
+    )
+  );
+
+drop policy if exists app_users_tenant_insert on app_users;
+create policy app_users_tenant_insert on app_users
+  for insert
+  with check (
+    business_id in (select auth_business_ids())
+    and (
+      branch_id is null
+      or branch_id in (select auth_branch_ids())
+    )
+    and public.is_business_subscription_active(business_id)
+  );
+
+drop policy if exists app_users_tenant_update on app_users;
+create policy app_users_tenant_update on app_users
+  for update
+  using (
+    business_id in (select auth_business_ids())
+    and (
+      branch_id is null
+      or branch_id in (select auth_branch_ids())
+    )
+  )
+  with check (
+    business_id in (select auth_business_ids())
+    and (
+      branch_id is null
+      or branch_id in (select auth_branch_ids())
+    )
+    and public.is_business_subscription_active(business_id)
+  );
+
+drop policy if exists app_users_tenant_delete on app_users;
+create policy app_users_tenant_delete on app_users
+  for delete
+  using (
+    business_id in (select auth_business_ids())
+    and (
+      branch_id is null
+      or branch_id in (select auth_branch_ids())
+    )
+    and public.is_business_subscription_active(business_id)
+  );
 
 -- ----------------------------------------------------------------------------
 -- 6. Seguridad extra: los negocios y sus miembros también quedan aislados.
@@ -183,40 +532,90 @@ create policy businesses_member_access on businesses
   using (id in (select auth_business_ids()));
 
 -- Cualquier persona ya logueada en Supabase Auth puede CREAR un negocio
--- nuevo (es el paso "Crear cuenta" / registerBusiness()). Antes de este
--- insert todavía no existe la fila en business_members, así que no se
--- puede exigir auth_business_ids() aquí — se exige en el insert de
--- business_members de abajo, que es lo que realmente ata ese negocio
--- al usuario que lo creó.
+-- nuevo (es el paso "Crear cuenta" / registerBusiness()) SIEMPRE QUE
+-- todavía no haya usado su trial gratuito de por vida. Esto cierra la
+-- ruta de bypass por la que un usuario podía crear negocios ilimitados
+-- con trials ilimitados insertando directamente desde el cliente.
 drop policy if exists businesses_insert_own on businesses;
 create policy businesses_insert_own on businesses
   for insert
-  with check (auth.uid() is not null);
+  with check (
+    auth.uid() is not null
+    and not public.has_user_used_trial(auth.uid())
+  );
 
--- Un miembro del negocio (cualquier rol, ya que hoy solo el ADMIN llega al
--- onboarding) puede actualizar la fila de SU propio negocio. Esto es lo
--- que permite marcar onboarding_completed = true desde el cliente al
--- terminar el asistente, y en general editar datos del negocio desde
--- Configuración más adelante.
+-- Solo ADMIN puede actualizar la fila de SU propio negocio, y SOLO columnas
+-- seguras (no plan, payment_status, ni datos de suscripción).
+-- Si la suscripción está vencida, no se permiten modificaciones operativas.
 drop policy if exists businesses_update_own on businesses;
 create policy businesses_update_own on businesses
   for update
-  using (id in (select auth_business_ids()))
-  with check (id in (select auth_business_ids()));
+  using (
+    id in (select auth_business_ids())
+    and public.has_business_role(id, array['ADMIN'])
+  )
+  with check (
+    id in (select auth_business_ids())
+    and public.has_business_role(id, array['ADMIN'])
+    and public.is_business_subscription_active(id)
+  );
 
+-- Un miembro del negocio puede ver los datos de membresía de SU propio negocio.
 alter table business_members enable row level security;
-drop policy if exists business_members_self_access on business_members;
-create policy business_members_self_access on business_members
+drop policy if exists business_members_self_read on business_members;
+create policy business_members_self_read on business_members
   for select
-  using (user_id = auth.uid());
+  using (
+    business_id in (select auth_business_ids())
+    and user_id = auth.uid()
+  );
 
--- Un usuario solo puede insertarse a SÍ MISMO como miembro de un negocio
--- (no puede meter a otro usuario ni asignarse a un negocio ajeno editando
--- el user_id). Esto es lo que cierra el registro de forma segura.
-drop policy if exists business_members_insert_self on business_members;
-create policy business_members_insert_self on business_members
+-- Un usuario solo puede insertarse como miembro de un negocio SI existe una
+-- invitación válida para ese correo en ese negocio, o si la operación la
+-- realiza la Edge Function con service_role (que bypassea RLS).
+drop policy if exists business_members_self_insert on business_members;
+create policy business_members_self_insert on business_members
   for insert
-  with check (user_id = auth.uid());
+  with check (
+    user_id = auth.uid()
+    and exists (
+      select 1 from business_invitations
+      where business_id = business_members.business_id
+        and (email = (select email from auth.users where id = auth.uid())
+             or user_id = auth.uid())
+        and accepted_at is null
+        and expires_at > now()
+    )
+    and public.is_business_subscription_active(business_members.business_id)
+  );
+
+-- Solo ADMIN puede cambiar roles de otros miembros.
+drop policy if exists business_members_update_role on business_members;
+create policy business_members_update_role on business_members
+  for update
+  using (
+    business_id in (select auth_business_ids())
+    and public.has_business_role(business_id, array['ADMIN'])
+    and public.is_business_subscription_active(business_id)
+  )
+  with check (
+    business_id in (select auth_business_ids())
+    and public.has_business_role(business_id, array['ADMIN'])
+    and public.is_business_subscription_active(business_id)
+  );
+
+-- Solo ADMIN puede eliminar miembros (o el propio usuario puede retirarse).
+drop policy if exists business_members_delete_member on business_members;
+create policy business_members_delete_member on business_members
+  for delete
+  using (
+    business_id in (select auth_business_ids())
+    and (
+      public.has_business_role(business_id, array['ADMIN'])
+      or user_id = auth.uid()
+    )
+    and public.is_business_subscription_active(business_id)
+  );
 
 -- ============================================================================
 -- Listo. A partir de aquí, cualquier consulta hecha con el token de un
@@ -256,6 +655,78 @@ $$;
 -- Solo la Edge Function (que llama con la service_role key) puede usar esto.
 revoke all on function public.admin_get_user_business_status(text) from public, anon, authenticated;
 grant execute on function public.admin_get_user_business_status(text) to service_role;
+
+-- ============================================================================
+-- 6.1. AUDITORÍA — triggers para cambios sensibles en business_members.
+-- ============================================================================
+create or replace function public.audit_business_members_change()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if TG_OP = 'INSERT' then
+    insert into audit_logs (id, business_id, data, version, created_at, updated_at)
+    values (
+      gen_random_uuid()::text,
+      NEW.business_id,
+      jsonb_build_object(
+        'action', 'BUSINESS_MEMBER_ADDED',
+        'user_id', NEW.user_id,
+        'role', NEW.role,
+        'business_id', NEW.business_id,
+        'timestamp', now()
+      ),
+      1,
+      now(),
+      now()
+    );
+    return NEW;
+  elsif TG_OP = 'UPDATE' then
+    insert into audit_logs (id, business_id, data, version, created_at, updated_at)
+    values (
+      gen_random_uuid()::text,
+      NEW.business_id,
+      jsonb_build_object(
+        'action', 'BUSINESS_MEMBER_ROLE_CHANGED',
+        'user_id', NEW.user_id,
+        'old_role', OLD.role,
+        'new_role', NEW.role,
+        'business_id', NEW.business_id,
+        'timestamp', now()
+      ),
+      1,
+      now(),
+      now()
+    );
+    return NEW;
+  elsif TG_OP = 'DELETE' then
+    insert into audit_logs (id, business_id, data, version, created_at, updated_at)
+    values (
+      gen_random_uuid()::text,
+      OLD.business_id,
+      jsonb_build_object(
+        'action', 'BUSINESS_MEMBER_REMOVED',
+        'user_id', OLD.user_id,
+        'role', OLD.role,
+        'business_id', OLD.business_id,
+        'timestamp', now()
+      ),
+      1,
+      now(),
+      now()
+    );
+    return OLD;
+  end if;
+  return null;
+end;
+$$;
+
+drop trigger if exists audit_business_members on business_members;
+create trigger audit_business_members
+  after insert or update or delete on business_members
+  for each row execute function public.audit_business_members_change();
 
 -- ----------------------------------------------------------------------------
 -- 8. GRANTS explícitos (esto es lo que faltaba y causaba
@@ -313,7 +784,10 @@ grant update (
 -- payment_method, payment_status
 
 grant all on business_members to service_role;
-grant select, insert, update, delete on business_members to authenticated;
+grant select on business_members to authenticated;
+
+grant all on business_invitations to service_role;
+grant select, insert, update, delete on business_invitations to authenticated;
 
 grant all on app_users to service_role;
 grant select, insert, update, delete on app_users to authenticated;
@@ -367,14 +841,8 @@ create or replace function public.adjust_product_stock(
   p_product_id text,
   p_delta numeric,
   p_extra_fields jsonb default '{}'::jsonb,
-  -- BLOQUEANTE #4 (auditoría Fase 2): antes esta función rechazaba SIEMPRE
-  -- cualquier descuento que dejara el stock en negativo, sin importar el
-  -- switch "Permitir stock negativo" de Ajustes (companyConfigStore) — por
-  -- eso el switch "no hacía nada": la guardia real vivía acá, ignorando por
-  -- completo la preferencia del negocio. Default `false` para que cualquier
-  -- llamada vieja (o de un cliente desactualizado) siga siendo tan estricta
-  -- como siempre.
-  p_allow_negative boolean default false
+  p_allow_negative boolean default false,
+  p_branch_id uuid default null
 )
 returns jsonb
 language plpgsql
@@ -382,25 +850,45 @@ security invoker
 as $$
 declare
   v_updated jsonb;
+  v_branch_stock numeric;
 begin
-  update products
-  set data = jsonb_set(
-               data,
-               '{stock}',
-               to_jsonb(((data->>'stock')::numeric + p_delta))
-             ) || p_extra_fields,
-      updated_at = now()
-  where id = p_product_id
-    and (p_allow_negative or (data->>'stock')::numeric + p_delta >= 0)
-  returning data into v_updated;
+  if p_branch_id is not null then
+    select data into v_updated from products where id = p_product_id;
+
+    v_branch_stock := coalesce((v_updated->'branchStocks'->>p_branch_id::text)::numeric, 0) + p_delta;
+
+    if not p_allow_negative and v_branch_stock < 0 then
+      return null;
+    end if;
+
+    update products
+    set data = jsonb_set(
+                 case
+                   when branch_id = p_branch_id then
+                     jsonb_set(data, '{stock}', to_jsonb(v_branch_stock))
+                   else
+                     data
+                 end,
+                 '{branchStocks, ' || p_branch_id::text || '}',
+                 to_jsonb(v_branch_stock)
+               ) || p_extra_fields,
+        updated_at = now()
+    where id = p_product_id
+    returning data into v_updated;
+  else
+    update products
+    set data = jsonb_set(
+                 data,
+                 '{stock}',
+                 to_jsonb(((data->>'stock')::numeric + p_delta))
+               ) || p_extra_fields,
+        updated_at = now()
+    where id = p_product_id
+      and (p_allow_negative or (data->>'stock')::numeric + p_delta >= 0)
+    returning data into v_updated;
+  end if;
 
   if v_updated is null then
-    -- El UPDATE de arriba no afectó ninguna fila: o el producto no existe
-    -- (o no pertenece al negocio del usuario, lo que RLS ve igual que "no
-    -- existe"), o sí existe pero no había stock suficiente. Se distingue
-    -- con una lectura aparte SOLO para dar un mensaje de error útil — el
-    -- UPDATE de arriba ya falló como transacción completa, así que esta
-    -- lectura no reintroduce ninguna condición de carrera real.
     if not exists (select 1 from products where id = p_product_id) then
       raise exception 'PRODUCT_NOT_FOUND' using errcode = 'P0002';
     else
@@ -412,5 +900,70 @@ begin
 end;
 $$;
 
-revoke all on function public.adjust_product_stock(text, numeric, jsonb, boolean) from public, anon;
-grant execute on function public.adjust_product_stock(text, numeric, jsonb, boolean) to authenticated;
+revoke all on function public.adjust_product_stock(text, numeric, jsonb, boolean, uuid) from public, anon;
+grant execute on function public.adjust_product_stock(text, numeric, jsonb, boolean, uuid) to authenticated;
+
+-- ============================================================================
+-- 7. VERIFICACIÓN DE SUSCRIPCIÓN — backend enforcement
+-- ============================================================================
+-- No confiar en el frontend para bloquear negocios vencidos.
+-- Esta función devuelve true si el negocio tiene suscripción activa
+-- (trial, monthly, yearly) y false si está expired o suspended.
+-- Se usa en RLS policies y en Edge Functions.
+-- ============================================================================
+create or replace function public.is_business_subscription_active(p_business_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from businesses
+    where id = p_business_id
+      and (
+        (
+          plan = 'trial'
+          and trial_ends_at is not null
+          and trial_ends_at > CURRENT_TIMESTAMP
+        )
+        or (
+          plan in ('monthly', 'yearly')
+          and (
+            renewal_date is null
+            or renewal_date > CURRENT_TIMESTAMP
+          )
+        )
+      )
+  );
+$$;
+
+revoke all on function public.is_business_subscription_active(uuid) from public, anon;
+grant execute on function public.is_business_subscription_active(uuid) to authenticated;
+
+-- Permitir que service_role (Edge Functions) también la use
+grant execute on function public.is_business_subscription_active(uuid) to service_role;
+
+-- ============================================================================
+-- 7.1. HELPER PARA EDGE FUNCTIONS — obtener estado de suscripción
+-- ============================================================================
+-- Devuelve el plan y si está activo. Las Edge Functions usan esto para
+-- decidir si permitir operaciones que generen datos.
+-- ============================================================================
+create or replace function public.get_business_subscription_status(p_business_id uuid)
+returns table(plan text, is_active boolean)
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select 
+    plan,
+    case when plan not in ('expired', 'suspended') then true else false end as is_active
+  from businesses
+  where id = p_business_id;
+$$;
+
+revoke all on function public.get_business_subscription_status(uuid) from public, anon;
+grant execute on function public.get_business_subscription_status(uuid) to authenticated, service_role;

@@ -4,11 +4,11 @@ import { AlertTriangle } from "lucide-react";
 /**
  * Reemplazo del `window.confirm()` nativo del navegador.
  *
- * El confirm nativo muestra el nombre del dominio ("localhost:5173 dice") y
- * botones del sistema operativo — se ve como un aviso técnico, no como parte
- * de la app, y en producción (dominio real) seguiría rompiendo la experiencia
- * igual. Este modal se ve y se comporta como el resto de VIMDY: mismo fondo
- * oscuro, mismas tarjetas, mismos botones.
+ * El confirm nativo muestra el nombre del dominio y botones del sistema
+ * operativo — se ve como un aviso técnico, no como parte de la app, y en
+ * producción seguiría rompiendo la experiencia igual. Este modal se ve y se
+ * comporta como el resto de VIMDY: mismo fondo oscuro, mismas tarjetas, mismos
+ * botones.
  *
  * Uso: se controla con un solo estado en el componente padre (ej. el
  * producto que se quiere eliminar). Mientras ese estado es `null`, el modal

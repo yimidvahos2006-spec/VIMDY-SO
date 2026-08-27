@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { ShoppingCart, CreditCard, Receipt, Lock, ChefHat } from "lucide-react";
+import { ShoppingCart, CreditCard, Receipt, Lock, ChefHat, CheckCircle2 } from "lucide-react";
 
 import { useCart } from "../../../core/store/useCart";
 import { usePayment } from "../../../core/store/usePayment";
+import { paymentStore } from "../../../core/store/paymentStore";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { processSale } from "../../../core/services/processSale";
 import { useAuth } from "../../context/AuthContext";
@@ -44,10 +45,11 @@ export function PosSalePanel() {
   const { t, language } = useTranslation();
 
   const { items } = useCart();
-  const { total, method, received, mixedReceived, requiresInvoice, reference, mixedCard, mixedTransfer } = usePayment();
+  const { total, method, received, mixedReceived, change, requiresInvoice, reference, mixedCard, mixedTransfer, customerName } = usePayment();
   const { user } = useAuth();
 
   const [processing, setProcessing] = useState(false);
+  const [saleConfirmation, setSaleConfirmation] = useState<{ total: number; method: string; change: number; customerName: string; saleId: string } | null>(null);
 
   // IDEMPOTENCIA (checklist crítico #4): id del intento de cobro actual,
   // generado UNA sola vez (con el primer click de "Cobrar") y reutilizado
@@ -74,7 +76,7 @@ export function PosSalePanel() {
     let cancelled = false;
 
     async function checkShift() {
-      const current = await container.shiftEngine.getCurrentShift();
+      const current = await container.shiftEngine.get().getCurrentShift();
       if (!cancelled) setShiftOpen(current !== null);
     }
 
@@ -85,6 +87,12 @@ export function PosSalePanel() {
       clearInterval(interval);
     };
   }, []);
+
+  useEffect(() => {
+    if (!saleConfirmation) return;
+    const timer = setTimeout(() => setSaleConfirmation(null), 3000);
+    return () => clearTimeout(timer);
+  }, [saleConfirmation]);
 
   const needsReference =
     method === "card" ||
@@ -118,19 +126,30 @@ export function PosSalePanel() {
     const attemptId = saleAttemptId ?? crypto.randomUUID();
     if (!saleAttemptId) setSaleAttemptId(attemptId);
 
+    const paymentBeforeCharge = paymentStore.get();
+
     setProcessing(true);
     try {
-      const success = await processSale({
+      const result = await processSale({
         cashierId: user.id,
         cashierName: user.name,
         saleId: attemptId
       });
 
-      if (success) {
+      if (result.success) {
         toast.success(t("pos.sale.saleSuccessToast"));
-        // Venta cobrada de verdad: el intento terminó, se libera el id
-        // para que la siguiente venta arranque desde cero.
+        setSaleConfirmation({
+          total: paymentBeforeCharge.total,
+          method: paymentBeforeCharge.method,
+          change: paymentBeforeCharge.change,
+          customerName: paymentBeforeCharge.customerName,
+          saleId: attemptId
+        });
         setSaleAttemptId(null);
+
+        if (result.invoiceError) {
+          toast.warning(result.invoiceError);
+        }
       }
     } finally {
       setProcessing(false);
@@ -156,7 +175,7 @@ export function PosSalePanel() {
 
   return (
 
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col relative">
 
       {/* Encabezado */}
       <div className="border-b border-vimdy-border px-4 py-3 flex-shrink-0">
@@ -231,6 +250,35 @@ export function PosSalePanel() {
         </VimdyButton>
 
       </div>
+
+      {saleConfirmation && (
+        <div
+          className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setSaleConfirmation(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-vimdy-xl bg-vimdy-surface border border-vimdy-success/40 p-6 text-center shadow-vimdy-lg"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <CheckCircle2 size={48} className="mx-auto mb-3 text-vimdy-success" />
+            <h3 className="text-vimdy-text font-bold text-lg mb-1">Venta realizada</h3>
+            <p className="text-vimdy-text-secondary text-vimdy-small mb-4">
+              {formatMoney(saleConfirmation.total, companyConfigStore.get().currency, language)}
+            </p>
+            <div className="space-y-1.5 text-vimdy-micro text-vimdy-text-secondary mb-4">
+              <p>Método: {saleConfirmation.method === "cash" ? "Efectivo" : saleConfirmation.method === "card" ? "Tarjeta" : saleConfirmation.method === "transfer" ? "Transferencia" : "Mixto"}</p>
+              {saleConfirmation.method === "cash" && saleConfirmation.change > 0 && (
+                <p>Cambio: {formatMoney(saleConfirmation.change, companyConfigStore.get().currency, language)}</p>
+              )}
+              <p>Cliente: {saleConfirmation.customerName || "General"}</p>
+              <p className="text-vimdy-text-tertiary">#{saleConfirmation.saleId.slice(0, 8)}</p>
+            </div>
+            <VimdyButton onClick={() => setSaleConfirmation(null)} variant="primary" fullWidth>
+              Nueva venta
+            </VimdyButton>
+          </div>
+        </div>
+      )}
 
     </div>
 

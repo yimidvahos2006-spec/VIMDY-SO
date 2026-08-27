@@ -27,7 +27,9 @@ import {
   ChefHat,
   Flame,
   Clock3,
-  Scale
+  Scale,
+  Download,
+  ArrowLeftRight
 } from "lucide-react";
 
 import { useInventory, getStockStatus, StockStatus } from "../../../core/store/useInventory";
@@ -45,10 +47,17 @@ import { fileToProductImage } from "../../utils/imageUtils";
 import { ProductionIntelligencePanel } from "./ProductionIntelligencePanel";
 import { buildProductInputFromImportRow, inferUnitFromProductName, ImportedProductRow } from "./importHelpers";
 import { LOSS_CATEGORY_LABEL } from "../../../core/engines/lossCategoryLabels";
+import { getBranches, getCurrentBranchId, getCurrentBusinessId } from "../../../infrastructure/supabase/supabaseClient";
+import { formatMoney } from "../../../core/utils/formatMoney";
+import { companyConfigStore } from "../../../core/store/companyConfigStore";
 
 const UNIT_OPTIONS = ["unidad", "kg", "g", "litro", "ml", "libra", "servicio", "paquete", "caja"];
 
-const money = (value: number) => `$${value.toLocaleString("es-CO")}`;
+const money = (value: number) => {
+  const currency = companyConfigStore.get().currency;
+  const language = companyConfigStore.get().language;
+  return formatMoney(value, currency, language);
+};
 
 const STATUS_LABEL: Record<StockStatus, string> = {
   normal: "Normal",
@@ -130,6 +139,12 @@ export function InventoryDashboard() {
     [products]
   );
   const [showProduceModal, setShowProduceModal] = useState(false);
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferProduct, setTransferProduct] = useState<Product | null>(null);
+  const [transferQuantity, setTransferQuantity] = useState(1);
+  const [transferTargetBranchId, setTransferTargetBranchId] = useState<string>("");
+  const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
+  const [loadingBranches, setLoadingBranches] = useState(false);
 
   const [duplicating, setDuplicating] = useState<string | null>(null);
 
@@ -139,6 +154,49 @@ export function InventoryDashboard() {
 
   function handleDeleteProduct(product: Product) {
     setProductToDelete(product);
+  }
+
+  async function openTransferModal(product: Product) {
+    setTransferProduct(product);
+    setTransferQuantity(1);
+    setTransferTargetBranchId("");
+    setShowTransferModal(true);
+    const businessId = getCurrentBusinessId();
+    if (businessId) {
+      setLoadingBranches(true);
+      try {
+        const all = await getBranches(businessId);
+        const current = getCurrentBranchId();
+        setBranches(
+          all
+            .filter((b) => b.active && b.id !== current)
+            .map((b) => ({ id: b.id, name: b.name }))
+        );
+      } catch {
+        setBranches([]);
+      } finally {
+        setLoadingBranches(false);
+      }
+    }
+  }
+
+  async function confirmTransfer() {
+    const product = transferProduct;
+    if (!product || !transferTargetBranchId) return;
+
+    try {
+      await container.inventoryEngine.get().transferStock(
+        product.id,
+        getCurrentBranchId() ?? "",
+        transferTargetBranchId,
+        transferQuantity
+      );
+      toast.success(`Transferidos ${transferQuantity} unidades de ${product.name}`);
+      setShowTransferModal(false);
+      setTransferProduct(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Error en la transferencia");
+    }
   }
 
   async function confirmDeleteProduct() {
@@ -163,6 +221,7 @@ export function InventoryDashboard() {
     setDuplicating(product.id);
     await createProduct({
       name: `${product.name} (copia)`,
+      description: product.description,
       categoryId: product.categoryId,
       price: product.price,
       purchasePrice: product.purchasePrice,
@@ -171,8 +230,22 @@ export function InventoryDashboard() {
       minStock: product.minStock,
       unit: product.unit,
       supplierId: product.supplierId,
-      image: product.image
-      // sku y barcode se omiten a propósito: deben ser únicos por producto.
+      alternateSupplierId: product.alternateSupplierId,
+      image: product.image,
+      barcode: undefined,
+      sku: undefined,
+      active: product.active,
+      favorite: product.favorite,
+      aliases: product.aliases,
+      recipe: product.recipe,
+      productionMode: product.productionMode,
+      requiresKitchen: product.requiresKitchen,
+      estimatedPrepMinutes: product.estimatedPrepMinutes,
+      printStationOverride: product.printStationOverride,
+      sizes: product.sizes,
+      extras: product.extras,
+      trackStock: product.trackStock,
+      isIngredient: product.isIngredient
     });
     setDuplicating(null);
   }
@@ -245,6 +318,44 @@ export function InventoryDashboard() {
     }
   }
 
+  function exportInventoryToCsv() {
+    const headers = ["nombre", "sku", "categoria", "stockActual", "stockMinimo", "precioCompra", "precioVenta", "estado"];
+    const rows = products.map((p) => {
+      const status = getStockStatus(p);
+      return [
+        p.name,
+        p.sku ?? "",
+        categoryNameById[p.categoryId] ?? p.categoryId,
+        p.stock,
+        p.minStock,
+        p.purchasePrice ?? 0,
+        p.price,
+        STATUS_LABEL[status]
+      ];
+    });
+
+    const csvContent = [headers, ...rows]
+      .map((row) =>
+        row
+          .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
+          .join(",")
+      )
+      .join("\n");
+
+    const bom = "\uFEFF";
+    const blob = new Blob([bom + csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const date = new Date().toISOString().split("T")[0];
+    link.setAttribute("href", url);
+    link.setAttribute("download", `inventario_${date}.csv`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -307,6 +418,26 @@ export function InventoryDashboard() {
             <Sparkles size={18} />
             Importar menú con IA
           </button>
+          {products.length > 0 && (
+            <VimdyButton
+              onClick={() => openTransferModal(selected ?? products[0])}
+              variant="secondary"
+              size="lg"
+              icon={<ArrowLeftRight size={18} />}
+            >
+              Transferir
+            </VimdyButton>
+          )}
+          {products.length > 0 && (
+            <VimdyButton
+              onClick={exportInventoryToCsv}
+              variant="secondary"
+              size="lg"
+              icon={<Download size={18} />}
+            >
+              Exportar CSV
+            </VimdyButton>
+          )}
           <VimdyButton
             onClick={() => setShowNewProduct(true)}
             variant="primary"
@@ -326,6 +457,78 @@ export function InventoryDashboard() {
           onProduce={produceBatch}
           error={error}
         />
+      )}
+
+      {showTransferModal && transferProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-vimdy-surface border border-vimdy-border rounded-vimdy-lg p-6 w-full max-w-md shadow-xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-vimdy-text font-bold text-lg">Transferir stock</h3>
+              <button
+                onClick={() => setShowTransferModal(false)}
+                className="text-vimdy-text-secondary hover:text-vimdy-text"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <p className="text-vimdy-text-secondary text-sm mb-4">
+              {transferProduct.name} — Stock disponible: {transferProduct.stock}
+            </p>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-vimdy-text-secondary text-xs font-semibold mb-1">
+                  Sucursal destino
+                </label>
+                <select
+                  value={transferTargetBranchId}
+                  onChange={(e) => setTransferTargetBranchId(e.target.value)}
+                  className="w-full h-11 px-3 rounded-vimdy-md border border-vimdy-border bg-vimdy-background text-vimdy-text"
+                >
+                  <option value="">Selecciona una sucursal</option>
+                  {loadingBranches ? (
+                    <option value="" disabled>
+                      Cargando...
+                    </option>
+                  ) : (
+                    branches.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+              <div>
+                <label className="block text-vimdy-text-secondary text-xs font-semibold mb-1">
+                  Cantidad
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={transferProduct.stock}
+                  value={transferQuantity}
+                  onChange={(e) => setTransferQuantity(Number(e.target.value))}
+                  className="w-full h-11 px-3 rounded-vimdy-md border border-vimdy-border bg-vimdy-background text-vimdy-text"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={() => setShowTransferModal(false)}
+                  className="h-10 px-4 rounded-vimdy-md border border-vimdy-border text-vimdy-text-secondary hover:bg-vimdy-surface-hover"
+                >
+                  Cancelar
+                </button>
+                <VimdyButton
+                  onClick={confirmTransfer}
+                  disabled={!transferTargetBranchId || transferQuantity <= 0}
+                  variant="primary"
+                >
+                  Confirmar transferencia
+                </VimdyButton>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {error && (
@@ -447,7 +650,7 @@ export function InventoryDashboard() {
                   const status = getStockStatus(product);
                   const capacity =
                     product.recipe && product.recipe.length > 0
-                      ? container.recipeEngine.getProductionCapacity(product, productMap)
+                      ? container.recipeEngine.get().getProductionCapacity(product, productMap)
                       : null;
                   return (
                     <tr
@@ -748,7 +951,7 @@ function AiImportModal({
   const [openRecipeRowId, setOpenRecipeRowId] = useState<string | null>(null);
 
   React.useEffect(() => {
-    container.inventoryEngine.listAll().then(setAllProducts);
+    container.inventoryEngine.get().listAll().then(setAllProducts);
   }, []);
 
   const steps = [
@@ -790,7 +993,7 @@ function AiImportModal({
   // por producto — si esperáramos a "review", la IA nunca tendría contra
   // qué clasificar.
   React.useEffect(() => {
-    container.categoryEngine.listAll().then(setCategories);
+    container.categoryEngine.get().listAll().then(setCategories);
   }, []);
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -974,7 +1177,7 @@ function AiImportModal({
     setCreatingCategory(true);
 
     try {
-      const created = await container.categoryEngine.create({
+      const created = await container.categoryEngine.get().create({
         name: trimmed,
         requiresKitchenByDefault: newCategoryRequiresKitchen
       });
@@ -1897,9 +2100,9 @@ function ProductFormModal({
       recipe: draftRecipe
     };
 
-    const cost = container.recipeEngine.getRecipeCost(draftProduct, productMap);
-    const profitability = container.recipeEngine.getProfitability(draftProduct, productMap);
-    const capacity = container.recipeEngine.getProductionCapacity(draftProduct, productMap);
+    const cost = container.recipeEngine.get().getRecipeCost(draftProduct, productMap);
+    const profitability = container.recipeEngine.get().getProfitability(draftProduct, productMap);
+    const capacity = container.recipeEngine.get().getProductionCapacity(draftProduct, productMap);
 
     return cost && profitability && capacity ? { cost, profitability, capacity } : null;
   }, [hasRecipe, recipeRows, allProducts, price, product?.id, name, categoryId, minStock]);
@@ -1909,9 +2112,9 @@ function ProductFormModal({
 
   React.useEffect(() => {
     Promise.all([
-      container.categoryEngine.listAll(),
-      container.supplierEngine.listAll(),
-      container.inventoryEngine.listAll()
+      container.categoryEngine.get().listAll(),
+      container.supplierEngine.get().listAll(),
+      container.inventoryEngine.get().listAll()
     ])
       .then(([cats, provs, prods]) => {
         setCategories(cats);
@@ -1937,7 +2140,7 @@ function ProductFormModal({
     setCreatingCategory(true);
 
     try {
-      const created = await container.categoryEngine.create({
+      const created = await container.categoryEngine.get().create({
         name: trimmed,
         requiresKitchenByDefault: newCategoryRequiresKitchen,
         printStation: newCategoryPrintStation.trim() || undefined
@@ -3234,7 +3437,7 @@ function CategoryStationEditor({
     if (!category) return;
     setSaving(true);
     try {
-      const updated = await container.categoryEngine.update(category.id, {
+      const updated = await container.categoryEngine.get().update(category.id, {
         printStation: value.trim() || undefined
       });
       onUpdated(updated);
@@ -3473,15 +3676,15 @@ function ProductDetailModal({
   const hasRecipe = !!product.recipe && product.recipe.length > 0;
   const productMap = useMemo(() => new Map(allProducts.map((p) => [p.id, p])), [allProducts]);
   const recipeCost = useMemo(
-    () => (hasRecipe ? container.recipeEngine.getRecipeCost(product, productMap) : null),
+    () => (hasRecipe ? container.recipeEngine.get().getRecipeCost(product, productMap) : null),
     [hasRecipe, product, productMap]
   );
   const profitability = useMemo(
-    () => (hasRecipe ? container.recipeEngine.getProfitability(product, productMap) : null),
+    () => (hasRecipe ? container.recipeEngine.get().getProfitability(product, productMap) : null),
     [hasRecipe, product, productMap]
   );
   const capacity = useMemo(
-    () => (hasRecipe ? container.recipeEngine.getProductionCapacity(product, productMap) : null),
+    () => (hasRecipe ? container.recipeEngine.get().getProductionCapacity(product, productMap) : null),
     [hasRecipe, product, productMap]
   );
 

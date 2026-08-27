@@ -42,7 +42,7 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
  * Pantalla real de apertura/cierre/arqueo de turno.
  * Reemplaza el CashModule anterior (que leía de cashRegisterStore, un
  * store falso desconectado de las ventas). Todo aquí lee y escribe
- * directamente sobre container.shiftEngine / container.cashEngine, que
+ * directamente sobre container.shiftEngine.get() / container.cashEngine, que
  * son los mismos motores que SalesEngine usa al cobrar en el POS.
  */
 export function ShiftPanel() {
@@ -70,7 +70,7 @@ export function ShiftPanel() {
 
   const refresh = useCallback(async () => {
     try {
-      const current = await container.shiftEngine.getCurrentShift();
+      const current = await container.shiftEngine.get().getCurrentShift();
 
       if (!current) {
         setSummary(null);
@@ -78,7 +78,7 @@ export function ShiftPanel() {
         return;
       }
 
-      const shiftSummary = await container.shiftEngine.getShiftSummary(current.id);
+      const shiftSummary = await container.shiftEngine.get().getShiftSummary(current.id);
       setSummary(shiftSummary);
       setLoading(false);
     } catch (err) {
@@ -117,7 +117,7 @@ export function ShiftPanel() {
     setOpening(true);
 
     try {
-      await container.shiftEngine.openShift(user.id, amount, openingNotes || undefined);
+      await container.shiftEngine.get().openShift(user.id, amount, openingNotes || undefined);
       notificationStore.addCashOpen(
         `${user.name} abrió turno con fondo inicial de ${formatCOP(amount)}.`,
         `CAJA_ABIERTA:${user.id}:${Date.now()}`
@@ -148,7 +148,7 @@ export function ShiftPanel() {
     setClosing(true);
 
     try {
-      const closed = await container.shiftEngine.closeShift(
+      const closed = await container.shiftEngine.get().closeShift(
         summary.shift.id,
         counted,
         closingNotes || undefined
@@ -186,9 +186,9 @@ export function ShiftPanel() {
 
     try {
       if (movementType === "OUT") {
-        await container.cashEngine.registerExpense(amount, movementReason.trim(), manualMovementId);
+        await container.cashEngine.get().registerExpense(amount, movementReason.trim(), manualMovementId);
       } else {
-        await container.cashEngine.registerIncome(amount, movementReason.trim(), "CASH", undefined, manualMovementId);
+        await container.cashEngine.get().registerIncome(amount, movementReason.trim(), "CASH", undefined, manualMovementId);
       }
       setMovementAmount("");
       setMovementReason("");

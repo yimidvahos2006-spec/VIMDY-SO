@@ -1,3 +1,4 @@
+import React from "react";
 import { useNavigate } from "react-router-dom";
 import { BrainCircuit } from "lucide-react";
 
@@ -20,7 +21,7 @@ import { buildManagerPriorities, priorityTitle, PRIORITY_COLOR_CLASS } from "./m
  * puede mover ni ocultar. Los datos salen de useBusinessSnapshot, el mismo
  * BusinessSnapshot real que ya usan el Copiloto y las alertas automáticas.
  */
-export function GerenteInteligente() {
+export const GerenteInteligente = React.memo(function GerenteInteligente() {
   const navigate = useNavigate();
   const { snapshot, hasEnoughData } = useBusinessSnapshot();
   const { t } = useTranslation();
@@ -86,4 +87,4 @@ export function GerenteInteligente() {
       </div>
     </div>
   );
-}
+});

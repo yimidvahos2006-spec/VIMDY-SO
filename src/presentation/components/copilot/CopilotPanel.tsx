@@ -49,7 +49,7 @@ export function CopilotPanel() {
     // ("crea un producto", "abre la caja", "busca al cliente Ana"), se
     // ejecuta de una vez —navegación + intent de UI— sin gastar la API de
     // Claude ni esperar respuesta de red.
-    const command = await container.commandEngine.parse(trimmed);
+    const command = await container.commandEngine.get().parse(trimmed);
     if (command) {
       if (command.intent) {
         commandIntentStore.dispatch(command.intent);
@@ -67,7 +67,7 @@ export function CopilotPanel() {
     // responde al instante con BusinessAnalyzer, sin gastar la API de Claude
     // ni esperar respuesta de red. Si no calza con nada conocido, sigue el
     // camino normal y se lo pregunta a Claude con todo el contexto.
-    const quickAnswer = await container.questionRouter.answer(
+    const quickAnswer = await container.questionRouter.get().answer(
       trimmed,
       business.name || "Mi negocio",
       config.currency
@@ -80,7 +80,7 @@ export function CopilotPanel() {
     copilotStore.setLoading(true);
 
     try {
-      const reply = await container.copilotService.ask(
+      const reply = await container.copilotService.get().ask(
         trimmed,
         copilotStore.getHistoryForApi(),
         business.name || "Mi negocio",

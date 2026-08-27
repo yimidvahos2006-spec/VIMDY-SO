@@ -2,6 +2,8 @@
 import { InventoryEngine, ProductInput } from '../../core/engines/InventoryEngine';
 import { Product } from '../../core/entities/Entities';
 
+import { getCurrentBranchId } from '../../infrastructure/supabase/supabaseClient';
+
 export class InventoryService {
   constructor(
     private readonly engine: InventoryEngine
@@ -37,7 +39,11 @@ export class InventoryService {
       id,
       quantity,
       reason,
-      performedBy
+      performedBy,
+      undefined,
+      undefined,
+      undefined,
+      getCurrentBranchId()
     );
   }
 
@@ -51,7 +57,10 @@ export class InventoryService {
       id,
       quantity,
       reason,
-      performedBy
+      performedBy,
+      undefined,
+      undefined,
+      getCurrentBranchId()
     );
   }
 

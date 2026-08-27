@@ -25,7 +25,8 @@ export class KardexEngine {
     supplierName?: string,
     lossCategory?: LossCategory,
     movementId?: string,
-    productName?: string
+    productName?: string,
+    branchId?: string
   ): Promise<void> {
     const movement: InventoryMovement = {
       id: movementId ?? crypto.randomUUID(),
@@ -39,6 +40,7 @@ export class KardexEngine {
       supplierId,
       supplierName,
       lossCategory,
+      branchId,
     };
 
     await this.movementRepository.save(movement);

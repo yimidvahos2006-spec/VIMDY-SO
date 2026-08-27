@@ -40,7 +40,7 @@ export function PosTableSearchModal({ onClose }: Props) {
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
 
   const reloadTables = useCallback(async () => {
-    const all = await container.tableEngine.getAllTables();
+    const all = await container.tableEngine.get().getAllTables();
     setTables(all);
   }, []);
 
@@ -48,7 +48,7 @@ export function PosTableSearchModal({ onClose }: Props) {
     let cancelled = false;
 
     tablesReady.then(async () => {
-      const all = await container.tableEngine.getAllTables();
+      const all = await container.tableEngine.get().getAllTables();
       if (cancelled) return;
       setTables(all);
       setReady(true);

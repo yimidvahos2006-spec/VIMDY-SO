@@ -45,12 +45,12 @@ export function useKitchenOrders() {
     // false).
     try {
       const [rawOrders, products, tables, users, waiters, categories] = await Promise.all([
-        container.kitchenService.getOrders(),
-        container.inventoryEngine.listAll(),
-        container.tableEngine.getAllTables(),
-        container.userEngine.listUsers(),
-        container.waiterEngine.listAll(),
-        container.categoryEngine.listAll()
+        container.kitchenService.get().getOrders(),
+        container.inventoryEngine.get().listAll(),
+        container.tableEngine.get().getAllTables(),
+        container.userEngine.get().listUsers(),
+        container.waiterEngine.get().listAll(),
+        container.categoryEngine.get().listAll()
       ]);
 
       const enriched = enrichKitchenOrders(rawOrders, { products, tables, users, waiters, categories }).sort(
@@ -107,7 +107,7 @@ export function useKitchenOrders() {
   });
 
   async function updateStatus(id: string, status: KitchenOrder["status"]) {
-    await container.kitchenService.updateStatus(id, status);
+    await container.kitchenService.get().updateStatus(id, status);
     // No hace falta llamar a reload() aquí: KitchenEngine ya emite el
     // evento "kitchen" y el listener de arriba se encarga de refrescar.
   }
@@ -121,7 +121,7 @@ export function useKitchenOrders() {
     if (!user) {
       throw new Error("No hay una sesión activa para cancelar la comanda.");
     }
-    await container.kitchenService.cancelOrder(id, reason, user.id);
+    await container.kitchenService.get().cancelOrder(id, reason, user.id);
   }
 
   return { orders, loading, reload, updateStatus, cancelOrder, newOrderIds };

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext";
@@ -48,21 +48,93 @@ import type { Category } from "../../core/entities/Entities";
  */
 export function OnboardingPage() {
   const { user, businessId, onboardingCompleted, isReady } = useAuth();
-  const [step, setStep] = useState<OnboardingStepId>("welcome");
+  const [step, setStep] = useState<OnboardingStepId>(() => {
+    try {
+      const saved = localStorage.getItem("vimdy_onboarding_step");
+      if (saved && ONBOARDING_STEPS_BUILT.includes(saved as OnboardingStepId)) {
+        return saved as OnboardingStepId;
+      }
+    } catch {
+      // localStorage no disponible (modo privado/incógnito).
+    }
+    return "welcome";
+  });
 
-  // Se llena en el PASO 3 y lo usa el PASO 4 para calcular los módulos.
-  const [businessType, setBusinessType] = useState<BusinessTypeId | null>(null);
-  // Se llena en el PASO 4 y lo usan el PASO 5 (¿el negocio usa mesas?) y
-  // el PASO 6 (¿tiene sentido ofrecer el rol Mesero/Cocina?).
-  const [enabledModules, setEnabledModules] = useState<ModuleId[]>([]);
-  // Se llena en el PASO 7 y lo usa el PASO 8 para elegir la categoría
-  // real del primer producto.
-  const [categories, setCategories] = useState<Category[]>([]);
+  const [businessType, setBusinessType] = useState<BusinessTypeId | null>(() => {
+    try {
+      const saved = localStorage.getItem("vimdy_onboarding_business_type");
+      return saved ? (JSON.parse(saved) as BusinessTypeId) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [enabledModules, setEnabledModules] = useState<ModuleId[]>(() => {
+    try {
+      const saved = localStorage.getItem("vimdy_onboarding_enabled_modules");
+      return saved ? (JSON.parse(saved) as ModuleId[]) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [categories, setCategories] = useState<Category[]>(() => {
+    try {
+      const saved = localStorage.getItem("vimdy_onboarding_categories");
+      return saved ? (JSON.parse(saved) as Category[]) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("vimdy_onboarding_step", step);
+    } catch {
+      // ignore
+    }
+  }, [step]);
+
+  useEffect(() => {
+    try {
+      if (businessType) {
+        localStorage.setItem("vimdy_onboarding_business_type", JSON.stringify(businessType));
+      } else {
+        localStorage.removeItem("vimdy_onboarding_business_type");
+      }
+    } catch {
+      // ignore
+    }
+  }, [businessType]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("vimdy_onboarding_enabled_modules", JSON.stringify(enabledModules));
+    } catch {
+      // ignore
+    }
+  }, [enabledModules]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("vimdy_onboarding_categories", JSON.stringify(categories));
+    } catch {
+      // ignore
+    }
+  }, [categories]);
 
   if (!isReady) return null;
 
   // El negocio ya está listo: no hay razón para quedarse en /onboarding.
   if (onboardingCompleted) {
+    try {
+      localStorage.removeItem("vimdy_onboarding_step");
+      localStorage.removeItem("vimdy_onboarding_business_type");
+      localStorage.removeItem("vimdy_onboarding_enabled_modules");
+      localStorage.removeItem("vimdy_onboarding_categories");
+    } catch {
+      // ignore
+    }
     return <Navigate to="/dashboard" replace />;
   }
 

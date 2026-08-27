@@ -23,14 +23,14 @@ describe("SubscriptionEngine - cancelación", () => {
     expect(engine.daysRemaining(trialEndsAt, now)).toBe(0);
   });
 
-  it("effectiveStatus devuelve suspended para trial vencido", () => {
+  it("effectiveStatus devuelve expired para trial vencido", () => {
     const sub = {
       plan: "trial" as const,
       trialEndsAt: new Date("2026-08-10T00:00:00Z"),
       paymentStatus: "approved" as const
     };
     const now = new Date("2026-08-16T00:00:00Z");
-    expect(engine.effectiveStatus(sub as any, now)).toBe("suspended");
+    expect(engine.effectiveStatus(sub as any, now)).toBe("expired");
   });
 
   it("isBlocked devuelve true para suspended", () => {

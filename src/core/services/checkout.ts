@@ -32,7 +32,7 @@ import { subscriptionEngine } from "../engines/SubscriptionEngine";
  * un flujo que ya podría haber tocado datos (carrito, mesa, etc).
  */
 export async function assertShiftOpen(): Promise<boolean> {
-  const currentShift = await container.shiftEngine.getCurrentShift();
+  const currentShift = await container.shiftEngine.get().getCurrentShift();
 
   if (!currentShift) {
     toast.error('La caja está cerrada. Abre un turno en la pestaña "Turno de caja" antes de cobrar.');
@@ -105,8 +105,8 @@ export async function syncDashboardAfterSale(sale: Sale): Promise<void> {
   dashboardStore.addSale(sale.total, totalProductsSold);
 
   const [remainingProducts, activeKitchenOrders] = await Promise.all([
-    container.inventoryEngine.listAll(),
-    container.kitchenService.getOrders()
+    container.inventoryEngine.get().listAll(),
+    container.kitchenService.get().getOrders()
   ]);
 
   dashboardStore.updateInventory(
@@ -129,8 +129,8 @@ export async function syncDashboardAfterReversal(sale: Sale): Promise<void> {
   dashboardStore.reverseSale(sale.total, totalProductsReturned);
 
   const [remainingProducts, activeKitchenOrders] = await Promise.all([
-    container.inventoryEngine.listAll(),
-    container.kitchenService.getOrders()
+    container.inventoryEngine.get().listAll(),
+    container.kitchenService.get().getOrders()
   ]);
 
   dashboardStore.updateInventory(

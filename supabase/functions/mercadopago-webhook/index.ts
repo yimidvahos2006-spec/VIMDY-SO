@@ -153,9 +153,13 @@ Deno.serve(async (req: Request) => {
   try {
     // 2) Con la firma ya validada, se consulta el pago REAL en Mercado
     //    Pago (nunca se confía en lo que traiga el body de la notificación).
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15_000);
     const paymentResponse = await fetch(`https://api.mercadopago.com/v1/payments/${dataId}`, {
-      headers: { Authorization: `Bearer ${MERCADOPAGO_ACCESS_TOKEN}` }
+      headers: { Authorization: `Bearer ${MERCADOPAGO_ACCESS_TOKEN}` },
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
 
     if (!paymentResponse.ok) {
       // Puede ser una notificación de un tipo de recurso que no es "payment"
@@ -206,34 +210,44 @@ Deno.serve(async (req: Request) => {
 
     if (payment.status === "approved") {
       const plan = paymentRow.plan as "monthly" | "yearly";
-      const renewalDate = new Date(now);
-      renewalDate.setDate(renewalDate.getDate() + PLAN_PERIOD_DAYS[plan]);
 
-      const { error: businessUpdateError } = await admin
-        .from("businesses")
-        .update({
-          plan,
-          renewal_date: renewalDate.toISOString(),
-          next_charge_at: renewalDate.toISOString(),
-          payment_method: paymentMethod,
-          payment_status: "approved"
-        })
-        .eq("id", paymentRow.business_id);
+      // 6) Activar/renovar el plan usando la función SQL server-side.
+      const { data: activationResult, error: activationError } = await admin.rpc(
+        "activate_subscription_server_side",
+        {
+          p_business_id: paymentRow.business_id,
+          p_plan: plan,
+          p_payment_id: paymentRow.id,
+          p_now: new Date().toISOString()
+        }
+      );
 
-      if (businessUpdateError) {
-        return json({ error: "BUSINESS_UPDATE_FAILED", detail: businessUpdateError.message }, 500);
+      if (activationError) {
+        return json({ error: "ACTIVATION_FAILED", detail: activationError.message }, 500);
       }
+
+      const result = activationResult as {
+        ok: boolean;
+        alreadyActivated: boolean;
+        renewalNumber: number;
+        renewal_date?: string;
+      };
 
       const { error: paymentUpdateError } = await admin
         .from("subscription_payments")
-        .update({ status: "approved", payment_method: paymentMethod, paid_at: now.toISOString() })
+        .update({ payment_method: paymentMethod, paid_at: new Date().toISOString() })
         .eq("id", paymentRow.id);
 
       if (paymentUpdateError) {
         return json({ error: "PAYMENT_UPDATE_FAILED", detail: paymentUpdateError.message }, 500);
       }
 
-      return json({ ok: true, activated: true });
+      return json({
+        ok: true,
+        activated: !result.alreadyActivated,
+        renewalNumber: result.renewalNumber,
+        renewalDate: result.renewal_date
+      });
     }
 
     if (payment.status === "rejected" || payment.status === "cancelled") {

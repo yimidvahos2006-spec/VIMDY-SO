@@ -19,7 +19,7 @@ import { Sale, Customer } from "../core/entities/Entities";
    el historial contra lo que tenía guardado localmente.
 
    Esta es la pieza que lo soluciona de raíz: recalcula TODO — hoy, ayer
-   y los últimos 14 días — leyendo la fuente real (container.salesEngine /
+   y los últimos 14 días — leyendo la fuente real (container.salesEngine.get() /
    customerEngine / inventoryEngine / kitchenService) y lo escribe en
    dashboardStore con .applyReconciled(), que es lo que ya leen todos los
    bloques del Dashboard (DashboardIndicators, GerenteInteligente).
@@ -78,10 +78,10 @@ export function useDashboardSync() {
       await productsReady;
 
       const [allSales, allCustomers, allProducts, kitchenOrders] = await Promise.all([
-        container.salesEngine.getAllSales(),
-        container.customerEngine.getAllCustomers(),
-        container.inventoryEngine.listAll(),
-        container.kitchenService.getOrders()
+        container.salesEngine.get().getAllSales(),
+        container.customerEngine.get().getAllCustomers(),
+        container.inventoryEngine.get().listAll(),
+        container.kitchenService.get().getOrders()
       ]);
 
       if (cancelled) return;

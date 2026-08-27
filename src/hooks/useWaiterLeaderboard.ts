@@ -26,8 +26,8 @@ export function useWaiterLeaderboard() {
     // Con try/finally, `loading` siempre se resuelve pase lo que pase.
     try {
       const [sales, waiters] = await Promise.all([
-        container.salesEngine.getSalesByDate(startOfToday),
-        container.waiterEngine.listActive()
+        container.salesEngine.get().getSalesByDate(startOfToday),
+        container.waiterEngine.get().listActive()
       ]);
 
       setEntries(computeWaiterLeaderboard(sales, waiters));

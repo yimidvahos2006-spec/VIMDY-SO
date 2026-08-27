@@ -3,6 +3,9 @@ import { useEffect, useSyncExternalStore } from "react";
 import { subscriptionStore } from "./subscriptionStore";
 import { subscriptionEngine } from "../engines/SubscriptionEngine";
 import { SubscriptionStatus } from "../entities/SubscriptionTypes";
+import { evaluateSubscriptionNotifications } from "./subscriptionNotifications";
+import { vimdyCore } from "../VimdyCore";
+import { fetchSubscription } from "../../infrastructure/supabase/subscriptionContext";
 
 const RECHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hora — suficiente para "cada día"
 
@@ -11,8 +14,9 @@ export interface UseSubscriptionResult {
   plan: SubscriptionStatus | null;
   daysRemaining: number;
   countdownLabel: string;
-  warningThreshold: 7 | 3 | 1 | null;
+  warningThreshold: 3 | 2 | 1 | null;
   isTrial: boolean;
+  isExpired: boolean;
   isSuspended: boolean;
   trialEndsAt: Date | null;
   renewalDate: Date | null;
@@ -40,9 +44,26 @@ export function useSubscription(): UseSubscriptionResult {
   useEffect(() => {
     const interval = setInterval(() => {
       const current = subscriptionStore.getSnapshot().subscription;
-      if (current) subscriptionStore.updateSubscription({ ...current });
+      if (current) {
+        subscriptionStore.updateSubscription({ ...current });
+        evaluateSubscriptionNotifications();
+      }
     }, RECHECK_INTERVAL_MS);
     return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = vimdyCore.on("subscription", async () => {
+      const current = subscriptionStore.getSnapshot().subscription;
+      if (current) {
+        const refreshed = await fetchSubscription(current.businessId);
+        if (refreshed) {
+          subscriptionStore.hydrate(refreshed);
+          evaluateSubscriptionNotifications();
+        }
+      }
+    });
+    return unsubscribe;
   }, []);
 
   const { subscription, payments, loading } = snapshot;
@@ -55,6 +76,7 @@ export function useSubscription(): UseSubscriptionResult {
       countdownLabel: "",
       warningThreshold: null,
       isTrial: false,
+      isExpired: false,
       isSuspended: false,
       trialEndsAt: null,
       renewalDate: null,
@@ -74,8 +96,9 @@ export function useSubscription(): UseSubscriptionResult {
     plan: status,
     daysRemaining,
     countdownLabel: subscriptionEngine.countdownLabel(daysRemaining),
-    warningThreshold: status === "suspended" ? null : subscriptionEngine.warningThreshold(daysRemaining),
+    warningThreshold: status === "suspended" || status === "expired" ? null : subscriptionEngine.warningThreshold(daysRemaining),
     isTrial: status === "trial",
+    isExpired: status === "expired",
     isSuspended: status === "suspended",
     trialEndsAt: subscription.trialEndsAt,
     renewalDate: subscription.renewalDate,

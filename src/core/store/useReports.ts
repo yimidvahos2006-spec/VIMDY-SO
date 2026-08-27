@@ -60,9 +60,9 @@ export function useReports() {
   const load = useCallback(async () => {
     await productsReady;
     const [allSales, allProducts, allCustomers] = await Promise.all([
-      container.salesEngine.getAllSales(),
-      container.inventoryEngine.listAll(),
-      container.customerEngine.getAllCustomers()
+      container.salesEngine.get().getAllSales(),
+      container.inventoryEngine.get().listAll(),
+      container.customerEngine.get().getAllCustomers()
     ]);
     setSales(allSales);
     setProducts(allProducts);

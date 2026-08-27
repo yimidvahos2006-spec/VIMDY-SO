@@ -10,8 +10,8 @@ import { Subscription, SubscriptionStatus, SubscriptionPayment, SubscriptionAudi
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
-/** Umbrales de aviso, del más lejano al más cercano al vencimiento. */
-export const WARNING_THRESHOLDS = [7, 3, 1] as const;
+/** Umbrales de aviso: 3 días, 2 días, 1 día. */
+export const WARNING_THRESHOLDS = [3, 2, 1] as const;
 export type WarningThreshold = (typeof WARNING_THRESHOLDS)[number];
 
 export type SubscriptionAuditAction =
@@ -30,34 +30,36 @@ export type SubscriptionAuditAction =
 
 export class SubscriptionEngine {
   /**
-   * Días restantes de trial, redondeados hacia arriba.
+   * Días restantes de trial, usando días calendario exactos en UTC.
    * Nunca negativo: si ya venció, devuelve 0.
    */
   daysRemaining(trialEndsAt: Date | null, now: Date = new Date()): number {
     if (!trialEndsAt) return 0;
-    const diffMs = trialEndsAt.getTime() - now.getTime();
-    if (diffMs <= 0) return 0;
-    return Math.ceil(diffMs / MS_PER_DAY);
+    const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const end = Date.UTC(trialEndsAt.getUTCFullYear(), trialEndsAt.getUTCMonth(), trialEndsAt.getUTCDate());
+    const diffDays = Math.round((end - today) / MS_PER_DAY);
+    return Math.max(0, diffDays);
   }
 
   /**
-   * ¿Toca mostrar un aviso hoy? Devuelve el umbral exacto (7, 3 o 1)
+   * ¿Toca mostrar un aviso hoy? Devuelve el umbral exacto (3, 2 o 1)
    * si los días restantes coinciden, o null si no.
    */
   warningThreshold(daysRemaining: number): WarningThreshold | null {
-    if (daysRemaining > 7) return null;
+    if (daysRemaining > 3) return null;
     const match = WARNING_THRESHOLDS.find((threshold) => daysRemaining >= threshold);
     return match ?? null;
   }
 
   /**
-   * Estado efectivo (los 4 círculos). Un plan pagado con cobro fallido
-   * o vencido (past_due) se considera "suspended".
+   * Estado efectivo (los 5 círculos).
+   * - trial -> expired cuando se vence el trial
+   * - monthly/yearly -> suspended cuando el pago falla
    */
   effectiveStatus(sub: Subscription, now: Date = new Date()): SubscriptionStatus {
     if (sub.plan === "trial") {
       const remaining = this.daysRemaining(sub.trialEndsAt, now);
-      return remaining > 0 ? "trial" : "suspended";
+      return remaining > 0 ? "trial" : "expired";
     }
 
     if (sub.paymentStatus === "declined" || sub.paymentStatus === "past_due") {
@@ -69,10 +71,11 @@ export class SubscriptionEngine {
 
   /**
    * ¿Debe bloquearse el registro de nuevas operaciones (ventas)?
-   * Solo cuando el estado efectivo es "suspended".
+   * Cuando el estado efectivo es "expired" o "suspended".
    */
   isBlocked(sub: Subscription, now: Date = new Date()): boolean {
-    return this.effectiveStatus(sub, now) === "suspended";
+    const status = this.effectiveStatus(sub, now);
+    return status === "expired" || status === "suspended";
   }
 
   /** Texto corto para el contador. */

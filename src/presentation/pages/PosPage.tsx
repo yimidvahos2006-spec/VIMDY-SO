@@ -6,6 +6,7 @@ import { PosProducts } from "../components/pos/PosProducts";
 import { PosSalePanel } from "../components/pos/PosSalePanel";
 import { PosStatusBar } from "../components/pos/PosStatusBar";
 import { PosWeightEntryModal } from "../components/pos/PosWeightEntryModal";
+import { PosVariantSelectorModal } from "../components/pos/PosVariantSelectorModal";
 
 export function PosPage() {
   return (
@@ -38,6 +39,12 @@ export function PosPage() {
           compartido, controlado por weightEntryStore. Se abre tanto desde
           PosTopBar (escaneo) como desde PosProducts (clic en tarjeta). */}
       <PosWeightEntryModal />
+
+      {/* PENDIENTE #1 de Pre-Lanzamiento (auditoría ago 2026): un solo modal
+          compartido, controlado por variantSelectorStore. Se abre tanto
+          desde PosProducts (clic en tarjeta) como desde PosTopBar
+          (escaneo), solo para productos con tamaños/extras configurados. */}
+      <PosVariantSelectorModal />
 
     </div>
   );

@@ -39,7 +39,7 @@ interface AddedEmployee {
  * PASO 6 del asistente de onboarding (FASE 3).
  *
  * Permite agregar empleados reales (Administrador, Cajero, Mesero, Cocina)
- * uno por uno, a través de container.userEngine.createUser — el mismo
+ * uno por uno, a través de container.userEngine.get().createUser — el mismo
  * motor real que usa Configuración > Usuarios. Cada empleado queda
  * guardado en Supabase (app_users) apenas se agrega, no al final. Es el
  * único paso del asistente que se puede omitir por completo (el negocio
@@ -73,7 +73,7 @@ export function EmployeesStep({ enabledModules, onDone }: EmployeesStepProps) {
     setError(null);
 
     try {
-      const created = await container.userEngine.createUser(user?.id ?? "ADMIN", {
+      const created = await container.userEngine.get().createUser(user?.id ?? "ADMIN", {
         name: name.trim(),
         email: email.trim(),
         password: password.trim(),

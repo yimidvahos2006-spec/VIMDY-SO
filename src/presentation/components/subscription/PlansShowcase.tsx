@@ -3,6 +3,7 @@ import { Check, Loader2, ShieldCheck } from "lucide-react";
 
 import { SUBSCRIPTION_PLANS, PlanDefinition, getPlanPrice, getPlanCurrency } from "../../../core/entities/SubscriptionTypes";
 import { formatMoney } from "../../../core/utils/formatMoney";
+import { companyConfigStore } from "../../../core/store/companyConfigStore";
 
 interface PlansShowcaseProps {
   onSelectPlan: (plan: PlanDefinition) => Promise<void> | void;
@@ -13,8 +14,9 @@ interface PlansShowcaseProps {
 export function PlansShowcase({
   onSelectPlan,
   currentPlan,
-  countryCode = "US"
+  countryCode
 }: PlansShowcaseProps) {
+  const effectiveCountry = countryCode ?? companyConfigStore.get().country ?? "CO";
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
 
   async function handleSelect(plan: PlanDefinition) {
@@ -31,8 +33,8 @@ export function PlansShowcase({
       {SUBSCRIPTION_PLANS.map((plan) => {
         const isCurrent = currentPlan === plan.id;
         const isYearly = plan.id === "yearly";
-        const displayPrice = getPlanPrice(plan.id, countryCode);
-        const displayCurrency = getPlanCurrency(plan.id, countryCode);
+        const displayPrice = getPlanPrice(plan.id, effectiveCountry);
+        const displayCurrency = getPlanCurrency(plan.id, effectiveCountry);
 
         return (
           <div

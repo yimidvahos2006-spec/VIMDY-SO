@@ -23,5 +23,8 @@
     "src",
     "tests",
     "vitest.config.ts"
+  ],
+  "exclude": [
+    "tests/e2e"
   ]
 }

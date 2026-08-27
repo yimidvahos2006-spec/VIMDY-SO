@@ -93,7 +93,7 @@ export class KitchenEngine {
     id: string,
     status: KitchenOrder['status']
   ): Promise<void> {
-    const order = await this.repository.findById(id);
+    const order = await this.getById(id);
 
     if (!order) {
       throw new Error('ORDER_NOT_FOUND');

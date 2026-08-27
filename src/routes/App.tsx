@@ -21,6 +21,15 @@ import { BusinessSelectorPage } from "../presentation/pages/BusinessSelectorPage
 import { CreateBusinessPage } from "../presentation/pages/CreateBusinessPage";
 import { RequireCountry } from "../presentation/navigation/RequireCountry";
 
+import { LandingPage } from "../marketing/pages/LandingPage";
+import { PricingPage } from "../marketing/pages/PricingPage";
+import { FeaturesPage } from "../marketing/pages/FeaturesPage";
+import { ContactPage } from "../marketing/pages/ContactPage";
+import { PrivacyPage } from "../marketing/pages/PrivacyPage";
+import { TermsPage } from "../marketing/pages/TermsPage";
+import { CookiesPage } from "../marketing/pages/CookiesPage";
+import { MarketingLayout } from "../marketing/components/MarketingLayout";
+
 // Lazy loading: cada módulo solo se descarga y se ejecuta cuando el
 // usuario realmente entra a esa ruta, en vez de cargar Dashboard + POS +
 // Cocina + Inventario + Reportes + Configuración todos de una vez al
@@ -320,6 +329,17 @@ export function App() {
           </RequireCountry>
         }
       />
+
+      {/* Marketing público — sin autenticación, sin MainLayout */}
+      <Route element={<MarketingLayout />}>
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/precios" element={<PricingPage />} />
+        <Route path="/funciones" element={<FeaturesPage />} />
+        <Route path="/contacto" element={<ContactPage />} />
+        <Route path="/privacidad" element={<PrivacyPage />} />
+        <Route path="/terminos" element={<TermsPage />} />
+        <Route path="/cookies" element={<CookiesPage />} />
+      </Route>
 
       {/* PASO 1: ruta del asistente de onboarding. Va fuera de MainLayout
           (pantalla completa, sin sidebar) pero sigue exigiendo sesión

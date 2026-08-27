@@ -201,14 +201,18 @@ Deno.serve(async (req: Request) => {
     //    este endpoint le agrega a la operación (el navegador no puede
     //    hacerlo).
     const apiBase = resolveWompiApiBase(WOMPI_PRIVATE_KEY);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15_000);
     const wompiResponse = await fetch(`${apiBase}/transactions/${transactionId}/refund`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${WOMPI_PRIVATE_KEY}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ amount_in_cents: refundAmountInCents })
+      body: JSON.stringify({ amount_in_cents: refundAmountInCents }),
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
 
     const wompiBody = (await wompiResponse.json()) as WompiRefundApiResponse;
 
@@ -224,31 +228,31 @@ Deno.serve(async (req: Request) => {
 
     const transaction = wompiBody.data;
 
-    // 7) Reflejar el resultado real en nuestro propio histórico — nunca se
-    //    asume "reembolsado" en subscription_payments solo porque se llamó
-    //    a este endpoint: se guarda lo que Wompi confirmó de vuelta. El
-    //    reembolso siendo total o parcial no cambia el plan/fechas de
-    //    vigencia actuales del negocio: VIMDY no revoca acceso ya otorgado
-    //    por un reembolso, solo deja de proyectarse una renovación futura
-    //    sobre este mismo cobro.
-    const { error: paymentUpdateError } = await admin
-      .from("subscription_payments")
-      .update({ status: "refunded" })
-      .eq("id", paymentRow.id);
+    // 7) Reflejar el resultado real en nuestro propio histórico usando la
+    //    función SQL server-side. Esto registra auditoría, marca el pago como
+    //    reembolsado y, si es total, actualiza el estado del negocio.
+    const refundAmount = refundAmountInCents / 100;
+    const { data: refundResult, error: refundError } = await admin.rpc(
+      "refund_subscription_payment_server_side",
+      {
+        p_payment_id: paymentRow.id,
+        p_refund_amount: refundAmount,
+        p_provider_refund_id: transaction.id,
+        p_now: new Date().toISOString()
+      }
+    );
 
-    if (paymentUpdateError) {
-      return json({ error: "PAYMENT_UPDATE_FAILED", detail: paymentUpdateError.message }, 500);
+    if (refundError) {
+      return json({ error: "REFUND_UPDATE_FAILED", detail: refundError.message }, 500);
     }
 
-    if (refundAmountInCents === originalAmountInCents) {
-      await admin
-        .from("businesses")
-        .update({ payment_status: "declined" })
-        .eq("id", paymentRow.business_id)
-        .eq("payment_status", "approved");
-    }
+    const result = refundResult as {
+      ok: boolean;
+      is_total_refund: boolean;
+      new_payment_status: string;
+    };
 
-    return json({ ok: true, transaction });
+    return json({ ok: true, transaction, isTotalRefund: result.is_total_refund });
   } catch (error) {
     return json({ error: "WOMPI_REFUND_TRANSACTION_FAILED", detail: String(error) }, 500);
   }

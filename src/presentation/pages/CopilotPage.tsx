@@ -53,7 +53,7 @@ function CopilotPageContent() {
     setDraft("");
     copilotStore.addUserMessage(trimmed);
 
-    const command = await container.commandEngine.parse(trimmed);
+    const command = await container.commandEngine.get().parse(trimmed);
     if (command) {
       if (command.intent) {
         commandIntentStore.dispatch(command.intent);
@@ -66,7 +66,7 @@ function CopilotPageContent() {
     const business = businessStore.get();
     const config = companyConfigStore.get();
 
-    const quickAnswer = await container.questionRouter.answer(
+    const quickAnswer = await container.questionRouter.get().answer(
       trimmed,
       business.name || "Mi negocio",
       config.currency
@@ -79,7 +79,7 @@ function CopilotPageContent() {
     copilotStore.setLoading(true);
 
     try {
-      const reply = await container.copilotService.ask(
+      const reply = await container.copilotService.get().ask(
         trimmed,
         copilotStore.getHistoryForApi(),
         business.name || "Mi negocio",

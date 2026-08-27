@@ -104,14 +104,18 @@ async function verifyWebhookSignature(req: Request, rawBody: string, accessToken
     return false;
   }
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15_000);
   const response = await fetch(`${resolvePayPalApiBase()}/v1/notifications/verify-webhook-signature`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(verificationBody)
+    body: JSON.stringify(verificationBody),
+    signal: controller.signal
   });
+  clearTimeout(timeoutId);
 
   if (!response.ok) return false;
   const result = (await response.json()) as { verification_status?: string };
@@ -129,7 +133,9 @@ interface PayPalWebhookEvent {
 
 interface PayPalCaptureResponse {
   status: string;
-  purchase_units?: { payments?: { captures?: { amount?: { currency_code?: string; value?: string } }[] } }[];
+  purchase_units?: {
+    payments?: { captures?: { id?: string; amount?: { currency_code?: string; value?: string } }[] };
+  }[];
 }
 
 Deno.serve(async (req: Request) => {
@@ -212,7 +218,8 @@ Deno.serve(async (req: Request) => {
       headers: {
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json"
-      }
+      },
+      signal: (() => { const c = new AbortController(); setTimeout(() => c.abort(), 15_000); return c.signal; })()
     });
 
     if (!captureResponse.ok) {
@@ -259,35 +266,55 @@ Deno.serve(async (req: Request) => {
     }
 
     const plan = paymentRow.plan as "monthly" | "yearly";
-    const now = new Date();
-    const renewalDate = new Date(now);
-    renewalDate.setDate(renewalDate.getDate() + PLAN_PERIOD_DAYS[plan]);
 
-    const { error: businessUpdateError } = await admin
-      .from("businesses")
-      .update({
-        plan,
-        renewal_date: renewalDate.toISOString(),
-        next_charge_at: renewalDate.toISOString(),
-        payment_method: "paypal",
-        payment_status: "approved"
-      })
-      .eq("id", paymentRow.business_id);
+    // 5) Activar/renovar el plan usando la función SQL server-side.
+    //    Esta función calcula las fechas correctamente (14 meses para anual),
+    //    marca trial como usado, y registra auditoría.
+    const { data: activationResult, error: activationError } = await admin.rpc(
+      "activate_subscription_server_side",
+      {
+        p_business_id: paymentRow.business_id,
+        p_plan: plan,
+        p_payment_id: paymentRow.id,
+        p_now: new Date().toISOString()
+      }
+    );
 
-    if (businessUpdateError) {
-      return json({ error: "BUSINESS_UPDATE_FAILED", detail: businessUpdateError.message }, 500);
+    if (activationError) {
+      return json({ error: "ACTIVATION_FAILED", detail: activationError.message }, 500);
     }
+
+    const result = activationResult as {
+      ok: boolean;
+      alreadyActivated: boolean;
+      renewalNumber: number;
+      renewal_date?: string;
+    };
+
+    // 6) El id de la CAPTURA (distinto del id de la orden) es lo único que
+    //    acepta el endpoint de reembolso de PayPal. Se guarda acá porque este
+    //    es el único momento en que VIMDY llega a verlo.
+    const captureId = capture.purchase_units?.[0]?.payments?.captures?.[0]?.id;
 
     const { error: paymentUpdateError } = await admin
       .from("subscription_payments")
-      .update({ status: "approved", payment_method: "paypal", paid_at: now.toISOString() })
+      .update({
+        payment_method: "paypal",
+        paid_at: new Date().toISOString(),
+        paypal_capture_id: captureId ?? null
+      })
       .eq("id", paymentRow.id);
 
     if (paymentUpdateError) {
       return json({ error: "PAYMENT_UPDATE_FAILED", detail: paymentUpdateError.message }, 500);
     }
 
-    return json({ ok: true, activated: true });
+    return json({
+      ok: true,
+      activated: !result.alreadyActivated,
+      renewalNumber: result.renewalNumber,
+      renewalDate: result.renewal_date
+    });
   } catch (error) {
     return json({ error: "PAYPAL_WEBHOOK_FAILED", detail: String(error) }, 500);
   }

@@ -39,8 +39,9 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 
+const VIMDY_APP_URL = Deno.env.get("VIMDY_APP_URL");
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": VIMDY_APP_URL ?? "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type"
 };
 
@@ -109,7 +110,16 @@ Deno.serve(async (req: Request) => {
 
   const businessId = callerMembership.business_id as string;
 
-  // 3) Validar el body.
+  // 3) Verificar que la suscripción del negocio está activa.
+  const { data: activeData, error: activeError } = await admin.rpc("is_business_subscription_active", {
+    p_business_id: businessId
+  });
+
+  if (activeError || !activeData) {
+    return json({ error: "SUBSCRIPTION_EXPIRED: la suscripción del negocio ha vencido. Selecciona un plan para continuar." }, 403);
+  }
+
+  // 4) Validar el body.
   let payload: RequestPayload;
   try {
     payload = await req.json();

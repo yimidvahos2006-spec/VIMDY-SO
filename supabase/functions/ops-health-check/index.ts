@@ -22,6 +22,11 @@
 // SEGURIDAD: igual que payments-reconcile, exige x-ops-secret propio — no
 // hay usuario humano detrás de esta llamada, solo el cron.
 //
+// PROGRAMACIÓN — esta función NO se dispara sola. Hace falta el cron de
+// supabase/ops_health_check_cron.sql (pg_cron, cada 15 min) o el mismo
+// intervalo configurado desde "Cron Jobs" en el dashboard de Supabase.
+// Sin uno de los dos, esta función solo corre si alguien la llama a mano.
+//
 // CONFIGURACIÓN REQUERIDA:
 //   supabase secrets set OPS_SECRET=<cadena larga aleatoria>
 //   supabase secrets set OPS_WEBHOOK_URL=<tu webhook de Slack/Discord>
@@ -53,13 +58,25 @@ const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const OPS_SECRET = Deno.env.get("OPS_SECRET");
 const OPS_WEBHOOK_URL = Deno.env.get("OPS_WEBHOOK_URL");
 
-async function notify(text: string) {
+const DISCORD_CONTENT_LIMIT = 1900; // límite real de Discord es 2000; deja margen
+
+async function notify(rawText: string) {
   if (!OPS_WEBHOOK_URL) return;
+  const text =
+    rawText.length > DISCORD_CONTENT_LIMIT
+      ? `${rawText.slice(0, DISCORD_CONTENT_LIMIT)}\n… (recortado, revisa system_errors para el detalle completo)`
+      : rawText;
   try {
+    // Manda ambos campos a propósito: Discord solo lee "content" (ignora
+    // "text" en silencio, sin error, así que un webhook de Discord con
+    // solo "text" parece funcionar pero JAMÁS aparece nada en el canal).
+    // Slack/Discord con formato "Slack-compatible" leen "text". Con los
+    // dos, sirve para cualquiera de los dos sin tener que configurar nada
+    // distinto según el proveedor que elijas.
     await fetch(OPS_WEBHOOK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text })
+      body: JSON.stringify({ content: text, text })
     });
   } catch (error) {
     console.error("OPS_HEALTH_CHECK_NOTIFY_FAILED", String(error));
@@ -84,14 +101,31 @@ Deno.serve(async (req: Request) => {
 
   // ---- 1. Errores recientes -------------------------------------------
   const errorCutoff = new Date(Date.now() - OPS_ERROR_WINDOW_MINUTES * 60_000).toISOString();
-  const { count: recentErrorCount, error: errorsFetchError } = await admin
+  const { data: recentErrorRows, error: errorsFetchError } = await admin
     .from("system_errors")
-    .select("id", { count: "exact", head: true })
+    .select("id")
     .eq("severity", "error")
-    .gte("created_at", errorCutoff);
+    .gte("created_at", errorCutoff)
+    .limit(1000);
+  const recentErrorCount = recentErrorRows?.length ?? 0;
 
   if (errorsFetchError) {
-    problems.push(`⚠️ No se pudo leer system_errors: ${errorsFetchError.message}`);
+    // console.error a propósito, aparte de mandarlo a Discord — así queda
+    // visible en Logs del Dashboard aunque el webhook falle o nadie esté
+    // mirando el canal en ese momento. Loggeamos TODO el detalle posible
+    // porque a veces error.message viene vacío y el resto de campos
+    // (code/details/hint) son los que de verdad explican qué pasó.
+    console.error(
+      "OPS_HEALTH_CHECK_SYSTEM_ERRORS_READ_FAILED",
+      JSON.stringify({
+        message: errorsFetchError.message,
+        code: (errorsFetchError as { code?: string }).code,
+        details: (errorsFetchError as { details?: string }).details,
+        hint: (errorsFetchError as { hint?: string }).hint,
+        keys: Object.keys(errorsFetchError)
+      })
+    );
+    problems.push(`⚠️ No se pudo leer system_errors: ${errorsFetchError.message || errorsFetchError.code || "error desconocido"}`);
   } else if ((recentErrorCount ?? 0) > OPS_ERROR_THRESHOLD) {
     // Agrupa por categoría para que la alerta diga QUÉ se está rompiendo,
     // no solo cuánto.
@@ -124,7 +158,8 @@ Deno.serve(async (req: Request) => {
     .lt("created_at", paymentCutoff);
 
   if (paymentsFetchError) {
-    problems.push(`⚠️ No se pudo leer subscription_payments: ${paymentsFetchError.message}`);
+    console.error("OPS_HEALTH_CHECK_SUBSCRIPTION_PAYMENTS_READ_FAILED", JSON.stringify(paymentsFetchError));
+    problems.push(`⚠️ No se pudo leer subscription_payments: ${paymentsFetchError.message || paymentsFetchError.code || "error desconocido"}`);
   } else if (stuckPayments && stuckPayments.length > 0) {
     const ids = stuckPayments.map((p) => p.id).join(", ");
     problems.push(

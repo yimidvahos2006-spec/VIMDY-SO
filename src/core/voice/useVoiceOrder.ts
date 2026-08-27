@@ -6,6 +6,8 @@ import { parseVoice, VoiceOrder } from "./voiceParser";
 
 import { matchVoiceOrders } from "./voiceMatcher";
 
+import { Product } from "../entities/Entities";
+
 export interface VoiceProcessResult {
 
   success: boolean;
@@ -22,12 +24,9 @@ export interface UseVoiceOrderOptions {
 
   onError?: (error: string) => void;
 
-  /** Handler personalizado para agregar items. Si no se provee, no hace nada. */
-
-  onAddItem?: (order: VoiceOrder, match: { product: { id: string; name: string; price: number } }) => void;
+  onAddItem?: (order: VoiceOrder & { note?: string }, match: { product: Product }) => void;
 
 }
-
 export function useVoiceOrder(options: UseVoiceOrderOptions = {}) {
 
   const [listening, setListening] = useState(false);

@@ -42,11 +42,19 @@ function json(body: unknown, status = 200) {
 
 type Plan = "monthly" | "yearly";
 
-// Precio real de VIMDY decidido por el negocio (no es una conversión
-// automática de COP): USD para la mayoría de países, EUR solo para España.
-const PLAN_PRICE_BY_CURRENCY: Record<string, Record<Plan, number>> = {
-  USD: { monthly: 89, yearly: 899 },
-  EUR: { monthly: 89, yearly: 890 }
+// Espejo server-side de SUBSCRIPTION_PLANS (src/core/entities/SubscriptionTypes.ts)
+// Precios reales por país para los 10 países soportados.
+const PLAN_PRICE_BY_COUNTRY: Record<string, Record<Plan, number>> = {
+  CO: { monthly: 79000, yearly: 799000 },
+  US: { monthly: 89, yearly: 899 },
+  MX: { monthly: 1499, yearly: 14990 },
+  PE: { monthly: 149, yearly: 1490 },
+  CL: { monthly: 14990, yearly: 149900 },
+  AR: { monthly: 89999, yearly: 899999 },
+  EC: { monthly: 59, yearly: 599 },
+  PA: { monthly: 69, yearly: 699 },
+  VE: { monthly: 49, yearly: 499 },
+  ES: { monthly: 69, yearly: 699 }
 };
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
@@ -133,24 +141,54 @@ Deno.serve(async (req: Request) => {
       return json({ error: "BUSINESS_NOT_FOUND" }, 404);
     }
 
-    // PayPal solo cobra en USD/EUR — nunca en COP. Si el negocio no tiene
-    // una moneda que PayPal acepte, se usa USD por defecto (mismo criterio
-    // que PayPalProvider.getCurrency en el cliente).
-    const currency = business.country === "ES" ? "EUR" : "USD";
-    const pricing = PLAN_PRICE_BY_CURRENCY[currency];
+    const ALLOWED_PAYPAL_COUNTRIES = new Set(["CO", "MX", "PE", "CL", "AR", "ES", "EC", "PA", "US", "VE"]);
+    if (!ALLOWED_PAYPAL_COUNTRIES.has(business.country)) {
+      return json({ error: "COUNTRY_NOT_SUPPORTED: PayPal no está disponible para este país." }, 400);
+    }
+
+    const country = business.country;
+    const pricing = PLAN_PRICE_BY_COUNTRY[country];
 
     if (!pricing) {
       return json(
         {
           error: "PRICING_NOT_CONFIGURED",
-          detail: `No hay un precio de VIMDY verificado en ${currency} todavía. Defínelo en PLAN_PRICE_BY_CURRENCY antes de habilitar PayPal.`
+          detail: `No hay un precio de VIMDY verificado para ${country} todavía. Defínelo en PLAN_PRICE_BY_COUNTRY antes de habilitar PayPal.`
         },
         409
       );
     }
 
+    const currency = business.currency;
     const amount = pricing[plan];
     const reference = `pp_${businessId.slice(0, 8)}_${Date.now()}`;
+    const idempotencyKey = crypto.randomUUID();
+
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const { data: recentPending, error: recentPendingError } = await admin
+      .from("subscription_payments")
+      .select("id, paypal_order_id, created_at")
+      .eq("business_id", businessId)
+      .eq("plan", plan)
+      .eq("status", "pending")
+      .gte("created_at", fiveMinutesAgo)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (recentPendingError) {
+      return json({ error: "PAYMENT_CHECK_FAILED", detail: recentPendingError.message }, 500);
+    }
+
+    if (recentPending) {
+      // Si hay un pago pending reciente, devolverlo para evitar doble checkout
+      return json({
+        ok: true,
+        approvalUrl: recentPending.paypal_order_id ? `${resolvePayPalApiBase()}/v2/checkout/orders/${recentPending.paypal_order_id}` : null,
+        orderId: recentPending.paypal_order_id,
+        existing: true
+      });
+    }
 
     const { error: insertError } = await admin.from("subscription_payments").insert({
       business_id: businessId,
@@ -158,7 +196,8 @@ Deno.serve(async (req: Request) => {
       amount,
       currency,
       status: "pending",
-      paypal_order_id: null // se completa abajo una vez PayPal confirme el id de la orden
+      paypal_order_id: null, // se completa abajo una vez PayPal confirme el id de la orden
+      idempotency_key: idempotencyKey
     });
 
     if (insertError) {
@@ -167,7 +206,8 @@ Deno.serve(async (req: Request) => {
 
     const accessToken = await getPayPalAccessToken();
     const planLabel = plan === "monthly" ? "Plan Mensual" : "Plan Anual";
-
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15_000);
     const orderResponse = await fetch(`${resolvePayPalApiBase()}/v2/checkout/orders`, {
       method: "POST",
       headers: {
@@ -189,8 +229,10 @@ Deno.serve(async (req: Request) => {
           cancel_url: `${VIMDY_APP_URL}/configuracion/suscripcion?pago=cancelado`,
           user_action: "PAY_NOW"
         }
-      })
+      }),
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
 
     if (!orderResponse.ok) {
       const errorBody = await orderResponse.text();

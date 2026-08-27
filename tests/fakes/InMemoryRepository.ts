@@ -111,6 +111,10 @@ export class InMemoryRepository<T extends { id: string; version?: number }>
     return this.rows.size;
   }
 
+  public async all(): Promise<T[]> {
+    return Array.from(this.rows.values()).map((row) => this.clone(row));
+  }
+
   /** Solo para armar datos iniciales en un test sin pasar por save(). */
   public seed(item: T): void {
     this.rows.set(item.id, this.clone({ ...item, version: item.version ?? 1 }));

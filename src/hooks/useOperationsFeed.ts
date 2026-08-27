@@ -52,7 +52,7 @@ export function useOperationsFeed() {
   const alertedTables = useRef(new Set<string>());
   const hasIndexedInitialState = useRef(false);
 
-  // Copia real de las mesas: viene de container.tableEngine (la misma
+  // Copia real de las mesas: viene de container.tableEngine.get() (la misma
   // fuente que usa Meseros.tsx), no de datos inventados. Se refresca sola
   // cuando realtimeSync.ts avisa que una mesa cambió en cualquier
   // dispositivo, así el feed nunca queda mirando mesas desactualizadas.
@@ -63,7 +63,7 @@ export function useOperationsFeed() {
 
     async function loadTables() {
       await tablesReady;
-      const all = await container.tableEngine.getAllTables();
+      const all = await container.tableEngine.get().getAllTables();
       if (!cancelled) tablesSnapshotRef.current = all;
     }
 
@@ -115,7 +115,7 @@ export function useOperationsFeed() {
 
       let name = "Usuario";
       try {
-        const user = await container.userEngine.getUser(payload.userId);
+        const user = await container.userEngine.get().getUser(payload.userId);
         name = user.name;
       } catch {
         // Si no se encuentra el usuario, se muestra el mensaje genérico.

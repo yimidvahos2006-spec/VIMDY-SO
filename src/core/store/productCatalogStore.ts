@@ -41,7 +41,7 @@ class ProductCatalogStore extends ObservableStore<Product[]> {
    * NUNCA se queda esperando a que responda Supabase:
    *   - `productsReady` (ver CompositionRoot.ts) ya resuelve de inmediato,
    *     no depende de red.
-   *   - `container.inventoryEngine.listAll()` termina llamando a
+   *   - `container.inventoryEngine.get().listAll()` termina llamando a
    *     `ProductRepository.findAll()`, que desde los Pasos 1.1+1.2 lee
    *     primero del caché local en IndexedDB y responde con eso al
    *     instante — el fetch real a Supabase corre en paralelo, sin
@@ -65,7 +65,7 @@ class ProductCatalogStore extends ObservableStore<Product[]> {
   private async hydrate(): Promise<void> {
     try {
       await productsReady;
-      const products = await container.inventoryEngine.listAll();
+      const products = await container.inventoryEngine.get().listAll();
       this.publish(products);
       this.loaded = true;
     } catch (error) {
@@ -77,7 +77,7 @@ class ProductCatalogStore extends ObservableStore<Product[]> {
 
   /** Vuelve a leer del InventoryEngine (llamar después de vender, reabastecer, etc). */
   async refresh(): Promise<void> {
-    const products = await container.inventoryEngine.listAll();
+    const products = await container.inventoryEngine.get().listAll();
     this.publish(products);
   }
 

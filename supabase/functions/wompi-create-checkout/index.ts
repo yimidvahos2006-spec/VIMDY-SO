@@ -41,10 +41,10 @@ function json(body: unknown, status = 200) {
 type Plan = "monthly" | "yearly";
 
 // Espejo server-side de SUBSCRIPTION_PLANS (src/core/entities/SubscriptionTypes.ts)
-// y de PLAN_PRICE_BY_CURRENCY en mercadopago-checkout — misma fuente de verdad,
+// y de COUNTRY_PRICE_MAP en mercadopago-checkout — misma fuente de verdad,
 // una copia por Edge Function porque cada una corre aislada.
-const PLAN_PRICE_BY_CURRENCY: Record<string, Record<Plan, number>> = {
-  COP: { monthly: 79000, yearly: 790000 }
+const PLAN_PRICE_BY_COUNTRY: Record<string, Record<Plan, number>> = {
+  CO: { monthly: 79000, yearly: 799000 }
 };
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
@@ -80,6 +80,18 @@ async function buildIntegritySignature(
   return Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
+}
+
+function buildCheckoutUrl(reference: string, amountInCents: number, currency: string, signature: string): string {
+  const redirectUrl = `${APP_BASE_URL}/configuracion/suscripcion`;
+  return (
+    `${resolveWompiCheckoutBase()}?public-key=${encodeURIComponent(WOMPI_PUBLIC_KEY!)}` +
+    `&currency=${encodeURIComponent(currency)}` +
+    `&amount-in-cents=${amountInCents}` +
+    `&reference=${encodeURIComponent(reference)}` +
+    `&signature:integrity=${signature}` +
+    `&redirect-url=${encodeURIComponent(redirectUrl)}`
+  );
 }
 
 Deno.serve(async (req: Request) => {
@@ -132,36 +144,74 @@ Deno.serve(async (req: Request) => {
       return json({ error: "BUSINESS_NOT_FOUND" }, 404);
     }
 
-    const currency = (business.currency as string) ?? "COP";
-    const pricing = PLAN_PRICE_BY_CURRENCY[currency];
+    if (business.country !== "CO") {
+      return json({ error: "COUNTRY_NOT_SUPPORTED: Wompi solo está disponible para Colombia (CO)." }, 400);
+    }
 
-    // 2) Sin precio real verificado para esa moneda, se rechaza en vez de
+    const country = business.country;
+    const pricing = PLAN_PRICE_BY_COUNTRY[country];
+
+    // 2) Sin precio real verificado para ese país, se rechaza en vez de
     //    convertir a ciegas.
     if (!pricing) {
       return json(
         {
           error: "PRICING_NOT_CONFIGURED",
-          detail: `No hay un precio de VIMDY verificado en ${currency} todavía. Wompi solo opera en Colombia (COP).`
+          detail: `No hay un precio de VIMDY verificado para ${country} todavía. Wompi solo opera en Colombia (COP).`
         },
         409
       );
     }
 
+    const currency = (business.currency as string) ?? "COP";
     const amount = pricing[plan];
     const amountInCents = Math.round(amount * 100);
     const reference = `wompi_${businessId.slice(0, 8)}_${Date.now()}`;
+    const idempotencyKey = crypto.randomUUID();
 
-    // 3) Se deja el intento en 'pending' ANTES de armar la URL de Wompi —
+    // 3) Protección server-side contra doble checkout: si ya existe un pago
+    //    pending para el mismo negocio y plan creado en los últimos 5 minutos,
+    //    no crear uno nuevo. Esto previene dos pestañas/dos clics rápidos.
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const { data: recentPending, error: recentPendingError } = await admin
+      .from("subscription_payments")
+      .select("id, wompi_reference, created_at")
+      .eq("business_id", businessId)
+      .eq("plan", plan)
+      .eq("status", "pending")
+      .gte("created_at", fiveMinutesAgo)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (recentPendingError) {
+      return json({ error: "PAYMENT_CHECK_FAILED", detail: recentPendingError.message }, 500);
+    }
+
+    if (recentPending) {
+      // Devolver el checkout existente para que el usuario no pierda su pago
+      // anterior por un clic doble.
+      return json({
+        ok: true,
+        checkoutUrl: buildCheckoutUrl(recentPending.wompi_reference, amountInCents, currency, signature),
+        reference: recentPending.wompi_reference,
+        existing: true
+      });
+    }
+
+    // 4) Se deja el intento en 'pending' ANTES de armar la URL de Wompi —
     //    mismo patrón que mercadopago-checkout — para que el webhook
     //    siempre tenga una fila esperándolo con el monto/moneda reales a
-    //    comparar.
+    //    comparar. El idempotency_key previene dobles intentos desde el
+    //    mismo frontend.
     const { error: insertError } = await admin.from("subscription_payments").insert({
       business_id: businessId,
       plan,
       amount,
       currency,
       status: "pending",
-      wompi_reference: reference
+      wompi_reference: reference,
+      idempotency_key: idempotencyKey
     });
 
     if (insertError) {
@@ -174,15 +224,7 @@ Deno.serve(async (req: Request) => {
     //    valida esa firma al cargar la página, no hace falta llamar a su API
     //    acá.
     const signature = await buildIntegritySignature(reference, amountInCents, currency, WOMPI_INTEGRITY_SECRET);
-
-    const redirectUrl = `${APP_BASE_URL}/configuracion/suscripcion`;
-    const checkoutUrl =
-      `${resolveWompiCheckoutBase()}?public-key=${encodeURIComponent(WOMPI_PUBLIC_KEY)}` +
-      `&currency=${encodeURIComponent(currency)}` +
-      `&amount-in-cents=${amountInCents}` +
-      `&reference=${encodeURIComponent(reference)}` +
-      `&signature:integrity=${signature}` +
-      `&redirect-url=${encodeURIComponent(redirectUrl)}`;
+    const checkoutUrl = buildCheckoutUrl(reference, amountInCents, currency, signature);
 
     return json({ ok: true, checkoutUrl, reference });
   } catch (error) {

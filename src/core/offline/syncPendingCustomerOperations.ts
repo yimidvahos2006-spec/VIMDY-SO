@@ -35,7 +35,7 @@ async function syncOne(pending: PendingCustomerOperation): Promise<void> {
     );
   }
 
-  await container.customerEngine.save(pending.customer);
+  await container.customerEngine.get().save(pending.customer);
 }
 
 export async function syncPendingCustomerOperations(): Promise<void> {

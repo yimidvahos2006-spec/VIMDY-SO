@@ -1,20 +1,47 @@
-import React from "react";
+import React, { lazy, Suspense } from "react";
 import { Menu } from "lucide-react";
 
-import { VimdyBackground } from "../components/ui/VimdyBackground";
+import { VimdyAmbientBackground } from "../../marketing/animations/VimdyAmbientBackground";
 import { VimdySidebar } from "../components/ui/VimdySidebar";
 import { VimdyLogo } from "../components/ui/VimdyLogo";
-import { NotificationBell } from "../components/ui/NotificationBell";
 import { useSidebar } from "../../core/store/useSidebar";
 import { useMobileSidebar } from "../../core/store/useMobileSidebar";
 import { useAutoAlerts } from "../../hooks/useAutoAlerts";
 import { useDashboardSync } from "../../hooks/useDashboardSync";
-import { CopilotButton } from "../components/copilot/CopilotButton";
-import { CopilotPanel } from "../components/copilot/CopilotPanel";
-import { SubscriptionWarningBanner } from "../components/subscription/SubscriptionWarningBanner";
-import { TrialEndedOverlay } from "../components/subscription/TrialEndedOverlay";
-import { MobileBottomNav } from "../components/ui/MobileBottomNav";
 import { companyConfigStore } from "../../core/store/companyConfigStore";
+
+const NotificationBell = lazy(() =>
+  import("../components/ui/NotificationBell").then((m) => ({ default: m.NotificationBell }))
+);
+const CopilotPanel = lazy(() =>
+  import("../components/copilot/CopilotPanel").then((m) => ({ default: m.CopilotPanel }))
+);
+const CopilotButton = lazy(() =>
+  import("../components/copilot/CopilotButton").then((m) => ({ default: m.CopilotButton }))
+);
+const SubscriptionWarningBanner = lazy(() =>
+  import("../components/subscription/SubscriptionWarningBanner").then((m) => ({ default: m.SubscriptionWarningBanner }))
+);
+const TrialEndedOverlay = lazy(() =>
+  import("../components/subscription/TrialEndedOverlay").then((m) => ({ default: m.TrialEndedOverlay }))
+);
+const MobileBottomNav = lazy(() =>
+  import("../components/ui/MobileBottomNav").then((m) => ({ default: m.MobileBottomNav }))
+);
+
+function LazySection({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense
+      fallback={
+        <div className="fixed inset-0 flex items-center justify-center pointer-events-none z-40">
+          <div className="w-8 h-8 rounded-full border-2 border-cyan-500/30 border-t-cyan-400 animate-spin" />
+        </div>
+      }
+    >
+      {children}
+    </Suspense>
+  );
+}
 
 interface Props {
   children: React.ReactNode;
@@ -25,85 +52,71 @@ export function VimdyAppLayout({ children }: Props) {
   const { expanded } = useSidebar();
   const { show: openMobileSidebar } = useMobileSidebar();
 
-  // PASO 4 — Alertas automáticas: vigila el negocio en segundo plano (toda
-  // la app, no solo el Dashboard) y llena la campana sin que nadie pregunte.
   useAutoAlerts();
-
-  // Recalcula las métricas del Dashboard (ventas de hoy, pedidos, ticket
-  // promedio...) desde datos reales, y se actualiza solo cuando cualquier
-  // dispositivo (no solo este) vende, agrega un cliente o cambia stock.
   useDashboardSync();
 
   return (
-    <VimdyBackground>
+    <div className="min-h-screen relative">
+      <VimdyAmbientBackground className="opacity-40" />
+      <div className="relative z-10">
+        {companyConfigStore.get().enableAI && (
+          <LazySection>
+            <NotificationBell />
+          </LazySection>
+        )}
 
-      {companyConfigStore.get().enableAI && <NotificationBell />}
+        <VimdySidebar />
 
-      {/* El sidebar se posiciona solo (fixed) — en escritorio siempre
-          visible a la izquierda, en móvil/tablet oculto hasta que se abre
-          con el botón de hamburguesa de abajo. */}
-      <VimdySidebar />
+        <div className="h-screen overflow-hidden">
 
-      <div className="h-screen overflow-hidden">
+          <div className="md:hidden h-16 flex items-center gap-3 px-4 border-b border-vimdy-border bg-vimdy-background">
+            <button
+              onClick={openMobileSidebar}
+              className="w-10 h-10 rounded-xl flex items-center justify-center text-vimdy-text-secondary hover:bg-vimdy-surface hover:text-vimdy-text transition-all flex-shrink-0"
+            >
+              <Menu size={22} />
+            </button>
+            <VimdyLogo size={28} />
+            <span className="text-vimdy-text font-semibold tracking-wide">VIMDY</span>
+          </div>
 
-        {/* Barra superior — SOLO en móvil/tablet (< md). En escritorio el
-            sidebar ya está siempre visible, así que esta barra no hace
-            falta ahí. Sin esto, en pantallas angostas no había forma de
-            abrir el menú: por eso "Configuración" y otros paneles no se
-            veían. */}
-        <div className="md:hidden h-16 flex items-center gap-3 px-4 border-b border-vimdy-border bg-vimdy-background">
-          <button
-            onClick={openMobileSidebar}
-            className="w-10 h-10 rounded-xl flex items-center justify-center text-vimdy-text-secondary hover:bg-vimdy-surface hover:text-vimdy-text transition-all flex-shrink-0"
+          <main
+            className={`
+              ml-0
+              ${expanded ? "md:ml-[260px]" : "md:ml-[84px]"}
+              h-[calc(100vh-4rem)]
+              md:h-screen
+              overflow-y-auto
+              overflow-x-hidden
+              transition-all
+              duration-300
+              pb-16 md:pb-0
+            `}
           >
-            <Menu size={22} />
-          </button>
-          <VimdyLogo size={28} />
-          <span className="text-vimdy-text font-semibold tracking-wide">VIMDY</span>
+            {children}
+          </main>
+
+          <LazySection>
+            <MobileBottomNav />
+          </LazySection>
+
         </div>
 
-        {/* Contenido — en escritorio reserva el espacio del sidebar con
-            margen; en móvil/tablet el sidebar no ocupa espacio (es un
-            drawer superpuesto), así que el contenido usa el ancho
-            completo. */}
-        <main
-          className={`
-            ml-0
-            ${expanded ? "md:ml-[260px]" : "md:ml-[84px]"}
-            h-[calc(100vh-4rem)]
-            md:h-screen
-            overflow-y-auto
-            overflow-x-hidden
-            transition-all
-            duration-300
-            pb-16 md:pb-0
-          `}
-        >
-          {children}
-        </main>
+        {companyConfigStore.get().enableAI && (
+          <LazySection>
+            <>
+              <CopilotPanel />
+              <CopilotButton />
+            </>
+          </LazySection>
+        )}
 
-        {/* Navegación inferior — solo móvil/tablet */}
-        <MobileBottomNav />
-
+        <LazySection>
+          <SubscriptionWarningBanner />
+          <TrialEndedOverlay />
+        </LazySection>
       </div>
-
-      {/* Copiloto VIMDY: botón flotante + panel, visibles en toda la app.
-          Se puede apagar desde Configuración > enableAI. */}
-      {companyConfigStore.get().enableAI && (
-        <>
-          <CopilotPanel />
-          <CopilotButton />
-        </>
-      )}
-
-      {/* VIMDY — FASE 7: aviso de días restantes (PASO 4) y pantalla de
-          vencimiento (PASO 5), visibles en toda la app autenticada — no
-          solo en Dashboard/Configuración — porque ambos ya deciden solos
-          cuándo mostrarse (o no mostrarse) según el estado real del plan. */}
-      <SubscriptionWarningBanner />
-      <TrialEndedOverlay />
-
-    </VimdyBackground>
+    </div>
   );
 }
 

@@ -169,13 +169,15 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
     id: string,
     delta: number,
     extraFields: Record<string, unknown> = {},
-    allowNegative: boolean = false
+    allowNegative: boolean = false,
+    branchId?: string
   ): Promise<Product> {
     const { data, error } = await supabase.rpc("adjust_product_stock", {
       p_product_id: id,
       p_delta: delta,
       p_extra_fields: extraFields,
-      p_allow_negative: allowNegative
+      p_allow_negative: allowNegative,
+      p_branch_id: branchId ?? null
     });
 
     if (error) {
@@ -200,5 +202,21 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
     }
 
     return result;
+  }
+
+  public async findBySkuAndBranch(sku: string, branchId: string): Promise<Product | null> {
+    const businessId = getCurrentBusinessId();
+    if (!businessId || !sku) return null;
+
+    const { data, error } = await supabase
+      .from("products")
+      .select("data, version")
+      .eq("business_id", businessId)
+      .eq("branch_id", branchId)
+      .eq("data->>sku", sku)
+      .maybeSingle();
+
+    if (error) throw new Error(`SUPABASE_FIND_BY_SKU_FAILED: ${error.message}`);
+    return data ? this.reviveRow(data) : null;
   }
 }

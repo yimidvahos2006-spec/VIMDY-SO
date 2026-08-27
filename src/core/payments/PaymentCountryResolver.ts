@@ -12,10 +12,10 @@ import type { CountryCode, PaymentProviderName } from "./types/payment.types";
 /** Mapa país → proveedor. Regla de negocio central de VIMDY Payments. */
 const COUNTRY_PROVIDER_MAP: Record<string, PaymentProviderName> = {
   CO: "wompi",
-  AR: "mercadopago",
-  CL: "mercadopago",
-  PE: "mercadopago",
-  MX: "mercadopago",
+  AR: "paypal",
+  CL: "paypal",
+  PE: "paypal",
+  MX: "paypal",
   US: "paypal",
   EC: "paypal",
   PA: "paypal",

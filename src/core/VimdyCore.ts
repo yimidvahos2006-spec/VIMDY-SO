@@ -20,7 +20,8 @@ export type EventType =
   | "user"
   | "session"
   | "access"
-  | "ai";
+  | "ai"
+  | "subscription";
 
 export interface VimdyEvent {
 

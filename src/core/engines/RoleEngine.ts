@@ -128,6 +128,39 @@ export class RoleEngine {
     return role.permissions.includes("*") || role.permissions.includes(permissionId);
   }
 
+  public async seedDefaultPermissions(): Promise<void> {
+    await this.permissions.registerMany([
+      { id: "sales.create", module: "sales", description: "Crear ventas" },
+      { id: "sales.view", module: "sales", description: "Ver ventas" },
+      { id: "sales.edit", module: "sales", description: "Editar ventas" },
+      { id: "sales.delete", module: "sales", description: "Eliminar ventas" },
+      { id: "sales.refund", module: "sales", description: "Hacer devoluciones" },
+      { id: "sales.cancel", module: "sales", description: "Cancelar ventas" },
+      { id: "inventory.create", module: "inventory", description: "Crear productos" },
+      { id: "inventory.view", module: "inventory", description: "Ver inventario" },
+      { id: "inventory.edit", module: "inventory", description: "Editar productos y precios" },
+      { id: "inventory.transfer", module: "inventory", description: "Transferir stock" },
+      { id: "kitchen.create", module: "kitchen", description: "Crear comandas" },
+      { id: "kitchen.view", module: "kitchen", description: "Ver comandas" },
+      { id: "kitchen.complete", module: "kitchen", description: "Marcar comanda como lista" },
+      { id: "reports.view", module: "reports", description: "Ver reportes" },
+      { id: "reports.export", module: "reports", description: "Exportar reportes" },
+      { id: "config.view", module: "config", description: "Ver configuración" },
+      { id: "config.edit", module: "config", description: "Editar configuración" },
+      { id: "users.create", module: "users", description: "Crear usuarios" },
+      { id: "users.view", module: "users", description: "Ver usuarios" },
+      { id: "users.edit", module: "users", description: "Editar usuarios" },
+      { id: "users.suspend", module: "users", description: "Suspender usuarios" },
+      { id: "customers.create", module: "customers", description: "Crear clientes" },
+      { id: "customers.view", module: "customers", description: "Ver clientes" },
+      { id: "customers.edit", module: "customers", description: "Editar clientes" },
+      { id: "tables.view", module: "tables", description: "Ver mesas" },
+      { id: "tables.edit", module: "tables", description: "Editar mesas" },
+      { id: "cash.view", module: "cash", description: "Ver movimientos de caja" },
+      { id: "cash.close", module: "cash", description: "Cerrar turno de caja" }
+    ]);
+  }
+
   private async validatePermissions(permissionIds: string[]): Promise<void> {
     for (const id of permissionIds) {
       if (id === "*") continue;

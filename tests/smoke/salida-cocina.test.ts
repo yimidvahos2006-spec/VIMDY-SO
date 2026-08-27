@@ -2,20 +2,16 @@
 /* ===========================================================================
    SMOKE TEST — createKitchenOutput / KitchenScreenOutput / KitchenPrinterOutput
    ---------------------------------------------------------------------------
-   Cubre el punto 5.6: mientras todos los negocios de prueba usan
-   salidaCocina = "pantalla", esta prueba confirma dos cosas:
+   Cubre el punto 5.6:
 
-     1. Con "pantalla", createKitchenOutput() devuelve algo que de verdad
-        conecta con KitchenEngine (la misma pieza que ya alimenta
-        KitchenDashboard) — una comanda enviada por ahí termina guardada
-        y visible como cualquier otra comanda real.
+      1. Con "pantalla", createKitchenOutput() devuelve algo que de verdad
+         conecta con KitchenEngine — una comanda enviada por ahí termina guardada
+         y visible como cualquier otra comanda real.
 
-     2. Con "impresora", createKitchenOutput() devuelve el hueco (5.4), que
-        avisa ruidosamente que no está implementado en vez de fingir que
-        imprimió. Así, si algún día algo cambia salidaCocina por error
-        antes de que la impresora exista de verdad, se nota de inmediato
-        en vez de perder pedidos en silencio.
-=========================================================================== */
+      2. Con "impresora", createKitchenOutput() devuelve una implementación
+         real que genera el ticket de comanda. No guarda en KitchenEngine
+         (la impresora es un canal paralelo), pero tampoco lanza error.
+ =========================================================================== */
 
 import { describe, it, expect } from "vitest";
 
@@ -63,13 +59,11 @@ describe("Smoke: salidaCocina decide pantalla vs impresora", () => {
     expect(saved[0].items).toHaveLength(1);
   });
 
-  it('"impresora" no guarda nada y falla explícitamente, porque todavía es un hueco', async () => {
+  it('"impresora" no guarda en KitchenEngine pero tampoco lanza error', async () => {
     const { kitchen, kitchenOrders } = buildKitchenEngine();
     const output = createKitchenOutput("impresora", kitchen);
 
-    await expect(output.send(SAMPLE_ORDER)).rejects.toThrow(
-      /KITCHEN_PRINTER_NOT_IMPLEMENTED/
-    );
+    await expect(output.send(SAMPLE_ORDER)).resolves.toBeUndefined();
 
     const saved = await kitchenOrders.findAll();
     expect(saved).toHaveLength(0);

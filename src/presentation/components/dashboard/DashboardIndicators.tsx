@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import React, { type ReactNode } from "react";
 
 import { useDashboard } from "../../../core/store/useDashboard";
 import { useBusinessSnapshot } from "../../../hooks/useBusinessSnapshot";
@@ -32,7 +32,7 @@ function money(value: number, currency: string): string {
  * useBusinessSnapshot) o del DashboardEngine (vía useDashboard/dashboardStore,
  * que ya reconcilia sales/orders y su valor de ayer con datos reales).
  */
-export function DashboardIndicators() {
+export const DashboardIndicators = React.memo(function DashboardIndicators() {
   const { data, yesterday } = useDashboard();
   const { snapshot } = useBusinessSnapshot();
   const { t, language } = useTranslation();
@@ -82,7 +82,7 @@ export function DashboardIndicators() {
 
     </div>
   );
-}
+});
 
 interface IndicatorCardProps {
   title: string;
@@ -94,7 +94,7 @@ interface IndicatorCardProps {
  * Misma altura, ancho, padding, borde, sombra y tipografía para las 5
  * tarjetas, sin excepción. Nada de íconos ni gráficos: solo texto.
  */
-function IndicatorCard({ title, value, variation }: IndicatorCardProps) {
+const IndicatorCard = React.memo(function IndicatorCard({ title, value, variation }: { title: string; value: string; variation: React.ReactNode }) {
   return (
     <div className="h-[172px] flex flex-col justify-between rounded-vimdy-lg border border-vimdy-border bg-vimdy-surface shadow-vimdy-xs p-6">
       <p className="text-xs font-semibold tracking-widest text-vimdy-text-secondary uppercase">
@@ -104,4 +104,4 @@ function IndicatorCard({ title, value, variation }: IndicatorCardProps) {
       <p className="text-sm font-medium">{variation}</p>
     </div>
   );
-}
+});

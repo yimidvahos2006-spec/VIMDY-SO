@@ -19,7 +19,7 @@ interface CategoriesStepProps {
  *
  * A partir del tipo de negocio del PASO 3, crea automáticamente las
  * categorías reales del negocio (ver src/core/config/onboardingCategories.ts)
- * a través de container.categoryEngine.create — el mismo motor real que
+ * a través de container.categoryEngine.get().create — el mismo motor real que
  * usa el módulo de Productos. Si el negocio ya tiene categorías (por
  * ejemplo, un reintento del asistente), no las duplica.
  */
@@ -38,14 +38,14 @@ export function CategoriesStep({ businessType, onSaved }: CategoriesStepProps) {
       setError(null);
 
       try {
-        const existing = await container.categoryEngine.listAll();
+        const existing = await container.categoryEngine.get().listAll();
         const existingNames = new Set(existing.map((c) => c.name.toLowerCase()));
 
         const result: Category[] = [...existing];
 
         for (const name of names) {
           if (existingNames.has(name.toLowerCase())) continue;
-          const category = await container.categoryEngine.create({
+          const category = await container.categoryEngine.get().create({
             name,
             requiresKitchenByDefault: requiresKitchenByDefaultForBusinessType(businessType)
           });
@@ -114,14 +114,14 @@ export function CategoriesStep({ businessType, onSaved }: CategoriesStepProps) {
               // Reintento simple: recarga el efecto forzando un nuevo montaje lógico.
               setSaving(true);
               setError(null);
-              container.categoryEngine
+              container.categoryEngine.get()
                 .listAll()
                 .then(async (existing) => {
                   const existingNames = new Set(existing.map((c) => c.name.toLowerCase()));
                   const result: Category[] = [...existing];
                   for (const name of names) {
                     if (existingNames.has(name.toLowerCase())) continue;
-                    result.push(await container.categoryEngine.create({ name }));
+                    result.push(await container.categoryEngine.get().create({ name }));
                   }
                   setCreated(result.filter((c) => names.some((n) => n.toLowerCase() === c.name.toLowerCase())));
                 })

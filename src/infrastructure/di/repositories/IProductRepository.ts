@@ -36,6 +36,9 @@ export interface IProductRepository extends IRepository<Product> {
     id: string,
     delta: number,
     extraFields?: Record<string, unknown>,
-    allowNegative?: boolean
+    allowNegative?: boolean,
+    branchId?: string
   ): Promise<Product>;
+
+  findBySkuAndBranch(sku: string, branchId: string): Promise<Product | null>;
 }

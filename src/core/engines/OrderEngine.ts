@@ -79,8 +79,6 @@ const KITCHEN_STATUS_MAP: Record<string, OrderStatus> = {
   ENTREGADO: "DELIVERED"
 };
 
-let orderCounter = 0;
-
 export class OrderEngine {
   constructor(
     private readonly orderRepository: IRepository<Order>,
@@ -583,16 +581,14 @@ export class OrderEngine {
   }
 
   private generateOrderCode(source: OrderSource): string {
-    orderCounter += 1;
-
     const prefix =
       source === "TABLE" ? "PED-MSA" :
       source === "DELIVERY" ? "PED-DEL" :
       source === "TAKEOUT" ? "PED-LLV" :
       "PED-RAP";
 
-    const timestamp = Date.now().toString().slice(-6);
-    const sequence = orderCounter.toString().padStart(4, "0");
+    const timestamp = Date.now().toString().slice(-9);
+    const sequence = crypto.randomUUID().toString().slice(0, 8);
 
     return `${prefix}-${timestamp}-${sequence}`;
   }

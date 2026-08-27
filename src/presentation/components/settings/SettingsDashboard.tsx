@@ -15,11 +15,14 @@ import {
   AlertTriangle,
   Globe2,
   Eye,
-  EyeOff
+  EyeOff,
+  FileText
 } from "lucide-react";
 
 import { WaitersSettingsSection } from "./WaitersSettingsSection";
 import { PrintSettingsSection } from "./PrintSettingsSection";
+import { PermissionEditor } from "./PermissionEditor";
+import { BranchManager } from "./BranchManager";
 
 import { useSettings } from "../../../core/store/useSettings";
 import { useAuth } from "../../context/AuthContext";
@@ -29,7 +32,8 @@ import { UserStatus } from "../../../core/entities/Entities";
 import { downloadBackup } from "../../../infrastructure/supabase/backupService";
 import { useTranslation } from "../../../core/i18n/useTranslation";
 import {
-  COUNTRIES,
+  AVAILABLE_COUNTRIES,
+  AVAILABLE_COUNTRY_CODES,
   CURRENCIES,
   LANGUAGES,
   TIMEZONES,
@@ -145,7 +149,14 @@ export function SettingsDashboard() {
     roleName
   } = useSettings();
 
-  const [businessDraft, setBusinessDraft] = useState<Business>(business);
+  const [businessDraft, setBusinessDraft] = useState<Business>(() => {
+    const legacyCountry = String(business.country || "").trim();
+    const isValidCountry = legacyCountry.length === 2 && AVAILABLE_COUNTRY_CODES.some(code => code === legacyCountry);
+    return {
+      ...business,
+      country: isValidCountry ? (legacyCountry as Business["country"]) : "CO"
+    };
+  });
   const [businessSaved, setBusinessSaved] = useState(false);
   const [configDraft, setConfigDraft] = useState<CompanyConfig>(config);
   const [configSaved, setConfigSaved] = useState(false);
@@ -153,6 +164,7 @@ export function SettingsDashboard() {
   const [backingUp, setBackingUp] = useState(false);
   const [backupDone, setBackupDone] = useState(false);
   const [backupError, setBackupError] = useState<string | null>(null);
+  const [editingRole, setEditingRole] = useState<{ id: string; name: string } | null>(null);
 
   // Sincroniza los borradores cuando los datos reales terminan de cargar.
   React.useEffect(() => setBusinessDraft(business), [business]);
@@ -197,6 +209,10 @@ export function SettingsDashboard() {
             tax: defaults.taxRate
           }
         : {})
+    });
+    setBusinessDraft({
+      ...businessDraft,
+      country: countryCode as Business["country"]
     });
   }
 
@@ -302,11 +318,18 @@ export function SettingsDashboard() {
               />
             </Field>
             <Field label="País">
-              <input
+              <select
                 className={inputClass}
                 value={businessDraft.country}
-                onChange={(e) => setBusinessDraft({ ...businessDraft, country: e.target.value })}
-              />
+                onChange={(e) => handleCountryChange(e.target.value)}
+              >
+                <option value="">Selecciona un país</option>
+                {AVAILABLE_COUNTRIES.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {getCountryName(c.code, language)}
+                  </option>
+                ))}
+              </select>
             </Field>
             <div className="col-span-2">
               <Field
@@ -361,7 +384,7 @@ export function SettingsDashboard() {
                 value={configDraft.country}
                 onChange={(e) => handleCountryChange(e.target.value)}
               >
-                {COUNTRIES.map((c) => (
+                {AVAILABLE_COUNTRIES.map((c) => (
                   <option key={c.code} value={c.code}>
                     {getCountryName(c.code, language)}
                   </option>
@@ -546,6 +569,67 @@ export function SettingsDashboard() {
           </div>
         </SectionCard>
 
+        {config.electronicInvoicing && (
+          <SectionCard
+            icon={<FileText size={18} className="text-orange-400" />}
+            title="Facturación electrónica DIAN"
+            description="Configura la emisión de facturas electrónicas con la DIAN."
+          >
+            <div className="space-y-3">
+              <Toggle
+                label="Facturación electrónica DIAN"
+                description="Genera facturas electrónicas automáticamente al cobrar."
+                checked={configDraft.electronicInvoicing.enabled}
+                onChange={(v) =>
+                  setConfigDraft({
+                    ...configDraft,
+                    electronicInvoicing: { ...configDraft.electronicInvoicing, enabled: v }
+                  })
+                }
+              />
+              <Field label="Proveedor">
+                <select
+                  className={inputClass}
+                  value={configDraft.electronicInvoicing.provider}
+                  onChange={(e) =>
+                    setConfigDraft({
+                      ...configDraft,
+                      electronicInvoicing: {
+                        ...configDraft.electronicInvoicing,
+                        provider: e.target.value as "factus" | "none"
+                      }
+                    })
+                  }
+                  disabled={!configDraft.electronicInvoicing.enabled}
+                >
+                  <option value="none">Ninguno</option>
+                  <option value="factus">Factus</option>
+                </select>
+              </Field>
+              <div className="text-xs text-slate-400">
+                {configDraft.electronicInvoicing.enabled ? (
+                  <span className="text-green-400">
+                    Conectado a {configDraft.electronicInvoicing.provider}
+                  </span>
+                ) : (
+                  <span className="text-slate-500">Desconectado</span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center justify-between mt-4">
+              <SavedToast show={configSaved} label={t("settings.saved")} />
+              <VimdyButton
+                onClick={handleSaveConfig}
+                variant="primary"
+                size="sm"
+                className="ml-auto"
+              >
+                Guardar facturación
+              </VimdyButton>
+            </div>
+          </SectionCard>
+        )}
+
         {/* Impresión — plantillas de ticket, toggles y vista previa en vivo */}
         <PrintSettingsSection business={businessDraft} />
 
@@ -588,6 +672,15 @@ export function SettingsDashboard() {
               Descargar backup
             </VimdyButton>
           </div>
+        </SectionCard>
+
+        {/* Sucursales */}
+        <SectionCard
+          icon={<Building2 size={18} className="text-cyan-400" />}
+          title="Sucursales"
+          description="Administra las sucursales de tu negocio."
+        >
+          <BranchManager />
         </SectionCard>
 
         {/* Usuarios y roles */}
@@ -653,6 +746,37 @@ export function SettingsDashboard() {
                 </div>
               ))}
             </div>
+
+            <div className="mt-4 pt-4 border-t border-slate-700/60">
+              <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                Roles y permisos
+              </h4>
+              <div className="space-y-2">
+                {roles.map((r) => (
+                  <div
+                    key={r.id}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-2.5"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-white text-sm font-semibold truncate">{r.name}</p>
+                      <p className="text-slate-500 text-xs truncate">
+                        {r.permissions.includes("*")
+                          ? "Acceso total"
+                          : `${r.permissions.length} permiso${r.permissions.length === 1 ? "" : "s"}`}
+                      </p>
+                    </div>
+                    <VimdyButton
+                      onClick={() => setEditingRole({ id: r.id, name: r.name })}
+                      variant="ghost"
+                      size="sm"
+                      className="flex-shrink-0"
+                    >
+                      Editar permisos
+                    </VimdyButton>
+                  </div>
+                ))}
+              </div>
+            </div>
           </SectionCard>
         )}
 
@@ -673,6 +797,17 @@ export function SettingsDashboard() {
           onSubmit={async (data) => {
             const ok = await createUser(user?.id ?? "SYSTEM", data);
             if (ok) setCreatingUser(false);
+          }}
+        />
+      )}
+
+      {editingRole && (
+        <PermissionEditor
+          roleId={editingRole.id}
+          roleName={editingRole.name}
+          onClose={() => setEditingRole(null)}
+          onSaved={() => {
+            setEditingRole(null);
           }}
         />
       )}

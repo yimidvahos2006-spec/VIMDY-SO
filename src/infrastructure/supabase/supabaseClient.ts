@@ -119,3 +119,82 @@ export async function checkSupabaseReachable(timeoutMs: number = 5000): Promise<
     clearTimeout(timeoutId);
   }
 }
+
+export interface BranchRow {
+  id: string;
+  name: string;
+  address: string | null;
+  phone: string | null;
+  is_main: boolean;
+  active: boolean;
+}
+
+export async function getBranches(businessId: string): Promise<BranchRow[]> {
+  const { data, error } = await supabase
+    .from("branches")
+    .select("id, name, address, phone, is_main, active")
+    .eq("business_id", businessId)
+    .order("is_main", { ascending: false });
+
+  if (error) {
+    throw new Error(error.message ?? "No se pudieron cargar las sucursales.");
+  }
+
+  return (data ?? []) as BranchRow[];
+}
+
+export async function createBranch(
+  businessId: string,
+  input: { name: string; address?: string; phone?: string; is_main?: boolean; active?: boolean }
+): Promise<{ id: string }> {
+  const { data, error } = await supabase
+    .from("branches")
+    .insert({
+      business_id: businessId,
+      name: input.name.trim(),
+      address: input.address?.trim() || null,
+      phone: input.phone?.trim() || null,
+      is_main: input.is_main ?? false,
+      active: input.active ?? true
+    })
+    .select("id")
+    .single();
+
+  if (error || !data) {
+    throw new Error(error?.message ?? "No se pudo crear la sucursal.");
+  }
+
+  return data as { id: string };
+}
+
+export async function updateBranch(
+  branchId: string,
+  input: { name?: string; address?: string | null; phone?: string | null; is_main?: boolean; active?: boolean }
+): Promise<void> {
+  const updates: Record<string, unknown> = {};
+  if (input.name !== undefined) updates.name = input.name.trim();
+  if (input.address !== undefined) updates.address = input.address?.trim() || null;
+  if (input.phone !== undefined) updates.phone = input.phone?.trim() || null;
+  if (input.is_main !== undefined) updates.is_main = input.is_main;
+  if (input.active !== undefined) updates.active = input.active;
+
+  const { error } = await supabase
+    .from("branches")
+    .update(updates)
+    .eq("id", branchId);
+
+  if (error) {
+    throw new Error(error.message ?? "No se pudo actualizar la sucursal.");
+  }
+}
+
+export async function deleteBranch(branchId: string): Promise<void> {
+  const { error } = await supabase
+    .from("branches")
+    .delete()
+    .eq("id", branchId);
+
+  if (error) {
+    throw new Error(error.message ?? "No se pudo eliminar la sucursal.");
+  }
+}

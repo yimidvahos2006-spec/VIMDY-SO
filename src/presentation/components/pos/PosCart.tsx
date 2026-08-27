@@ -145,10 +145,10 @@ export function PosCart() {
   // guardamos en paymentStore para que Pago (PosPayment / PosCheckoutPanel)
   // siempre valide y muestre el mismo total que después va a crear la venta.
   const subtotal = total;
-  const tax = container.salesEngine.calculateTax(subtotal);
+  const tax = container.salesEngine.get().calculateTax(subtotal);
 
   const realDiscountAmount = discountType
-    ? container.salesEngine.calculateDiscount(subtotal, { type: discountType, value: discountValue })
+    ? container.salesEngine.get().calculateDiscount(subtotal, { type: discountType, value: discountValue })
     : 0;
 
   // BLOQUEANTE (auditoría Fase 2 — rama Bar): la propina se calcula sobre
@@ -156,10 +156,10 @@ export function PosCart() {
   // agrega al total DESPUÉS del IVA (ver SalesEngine.calculateTotal) — no
   // se cobra IVA sobre la propina.
   const realTipAmount = tipType
-    ? container.salesEngine.calculateTip(subtotal, { type: tipType, value: tipValue })
+    ? container.salesEngine.get().calculateTip(subtotal, { type: tipType, value: tipValue })
     : 0;
 
-  const totalConImpuesto = container.salesEngine.calculateTotal(
+  const totalConImpuesto = container.salesEngine.get().calculateTotal(
     subtotal,
     tax,
     realDiscountAmount,
@@ -202,7 +202,7 @@ export function PosCart() {
     }
 
     const clampedValue = discountKind === "PERCENT" ? Math.min(value, 100) : Math.min(value, subtotal);
-    const amount = container.salesEngine.calculateDiscount(subtotal, {
+    const amount = container.salesEngine.get().calculateDiscount(subtotal, {
       type: discountKind,
       value: clampedValue
     });
@@ -231,7 +231,7 @@ export function PosCart() {
     }
 
     const clampedValue = tipKind === "PERCENT" ? Math.min(value, 100) : value;
-    const amount = container.salesEngine.calculateTip(subtotal, {
+    const amount = container.salesEngine.get().calculateTip(subtotal, {
       type: tipKind,
       value: clampedValue
     });

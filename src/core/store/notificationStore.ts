@@ -14,6 +14,7 @@ export type NotificationCategory =
   | "META_CUMPLIDA"
   | "IA_COMPRA"
   | "RECORDATORIO"
+  | "SUSCRIPCION"
   | "GENERAL";
 
 export interface Notification {
@@ -205,6 +206,16 @@ class NotificationStore extends ObservableStore<Notification[]> {
   /** 🔔 Recordatorio manual creado por el usuario. */
   addReminder(message: string, key?: string) {
     this.add("Recordatorio", message, "info", key ?? `RECORDATORIO:${message}:${Date.now()}`, "RECORDATORIO");
+  }
+
+  /** 🟡 Notificación de suscripción: trial próximos a vencer. */
+  addSubscriptionWarning(title: string, message: string, key: string) {
+    this.add(title, message, "warning", key, "SUSCRIPCION");
+  }
+
+  /** 🔴 Notificación de suscripción: trial vencido. */
+  addSubscriptionExpired(title: string, message: string, key: string) {
+    this.add(title, message, "error", key, "SUSCRIPCION");
   }
 
   getAll(): Notification[] {

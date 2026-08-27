@@ -21,15 +21,8 @@
 //     evento se reconoce con 200 pero no se vuelve a procesar. Wompi
 //     reintenta webhooks; sin esto se podría duplicar la extensión del
 //     plan cada vez que reintenta.
-//
-// CONFIGURACIÓN REQUERIDA:
-//   supabase secrets set WOMPI_EVENTS_SECRET=prod_events_...
-//
-// Despliegue (SIN verificación de JWT — Wompi no manda uno):
-//   supabase functions deploy wompi-webhook --no-verify-jwt
-//
-// Y en el dashboard de Wompi (Configuración > Eventos), la URL a registrar es:
-//   https://<tu-proyecto>.supabase.co/functions/v1/wompi-webhook
+//   - Activación server-side: usa la función SQL `activate_subscription_server_side`
+//     para calcular fechas (12+2 meses para anual) y registrar auditoría.
 // ============================================================================
 
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -45,13 +38,6 @@ function json(body: unknown, status = 200) {
     headers: { ...corsHeaders, "Content-Type": "application/json" }
   });
 }
-
-// Espejo server-side de PLAN_BILLING en activate-subscription/index.ts y
-// wompi-create-checkout/index.ts.
-const PLAN_PERIOD_DAYS: Record<"monthly" | "yearly", number> = {
-  monthly: 30,
-  yearly: 365
-};
 
 // Wompi manda el método real de pago como "CARD" | "PSE" | "NEQUI" | "BANCOLOMBIA_TRANSFER" | ...
 // Se mapea a los valores que ya usa el resto de VIMDY (businesses.payment_method).
@@ -204,45 +190,53 @@ Deno.serve(async (req: Request) => {
 
     const status = transaction.status.toUpperCase();
     const paymentMethod = PAYMENT_METHOD_MAP[transaction.payment_method_type ?? ""] ?? null;
-    const now = new Date();
 
     if (status === "APPROVED") {
       const plan = paymentRow.plan as "monthly" | "yearly";
-      const periodDays = PLAN_PERIOD_DAYS[plan];
-      const renewalDate = new Date(now);
-      renewalDate.setDate(renewalDate.getDate() + periodDays);
 
-      // 5) Activar el plan de verdad — el mismo destino final que
-      //    activate-subscription, pero disparado por la confirmación real
-      //    del pago, no por un botón del navegador.
-      const { error: businessUpdateError } = await admin
-        .from("businesses")
-        .update({
-          plan,
-          renewal_date: renewalDate.toISOString(),
-          next_charge_at: renewalDate.toISOString(),
-          payment_method: paymentMethod,
-          payment_status: "approved"
-        })
-        .eq("id", paymentRow.business_id);
+      // 5) Activar/renovar el plan usando la función SQL server-side.
+      //    Esta función calcula las fechas correctamente (14 meses para anual),
+      //    marca trial como usado, y registra auditoría.
+      const { data: activationResult, error: activationError } = await admin.rpc(
+        "activate_subscription_server_side",
+        {
+          p_business_id: paymentRow.business_id,
+          p_plan: plan,
+          p_payment_id: paymentRow.id,
+          p_now: new Date().toISOString()
+        }
+      );
 
-      if (businessUpdateError) {
-        return json({ error: "BUSINESS_UPDATE_FAILED", detail: businessUpdateError.message }, 500);
+      if (activationError) {
+        return json({ error: "ACTIVATION_FAILED", detail: activationError.message }, 500);
       }
 
+      const result = activationResult as {
+        ok: boolean;
+        alreadyActivated: boolean;
+        renewalNumber: number;
+        renewal_date?: string;
+      };
+
+      // 6) Actualizar el método de pago en el pago (lo demás lo hace la función SQL)
       const { error: paymentUpdateError } = await admin
         .from("subscription_payments")
-        .update({ status: "approved", payment_method: paymentMethod, paid_at: now.toISOString() })
+        .update({ payment_method: paymentMethod })
         .eq("id", paymentRow.id);
 
       if (paymentUpdateError) {
         return json({ error: "PAYMENT_UPDATE_FAILED", detail: paymentUpdateError.message }, 500);
       }
 
-      return json({ ok: true, activated: true });
+      return json({
+        ok: true,
+        activated: !result.alreadyActivated,
+        renewalNumber: result.renewalNumber,
+        renewalDate: result.renewal_date
+      });
     }
 
-    // 6) Cualquier estado que no sea APPROVED (DECLINED, VOIDED, ERROR) se
+    // 7) Cualquier estado que no sea APPROVED (DECLINED, VOIDED, ERROR) se
     //    registra como declinado. El plan/fechas actuales del negocio NO
     //    se tocan — solo se refleja el intento fallido para que la UI
     //    pueda avisarle al usuario y ofrecerle reintentar.

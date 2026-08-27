@@ -1,16 +1,13 @@
 import { supabase } from "../supabase/supabaseClient";
+import { connectionStore } from "../../core/store/connectionStore";
 import { CopilotMessage } from "../../core/types/CopilotTypes";
 
-/**
- * CopilotApiClient
- * ---------------------------------------------------------------------------
- * Único punto del frontend que sabe cómo llegar a Claude: llama a la Edge
- * Function `copilot-chat` (nunca directo a api.anthropic.com desde el
- * navegador, para no exponer la API key). Mismo patrón que
- * authBusinessContext.ts usa con `register-business`.
- */
 export class CopilotApiClient {
   public async sendMessage(system: string, history: CopilotMessage[]): Promise<string> {
+    if (!connectionStore.isOnline()) {
+      return "Sin conexión: el Copiloto necesita internet para responder. Cuando vuelva la conexión, podés preguntarme lo que necesites.";
+    }
+
     const messages = history.map((message) => ({
       role: message.role,
       content: message.content

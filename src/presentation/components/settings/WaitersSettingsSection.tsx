@@ -25,7 +25,7 @@ export function WaitersSettingsSection() {
   const [busyId, setBusyId] = useState<string | null>(null);
 
   async function reload() {
-    const all = await container.waiterEngine.listAll();
+    const all = await container.waiterEngine.get().listAll();
     setWaiters(all);
     setLoading(false);
   }
@@ -45,7 +45,7 @@ export function WaitersSettingsSection() {
     setSaving(true);
     setError(null);
     try {
-      await container.waiterEngine.create({ name: name.trim() });
+      await container.waiterEngine.get().create({ name: name.trim() });
       setName("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo agregar el mesero.");
@@ -58,7 +58,7 @@ export function WaitersSettingsSection() {
     setBusyId(waiter.id);
     setError(null);
     try {
-      await container.waiterEngine.setActive(waiter.id, !waiter.active);
+      await container.waiterEngine.get().setActive(waiter.id, !waiter.active);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo actualizar el mesero.");
     } finally {
@@ -72,7 +72,7 @@ export function WaitersSettingsSection() {
     setBusyId(waiter.id);
     setError(null);
     try {
-      await container.waiterEngine.delete(waiter.id);
+      await container.waiterEngine.get().delete(waiter.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo eliminar el mesero.");
     } finally {

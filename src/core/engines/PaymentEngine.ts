@@ -25,6 +25,8 @@ export interface PaymentResult {
 
   date: Date;
 
+  invoiceError?: string;
+
 }
 
 export interface MixedPayment {

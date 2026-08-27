@@ -77,7 +77,7 @@ export abstract class SupabaseRepository<T extends { id: string; version?: numbe
   }
 
   /** Reconstruye la entidad tipada a partir de una fila `{ data, version }`. */
-  private reviveRow(row: { data: unknown; version: number }): T {
+  protected reviveRow(row: { data: unknown; version: number }): T {
     return { ...reviveDates(row.data as T), version: row.version } as T;
   }
 

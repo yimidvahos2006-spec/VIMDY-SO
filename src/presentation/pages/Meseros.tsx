@@ -34,12 +34,12 @@ function MeserosContent() {
   const [dialog, setDialog] = useState<"open" | "detail" | null>(null);
 
   const reloadTables = useCallback(async () => {
-    const all = await container.tableEngine.getAllTables();
+    const all = await container.tableEngine.get().getAllTables();
     setTables(all);
   }, []);
 
   const reloadWaiters = useCallback(async () => {
-    const all = await container.waiterEngine.listActive();
+    const all = await container.waiterEngine.get().listActive();
     setWaiters(all);
   }, []);
 
@@ -49,9 +49,9 @@ function MeserosContent() {
     Promise.all([tablesReady, productsReady])
       .then(async () => {
         const [allTables, allProducts, allWaiters] = await Promise.all([
-          container.tableEngine.getAllTables(),
-          container.inventoryEngine.listAll(),
-          container.waiterEngine.listActive()
+          container.tableEngine.get().getAllTables(),
+          container.inventoryEngine.get().listAll(),
+          container.waiterEngine.get().listActive()
         ]);
 
         if (cancelled) return;

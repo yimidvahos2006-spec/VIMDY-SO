@@ -3,6 +3,7 @@ import { AlertTriangle, RotateCcw, RefreshCcw, Home } from "lucide-react";
 
 import { useAuth } from "../../context/AuthContext";
 import { logError } from "../../../infrastructure/logging/opsLogger";
+import { container } from "../../../infrastructure/di/CompositionRoot";
 
 /**
  * ErrorBoundary.tsx
@@ -87,8 +88,7 @@ class ErrorBoundaryClass extends React.Component<ErrorBoundaryClassProps, ErrorB
   }
 
   private async logCrash(error: Error, info: React.ErrorInfo): Promise<void> {
-    const { container } = await import("../../../infrastructure/di/CompositionRoot");
-    await container.auditEngine.log(
+    await container.auditEngine.get().log(
       this.props.actorId ?? "system",
       "APP_CRASH",
       "system",

@@ -38,8 +38,9 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 
+const VIMDY_APP_URL = Deno.env.get("VIMDY_APP_URL");
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": VIMDY_APP_URL ?? "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type"
 };
 
@@ -75,7 +76,8 @@ const COUNTRY_DEFAULTS: Record<string, CountryDefaults> = {
   ES: { currency: "EUR", language: "es", timezone: "Europe/Madrid", taxRate: 21 },
   US: { currency: "USD", language: "en", timezone: "America/New_York", taxRate: 0 },
   EC: { currency: "USD", language: "es", timezone: "America/Guayaquil", taxRate: 15 },
-  PA: { currency: "USD", language: "es", timezone: "America/Panama", taxRate: 7 }
+  PA: { currency: "USD", language: "es", timezone: "America/Panama", taxRate: 7 },
+  VE: { currency: "USD", language: "es", timezone: "America/Caracas", taxRate: 0 }
 };
 
 const TRIAL_PERIOD_DAYS = 30;
@@ -141,39 +143,63 @@ Deno.serve(async (req: Request) => {
     return json({ error: "COUNTRY_INVALID: país no reconocido." }, 400);
   }
 
+  const now = new Date();
+  const trialEndsAt = new Date(now);
+  trialEndsAt.setDate(trialEndsAt.getDate() + TRIAL_PERIOD_DAYS);
+
+  // 3) Protección definitiva por persona: un usuario SOLO puede tener UN
+  //    trial de por vida, sin importar cuántos negocios cree, cuántas
+  //    veces cambie de dispositivo, navegador, IP o sesión.
+  const { data: hasUsedTrial, error: hasUsedTrialError } = await admin
+    .rpc("has_user_used_trial", { p_user_id: authUser.id });
+
+  if (hasUsedTrialError) {
+    return json({ error: "TRIAL_CHECK_FAILED", detail: hasUsedTrialError.message }, 500);
+  }
+
+  if (hasUsedTrial) {
+    return json({
+      error: "TRIAL_YA_USADO: ya utilizaste tu prueba gratuita de 30 días. Puedes contratar un plan mensual o anual para continuar."
+    }, 403);
+  }
+
+  // 4) Protección anti-trial-duplicado por negocio: no permitir crear un
+  //    negocio nuevo si este usuario ya tiene uno en trial/suspendido.
+  const { data: existingBusinesses, error: existingError } = await admin
+    .from("business_members")
+    .select("business_id, role")
+    .eq("user_id", authUser.id);
+
+  if (existingError) {
+    return json({ error: "BUSINESS_LOOKUP_FAILED", detail: existingError.message }, 500);
+  }
+
+  if (existingBusinesses && existingBusinesses.length > 0) {
+    const { data: existingBizData, error: existingBizError } = await admin
+      .from("businesses")
+      .select("id, plan, payment_status, subscription_status")
+      .in("id", existingBusinesses.map((b: { business_id: string }) => b.business_id))
+      .or("plan.eq.trial,plan.eq.suspended,payment_status.eq.none,payment_status.eq.pending");
+
+    if (existingBizError) {
+      return json({ error: "EXISTING_BUSINESS_LOOKUP_FAILED", detail: existingBizError.message }, 500);
+    }
+
+    if (existingBizData && existingBizData.length > 0) {
+      return json({
+        error: "TRIAL_DUPLICADO: ya tienes un negocio en periodo de prueba o suspendido. Activa un plan para ese negocio antes de crear uno nuevo."
+      }, 403);
+    }
+  }
+
   try {
-    // 3) Un mismo usuario no puede registrar un negocio dos veces — si ya
-    //    tiene una membresía, se rechaza en vez de crear un negocio
-    //    duplicado (el usuario debe usar Iniciar sesión, no Crear cuenta).
-    const { data: existingMembership, error: existingMembershipError } = await admin
-      .from("business_members")
-      .select("business_id")
-      .eq("user_id", authUser.id)
-      .limit(1)
-      .maybeSingle();
-
-    if (existingMembershipError) {
-      return json({ error: "MEMBERSHIP_CHECK_FAILED", detail: existingMembershipError.message }, 500);
-    }
-
-    if (existingMembership) {
-      return json({ error: "BUSINESS_ALREADY_EXISTS: este usuario ya tiene un negocio registrado." }, 409);
-    }
-
-    // 4) Calcular el trial SIEMPRE en el servidor — el cliente nunca envía
-    //    (ni decide) su propia fecha de vencimiento.
-    const now = new Date();
-    const trialEndsAt = new Date(now);
-    trialEndsAt.setDate(trialEndsAt.getDate() + TRIAL_PERIOD_DAYS);
-
-    // 5) Crear el negocio con la configuración inteligente resuelta a
-    //    partir del país (moneda, idioma, timezone, IVA sugerido).
     const { data: business, error: businessInsertError } = await admin
       .from("businesses")
       .insert({
         name: businessName,
         plan: "trial",
         trial_ends_at: trialEndsAt.toISOString(),
+        trial_used_at: now.toISOString(),
         country,
         currency: countryDefaults.currency,
         language: countryDefaults.language,
@@ -232,6 +258,37 @@ Deno.serve(async (req: Request) => {
       await admin.from("business_members").delete().eq("user_id", authUser.id).eq("business_id", business.id);
       await admin.from("businesses").delete().eq("id", business.id);
       return json({ error: "OWNER_PROFILE_FAILED", detail: profileInsertError.message }, 500);
+    }
+
+    const { error: branchInsertError } = await admin.from("branches").insert({
+      business_id: business.id,
+      name: "Sucursal principal",
+      is_main: true,
+      active: true
+    });
+
+    if (branchInsertError) {
+      await admin.from("app_users").delete().eq("id", authUser.id);
+      await admin.from("business_members").delete().eq("user_id", authUser.id).eq("business_id", business.id);
+      await admin.from("businesses").delete().eq("id", business.id);
+      return json({ error: "BRANCH_INSERT_FAILED", detail: branchInsertError.message }, 500);
+    }
+
+    // 8) Registrar el uso del trial para esta persona (idempotente a nivel
+    //    de BD por el unique constraint en user_id). Si esto falla, el
+    //    negocio ya está creado pero el trial no quedó marcado — en ese
+    //    caso se revierte todo para no dejar un trial "gratis" sin marcar.
+    const { error: trialUsageError } = await admin.rpc("record_trial_usage", {
+      p_user_id: authUser.id,
+      p_business_id: business.id
+    });
+
+    if (trialUsageError) {
+      await admin.from("branches").delete().eq("business_id", business.id);
+      await admin.from("app_users").delete().eq("id", authUser.id);
+      await admin.from("business_members").delete().eq("user_id", authUser.id).eq("business_id", business.id);
+      await admin.from("businesses").delete().eq("id", business.id);
+      return json({ error: "TRIAL_USAGE_RECORD_FAILED", detail: trialUsageError.message }, 500);
     }
 
     return json({ ok: true, businessId: business.id });

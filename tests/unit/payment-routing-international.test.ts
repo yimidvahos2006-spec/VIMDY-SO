@@ -16,9 +16,9 @@ describe("PaymentCountryResolver — 10 países", () => {
     expect(PaymentCountryResolver.resolve("CO")).toBe("wompi");
   });
 
-  it("AR, CL, MX, PE → mercadopago", () => {
+  it("AR, CL, MX, PE → paypal", () => {
     for (const c of ["AR", "CL", "MX", "PE"]) {
-      expect(PaymentCountryResolver.resolve(c)).toBe("mercadopago");
+      expect(PaymentCountryResolver.resolve(c)).toBe("paypal");
     }
   });
 
@@ -62,17 +62,17 @@ describe("PaymentMethodResolver — 10 países", () => {
     expect(methods).toContain("card");
   });
 
-  it("AR, CL, PE tienen métodos de Mercado Pago", () => {
+  it("AR, CL, PE tienen métodos de PayPal", () => {
     for (const c of ["AR", "CL", "PE"]) {
       const methods = PaymentMethodResolver.resolve(c);
-      expect(methods).toContain("mercadopago_wallet");
+      expect(methods).toContain("paypal");
       expect(methods).toContain("card");
     }
   });
 
-  it("MX tiene métodos de Mercado Pago con transferencia bancaria", () => {
+  it("MX tiene métodos de PayPal con transferencia bancaria", () => {
     const methods = PaymentMethodResolver.resolve("MX");
-    expect(methods).toContain("mercadopago_wallet");
+    expect(methods).toContain("paypal");
     expect(methods).toContain("bank_transfer");
     expect(methods).toContain("card");
   });
@@ -115,7 +115,7 @@ describe("PaymentValidator — países permitidos", () => {
 describe("Subscription prices — por país (server-side)", () => {
   it("getPlanPrice usa país, no moneda", () => {
     expect(getPlanPrice("monthly", "CO")).toBe(79000);
-    expect(getPlanPrice("yearly", "CO")).toBe(790000);
+    expect(getPlanPrice("yearly", "CO")).toBe(799000);
     expect(getPlanPrice("monthly", "US")).toBe(89);
     expect(getPlanPrice("yearly", "US")).toBe(899);
     expect(getPlanPrice("monthly", "MX")).toBe(1499);

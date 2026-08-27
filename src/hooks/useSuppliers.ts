@@ -9,7 +9,7 @@ import { vimdyCore } from "../core/VimdyCore";
    useSuppliers
    ---------------------------------------------------------------------------
    CRUD real de proveedores para el formulario de Productos. Lee y escribe
-   siempre contra container.supplierEngine (IndexedDB).
+   siempre contra container.supplierEngine.get() (IndexedDB).
 =========================================================================== */
 
 export interface UseSuppliersResult {
@@ -59,7 +59,7 @@ export function useSuppliers(): UseSuppliersResult {
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
-    const all = await container.supplierEngine.listAll();
+    const all = await container.supplierEngine.get().listAll();
     setSuppliers(all);
   }, []);
 
@@ -84,7 +84,7 @@ export function useSuppliers(): UseSuppliersResult {
     }): Promise<Supplier | null> => {
       setError(null);
       try {
-        const created = await container.supplierEngine.create(input);
+        const created = await container.supplierEngine.get().create(input);
         await reload();
         vimdyCore.emit("inventory");
         return created;
@@ -111,7 +111,7 @@ export function useSuppliers(): UseSuppliersResult {
     ): Promise<Supplier | null> => {
       setError(null);
       try {
-        const updated = await container.supplierEngine.update(id, input);
+        const updated = await container.supplierEngine.get().update(id, input);
         await reload();
         vimdyCore.emit("inventory");
         return updated;
@@ -127,7 +127,7 @@ export function useSuppliers(): UseSuppliersResult {
     async (id: string): Promise<boolean> => {
       setError(null);
       try {
-        await container.supplierEngine.delete(id);
+        await container.supplierEngine.get().delete(id);
         await reload();
         vimdyCore.emit("inventory");
         return true;

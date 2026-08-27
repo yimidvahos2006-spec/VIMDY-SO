@@ -50,4 +50,9 @@ export class FakeProductRepository
 
     return updated;
   }
+
+  public async findBySkuAndBranch(sku: string, branchId: string): Promise<Product | null> {
+    const all = await this.all();
+    return all.find((p) => p.sku === sku && p.branchId === branchId) ?? null;
+  }
 }

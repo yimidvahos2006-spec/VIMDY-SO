@@ -19,7 +19,7 @@ interface FirstProductStepProps {
  *
  * Crea el primer producto real del negocio con los campos que pide el
  * documento de producto (Nombre, Precio, Costo, Stock, Categoría), a
- * través de container.inventoryEngine.createProduct — el mismo motor real
+ * través de container.inventoryEngine.get().createProduct — el mismo motor real
  * que usa el módulo de Productos. El stock mínimo (para alertas de
  * inventario) no lo pide el asistente; se guarda en 0 (sin alerta) y
  * queda editable después desde Inventario.
@@ -68,7 +68,7 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
     setError(null);
 
     try {
-      await container.inventoryEngine.createProduct(
+      await container.inventoryEngine.get().createProduct(
         {
           name: name.trim(),
           categoryId,

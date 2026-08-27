@@ -644,6 +644,7 @@ export interface InventoryMovement {
    * son inventario que sí generó ingreso.
    */
   readonly lossCategory?: LossCategory;
+  readonly branchId?: string;
 }
 
 /**

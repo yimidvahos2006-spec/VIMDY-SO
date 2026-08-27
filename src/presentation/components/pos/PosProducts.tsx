@@ -10,6 +10,7 @@ import { useTranslation } from "../../../core/i18n/useTranslation";
 import { formatMoney } from "../../../core/utils/formatMoney";
 import { companyConfigStore } from "../../../core/store/companyConfigStore";
 import { weightEntryStore } from "../../../core/store/weightEntryStore";
+import { variantSelectorStore } from "../../../core/store/variantSelectorStore";
 import { isVariableQuantityUnit } from "../../../core/utils/weightUnits";
 
 export function PosProducts() {
@@ -139,10 +140,8 @@ export function PosProducts() {
               trackStock={product.trackStock}
               image={product.image}
               unit={isVariableQuantityUnit(product.unit) ? product.unit : undefined}
+              opensModal={variantSelectorStore.needsSelector(product)}
               onAdd={() => {
-                // BLOQUEANTE (auditoría Fase 2 — Supermercado): mismo
-                // criterio que PosTopBar.tsx — un producto por peso/volumen
-                // abre la báscula en vez de agregarse con cantidad 1.
                 if (isVariableQuantityUnit(product.unit)) {
                   weightEntryStore.open({
                     id: product.id,
@@ -150,6 +149,18 @@ export function PosProducts() {
                     price: product.price,
                     unit: product.unit as string,
                     requiresKitchen: product.requiresKitchen ?? true
+                  });
+                  return;
+                }
+
+                if (variantSelectorStore.needsSelector(product)) {
+                  variantSelectorStore.open({
+                    id: product.id,
+                    name: product.name,
+                    price: product.price,
+                    requiresKitchen: product.requiresKitchen ?? true,
+                    sizes: product.sizes,
+                    extras: product.extras
                   });
                   return;
                 }
@@ -173,24 +184,25 @@ export function PosProducts() {
 }
 
 /**
- * Toda la tarjeta es el botón: en un POS de mostrador, apuntarle a un botón
- * chiquito abajo de la tarjeta cuesta precisión y un toque extra. Acá
- * cualquier parte de la tarjeta agrega el producto, con un flash visual
- * (borde + check) de medio segundo para confirmar que sí se agregó — así
- * el cajero no tiene que mirar el carrito para saber si funcionó.
- *
- * Tarjeta reducida a lo esencial para el cajero en el momento de vender:
- * foto, nombre, precio y si hay o no. Categoría, conteo exacto de stock y
- * badges (favorito / top ventas) se sacaron: son datos de gestión, no de
- * venta, y antes competían por atención con el precio.
- */
-function ProductCard({
+  * Toda la tarjeta es el botón: en un POS de mostrador, apuntarle a un botón
+  * chiquito abajo de la tarjeta cuesta precisión y un toque extra. Acá
+  * cualquier parte de la tarjeta agrega el producto, con un flash visual
+  * (borde + check) de medio segundo para confirmar que sí se agregó — así
+  * el cajero no tiene que mirar el carrito para saber si funcionó.
+  *
+  * Tarjeta reducida a lo esencial para el cajero en el momento de vender:
+  * foto, nombre, precio y si hay o no. Categoría, conteo exacto de stock y
+  * badges (favorito / top ventas) se sacaron: son datos de gestión, no de
+  * venta, y antes competían por atención con el precio.
+  */
+const ProductCard = React.memo(function ProductCard({
   name,
   price,
   stock,
   trackStock,
   image,
   unit,
+  opensModal,
   onAdd
 }: {
   name: string;
@@ -198,14 +210,8 @@ function ProductCard({
   stock: number;
   trackStock?: boolean;
   image?: string;
-  /**
-   * BLOQUEANTE (auditoría Fase 2 — Supermercado): solo viene definido para
-   * un producto por peso/volumen (ver isVariableQuantityUnit). Cambia el
-   * precio mostrado ("$4.500/kg" en vez de "$4.500") y evita el flash de
-   * "Agregado" al tocar la tarjeta — onAdd() en ese caso solo ABRE el
-   * modal de báscula, todavía no agrega nada al carrito.
-   */
   unit?: string;
+  opensModal?: boolean;
   onAdd: () => void;
 }) {
   const { t, language } = useTranslation();
@@ -213,16 +219,11 @@ function ProductCard({
 
   function handleAdd() {
     onAdd();
-    if (unit) return;
+    if (unit || opensModal) return;
     setJustAdded(true);
     window.setTimeout(() => setJustAdded(false), 500);
   }
 
-  // BLOQUEANTE (bug reportado en video 2026-07-31): trackStock === false
-  // (Cocina sin receta, ej. Caldo de Costilla) no maneja stock propio —
-  // por eso nace en 0 — así que la tarjeta debe verse y comportarse como
-  // "disponible" sin importar el número de stock. Mismo criterio que
-  // InventoryEngine.buildConsumptionTargets / SalesEngine.validateSale.
   const available = trackStock === false || stock > 0;
   const formattedPrice = formatMoney(price, companyConfigStore.get().currency, language);
 
@@ -264,7 +265,6 @@ function ProductCard({
         )}
       </div>
 
-      {/* Nombre: una sola línea, truncado. */}
       <h3 className="w-full text-vimdy-text font-semibold text-vimdy-small leading-tight truncate">
         {name}
       </h3>
@@ -284,4 +284,4 @@ function ProductCard({
       </div>
     </button>
   );
-}
+});

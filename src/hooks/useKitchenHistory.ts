@@ -6,7 +6,7 @@ import { enrichKitchenOrders, KitchenOrderView } from "../core/services/kitchenO
 import { logWarning } from "../infrastructure/logging/opsLogger";
 
 /**
- * Historial de comandas ENTREGADAS. Lee de `container.kitchenService.getHistory()`,
+ * Historial de comandas ENTREGADAS. Lee de `container.kitchenService.get().getHistory()`,
  * que filtra sobre el mismo repositorio real de KitchenEngine — las comandas
  * nunca se borran, solo cambian de estado (ver KitchenEngine.getDeliveredOrders).
  *
@@ -25,12 +25,12 @@ export function useKitchenHistory() {
     // dejar el historial de Cocina con el spinner colgado.
     try {
       const [rawOrders, products, tables, users, waiters, categories] = await Promise.all([
-        container.kitchenService.getHistory(),
-        container.inventoryEngine.listAll(),
-        container.tableEngine.getAllTables(),
-        container.userEngine.listUsers(),
-        container.waiterEngine.listAll(),
-        container.categoryEngine.listAll()
+        container.kitchenService.get().getHistory(),
+        container.inventoryEngine.get().listAll(),
+        container.tableEngine.get().getAllTables(),
+        container.userEngine.get().listUsers(),
+        container.waiterEngine.get().listAll(),
+        container.categoryEngine.get().listAll()
       ]);
 
       // getDeliveredOrders ya ordena más reciente primero.

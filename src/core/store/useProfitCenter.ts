@@ -112,12 +112,12 @@ export function useProfitCenter() {
   const load = useCallback(async () => {
     await Promise.all([productsReady, categoriesReady]);
     const [allSales, allProducts, allCategories, allUsers, allProfitability, allCapacities] = await Promise.all([
-      container.salesEngine.getAllSales(),
-      container.inventoryEngine.listAll(),
-      container.categoryEngine.listAll(),
-      container.userEngine.listUsers(),
-      container.recipeEngine.getAllProfitability(),
-      container.recipeEngine.getAllProductionCapacities()
+      container.salesEngine.get().getAllSales(),
+      container.inventoryEngine.get().listAll(),
+      container.categoryEngine.get().listAll(),
+      container.userEngine.get().listUsers(),
+      container.recipeEngine.get().getAllProfitability(),
+      container.recipeEngine.get().getAllProductionCapacities()
     ]);
     setSales(allSales);
     setProducts(allProducts);

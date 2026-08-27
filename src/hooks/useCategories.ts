@@ -12,7 +12,7 @@ import { vimdyCore } from "../core/VimdyCore";
    ---------------------------------------------------------------------------
    CRUD real de categorías para el formulario de Productos (y para cualquier
    pantalla que necesite listar/crear categorías, como Configuración más
-   adelante). Lee y escribe siempre contra container.categoryEngine
+   adelante). Lee y escribe siempre contra container.categoryEngine.get()
    (IndexedDB) — reemplaza la idea de "categoría = texto suelto".
 =========================================================================== */
 
@@ -55,7 +55,7 @@ export function useCategories(): UseCategoriesResult {
 
   const reload = useCallback(async () => {
     await categoriesReady;
-    const all = await container.categoryEngine.listAll();
+    const all = await container.categoryEngine.get().listAll();
     setCategories(all);
   }, []);
 
@@ -79,7 +79,7 @@ export function useCategories(): UseCategoriesResult {
     }): Promise<Category | null> => {
       setError(null);
       try {
-        const created = await container.categoryEngine.create(input);
+        const created = await container.categoryEngine.get().create(input);
         await reload();
         vimdyCore.emit("inventory");
         return created;
@@ -103,7 +103,7 @@ export function useCategories(): UseCategoriesResult {
     ): Promise<Category | null> => {
       setError(null);
       try {
-        const updated = await container.categoryEngine.update(id, input);
+        const updated = await container.categoryEngine.get().update(id, input);
         await reload();
         vimdyCore.emit("inventory");
         return updated;
@@ -119,7 +119,7 @@ export function useCategories(): UseCategoriesResult {
     async (id: string): Promise<boolean> => {
       setError(null);
       try {
-        await container.categoryEngine.delete(id);
+        await container.categoryEngine.get().delete(id);
         await reload();
         vimdyCore.emit("inventory");
         return true;

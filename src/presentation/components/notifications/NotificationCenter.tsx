@@ -11,7 +11,8 @@ import {
   Trash2,
   X,
   Plus,
-  Inbox
+  Inbox,
+  CreditCard
 } from "lucide-react";
 
 import { useNotifications, NOTIFICATION_CATEGORIES } from "../../../core/store/useNotifications";
@@ -76,6 +77,12 @@ const CATEGORY_META: Record<
     icon: StickyNote,
     accent: "text-yellow-400",
     badge: "bg-yellow-500/15 text-yellow-300 border-yellow-500/30"
+  },
+  SUSCRIPCION: {
+    label: "Suscripción",
+    icon: CreditCard,
+    accent: "text-vimdy-accent",
+    badge: "bg-vimdy-accent/15 text-vimdy-accent border-vimdy-accent/30"
   },
   GENERAL: {
     label: "General",

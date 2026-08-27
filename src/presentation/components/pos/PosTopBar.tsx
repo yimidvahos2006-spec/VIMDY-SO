@@ -20,6 +20,7 @@ import { useProductCatalog } from "../../../core/store/useProductCatalog";
 import { useEnabledModules } from "../../../core/store/useEnabledModules";
 import { toastStore } from "../../../core/store/toastStore";
 import { weightEntryStore } from "../../../core/store/weightEntryStore";
+import { variantSelectorStore } from "../../../core/store/variantSelectorStore";
 import { isVariableQuantityUnit } from "../../../core/utils/weightUnits";
 import { useVoiceOrder } from "../../../core/voice/useVoiceOrder";
 import { useTranslation } from "../../../core/i18n/useTranslation";
@@ -105,6 +106,19 @@ export function PosTopBar() {
         price: product.price,
         unit: product.unit as string,
         requiresKitchen: product.requiresKitchen ?? true
+      });
+      clearSearch();
+      return;
+    }
+
+    if (variantSelectorStore.needsSelector(product)) {
+      variantSelectorStore.open({
+        id: product.id,
+        name: product.name,
+        price: product.price,
+        requiresKitchen: product.requiresKitchen ?? true,
+        sizes: product.sizes,
+        extras: product.extras
       });
       clearSearch();
       return;

@@ -1,0 +1,22 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /dashboard
+Disallow: /caja
+Disallow: /cocina
+Disallow: /meseros
+Disallow: /inventario
+Disallow: /clientes
+Disallow: /notificaciones
+Disallow: /reportes
+Disallow: /ganancias
+Disallow: /perdidas
+Disallow: /compras-inteligentes
+Disallow: /pronostico
+Disallow: /configuracion
+Disallow: /ia
+Disallow: /onboarding
+Disallow: /business-selector
+Disallow: /crear-negocio
+
+Sitemap: https://vimdy.co/sitemap.xml

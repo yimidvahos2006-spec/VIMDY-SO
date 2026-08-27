@@ -72,7 +72,7 @@ const HAMBURGUESA: Product = {
   active: true,
   categoryId: "Platos Fuertes",
   createdAt: new Date(),
-  updatedAt: new Date()
+  lastUpdated: new Date()
 };
 
 const GASEOSA: Product = {
@@ -87,7 +87,7 @@ const GASEOSA: Product = {
   active: true,
   categoryId: "Bebidas",
   createdAt: new Date(),
-  updatedAt: new Date()
+  lastUpdated: new Date()
 };
 
 describe("Smoke: experiencia del mesero en VIMDY", () => {

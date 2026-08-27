@@ -21,7 +21,7 @@ export type PaymentStatus = "none" | "pending" | "approved" | "declined" | "past
  * Estado EFECTIVO que ve el usuario — los 4 círculos de PASO 1.
  * Se calcula, nunca se guarda directamente.
  */
-export type SubscriptionStatus = "trial" | "monthly" | "yearly" | "suspended";
+export type SubscriptionStatus = "trial" | "monthly" | "yearly" | "expired" | "suspended";
 
 /** Fila `businesses` tal como la necesita el módulo de suscripciones. */
 export interface Subscription {
@@ -109,19 +109,19 @@ export const SUBSCRIPTION_PLANS: PlanDefinition[] = [
     price: 899,
     currency: "USD",
     billingLabel: "Facturación anual",
-    highlight: "Ahorra dos meses",
+    highlight: "Ahorra $149.000",
     features: [
       "Todas las funciones de VIMDY incluidas",
       "Soporte prioritario por WhatsApp",
       "Actualizaciones automáticas",
       "Acceso completo a POS, inventario, reportes y más",
-      "Dos meses gratis frente al plan mensual"
+      "$149.000 de ahorro frente al plan mensual"
     ]
   }
 ];
 
 const COUNTRY_PRICE_MAP: Record<string, Record<"monthly" | "yearly", number>> = {
-  CO: { monthly: 79000, yearly: 790000 },
+  CO: { monthly: 79000, yearly: 799000 },
   US: { monthly: 89, yearly: 899 },
   MX: { monthly: 1499, yearly: 14990 },
   PE: { monthly: 149, yearly: 1490 },

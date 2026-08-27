@@ -132,23 +132,21 @@ interface ReconcileOutcome {
 
 // deno-lint-ignore no-explicit-any
 async function activateBusiness(admin: any, row: PendingRow, paymentMethod: string | null, now: Date) {
-  const renewalDate = new Date(now);
-  renewalDate.setDate(renewalDate.getDate() + PLAN_PERIOD_DAYS[row.plan]);
+  const { data, error } = await admin.rpc("activate_subscription_server_side", {
+    p_business_id: row.business_id,
+    p_plan: row.plan,
+    p_payment_id: row.id,
+    p_now: now.toISOString()
+  });
 
-  await admin
-    .from("businesses")
-    .update({
-      plan: row.plan,
-      renewal_date: renewalDate.toISOString(),
-      next_charge_at: renewalDate.toISOString(),
-      payment_method: paymentMethod,
-      payment_status: "approved"
-    })
-    .eq("id", row.business_id);
+  if (error) {
+    console.error("PAYMENTS_RECONCILE_ACTIVATION_FAILED", JSON.stringify({ id: row.id, error: error.message }));
+    return;
+  }
 
   await admin
     .from("subscription_payments")
-    .update({ status: "approved", payment_method: paymentMethod, paid_at: now.toISOString() })
+    .update({ payment_method: paymentMethod })
     .eq("id", row.id);
 }
 
@@ -158,6 +156,7 @@ async function declineBusiness(admin: any, row: PendingRow, paymentMethod: strin
     .from("subscription_payments")
     .update({ status: "declined", payment_method: paymentMethod })
     .eq("id", row.id);
+
   await admin.from("businesses").update({ payment_status: "declined" }).eq("id", row.business_id);
 }
 
@@ -168,14 +167,35 @@ async function markError(admin: any, row: PendingRow) {
 
 // deno-lint-ignore no-explicit-any
 async function reconcileWompi(admin: any, row: PendingRow): Promise<ReconcileOutcome> {
+  if (!WOMPI_PUBLIC_KEY) {
+    console.error("PAYMENTS_RECONCILE_WOMPI_CONFIG_MISSING", "WOMPI_PUBLIC_KEY no está configurada en secrets.");
+    return { id: row.id, resolvedAs: "still_pending" };
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15_000);
   const response = await fetch(
-    `${resolveWompiApiBase()}/transactions?reference=${encodeURIComponent(row.wompi_reference as string)}`
+    `${resolveWompiApiBase()}/transactions/${encodeURIComponent(row.wompi_reference as string)}`,
+    { headers: { Authorization: `Bearer ${WOMPI_PUBLIC_KEY}` }, signal: controller.signal }
   );
-  if (!response.ok) return { id: row.id, resolvedAs: "still_pending" };
+  clearTimeout(timeoutId);
+
+  if (response.status === 404) {
+    await declineBusiness(admin, row, null);
+    return { id: row.id, resolvedAs: "declined" };
+  }
+
+  if (!response.ok) {
+    console.error("PAYMENTS_RECONCILE_WOMPI_HTTP_ERROR", JSON.stringify({ reference: row.wompi_reference, status: response.status }));
+    return { id: row.id, resolvedAs: "still_pending" };
+  }
 
   const body = (await response.json()) as { data?: Array<Record<string, unknown>> };
   const transaction = body.data?.[0];
-  if (!transaction) return { id: row.id, resolvedAs: "still_pending" };
+  if (!transaction) {
+    await declineBusiness(admin, row, null);
+    return { id: row.id, resolvedAs: "declined" };
+  }
 
   const status = String(transaction.status ?? "").toUpperCase();
   const amountInCents = Number(transaction.amount_in_cents ?? -1);
@@ -203,15 +223,21 @@ async function reconcileWompi(admin: any, row: PendingRow): Promise<ReconcileOut
 
 // deno-lint-ignore no-explicit-any
 async function reconcileMercadoPago(admin: any, row: PendingRow): Promise<ReconcileOutcome> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15_000);
   const response = await fetch(
     `https://api.mercadopago.com/v1/payments/search?external_reference=${encodeURIComponent(row.mercadopago_reference as string)}`,
-    { headers: { Authorization: `Bearer ${MERCADOPAGO_ACCESS_TOKEN}` } }
+    { headers: { Authorization: `Bearer ${MERCADOPAGO_ACCESS_TOKEN}` }, signal: controller.signal }
   );
+  clearTimeout(timeoutId);
   if (!response.ok) return { id: row.id, resolvedAs: "still_pending" };
 
   const body = (await response.json()) as { results?: Array<Record<string, unknown>> };
   const payment = body.results?.[0];
-  if (!payment) return { id: row.id, resolvedAs: "still_pending" };
+  if (!payment) {
+    await declineBusiness(admin, row, null);
+    return { id: row.id, resolvedAs: "declined" };
+  }
 
   const status = String(payment.status ?? "");
   const amount = Number(payment.transaction_amount ?? -1);
@@ -238,10 +264,20 @@ async function reconcileMercadoPago(admin: any, row: PendingRow): Promise<Reconc
 
 // deno-lint-ignore no-explicit-any
 async function reconcilePayPal(admin: any, row: PendingRow, accessToken: string): Promise<ReconcileOutcome> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15_000);
   const orderResponse = await fetch(`${resolvePayPalApiBase()}/v2/checkout/orders/${row.paypal_order_id}`, {
-    headers: { Authorization: `Bearer ${accessToken}` }
+    headers: { Authorization: `Bearer ${accessToken}` },
+    signal: controller.signal
   });
-  if (!orderResponse.ok) return { id: row.id, resolvedAs: "still_pending" };
+  clearTimeout(timeoutId);
+  if (!orderResponse.ok) {
+    if (orderResponse.status === 404) {
+      await declineBusiness(admin, row, "paypal");
+      return { id: row.id, resolvedAs: "declined" };
+    }
+    return { id: row.id, resolvedAs: "still_pending" };
+  }
 
   const order = (await orderResponse.json()) as {
     status?: string;
@@ -293,7 +329,23 @@ async function finishPayPalCapture(
     return { id: row.id, resolvedAs: "error" };
   }
 
-  await activateBusiness(admin, row, "paypal", new Date());
+  const { data, error } = await admin.rpc("activate_subscription_server_side", {
+    p_business_id: row.business_id,
+    p_plan: row.plan,
+    p_payment_id: row.id,
+    p_now: new Date().toISOString()
+  });
+
+  if (error) {
+    console.error("PAYMENTS_RECONCILE_PAYPAL_ACTIVATION_FAILED", JSON.stringify({ id: row.id, error: error.message }));
+    return { id: row.id, resolvedAs: "still_pending" };
+  }
+
+  await admin
+    .from("subscription_payments")
+    .update({ payment_method: "paypal" })
+    .eq("id", row.id);
+
   return { id: row.id, resolvedAs: "approved" };
 }
 
@@ -308,6 +360,22 @@ Deno.serve(async (req: Request) => {
 
   if (req.headers.get("x-reconcile-secret") !== RECONCILE_SECRET) {
     return json({ error: "UNAUTHORIZED" }, 401);
+  }
+
+  if (new URL(req.url).searchParams.has("diagnose")) {
+    const key = WOMPI_PUBLIC_KEY;
+    const prefix = key?.startsWith("pub_test_") === true ? "pub_test_" : key?.startsWith("pub_prod_") === true ? "pub_prod_" : key?.startsWith("pub_") === true ? "pub_" : "other";
+    const environment = key?.startsWith("pub_test_") === true ? "sandbox" : "production";
+    return json({
+      ok: true,
+      diagnose: true,
+      wompiPublicKey: {
+        defined: typeof key === "string" && key.length > 0,
+        length: typeof key === "string" ? key.length : 0,
+        prefix,
+        environment
+      }
+    });
   }
 
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);

@@ -10,7 +10,7 @@
  */
 
 const DB_NAME = "vimdy_os_db";
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 
 /**
  * Un object store por repositorio. Si agregas un repositorio nuevo,
@@ -68,13 +68,19 @@ export const STORE_NAMES = [
   "pendingSales",
   "pendingInventoryAdjustments",
   "pendingTableOperations",
-  "pendingCustomerOperations"
+  "pendingCustomerOperations",
+  "pendingKitchenOrders"
 ] as const;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
 export function openDatabase(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
+
+  if (typeof indexedDB === "undefined") {
+    dbPromise = Promise.reject(new Error("IndexedDB is not available in this environment."));
+    return dbPromise;
+  }
 
   dbPromise = new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);

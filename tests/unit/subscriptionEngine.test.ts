@@ -10,10 +10,10 @@ describe("SubscriptionEngine", () => {
   });
 
   describe("daysRemaining", () => {
-    it("returns days remaining rounded up", () => {
+    it("returns exact calendar days remaining", () => {
       const now = new Date("2024-01-01T00:00:00Z");
       const trialEnds = new Date("2024-01-05T23:59:59Z");
-      expect(engine.daysRemaining(trialEnds, now)).toBe(5);
+      expect(engine.daysRemaining(trialEnds, now)).toBe(4);
     });
 
     it("returns 0 if trial ended", () => {
@@ -26,24 +26,28 @@ describe("SubscriptionEngine", () => {
       expect(engine.daysRemaining(null)).toBe(0);
     });
 
-    it("returns 1 if less than 24h remain", () => {
+    it("returns 0 if less than 24h remain", () => {
       const now = new Date("2024-01-05T00:00:00Z");
       const trialEnds = new Date("2024-01-05T12:00:00Z");
-      expect(engine.daysRemaining(trialEnds, now)).toBe(1);
+      expect(engine.daysRemaining(trialEnds, now)).toBe(0);
     });
   });
 
   describe("warningThreshold", () => {
-    it("returns 7 when days remaining is 7", () => {
-      expect(engine.warningThreshold(7)).toBe(7);
+    it("returns null when days remaining is 10", () => {
+      expect(engine.warningThreshold(10)).toBeNull();
     });
 
-    it("returns 3 when days remaining is 5", () => {
-      expect(engine.warningThreshold(5)).toBe(3);
+    it("returns null when days remaining is 4", () => {
+      expect(engine.warningThreshold(4)).toBeNull();
     });
 
-    it("returns 1 when days remaining is 2", () => {
-      expect(engine.warningThreshold(2)).toBe(1);
+    it("returns 3 when days remaining is 3", () => {
+      expect(engine.warningThreshold(3)).toBe(3);
+    });
+
+    it("returns 2 when days remaining is 2", () => {
+      expect(engine.warningThreshold(2)).toBe(2);
     });
 
     it("returns 1 when days remaining is 1", () => {
@@ -52,10 +56,6 @@ describe("SubscriptionEngine", () => {
 
     it("returns null when days remaining is 0", () => {
       expect(engine.warningThreshold(0)).toBeNull();
-    });
-
-    it("returns null when days remaining is greater than 7", () => {
-      expect(engine.warningThreshold(10)).toBeNull();
     });
   });
 
@@ -74,7 +74,7 @@ describe("SubscriptionEngine", () => {
       expect(engine.effectiveStatus(sub, now)).toBe("trial");
     });
 
-    it("returns suspended when trial expired", () => {
+    it("returns expired when trial expired", () => {
       const now = new Date("2024-01-15T00:00:00Z");
       const sub: Subscription = {
         businessId: "b1",
@@ -85,7 +85,7 @@ describe("SubscriptionEngine", () => {
         paymentMethod: null,
         paymentStatus: "none"
       };
-      expect(engine.effectiveStatus(sub, now)).toBe("suspended");
+      expect(engine.effectiveStatus(sub, now)).toBe("expired");
     });
 
     it("returns monthly when plan is monthly and payment approved", () => {

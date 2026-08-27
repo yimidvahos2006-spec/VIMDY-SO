@@ -161,7 +161,7 @@ export async function sendOrderToKitchen(params: ProcessSaleParams): Promise<Sal
       : undefined;
 
   try {
-    const sale = await container.salesEngine.quickSale({
+    const sale = await container.salesEngine.get().quickSale({
       id: saleId,
       source: items.map((item) => ({
         productId: item.id,
@@ -202,7 +202,7 @@ async function chargeSaleOffline(
   method: PaymentMethod,
   mixed: MixedPayment | undefined,
   itemNames: Map<string, string>
-): Promise<boolean> {
+): Promise<{ success: boolean; invoiceError?: string }> {
   const payment = paymentStore.get();
 
   if (method === "CASH") {
@@ -211,7 +211,7 @@ async function chargeSaleOffline(
       toast.warning(
         `El efectivo recibido ($${(received).toLocaleString("es-CO")}) no cubre el total ($${(sale.total).toLocaleString("es-CO")}).`
       );
-      return false;
+      return { success: false };
     }
   }
 
@@ -268,7 +268,7 @@ async function chargeSaleOffline(
   cartStore.clear();
   paymentStore.reset();
 
-  return true;
+  return { success: true };
 }
 
 /**
@@ -286,7 +286,7 @@ export async function chargeSale(
   sale: Sale,
   params: ProcessSaleParams,
   precomputedItemNames?: Map<string, string>
-): Promise<boolean> {
+): Promise<{ success: boolean; invoiceError?: string }> {
   // Los nombres de producto no viven en Sale/SaleItem (solo productId+price+
   // quantity), así que normalmente se toman del carrito real. BUG que se
   // arregla acá: si esta venta ya se armó/encoló offline en el paso
@@ -309,7 +309,7 @@ export async function chargeSale(
       toast.warning(
         `El pago mixto no cubre el total. Faltan $${(payment.total - mixedTotal).toLocaleString("es-CO")}.`
       );
-      return false;
+      return { success: false };
     }
   }
 
@@ -320,7 +320,7 @@ export async function chargeSale(
 
   if (requiresPaymentReference && !payment.reference.trim()) {
     toast.warning("Debe ingresar una referencia de pago para la tarjeta/transferencia.");
-    return false;
+    return { success: false };
   }
 
   const mixed: MixedPayment | undefined =
@@ -343,13 +343,13 @@ export async function chargeSale(
   }
 
   try {
-    const { sale: paidSale } = await container.salesEngine.registerPayment(sale, method, {
+    const { sale: paidSale, payment: paymentResult } = await container.salesEngine.get().registerPayment(sale, method, {
       received: method === "CASH" ? payment.received || sale.total : sale.total,
       reference: payment.reference || undefined,
       mixed
     });
 
-    const receipt = await container.salesEngine.generateReceipt(
+    const receipt = await container.salesEngine.get().generateReceipt(
       paidSale,
       payment.customerName,
       params.cashierName,
@@ -399,7 +399,7 @@ export async function chargeSale(
     cartStore.clear();
     paymentStore.reset();
 
-    return true;
+    return { success: true, invoiceError: paymentResult.invoiceError };
   } catch (error) {
     if (isNetworkFailure(error)) {
       // La venta se cayó por red a mitad del cobro. Gracias a la
@@ -410,7 +410,7 @@ export async function chargeSale(
     }
 
     toast.error(translateBusinessError(error, "No se pudo procesar el pago."));
-    return false;
+    return { success: false };
   }
 }
 
@@ -423,7 +423,7 @@ export async function chargeSale(
  * offline: si no hay conexión, ambos pasos internos caen a la cola local
  * sin que el cajero note más que el aviso de "sin conexión".
  */
-export async function processSale(params: ProcessSaleParams): Promise<boolean> {
+export async function processSale(params: ProcessSaleParams): Promise<{ success: boolean; invoiceError?: string }> {
   // Se capturan los nombres ANTES de sendOrderToKitchen (ver comentario en
   // chargeSale de arriba): si no hay conexión, sendOrderToKitchen vacía el
   // carrito internamente antes de que lleguemos a chargeSale.
@@ -432,7 +432,7 @@ export async function processSale(params: ProcessSaleParams): Promise<boolean> {
   const sale = await sendOrderToKitchen(params);
 
   if (!sale) {
-    return false;
+    return { success: false };
   }
 
   return chargeSale(sale, params, itemNames);

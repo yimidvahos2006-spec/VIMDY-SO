@@ -58,9 +58,9 @@ export function useCustomers() {
   const load = useCallback(async () => {
     await productsReady;
     const [allCustomers, stats, allProducts] = await Promise.all([
-      container.customerEngine.getAllCustomers(),
-      container.salesEngine.getCustomerPurchaseStats(),
-      container.inventoryEngine.listAll(),
+      container.customerEngine.get().getAllCustomers(),
+      container.salesEngine.get().getCustomerPurchaseStats(),
+      container.inventoryEngine.get().listAll(),
     ]);
     setCustomers(allCustomers);
     setCustomerStats(stats);
@@ -125,7 +125,7 @@ export function useCustomers() {
   // cuando alguien realmente abre su ficha — no antes, y no las de nadie
   // más. Ya vienen ordenadas de más nueva a más vieja desde el repositorio.
   async function getSalesFor(customerId: string): Promise<Sale[]> {
-    return await container.salesEngine.getSalesByCustomer(customerId);
+    return await container.salesEngine.get().getSalesByCustomer(customerId);
   }
 
   function getProductName(productId: string): string {
@@ -154,7 +154,7 @@ export function useCustomers() {
     }
 
     try {
-      await container.customerEngine.save(customer);
+      await container.customerEngine.get().save(customer);
       await load();
       return true;
     } catch (e: any) {
@@ -174,7 +174,7 @@ export function useCustomers() {
   async function updateCustomer(customer: Customer) {
     setError(null);
     try {
-      await container.customerEngine.update(customer);
+      await container.customerEngine.get().update(customer);
       await load();
       return true;
     } catch (e: any) {
@@ -186,7 +186,7 @@ export function useCustomers() {
   async function deleteCustomer(id: string) {
     setError(null);
     try {
-      await container.customerEngine.delete(id);
+      await container.customerEngine.get().delete(id);
       await load();
       return true;
     } catch (e: any) {

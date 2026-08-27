@@ -566,8 +566,8 @@ export function getCountryDefaults(
   };
 }
 
-/** Zonas horarias únicas derivadas del catálogo de países (para el select). */
-export const TIMEZONES: string[] = Array.from(new Set(COUNTRIES.map((c) => c.timezone))).sort();
+/** Zonas horarias únicas derivadas del catálogo de países disponibles (para el select). */
+export const TIMEZONES: string[] = Array.from(new Set(AVAILABLE_COUNTRIES.map((c) => c.timezone))).sort();
 
 /**
  * Nombre del país localizado con datos reales de CLDR (vía Intl.DisplayNames

@@ -23,6 +23,9 @@ import { logWarning } from "../../infrastructure/logging/opsLogger";
 import { kitchenOutputModeStore } from "../store/kitchenOutputModeStore";
 import { createKitchenOutput } from "../services/KitchenOutputFactory";
 import { getCurrentBusinessId, getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
+import { connectionStore } from "../store/connectionStore";
+import { TableLocalRepository } from "../../infrastructure/di/repositories/TableLocalRepository";
+import { queueOpenTableOffline, queueCloseTableOffline, queueAddItemOffline, queueRemoveItemOffline, queueUpdateQuantityOffline, queueSendToKitchenOffline } from "../services/offlineTable";
 
 /* ===========================================================================
    TableEngine
@@ -140,7 +143,8 @@ export class TableEngine {
     private readonly tableRepository: IRepository<Table>,
     private readonly kitchen: KitchenEngine,
     private readonly sales: SalesEngine,
-    private readonly orders: OrderEngine
+    private readonly orders: OrderEngine,
+    private readonly local: TableLocalRepository = new TableLocalRepository()
   ) {}
 
   /* =======================================================================
@@ -175,16 +179,34 @@ export class TableEngine {
   }
 
   public async getTable(tableId: string): Promise<Table> {
-    const table = await this.tableRepository.findById(tableId);
+    try {
+      const table = await this.tableRepository.findById(tableId);
 
-    if (!table) {
-      throw new Error("TABLE_NOT_FOUND");
+      if (!table) {
+        throw new Error("TABLE_NOT_FOUND");
+      }
+
+      return table;
+    } catch (error) {
+      if (!connectionStore.isOnline()) {
+        const localTable = await this.local.findById(tableId);
+
+        if (!localTable) {
+          throw new Error("TABLE_NOT_FOUND");
+        }
+
+        return localTable;
+      }
+
+      throw error;
     }
-
-    return table;
   }
 
   public async getAllTables(): Promise<Table[]> {
+    if (!connectionStore.isOnline()) {
+      return this.local.findAll();
+    }
+
     return this.tableRepository.findAll();
   }
 
@@ -296,12 +318,22 @@ export class TableEngine {
    * la base de datos, no una hoja que solo él puede ver.
    */
   public async addItem(input: AddProductInput): Promise<Table> {
+    if (!connectionStore.isOnline()) {
+      const table = await this.getTable(input.tableId);
+      return queueAddItemOffline({ table, input });
+    }
+
     return this.mutateItems(input.tableId, cart =>
       cart.addItem(input.product, input.quantity ?? 1, input.note)
     );
   }
 
   public async removeItem(tableId: string, productId: string): Promise<Table> {
+    if (!connectionStore.isOnline()) {
+      const table = await this.getTable(tableId);
+      return queueRemoveItemOffline({ table, productId });
+    }
+
     return this.mutateItems(tableId, cart => cart.removeItem(productId));
   }
 
@@ -310,6 +342,11 @@ export class TableEngine {
     productId: string,
     quantity: number
   ): Promise<Table> {
+    if (!connectionStore.isOnline()) {
+      const table = await this.getTable(tableId);
+      return queueUpdateQuantityOffline({ table, productId, quantity });
+    }
+
     return this.mutateItems(tableId, cart => cart.updateQuantity(productId, quantity));
   }
 
@@ -349,6 +386,11 @@ export class TableEngine {
 
     if (items.length === 0) {
       throw new Error("EMPTY_ORDER: no hay productos para enviar a cocina.");
+    }
+
+    if (!connectionStore.isOnline()) {
+      await queueSendToKitchenOffline({ table, priority });
+      return;
     }
 
     const previousOrders = await this.kitchen.getByTableId(table.id);
@@ -513,30 +555,32 @@ export class TableEngine {
   ): Promise<{ sale: Sale; payment: PaymentResult; receipt: Receipt }> {
     const table = await this.getTable(input.tableId);
 
-    if (table.items.length === 0 && input.saleId) {
+    if (input.saleId) {
       const existingSale = await this.sales.getSale(input.saleId);
-      if (existingSale && (existingSale.status === "PAID" || existingSale.status === "CLOSED")) {
-        const existingReceipt = await this.sales.getReceiptBySaleId(existingSale.id);
-        const receipt = existingReceipt ?? await this.sales.generateReceipt(
-          existingSale,
-          input.customerName ?? "Cliente General",
-          input.cashier ?? "Administrador",
-          input.method,
-          input.received ?? existingSale.total,
-          existingSale.discount ?? 0
-        );
+      if (existingSale) {
+        if (existingSale.status === "PAID" || existingSale.status === "CLOSED") {
+          const existingReceipt = await this.sales.getReceiptBySaleId(existingSale.id);
+          const receipt = existingReceipt ?? await this.sales.generateReceipt(
+            existingSale,
+            input.customerName ?? "Cliente General",
+            input.cashier ?? "Administrador",
+            input.method,
+            input.received ?? existingSale.total,
+            existingSale.discount ?? 0
+          );
 
-        const payment: PaymentResult = {
-          success: true,
-          method: (existingSale.paymentMethod as PaymentMethod) || "CASH",
-          total: existingSale.total,
-          received: existingSale.total,
-          change: 0,
-          message: "Pago ya procesado (idempotente)",
-          date: existingSale.updatedAt
-        };
+          const payment: PaymentResult = {
+            success: true,
+            method: (existingSale.paymentMethod as PaymentMethod) || "CASH",
+            total: existingSale.total,
+            received: existingSale.total,
+            change: 0,
+            message: "Pago ya procesado (idempotente)",
+            date: existingSale.updatedAt
+          };
 
-        return { sale: existingSale, payment, receipt };
+          return { sale: existingSale, payment, receipt };
+        }
       }
     }
 
@@ -649,6 +693,20 @@ export class TableEngine {
           await new Promise(resolve => setTimeout(resolve, 50 * Math.pow(2, attempt - 1)));
           continue;
         }
+
+        if (!connectionStore.isOnline()) {
+          const updated = {
+            ...table,
+            items: cart.getItems(),
+            updatedAt: new Date()
+          };
+
+          await this.local.save(updated);
+          vimdyCore.emit("table", { action: "table.updated", table: updated });
+
+          return updated;
+        }
+
         throw err;
       }
     }
@@ -682,21 +740,41 @@ export class TableEngine {
     return updated;
   }
 
-  private async updateTable(
+  public async updateTable(
     tableId: string,
     patch: Partial<Table>
   ): Promise<Table> {
-    const table = await this.getTable(tableId);
+    for (let attempt = 1; attempt <= MAX_CONFLICT_RETRIES; attempt++) {
+      const table = await this.getTable(tableId);
 
-    const updated: Table = {
-      ...table,
-      ...patch,
-      updatedAt: new Date()
-    };
+      const updated: Table = {
+        ...table,
+        ...patch,
+        updatedAt: new Date()
+      };
 
-    await this.tableRepository.update(updated);
+      try {
+        await this.tableRepository.update(updated);
+        return updated;
+      } catch (err) {
+        if (isOptimisticLockError(err) && attempt < MAX_CONFLICT_RETRIES) {
+          await new Promise(resolve => setTimeout(resolve, 50 * Math.pow(2, attempt - 1)));
+          continue;
+        }
 
-    return updated;
+        if (!connectionStore.isOnline()) {
+          await this.local.save(updated);
+          vimdyCore.emit("table", { action: "table.updated", table: updated });
+          return updated;
+        }
+
+        throw err;
+      }
+    }
+
+    throw new Error(
+      "TABLE_UPDATE_CONFLICT: no se pudo actualizar la mesa tras varios intentos por choques de edición simultánea."
+    );
   }
 
   private async resetTable(tableId: string): Promise<Table> {

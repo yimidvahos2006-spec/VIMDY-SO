@@ -41,11 +41,15 @@ function json(body: unknown, status = 200) {
 
 type Plan = "monthly" | "yearly";
 
-// Única fuente de verdad server-side de cuánto vale cada plan, por moneda.
-// Espejo de SUBSCRIPTION_PLANS en src/core/entities/SubscriptionTypes.ts
-// para COP — agregar acá cualquier moneda nueva antes de habilitar ese país.
-const PLAN_PRICE_BY_CURRENCY: Record<string, Record<Plan, number>> = {
-  COP: { monthly: 79000, yearly: 790000 }
+// Única fuente de verdad server-side de cuánto vale cada plan, por país.
+// Espejo de COUNTRY_PRICE_MAP en src/core/entities/SubscriptionTypes.ts
+// para los 5 países donde Mercado Pago está habilitado (CO, AR, CL, MX, PE).
+const PLAN_PRICE_BY_COUNTRY: Record<string, Record<Plan, number>> = {
+  CO: { monthly: 79000, yearly: 799000 },
+  AR: { monthly: 89999, yearly: 899999 },
+  CL: { monthly: 14990, yearly: 149900 },
+  MX: { monthly: 1499, yearly: 14990 },
+  PE: { monthly: 149, yearly: 1490 }
 };
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
@@ -122,23 +126,56 @@ Deno.serve(async (req: Request) => {
       return json({ error: "BUSINESS_NOT_FOUND" }, 404);
     }
 
-    const currency = (business.currency as string) ?? "COP";
-    const pricing = PLAN_PRICE_BY_CURRENCY[currency];
+    const ALLOWED_MERCADOPAGO_COUNTRIES = new Set(["CO", "AR", "CL", "MX", "PE"]);
+    if (!ALLOWED_MERCADOPAGO_COUNTRIES.has(business.country)) {
+      return json({ error: "COUNTRY_NOT_SUPPORTED: Mercado Pago no está disponible para este país." }, 400);
+    }
 
-    // 2) Sin precio real verificado para esa moneda, se rechaza en vez de
+    const country = business.country;
+    const pricing = PLAN_PRICE_BY_COUNTRY[country];
+
+    // 2) Sin precio real verificado para ese país, se rechaza en vez de
     //    convertir a ciegas desde COP con una tasa de cambio inventada.
     if (!pricing) {
       return json(
         {
           error: "PRICING_NOT_CONFIGURED",
-          detail: `No hay un precio de VIMDY verificado en ${currency} todavía. Defínelo en PLAN_PRICE_BY_CURRENCY antes de habilitar Mercado Pago para este país.`
+          detail: `No hay un precio de VIMDY verificado para ${country} todavía. Defínelo en PLAN_PRICE_BY_COUNTRY antes de habilitar Mercado Pago para este país.`
         },
         409
       );
     }
 
+    const currency = (business.currency as string) ?? "COP";
     const amount = pricing[plan];
     const reference = `mp_${businessId.slice(0, 8)}_${Date.now()}`;
+    const idempotencyKey = crypto.randomUUID();
+
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const { data: recentPending, error: recentPendingError } = await admin
+      .from("subscription_payments")
+      .select("id, mercadopago_reference, created_at")
+      .eq("business_id", businessId)
+      .eq("plan", plan)
+      .eq("status", "pending")
+      .gte("created_at", fiveMinutesAgo)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (recentPendingError) {
+      return json({ error: "PAYMENT_CHECK_FAILED", detail: recentPendingError.message }, 500);
+    }
+
+    if (recentPending) {
+      // Si hay un pago pending reciente, no crear uno nuevo
+      return json({
+        ok: true,
+        checkoutUrl: recentPending.mercadopago_reference ? `${resolveMercadoPagoApiBase()}/checkout/preferences/${recentPending.mercadopago_reference}` : null,
+        reference: recentPending.mercadopago_reference,
+        existing: true
+      });
+    }
 
     // 3) Se deja el intento en 'pending' ANTES de llamar a Mercado Pago —
     //    igual que wompi-create-checkout — para que el webhook siempre
@@ -149,7 +186,8 @@ Deno.serve(async (req: Request) => {
       amount,
       currency,
       status: "pending",
-      mercadopago_reference: reference
+      mercadopago_reference: reference,
+      idempotency_key: idempotencyKey
     });
 
     if (insertError) {
@@ -170,18 +208,19 @@ Deno.serve(async (req: Request) => {
             title: `VIMDY — ${planLabel}`,
             quantity: 1,
             currency_id: currency,
-            unit_price: amount
+            unit_price: Number(amount)
           }
         ],
         external_reference: reference,
+        notification_url: `${SUPABASE_URL}/functions/v1/mercadopago-webhook`,
+        auto_return: "approved",
         back_urls: {
           success: `${VIMDY_APP_URL}/configuracion/suscripcion?pago=exitoso`,
           failure: `${VIMDY_APP_URL}/configuracion/suscripcion?pago=fallido`,
           pending: `${VIMDY_APP_URL}/configuracion/suscripcion?pago=pendiente`
-        },
-        auto_return: "approved",
-        notification_url: `${SUPABASE_URL}/functions/v1/mercadopago-webhook`
-      })
+        }
+      }),
+      signal: (() => { const c = new AbortController(); setTimeout(() => c.abort(), 15_000); return c.signal; })()
     });
 
     if (!response.ok) {

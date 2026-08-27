@@ -33,8 +33,8 @@ export function useTopSellingProducts(refreshKey: unknown): Map<string, number> 
       try {
         const to = new Date();
         const from = new Date(to.getTime() - THIRTY_DAYS_MS);
-        const sales = await container.salesEngine.getSalesByDate(from, to);
-        const { bestSellingProducts } = container.salesEngine.calculateStatistics(sales);
+        const sales = await container.salesEngine.get().getSalesByDate(from, to);
+        const { bestSellingProducts } = container.salesEngine.get().calculateStatistics(sales);
 
         if (cancelled) return;
 

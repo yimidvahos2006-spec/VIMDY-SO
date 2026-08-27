@@ -40,6 +40,7 @@ export type OpsErrorCategory =
   | "offline"
   | "ai"
   | "sales"
+  | "print"
   | "unknown";
 
 interface LogOptions {
@@ -55,15 +56,6 @@ async function persist(
   options: LogOptions
 ) {
   try {
-    // Import dinámico A PROPÓSITO, no al tope del archivo: opsLogger se
-    // importa desde engines de src/core que los smoke tests (tests/smoke/)
-    // corren en entorno "node" puro, sin DOM (ver vitest.config.ts). Si
-    // supabaseClient.ts se cargara al tope de este archivo, su código de
-    // inicialización (que toca `window` en modo DEV) tumbaría CUALQUIER
-    // test que use un engine que loguee algo — aunque el test nunca llame
-    // a logError/logWarning. Con import() perezoso, ese código solo se
-    // ejecuta si de verdad se llega a persistir un error (en el navegador
-    // real, nunca en los tests, que no llaman a esto).
     const { supabase, getCurrentBusinessId } = await import("../supabase/supabaseClient");
 
     let businessId = options.businessId ?? null;
@@ -94,6 +86,24 @@ async function persist(
   } catch {
     // Silencioso a propósito — ver nota de "best effort" arriba. Ya quedó
     // impreso en consola por logError/logWarning antes de llegar acá.
+  }
+}
+
+export async function logAudit(actorId: string, action: string, entity: string, details: string): Promise<void> {
+  try {
+    const { supabase, getCurrentBusinessId } = await import("../supabase/supabaseClient");
+
+    const businessId = getCurrentBusinessId();
+
+    await supabase.from("audit_log").insert({
+      actor_id: actorId,
+      action,
+      entity,
+      details: details.slice(0, 1000),
+      business_id: businessId
+    });
+  } catch {
+    // best effort
   }
 }
 

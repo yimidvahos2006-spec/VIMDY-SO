@@ -5,7 +5,8 @@ import { Table, Product, OrderPriority } from "../../../core/entities/Entities";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { isOptimisticLockError } from "../../../core/errors/OptimisticLockError";
 import { translateBusinessError } from "../../../core/errors/translateBusinessError";
-import { useVoiceOrder, VoiceOrder } from "../../../core/voice/useVoiceOrder";
+import { useVoiceOrder } from "../../../core/voice/useVoiceOrder";
+import { VoiceOrder } from "../../../core/voice/voiceParser";
 import { CloseTableDialog } from "./CloseTableDialog";
 
 interface Props {
@@ -56,14 +57,9 @@ export function TableDetailPanel({
     onAddItem: (order: VoiceOrder, match) => {
       const note = order.modifiers.length > 0 ? order.modifiers.join(", ") : undefined;
       run(() =>
-        container.tableEngine.addItem({
+        container.tableEngine.get().addItem({
           tableId: table.id,
-          product: {
-            id: match.product.id,
-            name: match.product.name,
-            price: match.product.price,
-            requiresKitchen: true
-          },
+          product: match.product,
           quantity: order.quantity,
           note
         })
@@ -122,7 +118,7 @@ export function TableDetailPanel({
 
   function addProduct(product: Product) {
     run(() =>
-      container.tableEngine.addItem({
+      container.tableEngine.get().addItem({
         tableId: table.id,
         product,
         quantity: 1
@@ -132,18 +128,18 @@ export function TableDetailPanel({
 
   function decreaseItem(productId: string, currentQty: number) {
     run(() =>
-      container.tableEngine.updateItemQuantity(table.id, productId, currentQty - 1)
+      container.tableEngine.get().updateItemQuantity(table.id, productId, currentQty - 1)
     );
   }
 
   function increaseItem(productId: string, currentQty: number) {
     run(() =>
-      container.tableEngine.updateItemQuantity(table.id, productId, currentQty + 1)
+      container.tableEngine.get().updateItemQuantity(table.id, productId, currentQty + 1)
     );
   }
 
   function removeItem(productId: string) {
-    run(() => container.tableEngine.removeItem(table.id, productId));
+    run(() => container.tableEngine.get().removeItem(table.id, productId));
   }
 
   function startEditNote(itemId: string, currentNote?: string) {
@@ -154,13 +150,13 @@ export function TableDetailPanel({
   function saveNote(itemId: string) {
     const trimmed = noteDraft.trim();
     run(async () => {
-      const table = await container.tableEngine.getTable(table.id);
-      const items = table.items.map(item =>
+      const currentTable = await container.tableEngine.get().getTable(table.id);
+      const items = currentTable.items.map(item =>
         item.productId === itemId
           ? { ...item, note: trimmed || undefined }
           : item
       );
-      await container.tableEngine.updateTable(table.id, { items });
+      await container.tableEngine.get().updateTable(currentTable.id, { items });
     });
     setEditingNoteId(null);
     setNoteDraft("");
@@ -170,7 +166,7 @@ export function TableDetailPanel({
     setBusy(true);
     setErrorMsg(null);
     try {
-      await container.tableEngine.sendToKitchen(table.id, priority);
+      await container.tableEngine.get().sendToKitchen(table.id, priority);
       setPriority("NORMAL");
       onChanged();
       onOrderSent?.();
@@ -186,7 +182,7 @@ export function TableDetailPanel({
   }
 
   function requestBill() {
-    run(() => container.tableEngine.requestBill(table.id));
+    run(() => container.tableEngine.get().requestBill(table.id));
   }
 
   const hasItems = table.items.length > 0;

@@ -9,7 +9,39 @@ import type { Sale } from "../entities/Entities";
 import { logError } from "../../infrastructure/logging/opsLogger";
 import { vimdyCore } from "../VimdyCore";
 import { getCurrentBusinessId, getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
-import { MAX_OFFLINE_ATTEMPTS, isBusinessError } from "./offlineConstants";
+import { MAX_OFFLINE_ATTEMPTS, isBusinessError, OFFLINE_BUSINESS_ERROR_PREFIXES } from "./offlineConstants";
+
+function formatOfflineBusinessError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const upper = message.toUpperCase();
+
+  if (upper.startsWith("VALIDATION_ERROR:") || upper.startsWith("INSUFFICIENT_STOCK:")) {
+    const detail = message.includes(":")
+      ? message.split(":").slice(1).join(":").trim()
+      : message;
+    return `Stock o datos inválidos: ${detail}`;
+  }
+
+  if (upper.startsWith("PRODUCT_NOT_FOUND:")) {
+    return "Un producto de la venta offline ya no existe en el inventario.";
+  }
+
+  if (upper.startsWith("CONTEXT_MISMATCH:") || upper.startsWith("NO_BUSINESS_CONTEXT:")) {
+    return "La venta offline corresponde a otro negocio o sucursal.";
+  }
+
+  if (upper.startsWith("ACCESS_DENIED:")) {
+    return "Sin permisos para sincronizar esta venta offline.";
+  }
+
+  const prefix = OFFLINE_BUSINESS_ERROR_PREFIXES.find((p) => upper.startsWith(p));
+  if (prefix) {
+    const detail = message.includes(":") ? message.split(":").slice(1).join(":").trim() : message;
+    return `Error de negocio: ${detail}`;
+  }
+
+  return message;
+}
 
 /**
  * syncPendingSales.ts
@@ -57,10 +89,10 @@ async function syncOne(pending: PendingSale): Promise<Sale> {
     );
   }
 
-  const sale = await container.salesEngine.createSale(pending.createSaleInput);
+  const sale = await container.salesEngine.get().createSale(pending.createSaleInput);
 
   if (pending.payment) {
-    await container.salesEngine.registerPayment(sale, pending.payment.method, {
+    await container.salesEngine.get().registerPayment(sale, pending.payment.method, {
       received: pending.payment.received,
       reference: pending.payment.reference,
       mixed: pending.payment.mixed
@@ -90,6 +122,7 @@ export async function syncPendingSales(): Promise<void> {
 
     let syncedCount = 0;
     let failedCount = 0;
+    let firstBusinessError: string | null = null;
 
     try {
       for (const pending of queue) {
@@ -126,17 +159,21 @@ export async function syncPendingSales(): Promise<void> {
           }
 
           if (isBusinessError(error)) {
+            const rawMessage = error instanceof Error ? error.message : String(error);
             logError("Error de negocio al sincronizar venta offline", {
               category: "offline",
               context: {
                 pendingId: pending.id,
                 businessId: pending.businessId,
                 branchId: pending.branchId,
-                error: error instanceof Error ? error.message : String(error)
+                error: rawMessage
               }
             });
-            await pendingSalesStore.markPermanentFailure(pending.id, error instanceof Error ? error.message : String(error));
+            await pendingSalesStore.markPermanentFailure(pending.id, rawMessage);
             failedCount += 1;
+            if (!firstBusinessError) {
+              firstBusinessError = formatOfflineBusinessError(error);
+            }
             continue;
           }
 
@@ -174,11 +211,15 @@ export async function syncPendingSales(): Promise<void> {
     }
 
     if (failedCount > 0) {
-      toast.error(
-        failedCount === 1
-          ? "1 venta sin conexión no se pudo sincronizar y quedó para revisión manual."
-          : `${failedCount} ventas sin conexión no pudieron sincronizarse y quedaron para revisión manual.`
-      );
+      if (failedCount === 1 && firstBusinessError) {
+        toast.error(firstBusinessError);
+      } else if (failedCount === 1) {
+        toast.error("1 venta sin conexión no se pudo sincronizar y quedó para revisión manual.");
+      } else {
+        toast.error(
+          `${failedCount} ventas sin conexión no pudieron sincronizarse y quedaron para revisión manual.`
+        );
+      }
     }
   })();
 

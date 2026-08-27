@@ -3,6 +3,7 @@ import { container, identityReady } from "../../infrastructure/di/CompositionRoo
 import { businessStore, Business } from "./businessStore";
 import { companyConfigStore, CompanyConfig } from "./companyConfigStore";
 import { Role, User, UserStatus } from "../entities/Entities";
+import { AVAILABLE_COUNTRY_CODES } from "../config/globalization";
 
 export function useSettings() {
   const [business, setBusiness] = useState<Business>(businessStore.get());
@@ -15,8 +16,8 @@ export function useSettings() {
   const loadUsersAndRoles = useCallback(async () => {
     await identityReady;
     const [allUsers, allRoles] = await Promise.all([
-      container.userEngine.listUsers(),
-      container.roleEngine.listRoles()
+      container.userEngine.get().listUsers(),
+      container.roleEngine.get().listRoles()
     ]);
     setUsers(allUsers);
     setRoles(allRoles);
@@ -33,11 +34,19 @@ export function useSettings() {
   function saveBusiness(data: Partial<Business>) {
     businessStore.update(data);
     setBusiness(businessStore.get());
+    if (data.country && AVAILABLE_COUNTRY_CODES.includes(data.country as any)) {
+      companyConfigStore.update({ country: data.country as CompanyConfig["country"] });
+      setConfig(companyConfigStore.get());
+    }
   }
 
   function saveConfig(data: Partial<CompanyConfig>) {
     companyConfigStore.update(data);
     setConfig(companyConfigStore.get());
+    if (data.country && AVAILABLE_COUNTRY_CODES.includes(data.country as any)) {
+      businessStore.update({ country: data.country as Business["country"] });
+      setBusiness(businessStore.get());
+    }
   }
 
   async function createUser(
@@ -46,7 +55,7 @@ export function useSettings() {
   ) {
     setError(null);
     try {
-      await container.userEngine.createUser(actorId, data);
+      await container.userEngine.get().createUser(actorId, data);
       await loadUsersAndRoles();
       return true;
     } catch (e: any) {
@@ -58,7 +67,7 @@ export function useSettings() {
   async function setUserStatus(actorId: string, userId: string, status: UserStatus) {
     setError(null);
     try {
-      await container.userEngine.setStatus(actorId, userId, status);
+      await container.userEngine.get().setStatus(actorId, userId, status);
       await loadUsersAndRoles();
       return true;
     } catch (e: any) {

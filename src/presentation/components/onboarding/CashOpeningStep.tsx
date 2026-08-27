@@ -13,7 +13,7 @@ interface CashOpeningStepProps {
 /**
  * PASO 9 del asistente de onboarding (FASE 3).
  *
- * Abre el turno de caja real del negocio con container.shiftEngine.openShift
+ * Abre el turno de caja real del negocio con container.shiftEngine.get().openShift
  * — el mismo motor real que usa el módulo de Caja (ver ShiftPanel.tsx).
  * Si ya hay un turno abierto (por ejemplo, un reintento del asistente),
  * lo detecta y deja continuar sin volver a abrir otro.
@@ -44,7 +44,7 @@ export function CashOpeningStep({ onSaved }: CashOpeningStepProps) {
     setError(null);
 
     try {
-      await container.shiftEngine.openShift(user.id, amountValue, "Apertura inicial (onboarding)");
+      await container.shiftEngine.get().openShift(user.id, amountValue, "Apertura inicial (onboarding)");
       onSaved();
     } catch (err) {
       // Si el asistente se reintenta y la caja ya quedó abierta, no es un

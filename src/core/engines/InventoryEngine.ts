@@ -5,6 +5,7 @@ import { IProductRepository } from '../../infrastructure/di/repositories/IProduc
 import { KardexEngine } from './KardexEngine';
 import { companyConfigStore } from '../store/companyConfigStore';
 import { logError } from '../../infrastructure/logging/opsLogger';
+import { getCurrentBranchId } from '../../infrastructure/supabase/supabaseClient';
 
 /** Un item de venta (o devolución) sobre el que hay que mover inventario. */
 export interface SaleStockItem {
@@ -440,7 +441,8 @@ export class InventoryEngine {
     performedBy?: string,
     supplierId?: string,
     purchasePrice?: number,
-    movementId?: string
+    movementId?: string,
+    branchId?: string
   ): Promise<void> {
     if (movementId && (await this.kardex.exists(movementId))) {
       return;
@@ -448,15 +450,21 @@ export class InventoryEngine {
 
     const now = new Date();
 
+    const product = await this.repository.findById(id);
+
     const extraFields: Record<string, unknown> = { lastUpdated: now.toISOString() };
     if (purchasePrice !== undefined) {
-      extraFields.purchasePrice = purchasePrice;
+      const currentStock = product?.stock ?? 0;
+      const currentCost = product?.purchasePrice;
+
+      extraFields.purchasePrice =
+        currentStock > 0 && currentCost !== undefined && quantity > 0
+          ? (currentStock * currentCost + quantity * purchasePrice) / (currentStock + quantity)
+          : purchasePrice;
     }
     if (supplierId) {
       extraFields.lastPurchaseDate = now.toISOString();
     }
-
-    const product = await this.repository.findById(id);
 
     let supplierName: string | undefined;
     if (supplierId) {
@@ -474,10 +482,17 @@ export class InventoryEngine {
       supplierName,
       undefined,
       movementId,
-      product?.name
+      product?.name,
+      branchId
     );
 
-    const updated = await this.repository.adjustStock(id, quantity, extraFields);
+    const updated = await this.repository.adjustStock(
+      id,
+      quantity,
+      extraFields,
+      companyConfigStore.get().allowNegativeStock,
+      branchId
+    );
   }
 
   /**
@@ -492,7 +507,8 @@ export class InventoryEngine {
     reason: string,
     performedBy?: string,
     lossCategory?: LossCategory,
-    movementId?: string
+    movementId?: string,
+    branchId?: string
   ): Promise<void> {
     if (movementId && (await this.kardex.exists(movementId))) {
       return;
@@ -510,15 +526,105 @@ export class InventoryEngine {
       undefined,
       lossCategory,
       movementId,
-      product?.name
+      product?.name,
+      branchId
     );
 
     const updated = await this.repository.adjustStock(
       id,
       -quantity,
       { lastUpdated: new Date().toISOString() },
-      companyConfigStore.get().allowNegativeStock
+      companyConfigStore.get().allowNegativeStock,
+      branchId
     );
+  }
+
+  async transferStock(
+    productId: string,
+    fromBranchId: string,
+    toBranchId: string,
+    quantity: number,
+    reason?: string,
+    performedBy?: string
+  ): Promise<void> {
+    if (fromBranchId === toBranchId) {
+      throw new Error('TRANSFER_SAME_BRANCH: la sucursal origen y destino deben ser distintas.');
+    }
+
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      throw new Error('INVALID_QUANTITY: la cantidad a transferir debe ser mayor que cero.');
+    }
+
+    const originProduct = await this.repository.findById(productId);
+    if (!originProduct) {
+      throw new Error('PRODUCT_NOT_FOUND');
+    }
+
+    const allowNegative = companyConfigStore.get().allowNegativeStock;
+    const originStock = originProduct.stock ?? 0;
+    if (!allowNegative && originStock < quantity) {
+      throw new Error(
+        `INSUFFICIENT_STOCK: disponible ${originStock} en sucursal origen, solicitado ${quantity}.`
+      );
+    }
+
+    const sku = originProduct.sku?.trim();
+    if (!sku) {
+      throw new Error('PRODUCT_WITHOUT_SKU: para transferir entre sucursales el producto necesita un SKU (así se identifica como "el mismo producto" en la sucursal destino).');
+    }
+
+    let destProduct: Product | null = await this.repository.findBySkuAndBranch(sku, toBranchId);
+
+    if (!destProduct) {
+      const now = new Date();
+      destProduct = {
+        ...originProduct,
+        id: crypto.randomUUID(),
+        stock: 0,
+        branchId: toBranchId,
+        lastUpdated: now,
+        createdAt: now,
+        version: 1
+      };
+      await this.repository.save(destProduct);
+    }
+
+    const transferReason = reason ?? `Transferencia de sucursal ${fromBranchId} a ${toBranchId}`;
+
+    await this.decreaseStock(
+      originProduct.id,
+      quantity,
+      `Salida por transferencia: ${transferReason}`,
+      performedBy,
+      undefined,
+      undefined,
+      fromBranchId
+    );
+
+    try {
+      await this.increaseStock(
+        destProduct.id,
+        quantity,
+        `Entrada por transferencia: ${transferReason}`,
+        performedBy,
+        undefined,
+        undefined,
+        undefined,
+        toBranchId
+      );
+    } catch (error) {
+      await this.increaseStock(
+        originProduct.id,
+        quantity,
+        `Reversión de transferencia fallida: ${transferReason}`,
+        performedBy,
+        undefined,
+        undefined,
+        undefined,
+        fromBranchId
+      );
+      throw error;
+    }
   }
 
   /**
@@ -662,9 +768,11 @@ export class InventoryEngine {
      */
     const applied: { productId: string; quantity: number }[] = [];
 
+    const branchId = getCurrentBranchId();
+
     for (const target of targets) {
       try {
-        await this.decreaseStock(target.productId, target.quantity, target.reason, performedBy);
+        await this.decreaseStock(target.productId, target.quantity, target.reason, performedBy, undefined, undefined, branchId);
         applied.push({ productId: target.productId, quantity: target.quantity });
       } catch (error) {
         for (const done of [...applied].reverse()) {
@@ -673,7 +781,11 @@ export class InventoryEngine {
               done.productId,
               done.quantity,
               `Reversión automática: falló el descuento de otro ingrediente de la misma venta (${reason})`,
-              performedBy
+              performedBy,
+              undefined,
+              undefined,
+              undefined,
+              branchId
             );
           } catch (rollbackError) {
             // Si hasta la reversión falla, no hay nada más que hacer desde
@@ -720,7 +832,11 @@ export class InventoryEngine {
             ingredient.productId,
             restoredQuantity,
             `${reason} (receta: ${product.name})`,
-            performedBy
+            performedBy,
+            undefined,
+            undefined,
+            undefined,
+            getCurrentBranchId()
           );
         }
       } else if (
@@ -733,7 +849,7 @@ export class InventoryEngine {
         // En cambio, un producto con receta BATCH maneja stock propio y se
         // debe restaurar incluso si `trackStock` quedó false por un caso
         // legacy/incorrecto.
-        await this.increaseStock(item.productId, item.quantity, reason, performedBy);
+        await this.increaseStock(item.productId, item.quantity, reason, performedBy, undefined, undefined, undefined, getCurrentBranchId());
       }
     }
   }
@@ -820,6 +936,7 @@ export class InventoryEngine {
     }
 
     const applied: { productId: string; quantity: number }[] = [];
+    const branchId = getCurrentBranchId();
 
     for (const item of required) {
       try {
@@ -827,7 +944,10 @@ export class InventoryEngine {
           item.productId,
           item.quantity,
           `Producción: ${quantity} x ${product.name}`,
-          performedBy
+          performedBy,
+          undefined,
+          undefined,
+          branchId
         );
         applied.push({ productId: item.productId, quantity: item.quantity });
       } catch (error) {
@@ -837,7 +957,11 @@ export class InventoryEngine {
               done.productId,
               done.quantity,
               `Reversión automática: falló el descuento de otro ingrediente de la misma tanda (Producción: ${product.name})`,
-              performedBy
+              performedBy,
+              undefined,
+              undefined,
+              undefined,
+              branchId
             );
           } catch (rollbackError) {
             logError(rollbackError, {
@@ -857,7 +981,11 @@ export class InventoryEngine {
       productId,
       quantity,
       `Producción: ${quantity} unidades preparadas`,
-      performedBy
+      performedBy,
+      undefined,
+      undefined,
+      undefined,
+      branchId
     );
 
     const updated = await this.repository.findById(productId);

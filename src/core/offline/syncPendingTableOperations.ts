@@ -1,11 +1,13 @@
 import { container } from "../../infrastructure/di/CompositionRoot";
 import { connectionStore } from "../store/connectionStore";
+import { productCatalogStore } from "../store/productCatalogStore";
 import { toast } from "../store/toastStore";
 import { isNetworkFailure } from "../services/offlineSale";
 import { pendingTableOperationsStore } from "./pendingTableOperationsStore";
 import type { PendingTableOperation } from "./PendingTableOperation";
 import { getCurrentBusinessId, getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
 import { MAX_OFFLINE_ATTEMPTS, isBusinessError } from "./offlineConstants";
+import { OrderPriority } from "../entities/Entities";
 
 /**
  * syncPendingTableOperations.ts
@@ -44,12 +46,42 @@ async function syncOne(pending: PendingTableOperation): Promise<void> {
     if (!pending.openInput) {
       throw new Error("PENDING_TABLE_OPERATION_MISSING_INPUT: falta openInput.");
     }
-    await container.tableEngine.openTable(pending.openInput);
-  } else {
+    await container.tableEngine.get().openTable(pending.openInput);
+  } else if (pending.type === "CLOSE") {
     if (!pending.closeInput) {
       throw new Error("PENDING_TABLE_OPERATION_MISSING_INPUT: falta closeInput.");
     }
-    await container.tableEngine.closeTable(pending.closeInput);
+    await container.tableEngine.get().closeTable(pending.closeInput);
+  } else if (pending.type === "ADD_ITEM") {
+    if (!pending.addItemInput) {
+      throw new Error("PENDING_TABLE_OPERATION_MISSING_INPUT: falta addItemInput.");
+    }
+    const product = productCatalogStore.getById(pending.addItemInput.productId);
+    if (!product) {
+      throw new Error(`PENDING_TABLE_OPERATION_MISSING_PRODUCT: no se encontró el producto ${pending.addItemInput.productId} en el catálogo.`);
+    }
+    await container.tableEngine.get().addItem({
+      tableId: pending.tableId,
+      product,
+      quantity: pending.addItemInput.quantity,
+      note: pending.addItemInput.note
+    });
+  } else if (pending.type === "REMOVE_ITEM") {
+    if (!pending.removeItemInput) {
+      throw new Error("PENDING_TABLE_OPERATION_MISSING_INPUT: falta removeItemInput.");
+    }
+    await container.tableEngine.get().removeItem(pending.tableId, pending.removeItemInput.productId);
+  } else if (pending.type === "UPDATE_QUANTITY") {
+    if (!pending.updateQuantityInput) {
+      throw new Error("PENDING_TABLE_OPERATION_MISSING_INPUT: falta updateQuantityInput.");
+    }
+    await container.tableEngine.get().updateItemQuantity(
+      pending.tableId,
+      pending.updateQuantityInput.productId,
+      pending.updateQuantityInput.quantity
+    );
+  } else if (pending.type === "SEND_TO_KITCHEN") {
+    await container.tableEngine.get().sendToKitchen(pending.tableId, pending.sendToKitchenInput?.priority as OrderPriority | undefined);
   }
 }
 

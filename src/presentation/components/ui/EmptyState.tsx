@@ -38,7 +38,7 @@ export function EmptyState({ icon, title, description, action, className = "" }:
       {action && (
         <button
           onClick={action.onClick}
-          className="h-11 px-6 rounded-xl bg-cyan-500 text-slate-950 font-bold hover:bg-cyan-400 flex items-center gap-2"
+          className="h-11 px-6 rounded-xl bg-vimdy-accent text-slate-950 font-bold hover:bg-vimdy-accent-hover flex items-center gap-2"
         >
           {action.icon}
           {action.label}

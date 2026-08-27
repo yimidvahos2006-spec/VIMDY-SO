@@ -135,7 +135,7 @@ interface BusinessRow {
   salida_cocina: string | null;
 }
 
-const TRIAL_PERIOD_DAYS = 30;
+const TRIAL_PERIOD_DAYS = 14;
 
 function toBusinessSession(
   userId: string,

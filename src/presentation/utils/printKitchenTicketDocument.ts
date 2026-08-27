@@ -1,5 +1,13 @@
 import { toast } from "../../core/store/toastStore";
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 export interface PrintableKitchenTicketItem {
   name: string;
   quantity: number;
@@ -110,12 +118,4 @@ export function printKitchenTicketDocument(
   printWindow.document.close();
 
   return true;
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }

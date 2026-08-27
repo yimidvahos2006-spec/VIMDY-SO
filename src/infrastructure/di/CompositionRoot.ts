@@ -51,7 +51,7 @@ import { AuditEngine } from '../../core/engines/AuditEngine';
 import { UserEngine } from '../../core/engines/UserEngine';
 import { AccessEngine } from '../../core/engines/AccessEngine';
 
-import { seedIdentity, ensureIdentity } from "./seedIdentity";
+import { seedIdentity } from "./seedIdentity";
 import { companyConfigStore } from '../../core/store/companyConfigStore';
 import { vimdyCore } from '../../core/VimdyCore';
 
@@ -69,7 +69,7 @@ import { CopilotApiClient } from './CopilotApiClient';
 import { logError } from "../logging/opsLogger";
 
 // --------------------
-// REPOS
+// REPOS — se crean eager porque son ligeros
 // --------------------
 const productRepo = new ProductRepository();
 const saleRepo = new SaleRepository();
@@ -87,7 +87,6 @@ const permissionRepo = new PermissionRepository();
 const auditLogRepo = new AuditLogRepository();
 const categoryRepo = new CategoryRepository();
 const supplierRepo = new SupplierRepository();
-// PASO 2.7 (Compras Inteligentes): el engine se conecta en la tarea 2.
 const purchaseOrderRepo = new PurchaseOrderRepository();
 const businessSnapshotRepo = new BusinessSnapshotRepository();
 const notificationRepo = new NotificationRepository();
@@ -95,194 +94,319 @@ const waiterRepo = new WaiterRepository();
 const receiptRepo = new ReceiptRepository();
 
 // --------------------
-// ENGINES — identidad, roles, permisos, autenticación, auditoría
+// LAZY SINGLETON HELPERS — los engines se instancian solo al usarse
 // --------------------
-const permissionEngine = new PermissionEngine(permissionRepo);
-const roleEngine = new RoleEngine(roleRepo, permissionEngine);
-const auditEngine = new AuditEngine(auditLogRepo);
-const userEngine = new UserEngine(userRepo, roleEngine, auditEngine);
-const accessEngine = new AccessEngine(userEngine, roleEngine);
+let permissionEngine: PermissionEngine | null = null;
+let roleEngine: RoleEngine | null = null;
+let auditEngine: AuditEngine | null = null;
+let userEngine: UserEngine | null = null;
+let accessEngine: AccessEngine | null = null;
+
+let kardexEngine: KardexEngine | null = null;
+let inventoryEngine: InventoryEngine | null = null;
+let recipeEngine: RecipeEngine | null = null;
+let purchaseIntelligenceEngine: PurchaseIntelligenceEngine | null = null;
+let purchaseOrderEngine: PurchaseOrderEngine | null = null;
+let forecastEngine: ForecastEngine | null = null;
+let categoryEngine: CategoryEngine | null = null;
+let supplierEngine: SupplierEngine | null = null;
+let waiterEngine: WaiterEngine | null = null;
+let healthEngine: HealthEngine | null = null;
+let aiEngine: AIEngine | null = null;
+let customerEngine: CustomerEngine | null = null;
+let kitchenEngine: KitchenEngine | null = null;
+
+let dashboardEngine: DashboardEngine | null = null;
+
+let cartEngine: CartEngine | null = null;
+let paymentEngine: PaymentEngine | null = null;
+let receiptEngine: ReceiptEngine | null = null;
+let cashEngine: CashEngine | null = null;
+let shiftEngine: ShiftEngine | null = null;
+let alertEngine: AlertEngine | null = null;
+let posCore: PosCore | null = null;
+
+let salesEngine: SalesEngine | null = null;
+let orderEngine: OrderEngine | null = null;
+let tableEngine: TableEngine | null = null;
+
+let businessAnalyzer: BusinessAnalyzer | null = null;
+let patternLearningEngine: PatternLearningEngine | null = null;
+let copilotEngine: CopilotEngine | null = null;
+let commandEngine: CommandEngine | null = null;
+let questionRouter: QuestionRouter | null = null;
+
+let dashboardService: DashboardService | null = null;
+let copilotService: CopilotService | null = null;
+let inventoryService: InventoryService | null = null;
+let customerService: CustomerService | null = null;
+let kitchenService: KitchenService | null = null;
+
+function ensurePermissionEngine(): PermissionEngine {
+  if (!permissionEngine) permissionEngine = new PermissionEngine(permissionRepo);
+  return permissionEngine;
+}
+
+function ensureRoleEngine(): RoleEngine {
+  if (!roleEngine) roleEngine = new RoleEngine(roleRepo, ensurePermissionEngine());
+  return roleEngine;
+}
+
+function ensureAuditEngine(): AuditEngine {
+  if (!auditEngine) auditEngine = new AuditEngine(auditLogRepo);
+  return auditEngine;
+}
+
+function ensureUserEngine(): UserEngine {
+  if (!userEngine) userEngine = new UserEngine(userRepo, ensureRoleEngine(), ensureAuditEngine());
+  return userEngine;
+}
+
+function ensureAccessEngine(): AccessEngine {
+  if (!accessEngine) accessEngine = new AccessEngine(ensureUserEngine(), ensureRoleEngine());
+  return accessEngine;
+}
+
+function ensureKardexEngine(): KardexEngine {
+  if (!kardexEngine) kardexEngine = new KardexEngine(movementRepo);
+  return kardexEngine;
+}
+
+function ensureInventoryEngine(): InventoryEngine {
+  if (!inventoryEngine) inventoryEngine = new InventoryEngine(productRepo, ensureKardexEngine(), supplierRepo, categoryRepo);
+  return inventoryEngine;
+}
+
+function ensureRecipeEngine(): RecipeEngine {
+  if (!recipeEngine) recipeEngine = new RecipeEngine(productRepo);
+  return recipeEngine;
+}
+
+function ensurePurchaseIntelligenceEngine(): PurchaseIntelligenceEngine {
+  if (!purchaseIntelligenceEngine) purchaseIntelligenceEngine = new PurchaseIntelligenceEngine(ensureInventoryEngine(), saleRepo);
+  return purchaseIntelligenceEngine;
+}
+
+function ensurePurchaseOrderEngine(): PurchaseOrderEngine {
+  if (!purchaseOrderEngine) purchaseOrderEngine = new PurchaseOrderEngine(purchaseOrderRepo, ensureInventoryEngine(), ensureRecipeEngine());
+  return purchaseOrderEngine;
+}
+
+function ensureForecastEngine(): ForecastEngine {
+  if (!forecastEngine) forecastEngine = new ForecastEngine(saleRepo, ensureInventoryEngine(), ensurePurchaseIntelligenceEngine());
+  return forecastEngine;
+}
+
+function ensureCategoryEngine(): CategoryEngine {
+  if (!categoryEngine) categoryEngine = new CategoryEngine(categoryRepo, productRepo);
+  return categoryEngine;
+}
+
+function ensureSupplierEngine(): SupplierEngine {
+  if (!supplierEngine) supplierEngine = new SupplierEngine(supplierRepo, productRepo);
+  return supplierEngine;
+}
+
+function ensureWaiterEngine(): WaiterEngine {
+  if (!waiterEngine) waiterEngine = new WaiterEngine(waiterRepo);
+  return waiterEngine;
+}
+
+function ensureHealthEngine(): HealthEngine {
+  if (!healthEngine) healthEngine = new HealthEngine();
+  return healthEngine;
+}
+
+function ensureAiEngine(): AIEngine {
+  if (!aiEngine) aiEngine = new AIEngine();
+  return aiEngine;
+}
+
+function ensureCustomerEngine(): CustomerEngine {
+  if (!customerEngine) customerEngine = new CustomerEngine(customerRepo, saleRepo);
+  return customerEngine;
+}
+
+function ensureKitchenEngine(): KitchenEngine {
+  if (!kitchenEngine) kitchenEngine = new KitchenEngine(kitchenRepo, ensureAuditEngine());
+  return kitchenEngine;
+}
+
+function ensureDashboardEngine(): DashboardEngine {
+  if (!dashboardEngine) {
+    dashboardEngine = new DashboardEngine(
+      productRepo,
+      saleRepo,
+      customerRepo,
+      kitchenRepo,
+      alertRepo,
+      ensureHealthEngine(),
+      ensureAiEngine(),
+      ensureInventoryEngine(),
+      ensureRecipeEngine()
+    );
+  }
+  return dashboardEngine;
+}
+
+function ensureCartEngine(): CartEngine {
+  if (!cartEngine) cartEngine = new CartEngine();
+  return cartEngine;
+}
+
+function ensurePaymentEngine(): PaymentEngine {
+  if (!paymentEngine) paymentEngine = new PaymentEngine();
+  return paymentEngine;
+}
+
+function ensureReceiptEngine(): ReceiptEngine {
+  if (!receiptEngine) receiptEngine = new ReceiptEngine(receiptRepo);
+  return receiptEngine;
+}
+
+function ensureCashEngine(): CashEngine {
+  if (!cashEngine) cashEngine = new CashEngine(cashMovementRepo);
+  return cashEngine;
+}
+
+function ensureShiftEngine(): ShiftEngine {
+  if (!shiftEngine) shiftEngine = new ShiftEngine(shiftRepo, ensureCashEngine());
+  return shiftEngine;
+}
+
+function ensureAlertEngine(): AlertEngine {
+  if (!alertEngine) alertEngine = new AlertEngine();
+  return alertEngine;
+}
+
+function ensurePosCore(): PosCore {
+  if (!posCore) posCore = new PosCore(ensureCartEngine(), ensureInventoryEngine(), ensureKitchenEngine(), ensureAiEngine());
+  return posCore;
+}
+
+function ensureSalesEngine(): SalesEngine {
+  if (!salesEngine) {
+    salesEngine = new SalesEngine(
+      saleRepo,
+      ensureCartEngine(),
+      ensureInventoryEngine(),
+      ensurePaymentEngine(),
+      ensureReceiptEngine(),
+      ensureKitchenEngine(),
+      ensureCashEngine(),
+      ensureCustomerEngine(),
+      ensureAlertEngine(),
+      ensureHealthEngine(),
+      ensureKardexEngine(),
+      ensurePosCore(),
+      ensureAuditEngine(),
+      {
+        defaultTaxRate: companyConfigStore.get().tax / 100,
+        defaultCustomerId: "CLIENTE_GENERAL",
+        loyaltyPointsPerCurrencyUnit: 0.001
+      }
+    );
+  }
+  return salesEngine;
+}
+
+function ensureOrderEngine(): OrderEngine {
+  if (!orderEngine) orderEngine = new OrderEngine(orderRepo, ensureKitchenEngine(), ensureSalesEngine());
+  return orderEngine;
+}
+
+function ensureTableEngine(): TableEngine {
+  if (!tableEngine) tableEngine = new TableEngine(tableRepo, ensureKitchenEngine(), ensureSalesEngine(), ensureOrderEngine());
+  return tableEngine;
+}
+
+function ensureBusinessAnalyzer(): BusinessAnalyzer {
+  if (!businessAnalyzer) {
+    businessAnalyzer = new BusinessAnalyzer(
+      ensureDashboardEngine(),
+      ensureInventoryEngine(),
+      ensureCashEngine(),
+      ensureCustomerEngine(),
+      orderRepo,
+      tableRepo,
+      userRepo,
+      ensureRecipeEngine(),
+      ensureKardexEngine(),
+      ensureForecastEngine(),
+      ensurePurchaseIntelligenceEngine(),
+      ensureAuditEngine()
+    );
+  }
+  return businessAnalyzer;
+}
+
+function ensurePatternLearningEngine(): PatternLearningEngine {
+  if (!patternLearningEngine) patternLearningEngine = new PatternLearningEngine(businessSnapshotRepo, ensureBusinessAnalyzer());
+  return patternLearningEngine;
+}
+
+function ensureCopilotEngine(): CopilotEngine {
+  if (!copilotEngine) copilotEngine = new CopilotEngine(ensureBusinessAnalyzer(), ensurePatternLearningEngine());
+  return copilotEngine;
+}
+
+function ensureCommandEngine(): CommandEngine {
+  if (!commandEngine) commandEngine = new CommandEngine(ensureCustomerEngine());
+  return commandEngine;
+}
+
+function ensureQuestionRouter(): QuestionRouter {
+  if (!questionRouter) questionRouter = new QuestionRouter(ensureBusinessAnalyzer());
+  return questionRouter;
+}
+
+function ensureDashboardService(): DashboardService {
+  if (!dashboardService) dashboardService = new DashboardService(ensureDashboardEngine());
+  return dashboardService;
+}
+
+function ensureCopilotService(): CopilotService {
+  if (!copilotService) copilotService = new CopilotService(ensureCopilotEngine(), new CopilotApiClient());
+  return copilotService;
+}
+
+function ensureInventoryService(): InventoryService {
+  if (!inventoryService) inventoryService = new InventoryService(ensureInventoryEngine());
+  return inventoryService;
+}
+
+function ensureCustomerService(): CustomerService {
+  if (!customerService) customerService = new CustomerService(ensureCustomerEngine());
+  return customerService;
+}
+
+function ensureKitchenService(): KitchenService {
+  if (!kitchenService) kitchenService = new KitchenService(ensureKitchenEngine());
+  return kitchenService;
+}
 
 /**
  * Catálogo de permisos + roles base (ADMIN, CAJERO, MESERO, etc). Este
  * catálogo es fijo y del sistema (no es dato de un negocio), así que sí
  * se sigue sembrando una sola vez al arrancar.
- *
- * Antes, aquí mismo se creaba un usuario "Administrador" local con
- * contraseña fija (admin@vimdy.local) si `app_users` estaba vacío. Eso
- * era necesario cuando el login todavía no existía de verdad. Ahora el
- * dueño de cada negocio se crea con la Edge Function `register-business`
- * (ver authBusinessContext.ts) y los empleados adicionales se crean desde
- * el PASO 6 del onboarding (EmployeesStep) o desde Configuración — crear
- * aquí un admin con credenciales fijas sería un usuario falso e inseguro.
  */
 export const identityReady = (async () => {
-  await seedIdentity(permissionEngine, roleEngine);
+  await seedIdentity(ensurePermissionEngine(), ensureRoleEngine());
 })();
 
-/**
- * Antes esta promesa sembraba un catálogo GENÉRICO de categorías
- * (Hamburguesas, Pizzas, Bebidas...) igual para cualquier negocio nuevo.
- * Fase 3 — Onboarding inteligente: ahora las categorías reales las crea
- * el PASO 7 del asistente (CategoriesStep.tsx), a partir del tipo de
- * negocio elegido en el PASO 3 (ver src/core/config/onboardingCategories.ts).
- * Se mantiene como promesa resuelta de inmediato solo para no romper a
- * quien ya espera `categoriesReady`/`productsReady` antes de leer del
- * repositorio de productos.
- */
 export const categoriesReady: Promise<void> = Promise.resolve();
-
-/**
- * Antes se sembraba un catálogo de productos de ejemplo (ver git history
- * de seedProducts.ts) para poder probar Caja/Inventario sin capturar nada
- * a mano. Un negocio real empieza con catálogo vacío: es el propio dueño
- * quien crea sus productos desde el módulo de Productos (Parte 1). Esta
- * promesa se mantiene solo para que el resto de pantallas (Caja, Voz,
- * Dashboard) sigan esperando a que las categorías estén listas antes de
- * leer del repositorio de productos.
- */
 export const productsReady: Promise<void> = categoriesReady;
-
-// --------------------
-// ENGINES — inventario, salud, IA, cliente, cocina
-// --------------------
-const kardexEngine = new KardexEngine(movementRepo);
-// Paso 3.2 (Cocina): categoryRepo como 4to argumento (opcional) para que
-// InventoryEngine.createProduct() pueda heredar Category.requiresKitchenByDefault
-// cuando el formulario/import no manda `requiresKitchen` explícito.
-const inventoryEngine = new InventoryEngine(productRepo, kardexEngine, supplierRepo, categoryRepo);
-// PASO 2 (Motor de Producción): única fuente de verdad para costo real,
-// rentabilidad y capacidad de producción derivados de Product.recipe.
-// Solo lee de productRepo, no depende de inventoryEngine.
-const recipeEngine = new RecipeEngine(productRepo);
-// PASO 2.6 (Compras Inteligentes — recomendaciones): analiza inventario +
-// velocidad de venta/consumo (directo y vía recetas) para recomendar qué
-// comprar. Solo lee, nunca modifica stock ni crea órdenes.
-const purchaseIntelligenceEngine = new PurchaseIntelligenceEngine(inventoryEngine, saleRepo);
-// PASO 2.7 (Compras Inteligentes — ejecución): convierte recomendaciones en
-// órdenes de compra reales, reutilizando InventoryEngine.increaseStock() al
-// recibir. Nunca borra órdenes (historial permanente).
-const purchaseOrderEngine = new PurchaseOrderEngine(purchaseOrderRepo, inventoryEngine, recipeEngine);
-// PASO 2.8 (Pronóstico Inteligente): reutiliza PurchaseIntelligenceEngine para
-// "qué ingrediente se agota primero" y "qué compras adelantar" — nunca
-// duplica el cálculo de velocidad de consumo, solo lo cruza con el pronóstico
-// de ventas por día de semana.
-const forecastEngine = new ForecastEngine(saleRepo, inventoryEngine, purchaseIntelligenceEngine);
-const categoryEngine = new CategoryEngine(categoryRepo, productRepo);
-const supplierEngine = new SupplierEngine(supplierRepo, productRepo);
-const waiterEngine = new WaiterEngine(waiterRepo);
-const healthEngine = new HealthEngine();
-const aiEngine = new AIEngine();
-const customerEngine = new CustomerEngine(customerRepo, saleRepo);
-const kitchenEngine = new KitchenEngine(kitchenRepo, auditEngine);
-
-const dashboardEngine = new DashboardEngine(
-  productRepo,
-  saleRepo,
-  customerRepo,
-  kitchenRepo,
-  alertRepo,
-  healthEngine,
-  aiEngine,
-  inventoryEngine,
-  recipeEngine
-);
-
-// --------------------
-// ENGINES — venta, cobro, caja, recibo, alertas, mesas
-// --------------------
-const cartEngine = new CartEngine();
-const paymentEngine = new PaymentEngine();
-const receiptEngine = new ReceiptEngine(receiptRepo);
-const cashEngine = new CashEngine(cashMovementRepo);
-const shiftEngine = new ShiftEngine(shiftRepo, cashEngine);
-const alertEngine = new AlertEngine();
-const posCore = new PosCore(cartEngine, inventoryEngine, kitchenEngine, aiEngine);
-
-const salesEngine = new SalesEngine(
-  saleRepo,
-  cartEngine,
-  inventoryEngine,
-  paymentEngine,
-  receiptEngine,
-  kitchenEngine,
-  cashEngine,
-  customerEngine,
-  alertEngine,
-  healthEngine,
-  kardexEngine,
-  posCore,
-  auditEngine,
-  {
-    // La tasa de IVA y el cliente/puntos por defecto ya no quedan fijos en
-    // el motor: se leen de companyConfigStore, que es lo que edita
-    // Configuracion > Impuestos. Si el negocio cambia su tasa, la venta
-    // (y el recibo) la reflejan de inmediato sin tocar código.
-    defaultTaxRate: companyConfigStore.get().tax / 100,
-    defaultCustomerId: "CLIENTE_GENERAL",
-    loyaltyPointsPerCurrencyUnit: 0.001
-  }
-);
-
-const orderEngine = new OrderEngine(
-  orderRepo,
-  kitchenEngine,
-  salesEngine
-);
-
-const tableEngine = new TableEngine(
-  tableRepo,
-  kitchenEngine,
-  salesEngine,
-  orderEngine
-);
-
-/**
- * Antes esta promesa sembraba un mapa FIJO de 12 mesas (Salón Principal,
- * Terraza, Barra) para cualquier negocio nuevo, incluso uno sin mesas
- * (ej. una tienda). Fase 3 — Onboarding inteligente: ahora las mesas
- * reales las crea el PASO 5 del asistente (TablesStep.tsx), con la
- * cantidad que el dueño elige de verdad, y solo si el negocio usa el
- * módulo "mesas". Se mantiene como promesa resuelta de inmediato solo
- * para no romper a quien ya espera `tablesReady` antes de leer del
- * TableEngine (Meseros, Dashboard).
- */
 export const tablesReady: Promise<void> = Promise.resolve();
-
-// --------------------
-// ENGINES / SERVICES — VIMDY Intelligence Engine (FASE 2)
-// --------------------
-const businessAnalyzer = new BusinessAnalyzer(
-  dashboardEngine,
-  inventoryEngine,
-  cashEngine,
-  customerEngine,
-  orderRepo,
-  tableRepo,
-  userRepo,
-  recipeEngine,
-  kardexEngine,
-  forecastEngine,
-  purchaseIntelligenceEngine,
-  auditEngine
-);
-const patternLearningEngine = new PatternLearningEngine(businessSnapshotRepo, businessAnalyzer);
-const copilotEngine = new CopilotEngine(businessAnalyzer, patternLearningEngine);
-const copilotApiClient = new CopilotApiClient();
-const commandEngine = new CommandEngine(customerEngine);
-const questionRouter = new QuestionRouter(businessAnalyzer);
 
 /**
  * PASO 9 — Aprendizaje: cada vez que se cierra un turno de caja (fin del
  * día operativo, aunque haya varios cajeros/turnos ese mismo día),
- * PatternLearningEngine guarda/actualiza la foto de HOY. Es idempotente
- * (una foto por día), así que no importa si se cierra más de un turno.
- * No bloquea el cierre del turno: si falla, solo se registra en consola.
+ * PatternLearningEngine guarda/actualiza la foto de HOY.
  */
 vimdyCore.on("shift", (payload) => {
   if (payload?.action !== "CLOSED") return;
 
-  patternLearningEngine
+  ensurePatternLearningEngine()
     .recordTodaySnapshot("VIMDY", companyConfigStore.get().currency)
     .catch((error) => {
       logError("[PASO 9] No se pudo guardar la foto diaria del negocio", { category: "sync", context: { error: String(error) } });
@@ -290,38 +414,39 @@ vimdyCore.on("shift", (payload) => {
 });
 
 // --------------------
-// SERVICES
+// SERVICES — también lazy, misma API pública
 // --------------------
 export const container = {
-  dashboardService: new DashboardService(dashboardEngine),
-  copilotService: new CopilotService(copilotEngine, copilotApiClient),
-  commandEngine,
-  questionRouter,
-  businessAnalyzer,
-  patternLearningEngine,
-  inventoryService: new InventoryService(inventoryEngine),
-  inventoryEngine,
-  recipeEngine,
-  purchaseIntelligenceEngine,
-  purchaseOrderEngine,
-  forecastEngine,
-  categoryEngine,
-  supplierEngine,
-  waiterEngine,
-  kardexEngine,
-  customerService: new CustomerService(customerEngine),
-  customerEngine,
-  kitchenService: new KitchenService(kitchenEngine),
-  salesEngine,
-  tableEngine,
-  orderEngine,
-  shiftEngine,
-  cashEngine,
-  permissionEngine,
-  roleEngine,
-  auditEngine,
-  userEngine,
-  accessEngine,
+  dashboardService: { get() { return ensureDashboardService(); } },
+  copilotService: { get() { return ensureCopilotService(); } },
+  commandEngine: { get() { return ensureCommandEngine(); } },
+  questionRouter: { get() { return ensureQuestionRouter(); } },
+  businessAnalyzer: { get() { return ensureBusinessAnalyzer(); } },
+  patternLearningEngine: { get() { return ensurePatternLearningEngine(); } },
+  inventoryService: { get() { return ensureInventoryService(); } },
+  inventoryEngine: { get() { return ensureInventoryEngine(); } },
+  recipeEngine: { get() { return ensureRecipeEngine(); } },
+  purchaseIntelligenceEngine: { get() { return ensurePurchaseIntelligenceEngine(); } },
+  purchaseOrderEngine: { get() { return ensurePurchaseOrderEngine(); } },
+  forecastEngine: { get() { return ensureForecastEngine(); } },
+  categoryEngine: { get() { return ensureCategoryEngine(); } },
+  supplierEngine: { get() { return ensureSupplierEngine(); } },
+  waiterEngine: { get() { return ensureWaiterEngine(); } },
+  kardexEngine: { get() { return ensureKardexEngine(); } },
+  customerService: { get() { return ensureCustomerService(); } },
+  customerEngine: { get() { return ensureCustomerEngine(); } },
+  kitchenService: { get() { return ensureKitchenService(); } },
+  kitchenEngine: { get() { return ensureKitchenEngine(); } },
+  salesEngine: { get() { return ensureSalesEngine(); } },
+  tableEngine: { get() { return ensureTableEngine(); } },
+  orderEngine: { get() { return ensureOrderEngine(); } },
+  shiftEngine: { get() { return ensureShiftEngine(); } },
+  cashEngine: { get() { return ensureCashEngine(); } },
+  permissionEngine: { get() { return ensurePermissionEngine(); } },
+  roleEngine: { get() { return ensureRoleEngine(); } },
+  auditEngine: { get() { return ensureAuditEngine(); } },
+  userEngine: { get() { return ensureUserEngine(); } },
+  accessEngine: { get() { return ensureAccessEngine(); } },
   notificationRepo,
   saleService: {
     save: async (sale: any) => {

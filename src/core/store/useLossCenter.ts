@@ -138,12 +138,12 @@ export function useLossCenter() {
   const load = useCallback(async () => {
     await Promise.all([productsReady, categoriesReady]);
     const [allMovements, allSales, allProducts, allCategories, allUsers, allProfitability] = await Promise.all([
-      container.kardexEngine.getAllMovements(),
-      container.salesEngine.getAllSales(),
-      container.inventoryEngine.listAll(),
-      container.categoryEngine.listAll(),
-      container.userEngine.listUsers(),
-      container.recipeEngine.getAllProfitability()
+      container.kardexEngine.get().getAllMovements(),
+      container.salesEngine.get().getAllSales(),
+      container.inventoryEngine.get().listAll(),
+      container.categoryEngine.get().listAll(),
+      container.userEngine.get().listUsers(),
+      container.recipeEngine.get().getAllProfitability()
     ]);
     setMovements(allMovements);
     setSales(allSales);

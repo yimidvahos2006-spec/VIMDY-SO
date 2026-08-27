@@ -20,7 +20,7 @@ function formatRelativeTime(timestamp: number, now: number, t: (key: Translation
   return t("dashboard.activity.hoursAgo", { hours });
 }
 
-function FeedRow({ event, now }: { event: FeedEvent; now: number }) {
+const FeedRow = React.memo(function FeedRow({ event, now }: { event: FeedEvent; now: number }) {
   const { t } = useTranslation();
   return (
     <div className="flex items-center justify-between rounded-vimdy-lg border border-vimdy-border bg-vimdy-surface p-5 hover:border-vimdy-accent/50 transition-colors duration-vimdy-normal animate-in fade-in slide-in-from-top-2">
@@ -43,23 +43,17 @@ function FeedRow({ event, now }: { event: FeedEvent; now: number }) {
       </span>
     </div>
   );
-}
+});
 
 /**
- * "Mesero del día": ranking por ventas de hoy, con corona para el
- * primero. A propósito solo aparece si hay MÁS DE UN mesero activo — con
- * uno solo, un ranking no dice nada útil y solo estorba en pantalla.
- */
-function WaiterLeaderboardCard() {
+  * "Mesero del día": ranking por ventas de hoy, con corona para el
+  * primero. A propósito solo aparece si hay MÁS DE UN mesero activo — con
+  * uno solo, un ranking no dice nada útil y solo estorba en pantalla.
+  */
+const WaiterLeaderboardCard = React.memo(function WaiterLeaderboardCard() {
   const { entries, totalActiveWaiters, loading } = useWaiterLeaderboard();
   const { t } = useTranslation();
 
-  // Fase 3 (5.3 — estados de carga): antes `loading` se trataba igual que
-  // "no hay datos" (return null) — la tarjeta simplemente no aparecía
-  // mientras cargaba, sin avisar nada. Ahora sí se distingue: mientras
-  // carga se muestra un Skeleton; solo cuando YA se sabe que no hay
-  // suficientes datos (1 o menos meseros activos, sin entradas) se oculta
-  // del todo, que sigue siendo el comportamiento correcto para ese caso.
   if (loading) {
     return (
       <div className="rounded-vimdy-lg border border-vimdy-border bg-vimdy-surface p-5 mb-4 space-y-3">
@@ -106,7 +100,7 @@ function WaiterLeaderboardCard() {
       </div>
     </div>
   );
-}
+});
 
 /**
  * Contenido del widget "Actividad reciente". Ya se muestra dentro de

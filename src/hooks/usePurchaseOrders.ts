@@ -97,7 +97,7 @@ export function usePurchaseOrders(): UsePurchaseOrdersResult {
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
-    const all = await container.purchaseOrderEngine.listAll();
+    const all = await container.purchaseOrderEngine.get().listAll();
     setOrders(all);
   }, []);
 
@@ -124,7 +124,7 @@ export function usePurchaseOrders(): UsePurchaseOrdersResult {
       setError(null);
       try {
         const session = userSessionStore.get();
-        const created = await container.purchaseOrderEngine.create({
+        const created = await container.purchaseOrderEngine.get().create({
           ...input,
           createdBy: session.logged ? session.name : undefined
         });
@@ -146,7 +146,7 @@ export function usePurchaseOrders(): UsePurchaseOrdersResult {
       setError(null);
       try {
         const session = userSessionStore.get();
-        const result = await container.purchaseOrderEngine.markAsPurchased(
+        const result = await container.purchaseOrderEngine.get().markAsPurchased(
           orderId,
           session.logged ? session.name : undefined,
           adjustedItems
@@ -173,7 +173,7 @@ export function usePurchaseOrders(): UsePurchaseOrdersResult {
     async (orderId: string, newExpectedDate: Date, note?: string): Promise<boolean> => {
       setError(null);
       try {
-        await container.purchaseOrderEngine.postpone(orderId, newExpectedDate, note);
+        await container.purchaseOrderEngine.get().postpone(orderId, newExpectedDate, note);
         await reload();
         toast.info("Orden pospuesta.");
         return true;
@@ -191,7 +191,7 @@ export function usePurchaseOrders(): UsePurchaseOrdersResult {
     async (orderId: string, note?: string): Promise<boolean> => {
       setError(null);
       try {
-        await container.purchaseOrderEngine.cancel(orderId, note);
+        await container.purchaseOrderEngine.get().cancel(orderId, note);
         await reload();
         toast.warning("Orden cancelada.");
         return true;

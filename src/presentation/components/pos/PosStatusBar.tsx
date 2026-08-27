@@ -5,6 +5,7 @@ import React, {
 } from "react";
 
 import {
+  AlertCircle,
   Calendar,
   Clock,
   RefreshCw,
@@ -23,7 +24,7 @@ export function PosStatusBar() {
   const { user } = useAuth();
   const { t, language } = useTranslation();
   const { isOnline, checkNow, checking } = useConnection();
-  const { count } = usePendingSalesQueue();
+  const { count, failedCount } = usePendingSalesQueue();
 
   const [now, setNow] = useState(new Date());
 
@@ -118,14 +119,23 @@ export function PosStatusBar() {
           </span>
         )}
 
-        {isOnline && count === 0 && justSynced && (
+        {isOnline && failedCount > 0 && (
+          <span className="flex items-center gap-2 text-vimdy-danger">
+            <AlertCircle size={13} />
+            {failedCount === 1
+              ? "1 venta offline necesita revisión manual"
+              : `${failedCount} ventas offline necesitan revisión manual`}
+          </span>
+        )}
+
+        {isOnline && count === 0 && failedCount === 0 && justSynced && (
           <span className="flex items-center gap-2 text-vimdy-success">
             <CheckCircle2 size={13} />
             {t("pos.status.allSynced")}
           </span>
         )}
 
-        {isOnline && count === 0 && !justSynced && (
+        {isOnline && count === 0 && failedCount === 0 && !justSynced && (
           <>
             <span className="flex items-center gap-2 text-vimdy-success">
               <span className="w-1.5 h-1.5 rounded-full bg-vimdy-success" />

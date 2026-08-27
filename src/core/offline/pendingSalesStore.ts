@@ -32,7 +32,9 @@ const EMPTY_SNAPSHOT: PendingSalesSnapshot = { items: [], loaded: false };
 class PendingSalesStore extends ObservableStore<PendingSalesSnapshot> {
   constructor() {
     super(EMPTY_SNAPSHOT);
-    void this.refresh();
+    if (typeof indexedDB !== "undefined") {
+      void this.refresh();
+    }
   }
 
   async refresh(): Promise<void> {
