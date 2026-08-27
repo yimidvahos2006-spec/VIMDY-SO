@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -378,4 +378,43 @@ textarea:focus-visible,
   background: var(--vimdy-surface-hover);
   border-radius: 12px;
   animation: vimdySkeletonPulse 1.6s ease-in-out infinite;
+}
+
+/* ===========================================================
+   HERO 3D / GLASS-CARD (marketing)
+   -----------------------------------------------------------
+   Restaurado del archivo marketing/styles/marketing.css, que
+   estaba huérfano (no se importaba en ningún sitio) y dejaba
+   sin estilar el mock 3D del Hero y las tarjetas de ContactPage
+   (.glass-card / .hero-3d-*). Colores en tokens oficiales VIMDY:
+   rgba(37,99,235) = vimdy-accent, rgba(56,189,248) = vimdy-blue.
+   =========================================================== */
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-card:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(56, 189, 248, 0.15);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(37, 99, 235, 0.08);
+}
+
+.hero-3d-container {
+  perspective: 1200px;
+}
+
+.hero-3d-card {
+  transform-style: preserve-3d;
+  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.hero-3d-glow {
+  background: radial-gradient(circle at center, rgba(56, 189, 248, 0.18) 0%, transparent 70%);
+  transform: translateZ(24px);
 }
