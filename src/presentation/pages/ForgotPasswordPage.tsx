@@ -50,7 +50,7 @@ export function ForgotPasswordPage() {
         <div className="mb-8 flex flex-col items-center gap-4">
           <VimdyLogo size={90} />
           <h1 className="text-2xl font-bold text-white tracking-wide">VIMDY OS</h1>
-          <p className="text-sm text-slate-400">Recupera el acceso a tu cuenta</p>
+          <p className="text-vimdy-text-secondary">Recupera el acceso a tu cuenta</p>
         </div>
 
         <GlassCard className="w-full max-w-sm p-8">
@@ -58,25 +58,25 @@ export function ForgotPasswordPage() {
             <div className="flex flex-col gap-5 text-center">
               <div className="text-4xl">📩</div>
               <p className="text-white font-medium">Revisa tu correo</p>
-              <p className="text-sm text-slate-400">
-                Si <span className="text-slate-300">{email.trim()}</span> tiene una cuenta en VIMDY, te enviamos un
+              <p className="text-vimdy-text-secondary">
+                Si <span className="text-vimdy-text">{email.trim()}</span> tiene una cuenta en VIMDY, te enviamos un
                 link para crear una nueva contraseña. Puede tardar unos minutos en llegar.
               </p>
               <Link
                 to="/login"
-                className="text-center text-sm text-cyan-400 hover:text-cyan-300 transition-colors mt-2"
+                className="text-center text-sm text-vimdy-accent hover:text-vimdy-accent-hover transition-colors mt-2"
               >
                 Volver a iniciar sesión
               </Link>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-              <p className="text-sm text-slate-400 -mt-1">
+              <p className="text-vimdy-text-secondary -mt-1">
                 Ingresa el correo con el que te registraste y te enviaremos un link para crear una nueva contraseña.
               </p>
 
               <div className="flex flex-col gap-2">
-                <label htmlFor="email" className="text-sm text-slate-300">
+                <label htmlFor="email" className="text-vimdy-small text-vimdy-text-secondary font-medium">
                   Correo electrónico
                 </label>
                 <input
@@ -86,14 +86,14 @@ export function ForgotPasswordPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   disabled={isLoading}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-3 text-white placeholder-slate-500 outline-none transition-colors focus:border-cyan-400 disabled:opacity-50"
+                  className="w-full rounded-vimdy-sm border border-vimdy-border bg-vimdy-background px-4 py-3 text-vimdy-body text-vimdy-text placeholder-vimdy-text-tertiary outline-none transition-colors duration-vimdy-fast focus:border-vimdy-accent focus:shadow-vimdy-accent disabled:opacity-50"
                   placeholder="tucorreo@vimdy.com"
                   autoFocus
                 />
               </div>
 
               {localError && (
-                <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-300">
+                <div className="rounded-vimdy-sm border border-vimdy-danger/25 bg-vimdy-danger-bg px-4 py-2 text-sm text-vimdy-danger">
                   {localError}
                 </div>
               )}
@@ -104,7 +104,7 @@ export function ForgotPasswordPage() {
 
               <Link
                 to="/login"
-                className="text-center text-sm text-slate-400 hover:text-cyan-400 transition-colors"
+                className="text-center text-sm text-vimdy-text-tertiary hover:text-vimdy-accent transition-colors"
               >
                 Volver a iniciar sesión
               </Link>

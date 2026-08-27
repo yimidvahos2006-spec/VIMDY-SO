@@ -68,7 +68,7 @@ export function UpdatePasswordPage() {
         <div className="mb-8 flex flex-col items-center gap-4">
           <VimdyLogo size={90} />
           <h1 className="text-2xl font-bold text-white tracking-wide">VIMDY OS</h1>
-          <p className="text-sm text-slate-400">Crea una nueva contraseña</p>
+          <p className="text-vimdy-text-secondary">Crea una nueva contraseña</p>
         </div>
 
         <GlassCard className="w-full max-w-sm p-8">
@@ -76,7 +76,7 @@ export function UpdatePasswordPage() {
             <div className="flex flex-col gap-5 text-center">
               <div className="text-4xl">✅</div>
               <p className="text-white font-medium">Contraseña actualizada</p>
-              <p className="text-sm text-slate-400">Ya puedes iniciar sesión con tu nueva contraseña.</p>
+              <p className="text-vimdy-text-secondary">Ya puedes iniciar sesión con tu nueva contraseña.</p>
               <VimdyButton onClick={() => navigate("/login", { replace: true })} className="w-full mt-2">
                 Iniciar sesión
               </VimdyButton>
@@ -104,7 +104,7 @@ export function UpdatePasswordPage() {
               />
 
               {(localError || serverError) && (
-                <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-300">
+                <div className="rounded-vimdy-sm border border-vimdy-danger/25 bg-vimdy-danger-bg px-4 py-2 text-sm text-vimdy-danger">
                   {localError || serverError}
                 </div>
               )}
@@ -116,7 +116,7 @@ export function UpdatePasswordPage() {
               {serverError && (
                 <Link
                   to="/recuperar-password"
-                  className="text-center text-sm text-cyan-400 hover:text-cyan-300 transition-colors"
+                  className="text-center text-sm text-vimdy-accent hover:text-vimdy-accent-hover transition-colors"
                 >
                   Pedir un nuevo link de recuperación
                 </Link>
