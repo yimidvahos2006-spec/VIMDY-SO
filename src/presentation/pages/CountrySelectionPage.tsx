@@ -14,6 +14,7 @@ import {
   CountryCode,
   getCountryDefaults,
   getCountryName,
+  getCurrencyName,
   detectCountryFromBrowser
 } from "../../core/config/globalization";
 
@@ -112,27 +113,33 @@ export function CountrySelectionPage() {
             </p>
           </div>
 
-          {/* Detección automática: destacada pero sin parecer alerta */}
+          {/* Detección automática: destacada con aire y jerarquía clara, pero
+              sin parecer una alerta/error — acento azul de marca, no warning. */}
           {detected && detectedName && (
             <div
-              className="flex items-center gap-3 rounded-lg border border-vimdy-accent/30 bg-vimdy-accent/5 px-4 py-3"
+              className="flex flex-col gap-1.5 rounded-xl border border-vimdy-accent/30 bg-vimdy-accent/5 px-4 py-3"
               role="status"
               aria-label={`${t("country.detected")} ${detectedName}`}
             >
-              <span className="text-2xl" aria-hidden="true">
-                {flagEmoji(detected)}
+              <span className="vimdy-small text-vimdy-text-tertiary">
+                {t("country.detected")}
               </span>
-              <div className="flex flex-col">
-                <span className="vimdy-small text-vimdy-text">
-                  {t("country.detected")}{" "}
-                  <span className="font-medium">{detectedName}</span>
+
+              <div className="flex items-center gap-2.5">
+                <span className="text-2xl" aria-hidden="true">
+                  {flagEmoji(detected)}
                 </span>
-                {detectedDefaults && (
-                  <span className="vimdy-micro text-vimdy-text-tertiary">
-                    {detectedDefaults.currency}
-                  </span>
-                )}
+                <span className="vimdy-h3 font-semibold text-white">
+                  {detectedName}
+                </span>
               </div>
+
+              {detectedDefaults && (
+                <span className="inline-flex items-center self-start rounded-md px-2 py-0.5 vimdy-micro font-medium text-vimdy-accent bg-vimdy-accent/10 border border-vimdy-accent/20">
+                  {detectedDefaults.currency} ·{" "}
+                  {getCurrencyName(detectedDefaults.currency, language).replace(/^./, (c) => c.toUpperCase())}
+                </span>
+              )}
             </div>
           )}
 
