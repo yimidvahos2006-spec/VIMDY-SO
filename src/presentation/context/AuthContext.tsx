@@ -78,7 +78,7 @@ interface AuthContextValue {
   register: (input: RegisterBusinessInput) => Promise<void>;
   /**
    * Registro de negocio — PASO 2: verifica el código OTP de 6 dígitos y,
-   * si es correcto, crea el negocio + membresía ADMIN + trial de 14 días
+   * si es correcto, crea el negocio + membresía ADMIN + trial de 30 días
    * (Edge Function register-business) y deja la sesión activa.
    */
   verifyOtp: (code: string) => Promise<void>;
@@ -358,7 +358,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // PASO 2a: confirma el código -> deja la sesión activa y confirmada.
       await verifyRegistrationOtp(code);
       // PASO 2b: con la sesión ya confirmada, crea el negocio + membresía
-       // ADMIN + trial de 14 días, y resuelve la sesión de negocio completa.
+      // ADMIN + trial de 30 días, y resuelve la sesión de negocio completa.
       const businessSession = await completeRegistration();
 
       hydrateBusinessConfig(businessSession);
