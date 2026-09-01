@@ -222,36 +222,36 @@ export class InventoryEngine {
   }
 
   /**
-   * Paso 3.2 (Cocina): decide el `requiresKitchen` con el que nace un
-   * producto NUEVO cuando el formulario/import no lo manda explícito.
-   *
-   * Prioridad:
-   *   1. `explicitValue` — si el caller (formulario manual, edición) sí
-   *      mandó el flag, esa es la fuente de verdad y no se toca.
-   *   2. `category.requiresKitchenByDefault` — si no vino explícito, se
-   *      hereda el default de la categoría del producto (ver Paso 3.1).
-   *      Esto es lo que hace que el import de menú con IA (Paso 2.4, que
-   *      nunca manda `requiresKitchen`) quede bien clasificado sin que el
-   *      negocio tenga que corregir producto por producto.
-   *   3. `true` — si no hay categoryRepository inyectado, o la categoría
-   *      no existe/no tiene el campo seteado, cae al default histórico
-   *      (mismo comportamiento que antes de este paso).
-   */
-  private async resolveRequiresKitchenDefault(
-    categoryId: string,
-    explicitValue: boolean | undefined
-  ): Promise<boolean> {
-    if (explicitValue !== undefined) {
-      return explicitValue;
-    }
+    * Paso 3.2 (Cocina): decide el `requiresKitchen` con el que nace un
+    * producto NUEVO cuando el formulario/import no lo manda explícito.
+    *
+    * Prioridad:
+    *   1. `explicitValue` — si el caller (formulario manual, edición) sí
+    *      mandó el flag, esa es la fuente de verdad y no se toca.
+    *   2. `category.requiresKitchenByDefault` — si no vino explícito, se
+    *      hereda el default de la categoría del producto (ver Paso 3.1).
+    *      Esto es lo que hace que el import de menú con IA (Paso 2.4, que
+    *      nunca manda `requiresKitchen`) quede bien clasificado sin que el
+    *      negocio tenga que corregir producto por producto.
+    *   3. `false` — si no hay categoryRepository inyectado, o la categoría
+    *      no existe/no tiene el campo seteado, cae al default seguro (false)
+    *      para no enviar productos a cocina por defecto.
+    */
+   private async resolveRequiresKitchenDefault(
+     categoryId: string,
+     explicitValue: boolean | undefined
+   ): Promise<boolean> {
+     if (explicitValue !== undefined) {
+       return explicitValue;
+     }
 
-    if (!this.categoryRepository) {
-      return true;
-    }
+     if (!this.categoryRepository) {
+       return false;
+     }
 
-    const category = await this.categoryRepository.findById(categoryId);
-    return category?.requiresKitchenByDefault ?? true;
-  }
+     const category = await this.categoryRepository.findById(categoryId);
+     return category?.requiresKitchenByDefault ?? false;
+   }
 
   /** Crea un producto nuevo. Este es el punto de entrada real del formulario "Nuevo producto". */
   public async createProduct(input: ProductInput, performedBy?: string): Promise<Product> {

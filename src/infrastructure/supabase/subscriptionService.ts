@@ -8,6 +8,7 @@
    =========================================================================== */
 
 import { supabase } from "./supabaseClient";
+import { TRIAL_PERIOD_DAYS } from "../../core/config/trial";
 import type {
   Subscription,
   SubscriptionPayment,
@@ -70,7 +71,7 @@ export class SubscriptionService {
 
       const now = new Date();
       const trialEndsAt = new Date(now);
-      trialEndsAt.setDate(trialEndsAt.getDate() + 30);
+       trialEndsAt.setDate(trialEndsAt.getDate() + TRIAL_PERIOD_DAYS);
 
       const { error: updateError } = await supabase
         .from("businesses")
@@ -423,21 +424,15 @@ export class SubscriptionService {
     }
   }
 
-  async recordTrialUsage(userId: string, businessId: string): Promise<{ ok: boolean; error?: string }> {
-    try {
-      const { error } = await supabase.rpc("record_trial_usage", {
-        p_user_id: userId,
-        p_business_id: businessId
-      });
-
-      if (error) {
-        return { ok: false, error: error.message };
-      }
-
-      return { ok: true };
-    } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : String(error) };
-    }
+  async recordTrialUsage(_userId: string, _businessId: string): Promise<{ ok: boolean; error?: string }> {
+    // NO se puede registrar trial usage desde el cliente.
+    // La inserción de user_trial_usage ocurre exclusivamente desde
+    // la Edge Function register-business, que valida el usuario vía JWT.
+    // Ver supabase/migrations/20260829_revoke_trial_usage_grants.sql
+    return {
+      ok: false,
+      error: "TRIAL_USAGE_RECORD_FORBIDDEN: el registro de uso del trial solo se puede realizar a través de la Edge Function register-business. No se admite la llamada directa desde el cliente."
+    };
   }
 
   async cancelSubscription(businessId: string, actorId?: string): Promise<{ ok: boolean; alreadyCancelled?: boolean; error?: string }> {

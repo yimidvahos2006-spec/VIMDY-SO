@@ -16,7 +16,7 @@ import { VimdyButton } from "../components/ui/VimdyButton";
  *
  *   1. El usuario escribe el código -> verifyOtp(code) en AuthContext.
  *   2. Si es correcto: AuthContext confirma la sesión, crea el negocio +
-   *      membresía ADMIN + trial de 30 días (Edge Function register-business)
+     *      membresía ADMIN + trial de 14 días (Edge Function register-business)
  *      y deja la sesión activa. Esta pantalla solo espera y navega.
  *   3. Si el usuario no recibió el código, "Reenviar código" (con
  *      enfriamiento de 30s manejado en authOtp.ts) dispara uno nuevo.
@@ -95,8 +95,17 @@ export function OtpPage() {
       await resendOtp();
       setResendMessage("Te enviamos un nuevo código.");
       setCooldown(resendCooldownSeconds());
-    } catch {
-      // El AuthContext ya guarda el mensaje de error en `error`.
+    } catch (err) {
+      // El AuthContext ya guarda el mensaje de error en `error`, pero si
+      // el error no se propagó correctamente, mostramos un mensaje local
+      // para asegurar que el usuario siempre vea feedback.
+      if (!error) {
+        setLocalError(
+          err instanceof Error
+            ? err.message
+            : "No se pudo reenviar el código. Inténtalo de nuevo."
+        );
+      }
     } finally {
       setIsResending(false);
     }
@@ -147,7 +156,7 @@ export function OtpPage() {
             )}
 
             {resendMessage && !localError && !error && (
-              <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-sm text-cyan-300">
+              <div className="rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-2 text-sm text-green-300">
                 {resendMessage}
               </div>
             )}

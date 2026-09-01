@@ -5,28 +5,16 @@ import { VimdyButton } from "../ui/VimdyButton";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 
 interface TablesStepProps {
+  preselectedCount?: number;
   onSaved: (tableCount: number) => void;
 }
 
 const TABLE_COUNT_OPTIONS = [5, 10, 20, 30, 40];
 
-/** Capacidad por defecto de cada mesa creada desde el onboarding — el
- * documento de producto solo pide la cantidad, no la capacidad por mesa,
- * así que se deja editable después desde Meseros/Configuración. */
 const DEFAULT_TABLE_CAPACITY = 4;
 
-/**
- * PASO 5 del asistente de onboarding (FASE 3).
- *
- * Solo se muestra si el negocio usa el módulo "mesas" (ver PASO 4). Al
- * elegir una cantidad, crea esa cantidad real de mesas ("Mesa 1"..."Mesa N")
- * a través de container.tableEngine.get().createTable — el mismo motor real que
- * usa Meseros/Configuración, así cada mesa nace con su ciclo de vida
- * completo (evento "table.created", estado FREE, etc). No hay simulación:
- * si falla la creación de alguna mesa, se muestra el error real.
- */
-export function TablesStep({ onSaved }: TablesStepProps) {
-  const [selected, setSelected] = useState<number | null>(null);
+export function TablesStep({ preselectedCount, onSaved }: TablesStepProps) {
+  const [selected, setSelected] = useState<number | null>(preselectedCount ?? null);
   const [saving, setSaving] = useState(false);
   const [createdCount, setCreatedCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -57,14 +45,16 @@ export function TablesStep({ onSaved }: TablesStepProps) {
     }
   }
 
+  const isReady = selected !== null;
+
   return (
     <GlassCard className="w-full max-w-lg px-6 py-10 sm:px-10 hover:translate-y-0 hover:scale-100 hover:border-slate-800 hover:shadow-xl">
       <div className="flex flex-col items-center gap-2 text-center mb-8">
         <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-wide">
-          ¿Cuántas mesas tiene tu negocio?
+          Confirma las mesas de tu negocio
         </h2>
         <p className="text-slate-400 text-sm max-w-sm">
-          Creamos tus mesas reales para que puedas empezar a atender de inmediato.
+          Puedes ajustar la cantidad o confirmar el número que ingresaste en el paso anterior.
         </p>
       </div>
 
@@ -78,7 +68,7 @@ export function TablesStep({ onSaved }: TablesStepProps) {
               key={count}
               type="button"
               onClick={() => handleSelect(count)}
-              disabled={saving}
+              disabled={saving || !isReady}
               className={`
                 flex flex-col items-center justify-center gap-1 rounded-2xl border px-3 py-5
                 transition-all duration-300

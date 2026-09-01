@@ -69,13 +69,10 @@ export function nextOnboardingStep(current: OnboardingStepId): OnboardingStepId 
 }
 
 /**
- * PASO 5 (mesas) es el único paso condicional del asistente: el documento
- * de producto dice "Si el negocio usa mesas: preguntar...". Un negocio
- * como Tienda o Panadería no tiene el módulo "mesas" activo (ver PASO 4 /
- * modules.ts), así que no tiene sentido preguntarle cuántas mesas tiene.
- * OnboardingPage llama a esta función justo después de "modules" en vez
- * de nextOnboardingStep() a secas.
+ * PASO 5 (mesas) se crea directamente en ModulesStep (PASO 4) cuando el
+ * usuario marca "Mesas" y escribe la cantidad. Ya no es un paso separado del
+ * asistente. Este resolver ahora salta directamente a "employees".
  */
-export function resolveAfterModules(enabledModules: readonly string[]): OnboardingStepId {
-  return enabledModules.includes("mesas") ? "tables" : "employees";
+export function resolveAfterModules(): OnboardingStepId {
+  return "employees";
 }

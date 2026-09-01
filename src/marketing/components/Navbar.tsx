@@ -3,7 +3,7 @@ import { Menu, X } from "lucide-react";
 import { VimdyLogo } from "../../presentation/components/ui/VimdyLogo";
 
 const navLinks = [
-  { href: "#producto", label: "Producto" },
+  { href: "/funciones", label: "Funciones" },
   { href: "#soluciones", label: "Soluciones" },
   { href: "#precios", label: "Precios" },
   { href: "#como-funciona", label: "Cómo funciona" },

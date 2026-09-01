@@ -1,8 +1,13 @@
 import { supabase, setCurrentBusinessId, setCurrentBranchId } from "./supabaseClient";
+import { APP_URL } from "../../core/config/appUrl";
+import { resendRegistrationOtp } from "./authOtp";
 import type { BusinessTypeId } from "../../core/config/businessTypes";
 import type { ModuleId } from "../../core/config/modules";
 import type { KitchenOutputMode } from "../../core/services/kitchenOutput";
+import type { OperationConfig } from "../../core/config/operation";
 import { getCountryDefaults } from "../../core/config/globalization";
+import { getDefaultModulesForBusinessType } from "../../core/config/modules";
+import { TRIAL_PERIOD_DAYS } from "../../core/config/trial";
 
 /* ===========================================================================
    authBusinessContext
@@ -69,6 +74,7 @@ interface PendingRegistration {
   ownerName: string;
   country: string;
   email: string;
+  businessType?: string;
 }
 
 const PENDING_REGISTRATION_KEY = "vimdy_pending_registration";
@@ -93,7 +99,7 @@ function translateAuthError(rawMessage: string | undefined): string {
     return "Este correo ya tiene una cuenta. Si ya la verificaste, inicia sesión. Si no la recuerdas, usa '¿Olvidaste tu contraseña?'.";
   }
   if (message.includes("password should be at least") || message.includes("password should contain")) {
-    return "La contraseña debe tener al menos 6 caracteres.";
+    return "La contraseña debe tener al menos 8 caracteres, combinando letras, números y símbolos.";
   }
   if (message.includes("unable to validate email") || message.includes("invalid email")) {
     return "El correo no tiene un formato válido.";
@@ -135,7 +141,31 @@ interface BusinessRow {
   salida_cocina: string | null;
 }
 
-const TRIAL_PERIOD_DAYS = 30;
+/**
+ * Calcula los módulos activos del negocio.
+ *
+ * Prioridad (NUNCA sobrescribe configuración válida):
+ *  1. Si enabled_modules tiene valores válidos → usar esos valores.
+ *  2. Si enabled_modules es null/[] y existe business_type → calcular defaults.
+ *  3. Si ninguno → [].
+ *
+ * Esto protege contra negocios creados antes del sistema de módulos
+ * o con enabled_modules corrupto a [].
+ */
+function resolveEnabledModules(businessRow: BusinessRow | undefined): ModuleId[] {
+  const existing = businessRow?.enabled_modules as ModuleId[] | null | undefined;
+
+  if (existing && existing.length > 0) {
+    return existing;
+  }
+
+  const businessType = businessRow?.business_type as BusinessTypeId | null | undefined;
+  if (businessType) {
+    return getDefaultModulesForBusinessType(businessType);
+  }
+
+  return [];
+}
 
 function toBusinessSession(
   userId: string,
@@ -155,10 +185,10 @@ function toBusinessSession(
     language: businessRow?.language ?? "es",
     timezone: businessRow?.timezone ?? "America/Bogota",
     taxRate: businessRow?.tax_rate ?? 19,
-    onboardingCompleted: businessRow?.onboarding_completed ?? false,
-    businessType: (businessRow?.business_type as BusinessTypeId | null) ?? null,
-    enabledModules: (businessRow?.enabled_modules as ModuleId[] | null) ?? [],
-    salidaCocina: (businessRow?.salida_cocina as KitchenOutputMode | null) ?? "pantalla"
+     onboardingCompleted: businessRow?.onboarding_completed ?? false,
+     businessType: (businessRow?.business_type as BusinessTypeId | null) ?? null,
+     enabledModules: resolveEnabledModules(businessRow),
+     salidaCocina: (businessRow?.salida_cocina as KitchenOutputMode | null) ?? "pantalla"
   };
 }
 
@@ -280,25 +310,35 @@ export async function beginRegistration(input: RegisterBusinessInput): Promise<v
     email: input.email,
     password: input.password,
     options: {
-      data: { full_name: input.ownerName }
+      data: { full_name: input.ownerName },
+      emailRedirectTo: `${APP_URL}/verificar-codigo`
     }
   });
 
   if (error) {
+    const msg = error.message.toLowerCase();
+    if (msg.includes("user already registered") || msg.includes("already registered")) {
+      savePendingRegistration({
+        businessName: input.businessName,
+        ownerName: input.ownerName,
+        country: input.country,
+        email: input.email
+      });
+      await resendRegistrationOtp();
+      return;
+    }
     throw new Error(translateAuthError(error.message));
   }
 
-  // Supabase no revela si un correo ya existe: si la cuenta ya estaba
-  // confirmada, devuelve un user con identities: [] en vez de un error
-  // (así evita que alguien use este formulario para averiguar qué correos
-  // están registrados). Lo detectamos igual para no dejar al usuario
-  // esperando un código que nunca le servirá.
   if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
-    throw new Error(
-      "Este correo ya está registrado. Si ya verificaste tu cuenta, inicia sesión. " +
-      "Si no la recuerdas, usa '¿Olvidaste tu contraseña?'. " +
-      "Si crees que es un error, contacta a soporte."
-    );
+    savePendingRegistration({
+      businessName: input.businessName,
+      ownerName: input.ownerName,
+      country: input.country,
+      email: input.email
+    });
+    await resendRegistrationOtp();
+    return;
   }
 
   savePendingRegistration({
@@ -326,7 +366,8 @@ export async function completeRegistration(): Promise<BusinessSession> {
     body: {
       businessName: pending.businessName,
       ownerName: pending.ownerName,
-      country: pending.country
+      country: pending.country,
+      businessType: pending.businessType ?? "restaurante"
     }
   });
 
@@ -345,10 +386,15 @@ export async function completeRegistration(): Promise<BusinessSession> {
         // El body no era JSON válido; nos quedamos con el mensaje genérico.
       }
     }
-    throw new Error(detailedMessage ?? fnError.message ?? "No se pudo crear el negocio.");
+    const errorMessage = fnError instanceof Error ? fnError.message : (
+      typeof fnError === "object" && fnError !== null && "message" in fnError
+        ? String((fnError as { message: unknown }).message)
+        : null
+    );
+    throw new Error(detailedMessage ?? errorMessage ?? "No se pudo crear el negocio.");
   }
-  if (fnData?.error) {
-    throw new Error(fnData.error);
+  if (fnData && typeof fnData === "object" && "error" in fnData) {
+    throw new Error((fnData as { error: string }).error);
   }
 
   const { data: userData, error: userError } = await supabase.auth.getUser();
@@ -465,7 +511,7 @@ export async function signOut(): Promise<void> {
  */
 export async function requestPasswordReset(email: string): Promise<void> {
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${window.location.origin}/actualizar-password`
+    redirectTo: `${APP_URL}/actualizar-password`
   });
 
   if (error) {
@@ -538,8 +584,53 @@ export async function setEnabledModules(businessId: string, modules: ModuleId[])
 }
 
 /**
- * Crea un negocio adicional para un usuario ya autenticado, reutilizando el
- * mismo auth.uid(). No requiere OTP porque la cuenta ya está confirmada.
+ * Guarda el modo de salida de cocina (pantalla/impresora) en Supabase.
+ * Se usa en el PASO 5.2 condicional del onboarding y en Configuración > Operación.
+ * Requiere la policy `businesses_update_own` (ver supabase/schema.sql).
+ */
+export async function setKitchenOutputMode(businessId: string, mode: KitchenOutputMode): Promise<void> {
+  const { error } = await supabase
+    .from("businesses")
+    .update({ salida_cocina: mode })
+    .eq("id", businessId);
+
+  if (error) {
+    throw new Error(error.message ?? "No se pudo guardar la salida de cocina.");
+  }
+}
+
+/**
+ * Guarda la configuración de operación del negocio en Supabase.
+ * Se usa en Configuración > Operación. Requiere la policy `businesses_update_own`.
+ */
+export async function setOperationConfig(businessId: string, config: OperationConfig): Promise<void> {
+  const { error } = await supabase
+    .from("businesses")
+    .update({
+      sales_channels: config.salesChannels,
+      inventory_type: config.inventoryType,
+      production_mode: config.productionMode,
+      kds_enabled: config.kdsEnabled,
+      printer_enabled: config.printerEnabled
+    })
+    .eq("id", businessId);
+
+  if (error) {
+    throw new Error(error.message ?? "No se pudo guardar la configuración de operación.");
+  }
+}
+
+/**
+ * Creates an additional business for an existing user.
+ *
+ * This function delegates the entire process (trial check, business creation,
+ * membership, owner profile, trial registration) to the register-business
+ * Edge Function, which runs with service_role and validates the user via JWT.
+ *
+ * The client NEVER calls record_trial_usage() directly — that RPC is now
+ * restricted to service_role only. The Edge Function performs the trial_usage
+ * insert with the authenticated user's identity obtained from the JWT, not
+ * from client-supplied data.
  */
 export async function createAdditionalBusiness(
   userId: string,
@@ -550,97 +641,45 @@ export async function createAdditionalBusiness(
     throw new Error("COUNTRY_INVALID: país no reconocido.");
   }
 
-  const now = new Date();
-  const trialEndsAt = new Date(now);
-  trialEndsAt.setDate(trialEndsAt.getDate() + TRIAL_PERIOD_DAYS);
-
-  const { data: hasUsedTrial, error: hasUsedTrialError } = await supabase.rpc("has_user_used_trial", {
-    p_user_id: userId
-  });
-
-  if (hasUsedTrialError || hasUsedTrial) {
-    throw new Error("TRIAL_YA_USADO: ya utilizaste tu prueba gratuita de 30 días. Puedes contratar un plan mensual o anual para continuar.");
+  if (!userId) {
+    throw new Error("USER_ID_REQUIRED: se necesita el ID del usuario autenticado.");
   }
-
-  const { data: existingBusinesses, error: existingError } = await supabase
-    .from("business_members")
-    .select("business_id")
-    .eq("user_id", userId);
-
-  if (existingError) {
-    throw new Error("BUSINESS_LOOKUP_FAILED: " + existingError.message);
-  }
-
-  if (existingBusinesses && existingBusinesses.length > 0) {
-    const { data: existingBizData, error: existingBizError } = await supabase
-      .from("businesses")
-      .select("id, plan, payment_status, subscription_status")
-      .in("id", existingBusinesses.map((b: { business_id: string }) => b.business_id))
-      .or("plan.eq.trial,plan.eq.suspended,payment_status.eq.none,payment_status.eq.pending");
-
-    if (existingBizError) {
-      throw new Error("EXISTING_BUSINESS_LOOKUP_FAILED: " + existingBizError.message);
+  const { data: fnData, error: fnError } = await supabase.functions.invoke("register-business", {
+    body: {
+      businessName: input.businessName.trim(),
+      ownerName: input.ownerName,
+      country: input.country
     }
+  });
 
-    if (existingBizData && existingBizData.length > 0) {
-      throw new Error("TRIAL_DUPLICADO: ya tienes un negocio en periodo de prueba o suspendido. Activa un plan para ese negocio antes de crear uno nuevo.");
+  if (fnError) {
+    let detailedMessage: string | null = null;
+    const context = (fnError as { context?: Response }).context;
+    if (context && typeof context.json === "function") {
+      try {
+        const body = await context.json();
+        detailedMessage = body?.error ?? null;
+      } catch {
+        // Body no válido, usar mensaje genérico
+      }
     }
+    throw new Error(detailedMessage ?? fnError.message ?? "No se pudo crear el negocio.");
+  }
+  if (fnData?.error) {
+    throw new Error(fnData.error);
   }
 
-  const { data: business, error: businessInsertError } = await supabase
-    .from("businesses")
-    .insert({
-      name: input.businessName.trim(),
-      plan: "trial",
-      trial_ends_at: trialEndsAt.toISOString(),
-      trial_used_at: now.toISOString(),
-      country: input.country,
-      currency: countryDefaults.currency,
-      language: countryDefaults.language,
-      timezone: countryDefaults.timezone,
-      tax_rate: countryDefaults.taxRate
-    })
-    .select("id")
-    .single();
-
-  if (businessInsertError || !business) {
-    throw new Error(businessInsertError?.message ?? "No se pudo crear el negocio.");
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (userError || !userData.user) {
+    throw new Error("Tu sesión no es válida. Vuelve a iniciar sesión.");
   }
 
-  const { error: memberInsertError } = await supabase.from("business_members").insert({
-    user_id: userId,
-    business_id: business.id,
-    role: "ADMIN"
-  });
-
-  if (memberInsertError) {
-    await supabase.from("businesses").delete().eq("id", business.id);
-    throw new Error(memberInsertError.message ?? "No se pudo asociar el usuario al negocio.");
+  const businessSession = await resolveBusinessSession(userData.user.id, input.ownerName);
+  if (!businessSession) {
+    throw new Error("El negocio se creó pero no se pudo cargar. Intenta iniciar sesión de nuevo.");
   }
 
-  const { error: trialUsageError } = await supabase.rpc("record_trial_usage", {
-    p_user_id: userId,
-    p_business_id: business.id
-  });
-
-  if (trialUsageError) {
-    await supabase.from("business_members").delete().eq("user_id", userId).eq("business_id", business.id);
-    await supabase.from("businesses").delete().eq("id", business.id);
-    throw new Error("TRIAL_USAGE_RECORD_FAILED: " + trialUsageError.message);
-  }
-
-  const session = toBusinessSession(userId, business.id, "ADMIN", input.ownerName, {
-    name: input.businessName,
-    country: input.country,
-    currency: countryDefaults.currency,
-    language: countryDefaults.language,
-    timezone: countryDefaults.timezone,
-    tax_rate: countryDefaults.taxRate,
-    onboarding_completed: false,
-    business_type: null,
-    enabled_modules: [],
-    salida_cocina: "pantalla"
-  });
-
-  return session;
+  setCurrentBusinessId(businessSession.businessId);
+  setCurrentBranchId(await resolveDefaultBranchId(businessSession.businessId));
+  return businessSession;
 }

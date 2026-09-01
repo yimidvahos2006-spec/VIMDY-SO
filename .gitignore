@@ -21,3 +21,6 @@ test-results/
 marketing-*.png
 hero-*.png
 scripts/e2e/
+
+.vercel
+.env*

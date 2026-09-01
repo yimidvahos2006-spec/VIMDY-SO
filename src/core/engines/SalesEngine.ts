@@ -885,7 +885,8 @@ export class SalesEngine {
     // Solo si ya había sido cobrada llegó a sumarse al Dashboard (eso
     // ocurre al pagar, no al crear la venta) — así que solo en ese caso
     // hay algo que revertir ahí.
-    const wasPaid = sale.status === "PAID";
+    const status = sale.status as string;
+    const wasPaid = status === "PAID" || status === "CLOSED";
 
     const alreadyRefunded = this.getRefundedQuantities(sale);
     const remainingItems: SaleItem[] = sale.items
@@ -895,12 +896,13 @@ export class SalesEngine {
       }))
       .filter(item => item.quantity > 0);
 
-    await this.updateInventory(
-      remainingItems,
-      `Cancelación venta ${sale.code ?? sale.id}: ${reason}`,
-      "INCREASE"
-    );
+    // 🔒 FIX DE SEGURIDAD: Calcular el monto restante (después de reembolsos parciales)
+    // Si la venta tenía reembolsos parciales, solo devolver el dinero restante
+    // Usamos el total de la venta menos lo ya reembolsado para incluir impuestos/descuentos
+    const alreadyRefundedTotal = (sale.refunds ?? []).reduce((sum, r) => sum + r.amount, 0);
+    const remainingAmount = roundMoney(Math.max((sale.total ?? 0) - alreadyRefundedTotal, 0), companyConfigStore.get().currency);
 
+    // Primero cancelar en cocina (best-effort)
     try {
       await this.kitchen.updateStatus(sale.id, "CANCELADO");
     } catch (kitchenError) {
@@ -909,6 +911,7 @@ export class SalesEngine {
       });
     }
 
+    // Actualizar el estado de la venta
     const cancelled = await this.updateSale({
       ...sale,
       status: "CANCELLED",
@@ -916,12 +919,22 @@ export class SalesEngine {
     });
 
     if (wasPaid) {
-      this.reverseDashboardForSale(sale);
+      // 🔒 FIX DE SEGURIDAD: Registrar el egreso de caja ANTES de restaurar inventario
+      // Usar ID determinístico para evitar duplicados en reintentos
       await this.cash.registerExpense(
-        sale.total,
+        remainingAmount,
         `Cancelación venta ${sale.code ?? sale.id}: ${reason}`,
         `sale-cancel-${sale.id}`
       );
+
+      // Ahora restaurar el inventario
+      await this.updateInventory(
+        remainingItems,
+        `Cancelación venta ${sale.code ?? sale.id}: ${reason}`,
+        "INCREASE"
+      );
+
+      this.reverseDashboardForSale(sale, remainingAmount, remainingItems.reduce((sum, item) => sum + item.quantity, 0));
     }
 
     await this.updateDashboard();
@@ -982,27 +995,43 @@ export class SalesEngine {
       );
     }
 
-    const currency = companyConfigStore.get().currency;
-    const remainingAmount = roundMoney(
-      remainingItems.reduce((sum, item) => sum + item.price * item.quantity, 0),
-      currency
-    );
+    // 🔒 FIX: Calcular el monto restante incluyendo impuestos/descuentos
+    // Usamos el total de la venta menos lo ya reembolsado
+    const alreadyRefundedTotal = (sale.refunds ?? []).reduce((sum, r) => sum + r.amount, 0);
+    const remainingAmount = roundMoney(Math.max((sale.total ?? 0) - alreadyRefundedTotal, 0), companyConfigStore.get().currency);
 
     const paymentResult = this.payment.refund(sale, remainingAmount);
 
     await this.verifyInventoryTrail(sale);
 
+    // 🔒 FIX DE SEGURIDAD: Usar ID determinístico para el reembolso
+    // Si el proceso falla a mitad de camino, podemos detectar y compensar
+    const refundRecordId = crypto.randomUUID();
+    const cashExpenseId = `sale-refund-${sale.id}-${refundRecordId}`;
+
+    // Primero registrar el movimiento de caja (con ID determinístico)
+    // Si esto falla, NO restauramos el inventario - no queda inconsistente
+    await this.updateCash(sale, "OUT", remainingAmount, cashExpenseId);
+
+    // Luego restaurar el inventario
+    // Si esto falla, el movimiento de caja ya está registrado y podemos compensar
     await this.updateInventory(
       remainingItems,
       `Reembolso venta ${sale.code ?? sale.id}: ${reason}`,
       "INCREASE"
     );
 
-    await this.updateCash(sale, "OUT", remainingAmount);
-
     const refunded = await this.updateSale({
       ...sale,
       status: "REFUNDED",
+      refunds: [...(sale.refunds ?? []), {
+        id: refundRecordId,
+        items: remainingItems.map(i => ({ productId: i.productId, quantity: i.quantity })),
+        amount: remainingAmount,
+        reason,
+        actorId,
+        createdAt: new Date()
+      }],
       notes: this.appendNote(sale.notes, `Reembolsada: ${reason}`)
     });
 
@@ -1138,27 +1167,8 @@ export class SalesEngine {
 
     await this.verifyInventoryTrail(sale);
 
-    // Solo se repone al inventario lo que efectivamente se está
-    // devolviendo en ESTE reembolso, no la venta entera.
-    const restockItems: SaleItem[] = cleanItems.map(line => ({
-      productId: line.productId,
-      quantity: line.quantity,
-      price: priceByProduct.get(line.productId) ?? 0
-    }));
-
-    await this.updateInventory(
-      restockItems,
-      `Reembolso parcial venta ${sale.code ?? sale.id}: ${reason}`,
-      "INCREASE"
-    );
-
-    await this.cash.registerExpense(
-      refundAmount,
-      `Reembolso parcial venta ${sale.code ?? sale.id}`
-    );
-
-    const paymentResult = this.payment.refundAmount(refundAmount);
-
+    // 🔒 FIX DE SEGURIDAD: Usar ID determinístico para el reembolso parcial
+    // Esto previene duplicados si el proceso se reintenta
     const refundRecord: SaleRefundRecord = {
       id: crypto.randomUUID(),
       items: cleanItems,
@@ -1167,6 +1177,31 @@ export class SalesEngine {
       actorId,
       createdAt: new Date()
     };
+    const cashExpenseId = `sale-refund-${sale.id}-${refundRecord.id}`;
+
+    // Solo se repone al inventario lo que efectivamente se está
+    // devolviendo en ESTE reembolso, no la venta entera.
+    const restockItems: SaleItem[] = cleanItems.map(line => ({
+      productId: line.productId,
+      quantity: line.quantity,
+      price: priceByProduct.get(line.productId) ?? 0
+    }));
+
+    // Primero registrar el movimiento de caja (con ID determinístico)
+    await this.cash.registerExpense(
+      refundAmount,
+      `Reembolso parcial venta ${sale.code ?? sale.id}`,
+      cashExpenseId
+    );
+
+    // Luego restaurar el inventario
+    await this.updateInventory(
+      restockItems,
+      `Reembolso parcial venta ${sale.code ?? sale.id}: ${reason}`,
+      "INCREASE"
+    );
+
+    const paymentResult = this.payment.refundAmount(refundAmount);
 
     // ¿Con este reembolso ya no queda NADA reembolsable? Entonces es,
     // en la práctica, un reembolso total hecho ítem por ítem — se marca
@@ -1468,6 +1503,29 @@ export class SalesEngine {
 
       return { sale: finalSale, payment: paymentResult };
     } catch (err) {
+      // ROLLBACK DE INVENTARIO: si el pago falla después de que el stock
+      // ya se descontó (createSale -> updateInventory), hay que reponer
+      // el inventario para que el producto vuelva a estar disponible.
+      // Sin esto, el stock quedaría inconsistente: producto descontado
+      // pero venta no pagada.
+      if (!isOptimisticLockError(err)) {
+        try {
+          await this.updateInventory(
+            current.items,
+            `Reversión automática: falló el cobro de la venta ${current.code ?? current.id}`,
+            "INCREASE"
+          );
+        } catch (rollbackError) {
+          logWarning(
+            `No se pudo revertir el inventario de la venta ${current.id} después de un cobro fallido`,
+            {
+              category: "sales",
+              context: { saleId: current.id, rollbackError: String(rollbackError) }
+            }
+          );
+        }
+      }
+
       // CIERRE DE LA VENTANA DE CARRERA: el chequeo de idempotencia de arriba
       // (current.status === "PAID"/"CLOSED") solo protege contra reintentos
       // SECUENCIALES. Si dos llamadas a registerPayment para la MISMA venta
@@ -1681,7 +1739,8 @@ export class SalesEngine {
   public async updateCash(
     sale: Sale,
     direction: "IN" | "OUT" = "IN",
-    amount: number = sale.total
+    amount: number = sale.total,
+    deterministicId?: string
   ): Promise<CashMovement> {
     const description =
       direction === "IN"
@@ -1689,9 +1748,10 @@ export class SalesEngine {
         : `Reembolso venta ${sale.code ?? sale.id}`;
 
     const id =
-      direction === "IN"
+      deterministicId ??
+      (direction === "IN"
         ? `sale-payment-${sale.id}`
-        : `sale-refund-${sale.id}`;
+        : `sale-refund-${sale.id}`);
 
     return direction === "IN"
       ? await this.cash.registerIncome(amount, description, sale.paymentMethod as CashMovement["paymentMethod"], undefined, id)

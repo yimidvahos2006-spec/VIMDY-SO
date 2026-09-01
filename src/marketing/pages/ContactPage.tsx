@@ -1,4 +1,5 @@
-import { Mail, MessageCircle, Phone } from "lucide-react";
+import { Mail, MessageCircle } from "lucide-react";
+import { VIMDY_CONTACT } from "../../core/config/contact";
 
 export function ContactPage() {
   return (
@@ -17,30 +18,24 @@ export function ContactPage() {
 
             <div className="grid md:grid-cols-3 gap-6">
               <a
-                href="mailto:contacto@vimdy.co"
+                href={`mailto:${VIMDY_CONTACT.email.support}`}
                 className="glass-card rounded-2xl p-6 text-center"
               >
                 <Mail className="mx-auto mb-4 text-blue-400" size={28} />
                 <h3 className="text-white font-semibold mb-1">Email</h3>
-                <p className="text-sm text-zinc-400">contacto@vimdy.co</p>
+                <p className="text-sm text-zinc-400">{VIMDY_CONTACT.email.support}</p>
               </a>
 
               <a
-                href="https://wa.me/573000000000"
+                href={VIMDY_CONTACT.whatsapp.link}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="glass-card rounded-2xl p-6 text-center"
               >
                 <MessageCircle className="mx-auto mb-4 text-green-400" size={28} />
                 <h3 className="text-white font-semibold mb-1">WhatsApp</h3>
-                <p className="text-sm text-zinc-400">+57 300 000 0000</p>
+                <p className="text-sm text-zinc-400">{VIMDY_CONTACT.whatsapp.number}</p>
               </a>
-
-              <div className="glass-card rounded-2xl p-6 text-center">
-                <Phone className="mx-auto mb-4 text-blue-400" size={28} />
-                <h3 className="text-white font-semibold mb-1">Teléfono</h3>
-                <p className="text-sm text-zinc-400">Próximamente</p>
-              </div>
             </div>
           </div>
         </section>

@@ -15,7 +15,7 @@ describe("SubscriptionEngine — prueba de 100 negocios", () => {
 
     for (let i = 1; i <= 100; i++) {
       const trialEndsAt = new Date(baseDate);
-      trialEndsAt.setDate(trialEndsAt.getDate() + 30 + (i % 30));
+      trialEndsAt.setDate(trialEndsAt.getDate() + 14 + (i % 14));
 
       businesses.push({
         businessId: `business-${i}`,
@@ -28,7 +28,7 @@ describe("SubscriptionEngine — prueba de 100 negocios", () => {
       });
     }
 
-    const now = new Date("2026-09-19T00:00:00Z");
+    const now = new Date("2026-08-25T00:00:00Z");
 
     let trialCount = 0;
     for (let i = 1; i <= 100; i++) {

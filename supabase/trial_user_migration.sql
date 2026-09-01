@@ -63,16 +63,14 @@ language plpgsql
 security definer
 as $$
 begin
-  insert into user_trial_usage (user_id, business_id)
-  values (p_user_id, p_business_id)
-  on conflict (user_id) do update set
-    business_id = excluded.business_id,
-    used_at = excluded.used_at;
+  insert into user_trial_usage (user_id, business_id, plan, used_at)
+  values (p_user_id, p_business_id, 'trial', now())
+  on conflict (user_id) do nothing;
 end;
 $$;
 
 revoke all on function public.record_trial_usage(uuid, uuid) from public, anon, authenticated;
-grant execute on function public.record_trial_usage(uuid, uuid) to service_role, authenticated;
+grant execute on function public.record_trial_usage(uuid, uuid) to service_role;
 
 -- ============================================================================
 -- FIN DE MIGRACIÓN

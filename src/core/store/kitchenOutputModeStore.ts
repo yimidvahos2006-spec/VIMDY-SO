@@ -27,6 +27,10 @@ class KitchenOutputModeStore extends ObservableStore<KitchenOutputMode> {
   set(mode: KitchenOutputMode) {
     this.publish(mode);
   }
+
+  clear() {
+    this.publish("pantalla");
+  }
 }
 
 export const kitchenOutputModeStore = new KitchenOutputModeStore();

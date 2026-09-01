@@ -47,7 +47,7 @@ function translateOtpError(rawMessage: string | undefined): string {
   if (message.includes("invalid") || message.includes("token has expired or is invalid")) {
     return "El código no es correcto. Revisa los 6 dígitos e inténtalo de nuevo.";
   }
-  if (message.includes("rate limit") || message.includes("too many")) {
+  if (message.includes("rate limit") || message.includes("too many") || message.includes("after 60 seconds")) {
     return "Demasiados intentos. Espera un momento antes de volver a intentarlo.";
   }
   if (message.includes("already confirmed") || message.includes("already been confirmed")) {
@@ -58,6 +58,34 @@ function translateOtpError(rawMessage: string | undefined): string {
   }
 
   return rawMessage || "No se pudo verificar el código. Inténtalo de nuevo.";
+}
+
+/**
+ * Traduce los errores específicos del flujo de reenvío de OTP. Separado de
+ * translateOtpError() porque los mensajes de error de resend son diferentes
+ * a los de verificación (ej. "For security reasons, you can only request
+ * this after 60 seconds" vs "otp expired").
+ */
+function translateResendError(rawMessage: string | undefined): string {
+  const message = (rawMessage ?? "").toLowerCase();
+
+  if (message.includes("rate limit") || message.includes("too many") || message.includes("after 60 seconds") || message.includes("for security reasons")) {
+    return "Espera un momento antes de pedir otro código.";
+  }
+  if (message.includes("already confirmed") || message.includes("already been confirmed")) {
+    return "Este correo ya fue verificado. Puedes continuar.";
+  }
+  if (message.includes("user not found") || message.includes("does not exist")) {
+    return "No encontramos una cuenta con este correo. Vuelve a registrarte.";
+  }
+  if (message.includes("fetch") || message.includes("network") || message.includes("timeout")) {
+    return "No hay conexión con el servidor. Revisa tu internet e inténtalo de nuevo.";
+  }
+  if (message.includes("email not sent") || message.includes("unable to send")) {
+    return "No pudimos enviar el correo. Inténtalo de nuevo en un momento.";
+  }
+
+  return rawMessage || "No se pudo reenviar el código. Inténtalo de nuevo.";
 }
 
 /**
@@ -95,6 +123,10 @@ export async function verifyRegistrationOtp(code: string): Promise<void> {
  * Aplica un enfriamiento de 30s en el propio cliente para evitar que un
  * doble clic dispare dos correos y para darle al usuario un mensaje claro
  * en vez de esperar a que Supabase responda con "rate limit".
+ *
+ * Cuando el código anterior ya expiró, supabase.auth.resend() genera un
+ * nuevo OTP con su propio tiempo de expiración (otp_expiry configurado en
+ * Supabase). El código anterior queda invalidado automáticamente.
  */
 export async function resendRegistrationOtp(): Promise<void> {
   const email = requirePendingEmail();
@@ -112,7 +144,7 @@ export async function resendRegistrationOtp(): Promise<void> {
   });
 
   if (error) {
-    throw new Error(translateOtpError(error.message));
+    throw new Error(translateResendError(error.message));
   }
 
   lastResendAt = now;

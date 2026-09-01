@@ -10,7 +10,7 @@ import { queueOpenTableOffline } from "../../../core/services/offlineTable";
 interface Props {
   table: Table;
   /** id del mesero ligero (Waiter) elegido en la pantalla de tarjetas. */
-  waiterId: string;
+  waiterId: string | null;
   onClose: () => void;
   onOpened: () => void;
 }
@@ -38,7 +38,7 @@ export function OpenTableDialog({ table, waiterId, onClose, onOpened }: Props) {
     const input = {
       tableId: table.id,
       peopleCount,
-      waiterId,
+      waiterId: waiterId ?? undefined,
       operationId: openAttemptIdRef.current
     };
 

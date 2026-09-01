@@ -67,8 +67,8 @@ export function UpdatePasswordPage() {
       <div className="min-h-screen flex flex-col items-center justify-center px-4">
         <div className="mb-8 flex flex-col items-center gap-4">
           <VimdyLogo size={90} />
-          <h1 className="text-2xl font-bold text-white tracking-wide">VIMDY OS</h1>
-          <p className="text-vimdy-text-secondary">Crea una nueva contraseña</p>
+           <h1 className="text-2xl font-bold text-white tracking-wide">VIMDY</h1>
+            <p className="text-vimdy-text-secondary">Actualizar contraseña</p>
         </div>
 
         <GlassCard className="w-full max-w-sm p-8">
@@ -95,7 +95,7 @@ export function UpdatePasswordPage() {
 
               <PasswordField
                 id="confirmPassword"
-                label="Confirma la contraseña"
+                 label="Confirmar contraseña"
                 value={confirmPassword}
                 onChange={setConfirmPassword}
                 disabled={isLoading}
@@ -110,7 +110,7 @@ export function UpdatePasswordPage() {
               )}
 
               <VimdyButton type="submit" disabled={isLoading} className="w-full mt-2">
-                {isLoading ? "Guardando..." : "Guardar nueva contraseña"}
+                {isLoading ? "Actualizando..." : "Actualizar contraseña"}
               </VimdyButton>
 
               {serverError && (

@@ -49,8 +49,8 @@ export function ForgotPasswordPage() {
       <div className="min-h-screen flex flex-col items-center justify-center px-4">
         <div className="mb-8 flex flex-col items-center gap-4">
           <VimdyLogo size={90} />
-          <h1 className="text-2xl font-bold text-white tracking-wide">VIMDY OS</h1>
-          <p className="text-vimdy-text-secondary">Recupera el acceso a tu cuenta</p>
+          <h1 className="text-2xl font-bold text-white tracking-wide">VIMDY</h1>
+            <p className="text-vimdy-text-secondary">Recupera el acceso a tu cuenta</p>
         </div>
 
         <GlassCard className="w-full max-w-sm p-8">
@@ -87,7 +87,7 @@ export function ForgotPasswordPage() {
                   onChange={(e) => setEmail(e.target.value)}
                   disabled={isLoading}
                   className="w-full rounded-vimdy-sm border border-vimdy-border bg-vimdy-background px-4 py-3 text-vimdy-body text-vimdy-text placeholder-vimdy-text-tertiary outline-none transition-colors duration-vimdy-fast focus:border-vimdy-accent focus:shadow-vimdy-accent disabled:opacity-50"
-                  placeholder="tucorreo@vimdy.com"
+                  placeholder="tucorreo@vimdy.co"
                   autoFocus
                 />
               </div>

@@ -22,11 +22,11 @@ describe("SubscriptionEngine — especificación de suscripciones", () => {
   }
 
   describe("Prueba 1 — Crear negocio nuevo", () => {
-    it("trial recién creado tiene 30 días restantes", () => {
+    it("trial recién creado tiene 14 días restantes", () => {
       const now = new Date("2026-08-20T00:00:00Z");
-      const trialEndsAt = new Date("2026-09-19T00:00:00Z");
+      const trialEndsAt = new Date("2026-09-03T00:00:00Z");
       const sub = makeSubscription(trialEndsAt.toISOString());
-      expect(engine.daysRemaining(sub.trialEndsAt, now)).toBe(30);
+      expect(engine.daysRemaining(sub.trialEndsAt, now)).toBe(14);
       expect(engine.effectiveStatus(sub, now)).toBe("trial");
       expect(engine.isBlocked(sub, now)).toBe(false);
     });

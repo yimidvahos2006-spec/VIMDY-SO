@@ -73,7 +73,7 @@ let unsubscribePendingSales: (() => void) | null = null;
 let syncBackoffUntil = 0;
 
 /** Reproduce una única PendingSale contra Supabase usando los engines reales. */
-async function syncOne(pending: PendingSale): Promise<Sale> {
+export async function syncOne(pending: PendingSale): Promise<Sale> {
   const currentBusinessId = getCurrentBusinessId();
   const currentBranchId = getCurrentBranchId();
 

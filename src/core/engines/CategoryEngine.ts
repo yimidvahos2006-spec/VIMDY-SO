@@ -53,10 +53,11 @@ export class CategoryEngine {
       description: input.description?.trim() || undefined,
       active: true,
       createdAt: new Date(),
-      // Paso 3.1: default true (igual que Product.requiresKitchen) si el
-      // formulario no dice nada — así una categoría creada sin tocar este
-      // campo se comporta como siempre se comportó antes de que existiera.
-      requiresKitchenByDefault: input.requiresKitchenByDefault ?? true,
+      // Paso 3.1: default false (seguro) si el formulario no dice nada —
+      // así una categoría creada sin tocar este campo NO asume cocina por
+      // defecto. Esto evita que productos de tiendas, bares, etc. se envíen
+      // a cocina incorrectamente.
+      requiresKitchenByDefault: input.requiresKitchenByDefault ?? false,
       printStation: input.printStation?.trim() || undefined
     };
 

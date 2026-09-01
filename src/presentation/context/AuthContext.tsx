@@ -8,10 +8,12 @@ import { startOfflineSalesSync, stopOfflineSalesSync } from "../../core/offline/
 import { startOfflineInventorySync, stopOfflineInventorySync } from "../../core/offline/syncPendingInventoryAdjustments";
 import { startOfflineTableSync, stopOfflineTableSync } from "../../core/offline/syncPendingTableOperations";
 import { startOfflineCustomerSync, stopOfflineCustomerSync } from "../../core/offline/syncPendingCustomerOperations";
+import { startOfflineKitchenSync, stopOfflineKitchenSync } from "../../core/offline/syncPendingKitchenOrders";
 import { pendingSalesStore } from "../../core/offline/pendingSalesStore";
 import { pendingCustomerOperationsStore } from "../../core/offline/pendingCustomerOperationsStore";
 import { pendingTableOperationsStore } from "../../core/offline/pendingTableOperationsStore";
 import { pendingInventoryAdjustmentsStore } from "../../core/offline/pendingInventoryAdjustmentsStore";
+import { pendingKitchenOrdersStore } from "../../core/offline/pendingKitchenOrdersStore";
 import {
   signIn,
   signOut,
@@ -78,7 +80,7 @@ interface AuthContextValue {
   register: (input: RegisterBusinessInput) => Promise<void>;
   /**
    * Registro de negocio — PASO 2: verifica el código OTP de 6 dígitos y,
-   * si es correcto, crea el negocio + membresía ADMIN + trial de 30 días
+   * si es correcto, crea el negocio + membresía ADMIN + trial de 14 días
    * (Edge Function register-business) y deja la sesión activa.
    */
   verifyOtp: (code: string) => Promise<void>;
@@ -226,6 +228,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           startOfflineInventorySync();
           startOfflineTableSync();
           startOfflineCustomerSync();
+          startOfflineKitchenSync();
         } catch (error) {
           console.error("[AuthContext] Fallo en bootstrap de sesión:", error);
         }
@@ -255,15 +258,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         stopOfflineInventorySync();
         stopOfflineTableSync();
         stopOfflineCustomerSync();
+        stopOfflineKitchenSync();
         void pendingSalesStore.clear();
         void pendingCustomerOperationsStore.clear();
         void pendingTableOperationsStore.clear();
         void pendingInventoryAdjustmentsStore.clear();
+        void pendingKitchenOrdersStore.clear();
         setCurrentBusinessId(null);
         setCurrentBranchId(null);
         setUser(null);
         setRole(null);
         setSessionId(null);
+        enabledModulesStore.clear();
+        subscriptionStore.clear();
+        kitchenOutputModeStore.clear();
       }
     });
 
@@ -302,6 +310,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       startOfflineInventorySync();
       startOfflineTableSync();
       startOfflineCustomerSync();
+      startOfflineKitchenSync();
       setUser(u);
       setRole(r);
       setSessionId(businessSession.userId);
@@ -358,7 +367,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // PASO 2a: confirma el código -> deja la sesión activa y confirmada.
       await verifyRegistrationOtp(code);
       // PASO 2b: con la sesión ya confirmada, crea el negocio + membresía
-      // ADMIN + trial de 30 días, y resuelve la sesión de negocio completa.
+      // ADMIN + trial de 14 días, y resuelve la sesión de negocio completa.
       const businessSession = await completeRegistration();
 
       hydrateBusinessConfig(businessSession);
@@ -373,6 +382,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       startOfflineInventorySync();
       startOfflineTableSync();
       startOfflineCustomerSync();
+      startOfflineKitchenSync();
       setUser(u);
       setRole(r);
       setSessionId(businessSession.userId);
@@ -414,15 +424,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     stopOfflineInventorySync();
     stopOfflineTableSync();
     stopOfflineCustomerSync();
+    stopOfflineKitchenSync();
     void pendingSalesStore.clear();
     void pendingCustomerOperationsStore.clear();
     void pendingTableOperationsStore.clear();
     void pendingInventoryAdjustmentsStore.clear();
+    void pendingKitchenOrdersStore.clear();
     enabledModulesStore.clear();
     subscriptionStore.clear();
+    kitchenOutputModeStore.clear();
     setUser(null);
     setRole(null);
     setSessionId(null);
+    setBusinessId(null);
+    setOnboardingCompleted(false);
   }, []);
 
   const handleRequestPasswordReset = useCallback(async (email: string) => {

@@ -125,7 +125,38 @@ Deno.serve(async (req: Request) => {
     return json({ error: "Faltan campos: businessId y plan ('monthly' | 'yearly') son obligatorios." }, 400);
   }
 
+  // 🔒 VERIFICACIÓN DE SEGURIDAD: Verificar JWT y membresía
+  const authHeader = req.headers.get("Authorization") ?? req.headers.get("authorization");
+  const accessToken = authHeader?.replace(/^Bearer\s+/i, "").trim();
+
+  if (!accessToken) {
+    return json({ error: "NO_AUTH: falta el token de sesión." }, 401);
+  }
+
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+
+  const { data: userData, error: userError } = await admin.auth.getUser(accessToken);
+  if (userError || !userData.user) {
+    return json({ error: "SESSION_INVALID" }, 401);
+  }
+
+  const authUser = userData.user;
+
+  // Verificar que el usuario es miembro del negocio
+  const { data: membership, error: membershipError } = await admin
+    .from("business_members")
+    .select("role")
+    .eq("user_id", authUser.id)
+    .eq("business_id", businessId)
+    .maybeSingle();
+
+  if (membershipError) {
+    return json({ error: "MEMBERSHIP_CHECK_FAILED", detail: membershipError.message }, 500);
+  }
+
+  if (!membership) {
+    return json({ error: "NOT_A_MEMBER: no perteneces a este negocio." }, 403);
+  }
 
   try {
     // 1) El negocio y su país/moneda salen de la base de datos, nunca del

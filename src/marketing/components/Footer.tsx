@@ -1,5 +1,6 @@
 import { Mail, MessageCircle } from "lucide-react";
 import { VimdyLogo } from "../../presentation/components/ui/VimdyLogo";
+import { VIMDY_CONTACT } from "../../core/config/contact";
 
 interface FooterLink {
   href: string;
@@ -9,13 +10,13 @@ interface FooterLink {
 
 const footerLinks: Record<string, FooterLink[]> = {
   Producto: [
-    { href: "#producto", label: "Funciones" },
-    { href: "#precios", label: "Precios" },
-    { href: "#como-funciona", label: "Cómo funciona" }
+    { href: "/funciones", label: "Funciones" },
+    { href: "/precios", label: "Precios" },
+    { href: "/#como-funciona", label: "Cómo funciona" }
   ],
   Soporte: [
     { href: "/contacto", label: "Contacto" },
-    { href: "https://wa.me/573000000000", label: "WhatsApp", external: true }
+    { href: VIMDY_CONTACT.whatsapp.link, label: "WhatsApp", external: true }
   ],
   Legal: [
     { href: "/privacidad", label: "Privacidad" },
@@ -62,18 +63,18 @@ export function Footer() {
 
         <div className="mt-12 pt-8 border-t border-white/5 flex flex-col md:flex-row justify-between items-center gap-4">
           <p className="text-zinc-600 text-sm">
-            © 2026 VIMDY. Todos los derechos reservados.
+            © {new Date().getFullYear()} VIMDY. Todos los derechos reservados.
           </p>
           <div className="flex items-center gap-6">
             <a
-              href="mailto:contacto@vimdy.co"
+              href={`mailto:${VIMDY_CONTACT.email.support}`}
               className="text-zinc-500 hover:text-white transition-colors"
               aria-label="Email"
             >
               <Mail size={18} />
             </a>
             <a
-              href="https://wa.me/573000000000"
+              href={VIMDY_CONTACT.whatsapp.link}
               target="_blank"
               rel="noopener noreferrer"
               className="text-zinc-500 hover:text-white transition-colors"

@@ -161,6 +161,15 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
         <VimdyButton type="submit" disabled={saving} className="mt-2">
           {saving ? "Guardando..." : "Continuar"}
         </VimdyButton>
+
+        <button
+          type="button"
+          onClick={onSaved}
+          disabled={saving}
+          className="text-center text-sm text-slate-400 hover:text-cyan-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Omitir (puedes agregar productos después desde Inventario)
+        </button>
       </form>
     </GlassCard>
   );

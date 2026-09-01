@@ -12,7 +12,7 @@ const DISMISS_KEY_PREFIX = "vimdy.subscription.warning.dismissed";
  * VIMDY — FASE 7, PASO 4: "Cuando falten 7 / 3 / 1 días, mostrar un aviso
  * elegante. Nunca mostrar mensajes agresivos."
  *
-   * Aplica tanto al trial de 30 días como al plan pagado (mensual/anual)
+   * Aplica tanto al trial de 14 días como al plan pagado (mensual/anual)
  * que el negocio haya elegido: en ambos casos avisa cuando faltan 7, 3 o
  * 1 día para la fecha relevante (trialEndsAt o renewalDate).
  *

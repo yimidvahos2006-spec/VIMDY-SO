@@ -30,7 +30,7 @@ interface Props {
 export function RequireModule({ children, module }: Props) {
   const enabledModules = useEnabledModules();
 
-  if (enabledModules !== null && !enabledModules.includes(module)) {
+  if (enabledModules && enabledModules.length > 0 && !enabledModules.includes(module)) {
     return <Navigate to="/dashboard" replace />;
   }
 

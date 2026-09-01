@@ -1,137 +1,186 @@
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 
 import { GlassCard } from "../ui/GlassCard";
 import { VimdyButton } from "../ui/VimdyButton";
 import { setEnabledModules } from "../../../infrastructure/supabase/authBusinessContext";
 import { enabledModulesStore } from "../../../core/store/enabledModulesStore";
 import { MODULE_CATALOG, getDefaultModulesForBusinessType } from "../../../core/config/modules";
+import type { ModuleId } from "../../../core/config/modules";
 import type { BusinessTypeId } from "../../../core/config/businessTypes";
+import { container } from "../../../infrastructure/di/CompositionRoot";
 
 interface ModulesStepProps {
   businessId: string;
-  /** Tipo de negocio elegido en el PASO 3, ya guardado en Supabase. */
-  businessType: BusinessTypeId;
-  onSaved: () => void;
+  businessType?: BusinessTypeId;
+  onSaved: (selectedModules: ModuleId[]) => void;
 }
 
-/**
- * PASO 4 del asistente de onboarding (FASE 3).
- *
- * A partir del tipo de negocio del PASO 3, calcula qué módulos van
- * activos (ver src/core/config/modules.ts), los guarda de inmediato en
- * Supabase (enabled_modules) y actualiza enabledModulesStore para que el
- * Sidebar se adapte en vivo, sin esperar a un refresh. Muestra el
- * resultado real (✓ activos / ✗ ocultos) y deja continuar solo cuando el
- * guardado en la base de datos fue exitoso.
- */
+const DEFAULT_TABLE_CAPACITY = 4;
+
 export function ModulesStep({ businessId, businessType, onSaved }: ModulesStepProps) {
-  const [saving, setSaving] = useState(true);
+  const [selectedModules, setSelectedModules] = useState<Set<ModuleId>>(new Set());
+  const [tableCount, setTableCount] = useState<string>("");
+  const [saving, setSaving] = useState(false);
+  const [creatingTables, setCreatingTables] = useState(false);
+  const [createdTables, setCreatedTables] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
 
-  const defaultModules = getDefaultModulesForBusinessType(businessType);
-
+  // Pre-seleccionar módulos según el tipo de negocio al montar el componente
   useEffect(() => {
-    let cancelled = false;
-
-    async function save() {
-      setSaving(true);
-      setError(null);
-      try {
-        await setEnabledModules(businessId, defaultModules);
-        if (cancelled) return;
-        enabledModulesStore.set(defaultModules);
-        setSaved(true);
-      } catch (err) {
-        if (cancelled) return;
-        const message = err instanceof Error ? err.message : "No se pudieron guardar los módulos.";
-        setError(message);
-      } finally {
-        if (!cancelled) setSaving(false);
-      }
+    if (businessType) {
+      const defaultModules = getDefaultModulesForBusinessType(businessType);
+      setSelectedModules(new Set(defaultModules));
     }
+  }, [businessType]);
 
-    save();
+  function toggleModule(moduleId: ModuleId) {
+    const newSet = new Set(selectedModules);
+    if (newSet.has(moduleId)) {
+      newSet.delete(moduleId);
+      if (moduleId === "mesas") {
+        setTableCount("");
+      }
+    } else {
+      newSet.add(moduleId);
+    }
+    setSelectedModules(newSet);
+  }
 
-    return () => {
-      cancelled = true;
-    };
-    // Solo se recalcula si cambia el negocio o su tipo — defaultModules es
-    // determinístico a partir de businessType, no hace falta en las deps.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [businessId, businessType]);
+  async function handleSave() {
+    setSaving(true);
+    setError(null);
+    try {
+      const modulesArray = Array.from(selectedModules) as ModuleId[];
 
-  const enabledSet = new Set(defaultModules);
+      if (modulesArray.includes("mesas")) {
+        const count = parseInt(tableCount.trim(), 10);
+        if (isNaN(count) || count < 1) {
+          throw new Error("Debes especificar cuántas mesas tiene tu negocio.");
+        }
+
+        setCreatingTables(true);
+        setCreatedTables(0);
+        let created = 0;
+        for (let i = 1; i <= count; i++) {
+          await container.tableEngine.get().createTable({
+            name: `Mesa ${i}`,
+            capacity: DEFAULT_TABLE_CAPACITY
+          });
+          created = i;
+          setCreatedTables(i);
+        }
+        setCreatingTables(false);
+      }
+
+      await setEnabledModules(businessId, modulesArray);
+      enabledModulesStore.set(modulesArray);
+      onSaved(modulesArray);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "No se pudieron guardar los módulos.";
+      setError(message);
+    } finally {
+      setSaving(false);
+      setCreatingTables(false);
+    }
+  }
+
+  const hasTables = selectedModules.has("mesas");
+  const canContinue = selectedModules.size > 0;
 
   return (
     <GlassCard className="w-full max-w-lg px-6 py-10 sm:px-10 hover:translate-y-0 hover:scale-100 hover:border-slate-800 hover:shadow-xl">
       <div className="flex flex-col items-center gap-2 text-center mb-8">
         <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-wide">
-          Preparando tus módulos
+          Elige los módulos que tu negocio necesita
         </h2>
         <p className="text-slate-400 text-sm max-w-sm">
-          Según tu tipo de negocio, activamos automáticamente lo que necesitas.
+          Activa los módulos que usarás. Puedes cambiarlos después en Configuración.
         </p>
       </div>
 
-      <div className="flex flex-col gap-2 mb-8">
+      <div className="flex flex-col gap-2 mb-6">
         {MODULE_CATALOG.map((module) => {
-          const isEnabled = enabledSet.has(module.id);
+          const isEnabled = selectedModules.has(module.id);
 
           return (
-            <div
-              key={module.id}
-              className={`
-                flex items-center gap-3 rounded-xl border px-4 py-3
-                ${isEnabled ? "border-slate-700 bg-slate-900/60" : "border-slate-800 bg-slate-900/20 opacity-50"}
-              `}
-            >
-              <span className="text-lg">{module.emoji}</span>
-              <span className="flex-1 text-sm font-medium text-white">{module.label}</span>
-              <span className={isEnabled ? "text-emerald-400" : "text-slate-600"}>
-                {isEnabled ? "✓" : "✗"}
-              </span>
+            <div key={module.id}>
+              <label
+                htmlFor={`module-${module.id}`}
+                className={`
+                  flex items-center gap-3 rounded-xl border px-4 py-3 cursor-pointer
+                  transition-all duration-200
+                  ${isEnabled
+                    ? "border-cyan-500/50 bg-slate-900/60"
+                    : "border-slate-800 bg-slate-900/20 hover:border-slate-700 hover:bg-slate-800/60"}
+                `}
+              >
+                <input
+                  id={`module-${module.id}`}
+                  type="checkbox"
+                  checked={isEnabled}
+                  onChange={() => toggleModule(module.id)}
+                  disabled={saving}
+                  className="h-5 w-5 rounded border border-slate-600 text-cyan-400 focus:ring-cyan-400/50 bg-slate-950 cursor-pointer disabled:cursor-not-allowed"
+                />
+                <span className="text-lg">{module.emoji}</span>
+                <span className="flex-1 text-sm font-medium text-white">{module.label}</span>
+              </label>
+
+              <div
+                className={`
+                  overflow-hidden transition-all duration-300 ease-out
+                  ${hasTables && module.id === "mesas"
+                    ? "max-h-32 opacity-100 py-3"
+                    : "max-h-0 opacity-0 pointer-events-none"}
+                `}
+              >
+                {module.id === "mesas" && (
+                  <div className="px-4 pt-2">
+                    <label className="text-sm text-slate-300">Cantidad de mesas</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="999"
+                      value={tableCount}
+                      onChange={(e) => setTableCount(e.target.value)}
+                      placeholder="Ej: 12"
+                      disabled={saving}
+                      className={`
+                        mt-2 w-full rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-2.5
+                        text-center text-white placeholder-slate-500 outline-none
+                        focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/30 transition-colors
+                        disabled:cursor-not-allowed
+                      `}
+                    />
+                  </div>
+                )}
+              </div>
             </div>
           );
         })}
       </div>
 
-      {saving && (
-        <p className="text-center text-sm text-slate-400">Guardando configuración...</p>
+      {(saving || creatingTables) && (
+        <p className="text-center text-sm text-slate-400">
+          {creatingTables
+            ? `Creando mesas... ${createdTables}/${tableCount}`
+            : "Guardando configuración..."}
+        </p>
       )}
 
       {error && (
-        <div className="flex flex-col items-center gap-3">
-          <p className="text-center text-sm text-red-400">{error}</p>
-          <VimdyButton
-            variant="secondary"
-            onClick={() => {
-              setSaving(true);
-              setError(null);
-              setEnabledModules(businessId, defaultModules)
-                .then(() => {
-                  enabledModulesStore.set(defaultModules);
-                  setSaved(true);
-                })
-                .catch((err: unknown) => {
-                  const message = err instanceof Error ? err.message : "No se pudieron guardar los módulos.";
-                  setError(message);
-                })
-                .finally(() => setSaving(false));
-            }}
-          >
-            Reintentar
-          </VimdyButton>
-        </div>
+        <p className="text-center text-sm text-red-400">{error}</p>
       )}
 
-      {saved && !error && (
-        <div className="flex justify-center">
-          <VimdyButton onClick={onSaved} className="min-w-[200px]">
-            Continuar
-          </VimdyButton>
-        </div>
-      )}
+      <div className="flex justify-center mt-4">
+        <VimdyButton
+          onClick={handleSave}
+          disabled={saving || creatingTables || !canContinue}
+          className="min-w-[200px]"
+        >
+          {saving || creatingTables ? "Guardando..." : "Continuar"}
+        </VimdyButton>
+      </div>
     </GlassCard>
   );
 }

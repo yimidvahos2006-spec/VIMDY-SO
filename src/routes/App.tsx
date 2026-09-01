@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense } from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 
 import { MainLayout } from "../presentation/layout/MainLayout";
@@ -7,8 +7,6 @@ import { OnboardingGate } from "../presentation/navigation/OnboardingGate";
 import { RequireModule } from "../presentation/navigation/RequireModule";
 import { UserSessionBadge } from "../presentation/components/ui/UserSessionBadge";
 import { ErrorBoundary } from "../presentation/components/ui/ErrorBoundary";
-import { VimdyIntro } from "../presentation/components/intro/VimdyIntro";
-import { appIntroStore } from "../core/store/appIntroStore";
 
 import { LoginPage } from "../presentation/pages/LoginPage";
 import { RegisterPage } from "../presentation/pages/RegisterPage";
@@ -29,6 +27,12 @@ import { PrivacyPage } from "../marketing/pages/PrivacyPage";
 import { TermsPage } from "../marketing/pages/TermsPage";
 import { CookiesPage } from "../marketing/pages/CookiesPage";
 import { MarketingLayout } from "../marketing/components/MarketingLayout";
+
+function isAppSubdomain(): boolean {
+  if (typeof window === "undefined") return false;
+  const hostname = window.location.hostname.toLowerCase();
+  return hostname.startsWith("app.") || hostname === "localhost" && new URLSearchParams(window.location.search).get("app") === "1";
+}
 
 // Lazy loading: cada módulo solo se descarga y se ejecuta cuando el
 // usuario realmente entra a esa ruta, en vez de cargar Dashboard + POS +
@@ -259,21 +263,77 @@ function AuthenticatedApp() {
 }
 
 export function App() {
-  // FASE 6, PASO 1 — Intro cinematográfica: se muestra UNA sola vez, justo
-  // después de instalar la app (appIntroStore lee/escribe un flag en
-  // localStorage del dispositivo). El estado inicial se calcula una sola
-  // vez (función perezosa de useState) para no mostrar ni un frame de la
-  // app real antes de decidir si toca reproducirla.
-  const [showIntro, setShowIntro] = useState(() => !appIntroStore.hasBeenShown());
-
-  if (showIntro) {
+  if (isAppSubdomain()) {
     return (
-      <VimdyIntro
-        onComplete={() => {
-          appIntroStore.markShown();
-          setShowIntro(false);
-        }}
-      />
+      <Routes>
+        <Route path="/pais" element={<CountrySelectionPage />} />
+        <Route
+          path="/login"
+          element={
+            <RequireCountry>
+              <LoginPage />
+            </RequireCountry>
+          }
+        />
+        <Route
+          path="/registro"
+          element={
+            <RequireCountry>
+              <RegisterPage />
+            </RequireCountry>
+          }
+        />
+        <Route
+          path="/verificar-codigo"
+          element={
+            <RequireCountry>
+              <OtpPage />
+            </RequireCountry>
+          }
+        />
+        <Route
+          path="/recuperar-password"
+          element={
+            <RequireCountry>
+              <ForgotPasswordPage />
+            </RequireCountry>
+          }
+        />
+        <Route
+          path="/actualizar-password"
+          element={
+            <RequireCountry>
+              <UpdatePasswordPage />
+            </RequireCountry>
+          }
+        />
+        <Route
+          path="/onboarding"
+          element={
+            <ProtectedRoute>
+              <OnboardingPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/business-selector"
+          element={
+            <ProtectedRoute>
+              <BusinessSelectorPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/crear-negocio"
+          element={
+            <ProtectedRoute>
+              <CreateBusinessPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="/" element={<Navigate to="/login" replace />} />
+        <Route path="/*" element={<AuthenticatedApp />} />
+      </Routes>
     );
   }
 

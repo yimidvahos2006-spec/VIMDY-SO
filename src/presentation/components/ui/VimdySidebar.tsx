@@ -68,8 +68,8 @@ export function VimdySidebar() {
   const enabledModules = useEnabledModules();
   const shiftOpen = useCashierShiftStatus();
 
-  const visibleMenu = useMemo(() => {
-    if (!enabledModules) return menu;
+   const visibleMenu = useMemo(() => {
+     if (!enabledModules || enabledModules.length === 0) return menu;
 
     const enabledSet = new Set(enabledModules);
 

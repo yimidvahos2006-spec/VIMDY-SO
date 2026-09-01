@@ -21,7 +21,7 @@ import {
   type OnboardingStepId
 } from "../components/onboarding/onboardingSteps";
 import type { BusinessTypeId } from "../../core/config/businessTypes";
-import { getDefaultModulesForBusinessType, type ModuleId } from "../../core/config/modules";
+import type { ModuleId } from "../../core/config/modules";
 import type { Category } from "../../core/entities/Entities";
 
 /**
@@ -160,19 +160,13 @@ export function OnboardingPage() {
           />
         )}
 
-        {stepIsBuilt && step === "modules" && businessId && businessType && (
+        {stepIsBuilt && step === "modules" && businessId && (
           <ModulesStep
             businessId={businessId}
-            businessType={businessType}
-            onSaved={() => {
-              // ModulesStep ya guardó los módulos reales en Supabase y en
-              // enabledModulesStore. getDefaultModulesForBusinessType es
-              // determinístico a partir de businessType, así que lo
-              // recalculamos aquí para tenerlo disponible en el resto del
-              // asistente (PASO 5 y PASO 6) sin depender del store global.
-              const modules = getDefaultModulesForBusinessType(businessType);
+            businessType={businessType ?? undefined}
+            onSaved={(modules) => {
               setEnabledModules(modules);
-              setStep(resolveAfterModules(modules));
+              setStep(resolveAfterModules());
             }}
           />
         )}

@@ -1,0 +1,56 @@
+name: VIMDY Monitor
+
+on:
+  schedule:
+    # Cada 15 minutos (monitoreo de salud)
+    - cron: '*/15 * * * *'
+    # Resumen diario a las 9:00 AM UTC-5 (14:00 UTC)
+    - cron: '0 14 * * *'
+
+  # Permitir ejecución manual desde GitHub
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Modo de ejecución'
+        required: true
+        default: 'check'
+        type: choice
+        options:
+          - check
+          - daily
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      OPS_SECRET: ${{ secrets.OPS_SECRET }}
+
+    steps:
+      - name: Determine mode
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "mode=${{ github.event.inputs.mode }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.schedule }}" = "0 14 * * *" ]; then
+            echo "mode=daily" >> $GITHUB_OUTPUT
+          else
+            echo "mode=check" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Call ops-monitor Edge Function
+        run: |
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            "${SUPABASE_URL}/functions/v1/ops-monitor?mode=${{ steps.mode.outputs.mode }}" \
+            -H "Authorization: Bearer ${SUPABASE_ANON_KEY}" \
+            -H "x-ops-secret: ${OPS_SECRET}" \
+            -H "Content-Type: application/json")
+
+          echo "HTTP Status: $HTTP_CODE"
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Monitor check failed with status $HTTP_CODE"
+            exit 1
+          fi

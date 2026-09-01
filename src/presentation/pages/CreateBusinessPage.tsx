@@ -12,7 +12,7 @@ import { companyConfigStore } from "../../core/store/companyConfigStore";
 import { useTranslation } from "../../core/i18n/useTranslation";
 
 export function CreateBusinessPage() {
-  const { isAuthenticated, isReady, switchBusiness } = useAuth();
+  const { isAuthenticated, isReady, switchBusiness, user } = useAuth();
   const navigate = useNavigate();
   const { language } = useTranslation();
 
@@ -48,14 +48,14 @@ export function CreateBusinessPage() {
     setLoading(true);
 
     try {
-      const userId = (useAuth() as unknown as { user?: { id?: string } }).user?.id;
+      const userId = user?.id;
       if (!userId) {
         throw new Error("No se pudo identificar el usuario autenticado.");
       }
 
       const session = await createAdditionalBusiness(userId, {
         businessName: businessName.trim(),
-        ownerName: "",
+        ownerName: user?.name ?? "",
         country
       });
 

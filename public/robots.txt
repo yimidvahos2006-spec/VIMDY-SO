@@ -18,5 +18,21 @@ Disallow: /ia
 Disallow: /onboarding
 Disallow: /business-selector
 Disallow: /crear-negocio
+Disallow: /verificar-codigo
+Disallow: /registro
+Disallow: /login
+Disallow: /forgot-password
+Disallow: /actualizar-password
 
+# Sitemap
 Sitemap: https://vimdy.co/sitemap.xml
+
+# Crawl-delay for bots
+User-agent: AhrefsBot
+Crawl-delay: 10
+
+User-agent: SemrushBot
+Crawl-delay: 10
+
+User-agent: MJ12bot
+Crawl-delay: 10

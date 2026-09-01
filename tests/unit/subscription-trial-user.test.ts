@@ -56,30 +56,23 @@ describe("SubscriptionService — trial por persona", () => {
     });
   });
 
-  describe("recordTrialUsage", () => {
-    it("registra el uso de trial correctamente", async () => {
+  describe("recordTrialUsage (DEPRECADO — ahora delegado a Edge Function)", () => {
+    it("devuelve error indicando que el cliente no puede registrar trial usage directamente", async () => {
       const { supabase } = await import("../../src/infrastructure/supabase/supabaseClient");
-      (supabase as any).rpc.mockResolvedValueOnce({ data: null, error: null });
-
-      const service = new SubscriptionService();
-      const result = await service.recordTrialUsage("user-1", "business-1");
-
-      expect(result.ok).toBe(true);
-      expect((supabase as any).rpc).toHaveBeenCalledWith("record_trial_usage", {
-        p_user_id: "user-1",
-        p_business_id: "business-1"
-      });
-    });
-
-    it("devuelve error si falla la inserción", async () => {
-      const { supabase } = await import("../../src/infrastructure/supabase/supabaseClient");
-      (supabase as any).rpc.mockResolvedValueOnce({ data: null, error: { message: "INSERT_FAILED" } });
-
       const service = new SubscriptionService();
       const result = await service.recordTrialUsage("user-1", "business-1");
 
       expect(result.ok).toBe(false);
-      expect(result.error).toBe("INSERT_FAILED");
+      expect(result.error).toMatch(/TRIAL_USAGE_RECORD_FORBIDDEN/);
+      expect((supabase as any).rpc).not.toHaveBeenCalled();
+    });
+
+    it("no hace ninguna llamada RPC al servidor", async () => {
+      const { supabase } = await import("../../src/infrastructure/supabase/supabaseClient");
+      const service = new SubscriptionService();
+      await service.recordTrialUsage("user-1", "business-1");
+
+      expect((supabase as any).rpc).not.toHaveBeenCalled();
     });
   });
 });

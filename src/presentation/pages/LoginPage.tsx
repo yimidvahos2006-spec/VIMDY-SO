@@ -102,7 +102,7 @@ export function LoginPage() {
                     focus:border-vimdy-accent focus:shadow-vimdy-accent
                     disabled:opacity-50
                   "
-                  placeholder="tucorreo@vimdy.com"
+                  placeholder="tucorreo@vimdy.co"
                 />
               </div>
 

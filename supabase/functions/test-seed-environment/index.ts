@@ -240,7 +240,7 @@ Deno.serve(async (req: Request) => {
         .insert({
           name: businessName,
           plan: "trial",
-          trial_ends_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+          trial_ends_at: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
           country: bt.country,
           currency: "COP",
           language: "es",

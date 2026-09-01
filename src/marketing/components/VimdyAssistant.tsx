@@ -14,8 +14,8 @@ const responses: Record<string, string> = {
     "Te registras, creas tu negocio y empiezas a operar. Puedes registrar ventas, controlar caja, gestionar inventario y ver reportes.",
   "tiene_inventario":
     "Sí. Incluye control de inventario con alertas de stock bajo, recetas para productos elaborados y trazabilidad completa.",
-  "soporte":
-    "Puedes contactarnos por WhatsApp o correo electrónico: contacto@vimdy.co"
+    "soporte":
+     "Puedes contactarnos por WhatsApp o correo electrónico: hola@vimdy.co"
 };
 
 const quickActions = [

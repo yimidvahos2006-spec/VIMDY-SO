@@ -31,7 +31,7 @@ export function PrivacyPage() {
               </p>
               <h2 className="text-xl font-semibold text-white">Contacto</h2>
               <p>
-                Para cualquier consulta sobre privacidad, escríbenos a contacto@vimdy.co.
+                 Para cualquier consulta sobre privacidad, escríbenos a hola@vimdy.co.
               </p>
             </div>
           </div>

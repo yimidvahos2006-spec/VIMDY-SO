@@ -967,3 +967,69 @@ $$;
 
 revoke all on function public.get_business_subscription_status(uuid) from public, anon;
 grant execute on function public.get_business_subscription_status(uuid) to authenticated, service_role;
+
+-- ============================================================================
+-- 8. TRIAL USAGE — control de trial por persona (uno de por vida)
+-- ============================================================================
+-- Tabla que registra qué usuarios ya usaron su trial gratuito. Se usa en
+-- la política de inserción de businesses para evitar que un usuario cree
+-- múltiples negocios con trials ilimitados.
+-- ============================================================================
+create table if not exists user_trial_usage (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  business_id uuid not null references businesses(id) on delete cascade,
+  plan text not null default 'trial',
+  used_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists user_trial_usage_used_at_idx
+  on user_trial_usage (used_at);
+
+alter table user_trial_usage enable row level security;
+
+drop policy if exists user_trial_usage_service_all on user_trial_usage;
+create policy user_trial_usage_service_all on user_trial_usage
+  for all
+  using (false)
+  with check (false);
+
+grant all on user_trial_usage to service_role;
+revoke all on user_trial_usage from authenticated, anon, public;
+
+-- Función: verificar si un usuario ya usó su trial
+create or replace function public.has_user_used_trial(p_user_id uuid)
+returns boolean
+language plpgsql
+security definer
+stable
+as $$
+begin
+  return exists (
+    select 1 from user_trial_usage
+    where user_id = p_user_id
+  );
+end;
+$$;
+
+revoke all on function public.has_user_used_trial(uuid) from public, anon, authenticated;
+grant execute on function public.has_user_used_trial(uuid) to service_role, authenticated;
+
+-- Función: registrar uso de trial (idempotente)
+create or replace function public.record_trial_usage(
+  p_user_id uuid,
+  p_business_id uuid
+)
+returns void
+language plpgsql
+security definer
+as $$
+begin
+  insert into user_trial_usage (user_id, business_id, plan, used_at)
+  values (p_user_id, p_business_id, 'trial', now())
+  on conflict (user_id) do nothing;
+end;
+$$;
+
+revoke all on function public.record_trial_usage(uuid, uuid) from public, anon, authenticated;
+grant execute on function public.record_trial_usage(uuid, uuid) to service_role;

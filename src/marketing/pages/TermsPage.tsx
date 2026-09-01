@@ -43,7 +43,7 @@ export function TermsPage() {
               </p>
               <h2 className="text-xl font-semibold text-white">Contacto</h2>
               <p>
-                Para consultas sobre estos términos, contáctanos en contacto@vimdy.co.
+                 Para consultas sobre estos términos, contáctanos en hola@vimdy.co.
               </p>
             </div>
           </div>

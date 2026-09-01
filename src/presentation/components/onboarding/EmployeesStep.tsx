@@ -131,6 +131,7 @@ export function EmployeesStep({ enabledModules, onDone }: EmployeesStepProps) {
           placeholder="Correo"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
+          autoComplete="new-password"
           disabled={saving}
         />
         <PasswordField
@@ -138,6 +139,7 @@ export function EmployeesStep({ enabledModules, onDone }: EmployeesStepProps) {
           label="Contraseña"
           value={password}
           onChange={setPassword}
+          autoComplete="new-password"
           disabled={saving}
           placeholder="Contraseña"
           inputClassName="rounded-2xl"

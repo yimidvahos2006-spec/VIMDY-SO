@@ -5,30 +5,27 @@ describe("SubscriptionEngine — cierre definitivo de trial por persona", () => 
   const now = new Date("2024-06-15T00:00:00Z");
 
   describe("flujo de trial por persona (no por negocio)", () => {
-    it("usuario nuevo obtiene 30 días", () => {
+    it("usuario nuevo obtiene 14 días", () => {
       expect(subscriptionEngine.canStartTrial(null)).toBe(true);
       expect(subscriptionEngine.canStartTrial(undefined)).toBe(true);
     });
 
-    it("reload conserva los mismos 30 días", () => {
-      const trialEndsAt = new Date("2024-07-15T00:00:00Z");
-      expect(subscriptionEngine.daysRemaining(trialEndsAt, now)).toBe(30);
-      // segunda "carga"
-      expect(subscriptionEngine.daysRemaining(trialEndsAt, now)).toBe(30);
+    it("reload conserva los mismos 14 días", () => {
+      const trialEndsAt = new Date("2024-06-29T00:00:00Z");
+      expect(subscriptionEngine.daysRemaining(trialEndsAt, now)).toBe(14);
+      expect(subscriptionEngine.daysRemaining(trialEndsAt, now)).toBe(14);
     });
 
-    it("logout/login conserva los mismos 30 días", () => {
-      const trialEndsAt = new Date("2024-07-15T00:00:00Z");
-      expect(subscriptionEngine.daysRemaining(trialEndsAt, now)).toBe(30);
-      // simula logout/login
-      expect(subscriptionEngine.daysRemaining(trialEndsAt, now)).toBe(30);
+    it("logout/login conserva los mismos 14 días", () => {
+      const trialEndsAt = new Date("2024-06-29T00:00:00Z");
+      expect(subscriptionEngine.daysRemaining(trialEndsAt, now)).toBe(14);
+      expect(subscriptionEngine.daysRemaining(trialEndsAt, now)).toBe(14);
     });
 
-    it("segundo dispositivo conserva los mismos 30 días", () => {
-      const trialEndsAt = new Date("2024-07-15T00:00:00Z");
-      expect(subscriptionEngine.daysRemaining(trialEndsAt, now)).toBe(30);
-      // desde otro dispositivo, el valor viene de BD
-      expect(subscriptionEngine.daysRemaining(trialEndsAt, now)).toBe(30);
+    it("segundo dispositivo conserva los mismos 14 días", () => {
+      const trialEndsAt = new Date("2024-06-29T00:00:00Z");
+      expect(subscriptionEngine.daysRemaining(trialEndsAt, now)).toBe(14);
+      expect(subscriptionEngine.daysRemaining(trialEndsAt, now)).toBe(14);
     });
 
     it("segundo negocio de la misma persona NO obtiene otro trial", () => {
@@ -146,8 +143,8 @@ describe("SubscriptionEngine — cierre definitivo de trial por persona", () => 
     it("manipulación de localStorage/sessionStorage → no modifica el derecho al trial", () => {
       // El engine lee de parámetros, no de storage.
       // No hay método que acepte storage.
-      const trialEndsAt = new Date("2024-07-15T00:00:00Z");
-      expect(subscriptionEngine.daysRemaining(trialEndsAt, now)).toBe(30);
+      const trialEndsAt = new Date("2024-06-29T00:00:00Z");
+      expect(subscriptionEngine.daysRemaining(trialEndsAt, now)).toBe(14);
       // No hay dependencia de storage en el engine
       expect(subscriptionEngine).not.toHaveProperty("readFromStorage");
     });
@@ -184,6 +181,82 @@ describe("SubscriptionEngine — cierre definitivo de trial por persona", () => 
       expect(subscriptionEngine).not.toHaveProperty("renew");
       expect(subscriptionEngine).not.toHaveProperty("expire");
       expect(subscriptionEngine).not.toHaveProperty("refund");
+    });
+  });
+
+  describe("VIMDY — Trial de 14 días", () => {
+    const trialStart = new Date("2026-08-20T00:00:00Z");
+
+    it("día 12: trial activo, sin bloqueo", () => {
+      const trialEndsAt = new Date(trialStart);
+      trialEndsAt.setDate(trialEndsAt.getDate() + 14);
+      const sub = {
+        businessId: "b1",
+        plan: "trial" as const,
+        trialEndsAt,
+        renewalDate: null,
+        nextChargeAt: null,
+        paymentMethod: null,
+        paymentStatus: "none" as const
+      };
+      const day12 = new Date("2026-09-01T00:00:00Z");
+      expect(subscriptionEngine.daysRemaining(trialEndsAt, day12)).toBe(2);
+      expect(subscriptionEngine.effectiveStatus(sub, day12)).toBe("trial");
+      expect(subscriptionEngine.isBlocked(sub, day12)).toBe(false);
+    });
+
+    it("día 13: 1 día restante", () => {
+      const trialEndsAt = new Date(trialStart);
+      trialEndsAt.setDate(trialEndsAt.getDate() + 14);
+      const sub = {
+        businessId: "b1",
+        plan: "trial" as const,
+        trialEndsAt,
+        renewalDate: null,
+        nextChargeAt: null,
+        paymentMethod: null,
+        paymentStatus: "none" as const
+      };
+      const day13 = new Date("2026-09-02T00:00:00Z");
+      expect(subscriptionEngine.daysRemaining(trialEndsAt, day13)).toBe(1);
+      expect(subscriptionEngine.effectiveStatus(sub, day13)).toBe("trial");
+      expect(subscriptionEngine.isBlocked(sub, day13)).toBe(false);
+    });
+
+    it("día 14: 0 días restantes → expired → bloqueado", () => {
+      const trialEndsAt = new Date(trialStart);
+      trialEndsAt.setDate(trialEndsAt.getDate() + 14);
+      const sub = {
+        businessId: "b1",
+        plan: "trial" as const,
+        trialEndsAt,
+        renewalDate: null,
+        nextChargeAt: null,
+        paymentMethod: null,
+        paymentStatus: "none" as const
+      };
+      const day14 = new Date("2026-09-03T00:00:00Z");
+      expect(subscriptionEngine.daysRemaining(trialEndsAt, day14)).toBe(0);
+      expect(subscriptionEngine.effectiveStatus(sub, day14)).toBe("expired");
+      expect(subscriptionEngine.isBlocked(sub, day14)).toBe(true);
+    });
+
+    it("día 16: 2 días después de vencido → sigue expired, datos intactos", () => {
+      const trialEndsAt = new Date(trialStart);
+      trialEndsAt.setDate(trialEndsAt.getDate() + 14);
+      const sub = {
+        businessId: "b1",
+        plan: "trial" as const,
+        trialEndsAt,
+        renewalDate: null,
+        nextChargeAt: null,
+        paymentMethod: null,
+        paymentStatus: "none" as const
+      };
+      const day16 = new Date("2026-09-05T00:00:00Z");
+      expect(subscriptionEngine.daysRemaining(trialEndsAt, day16)).toBe(0);
+      expect(subscriptionEngine.effectiveStatus(sub, day16)).toBe("expired");
+      expect(subscriptionEngine.isBlocked(sub, day16)).toBe(true);
     });
   });
 });
