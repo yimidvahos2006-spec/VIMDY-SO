@@ -208,6 +208,9 @@ export function SettingsDashboard() {
             timezone: defaults.timezone,
             tax: defaults.taxRate
           }
+        : {}),
+      ...(countryCode !== "CO"
+        ? { electronicInvoicing: { enabled: false, provider: "none" as const } }
         : {})
     });
     setBusinessDraft({
@@ -569,11 +572,11 @@ export function SettingsDashboard() {
           </div>
         </SectionCard>
 
-        {config.electronicInvoicing && (
+        {config.country === "CO" && (
           <SectionCard
             icon={<FileText size={18} className="text-orange-400" />}
             title="Facturación electrónica DIAN"
-            description="Configura la emisión de facturas electrónicas con la DIAN."
+            description="Configura la emisión de facturas electrónicas con la DIAN. Disponible solo para negocios en Colombia."
           >
             <div className="space-y-3">
               <Toggle

@@ -1444,10 +1444,13 @@ export class SalesEngine {
 
       if (electronicInvoicing.enabled) {
         try {
-          const provider = InvoiceFactory.resolve({
-            enabled: electronicInvoicing.enabled,
-            provider: electronicInvoicing.provider
-          });
+          const provider = InvoiceFactory.resolve(
+            {
+              enabled: electronicInvoicing.enabled,
+              provider: electronicInvoicing.provider
+            },
+            companyConfigStore.get().country
+          );
 
           if (provider) {
             let customer: InvoiceCustomer | undefined;

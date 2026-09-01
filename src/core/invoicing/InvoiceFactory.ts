@@ -18,10 +18,15 @@
 
 import type { IInvoiceProvider } from "./interfaces/IInvoiceProvider";
 import type { InvoiceProviderName } from "./types/invoice.types";
+import type { CountryCode } from "../config/globalization";
 import { FactusProvider } from "./providers/factus/FactusProvider";
 
 /** Proveedores reales, es decir, todo InvoiceProviderName salvo "none". */
 type RealInvoiceProviderName = Exclude<InvoiceProviderName, "none">;
+
+const PROVIDER_COUNTRIES: Record<RealInvoiceProviderName, CountryCode[]> = {
+  factus: ["CO"]
+};
 
 export class InvoiceFactory {
   private static instances: Partial<Record<RealInvoiceProviderName, IInvoiceProvider>> = {};
@@ -32,11 +37,18 @@ export class InvoiceFactory {
    * o `null` si el negocio no factura electrónicamente. Nadie debe llamar
    * a `create()` directamente sin pasar antes por acá.
    */
-  static resolve(electronicInvoicing: { enabled: boolean; provider: InvoiceProviderName }): IInvoiceProvider | null {
+  static resolve(
+    electronicInvoicing: { enabled: boolean; provider: InvoiceProviderName },
+    country: CountryCode
+  ): IInvoiceProvider | null {
     if (!electronicInvoicing.enabled || electronicInvoicing.provider === "none") {
       return null;
     }
-    return this.create(electronicInvoicing.provider as RealInvoiceProviderName);
+    const provider = electronicInvoicing.provider as RealInvoiceProviderName;
+    if (!PROVIDER_COUNTRIES[provider]?.includes(country)) {
+      return null;
+    }
+    return this.create(provider);
   }
 
   /** Devuelve la instancia (singleton) del proveedor solicitado. */
