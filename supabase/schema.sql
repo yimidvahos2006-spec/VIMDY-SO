@@ -958,9 +958,13 @@ security definer
 stable
 set search_path = public
 as $$
-  select 
+  select
     plan,
-    case when plan not in ('expired', 'suspended') then true else false end as is_active
+    case
+      when plan = 'trial' and trial_ends_at is not null and trial_ends_at > CURRENT_TIMESTAMP then true
+      when plan in ('monthly', 'yearly') and (renewal_date is null or renewal_date > CURRENT_TIMESTAMP) then true
+      else false
+    end as is_active
   from businesses
   where id = p_business_id;
 $$;
@@ -1033,3 +1037,551 @@ $$;
 
 revoke all on function public.record_trial_usage(uuid, uuid) from public, anon, authenticated;
 grant execute on function public.record_trial_usage(uuid, uuid) to service_role;
+
+-- ============================================================================
+-- 9. SISTEMA DE SUSCRIPCIONES — migración v2 consolidada
+-- ============================================================================
+-- Columnas de suscripción en businesses
+alter table businesses add column if not exists renewal_date timestamptz;
+alter table businesses add column if not exists next_charge_at timestamptz;
+alter table businesses add column if not exists payment_method text;
+alter table businesses add column if not exists payment_status text not null default 'none';
+alter table businesses add column if not exists subscription_status text not null default 'trial';
+alter table businesses add column if not exists trial_used_at timestamptz;
+
+-- Tabla de auditoría de suscripciones
+create table if not exists subscription_audit_log (
+  id uuid primary key default gen_random_uuid(),
+  business_id uuid not null references businesses(id) on delete cascade,
+  action text not null,
+  actor_type text not null default 'system',
+  actor_id uuid,
+  details jsonb not null default '{}'::jsonb,
+  ip_address inet,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists subscription_audit_log_business_id_idx on subscription_audit_log (business_id);
+create index if not exists subscription_audit_log_action_idx on subscription_audit_log (action);
+create index if not exists subscription_audit_log_created_at_idx on subscription_audit_log (created_at);
+
+alter table subscription_audit_log enable row level security;
+
+drop policy if exists subscription_audit_log_tenant_isolation on subscription_audit_log;
+create policy subscription_audit_log_tenant_isolation on subscription_audit_log
+  for select
+  using (business_id in (select auth_business_ids()));
+
+drop policy if exists subscription_audit_log_service_insert on subscription_audit_log;
+create policy subscription_audit_log_service_insert on subscription_audit_log
+  for insert
+  with check (false);
+
+grant all on subscription_audit_log to service_role;
+grant select on subscription_audit_log to authenticated;
+
+-- Columnas de idempotencia y referencias en subscription_payments
+create table if not exists subscription_payments (
+  id uuid primary key default gen_random_uuid(),
+  business_id uuid not null references businesses(id) on delete cascade,
+  plan text not null,
+  amount numeric not null,
+  currency text not null,
+  status text not null default 'pending',
+  idempotency_key text,
+  wompi_reference text,
+  mercadopago_reference text,
+  paypal_order_id text,
+  paypal_capture_id text,
+  renewal_number integer not null default 0,
+  provider_refund_id text,
+  refunded_at timestamptz,
+  paid_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+-- Constraints únicos
+create unique index if not exists subscription_payments_idempotency_key_unique
+  on subscription_payments (business_id, idempotency_key)
+  where idempotency_key is not null;
+create unique index if not exists subscription_payments_wompi_reference_unique
+  on subscription_payments (business_id, wompi_reference)
+  where wompi_reference is not null;
+create unique index if not exists subscription_payments_mercadopago_reference_unique
+  on subscription_payments (business_id, mercadopago_reference)
+  where mercadopago_reference is not null;
+create unique index if not exists subscription_payments_paypal_order_id_unique
+  on subscription_payments (business_id, paypal_order_id)
+  where paypal_order_id is not null;
+
+-- RLS y grants para subscription_payments
+alter table subscription_payments enable row level security;
+
+drop policy if exists subscription_payments_tenant_isolation on subscription_payments;
+create policy subscription_payments_tenant_isolation on subscription_payments
+  for select
+  using (business_id in (select auth_business_ids()));
+
+drop policy if exists subscription_payments_service_insert on subscription_payments;
+create policy subscription_payments_service_insert on subscription_payments
+  for insert
+  with check (false);
+
+grant all on subscription_payments to service_role;
+grant select on subscription_payments to authenticated;
+
+-- Función: verificar si un negocio puede empezar trial
+create or replace function public.can_start_trial(p_business_id uuid)
+returns boolean
+language plpgsql
+security definer
+as $$
+begin
+  return not exists (
+    select 1 from businesses
+    where id = p_business_id
+      and trial_used_at is not null
+  );
+end;
+$$;
+
+revoke all on function public.can_start_trial(uuid) from public, anon;
+grant execute on function public.can_start_trial(uuid) to service_role, authenticated;
+
+-- Función: marcar trial como usado
+create or replace function public.mark_trial_used(p_business_id uuid)
+returns void
+language plpgsql
+security definer
+as $$
+begin
+  update businesses
+  set trial_used_at = now()
+  where id = p_business_id
+    and trial_used_at is null;
+end;
+$$;
+
+revoke all on function public.mark_trial_used(uuid) from public, anon;
+grant execute on function public.mark_trial_used(uuid) to service_role, authenticated;
+
+-- Función: calcular días de acceso para plan anual (12 pagados + 2 gratis)
+create or replace function public.get_plan_period_days(p_plan text)
+returns integer
+language plpgsql
+immutable
+as $$
+begin
+  if p_plan = 'monthly' then
+    return 30;
+  elsif p_plan = 'yearly' then
+    return 30 * 14;
+  else
+    raise exception 'Plan inválido: %', p_plan;
+  end if;
+end;
+$$;
+
+revoke all on function public.get_plan_period_days(text) from public, anon;
+grant execute on function public.get_plan_period_days(text) to service_role, authenticated;
+
+-- Función: activar suscripción (server-side, idempotente)
+create or replace function public.activate_subscription_server_side(
+  p_business_id uuid,
+  p_plan text,
+  p_payment_id uuid,
+  p_now timestamptz default now()
+)
+returns jsonb
+language plpgsql
+security definer
+as $$
+declare
+  v_payment record;
+  v_period_days integer;
+  v_renewal_date timestamptz;
+  v_next_charge_at timestamptz;
+  v_result jsonb;
+  v_audit_id uuid;
+begin
+  if p_plan not in ('monthly', 'yearly') then
+    raise exception 'Plan inválido: %', p_plan;
+  end if;
+
+  if auth.uid() is not null then
+    if not exists (
+      select 1 from unnest(public.auth_business_ids()) as bid where bid = p_business_id
+    ) then
+      raise exception 'NOT_A_MEMBER: no perteneces a este negocio.';
+    end if;
+  end if;
+
+  select * into v_payment
+  from subscription_payments
+  where id = p_payment_id
+    and business_id = p_business_id;
+
+  if not found then
+    raise exception 'Pago no encontrado: %', p_payment_id;
+  end if;
+
+  if v_payment.status = 'approved' then
+    return jsonb_build_object(
+      'ok', true,
+      'already_activated', true,
+      'renewal_number', v_payment.renewal_number
+    );
+  end if;
+
+  if v_payment.status = 'declined' then
+    raise exception 'El pago % ya fue declinado. No se puede activar.', p_payment_id;
+  end if;
+
+  v_period_days := public.get_plan_period_days(p_plan);
+  if v_payment.paid_at is not null then
+    v_renewal_date := (v_payment.paid_at + (v_period_days || ' days')::interval);
+  else
+    v_renewal_date := (p_now + (v_period_days || ' days')::interval);
+  end if;
+  v_next_charge_at := v_renewal_date;
+
+  if exists (
+    select 1 from businesses
+    where id = p_business_id
+      and renewal_date > v_renewal_date
+  ) then
+    return jsonb_build_object(
+      'ok', true,
+      'already_activated', true,
+      'renewal_number', v_payment.renewal_number,
+      'reason', 'obsolete_payment'
+    );
+  end if;
+
+  update businesses
+  set
+    plan = p_plan,
+    renewal_date = v_renewal_date,
+    next_charge_at = v_next_charge_at,
+    payment_status = 'approved',
+    subscription_status = p_plan
+  where id = p_business_id;
+
+  update subscription_payments
+  set
+    status = 'approved',
+    paid_at = p_now,
+    renewal_number = coalesce(renewal_number, 0) + 1
+  where id = p_payment_id;
+
+  if v_payment.renewal_number is null or v_payment.renewal_number = 0 then
+    perform public.mark_trial_used(p_business_id);
+  end if;
+
+  insert into subscription_audit_log (business_id, action, actor_type, details)
+  values (
+    p_business_id,
+    'SUBSCRIPTION_ACTIVATED',
+    'payment_provider',
+    jsonb_build_object(
+      'plan', p_plan,
+      'payment_id', p_payment_id,
+      'renewal_number', coalesce(v_payment.renewal_number, 0) + 1,
+      'renewal_date', to_char(v_renewal_date, 'YYYY-MM-DD HH24:MI:SS')
+    )
+  )
+  returning id into v_audit_id;
+
+  v_result := jsonb_build_object(
+    'ok', true,
+    'already_activated', false,
+    'renewal_number', coalesce(v_payment.renewal_number, 0) + 1,
+    'renewal_date', to_char(v_renewal_date, 'YYYY-MM-DD HH24:MI:SS'),
+    'audit_id', v_audit_id
+  );
+
+  return v_result;
+end;
+$$;
+
+revoke all on function public.activate_subscription_server_side(uuid, text, uuid, timestamptz) from public, anon;
+grant execute on function public.activate_subscription_server_side(uuid, text, uuid, timestamptz) to service_role, authenticated;
+
+-- Función: renovar suscripción (server-side, idempotente)
+create or replace function public.renew_subscription_server_side(
+  p_business_id uuid,
+  p_plan text,
+  p_payment_id uuid,
+  p_now timestamptz default now()
+)
+returns jsonb
+language plpgsql
+security definer
+as $$
+declare
+  v_payment record;
+  v_period_days integer;
+  v_renewal_date timestamptz;
+  v_next_charge_at timestamptz;
+  v_audit_id uuid;
+begin
+  if p_plan not in ('monthly', 'yearly') then
+    raise exception 'Plan inválido: %', p_plan;
+  end if;
+
+  if auth.uid() is not null then
+    if not exists (
+      select 1 from unnest(public.auth_business_ids()) as bid where bid = p_business_id
+    ) then
+      raise exception 'NOT_A_MEMBER: no perteneces a este negocio.';
+    end if;
+  end if;
+
+  if exists (
+    select 1 from businesses
+    where id = p_business_id
+      and subscription_status = 'cancelled'
+  ) then
+    return jsonb_build_object(
+      'ok', true,
+      'already_renewed', false,
+      'reason', 'subscription_cancelled'
+    );
+  end if;
+
+  select * into v_payment
+  from subscription_payments
+  where id = p_payment_id
+    and business_id = p_business_id;
+
+  if not found then
+    raise exception 'Pago no encontrado: %', p_payment_id;
+  end if;
+
+  if v_payment.status = 'approved' then
+    return jsonb_build_object(
+      'ok', true,
+      'already_renewed', true,
+      'renewal_number', v_payment.renewal_number
+    );
+  end if;
+
+  if v_payment.status = 'declined' then
+    raise exception 'El pago % ya fue declinado. No se puede renovar.', p_payment_id;
+  end if;
+
+  v_period_days := public.get_plan_period_days(p_plan);
+  if v_payment.paid_at is not null then
+    v_renewal_date := (v_payment.paid_at + (v_period_days || ' days')::interval);
+  else
+    v_renewal_date := (p_now + (v_period_days || ' days')::interval);
+  end if;
+  v_next_charge_at := v_renewal_date;
+
+  if exists (
+    select 1 from businesses
+    where id = p_business_id
+      and renewal_date > v_renewal_date
+  ) then
+    return jsonb_build_object(
+      'ok', true,
+      'already_renewed', true,
+      'renewal_number', v_payment.renewal_number,
+      'reason', 'obsolete_payment'
+    );
+  end if;
+
+  update businesses
+  set
+    plan = p_plan,
+    renewal_date = v_renewal_date,
+    next_charge_at = v_next_charge_at,
+    payment_status = 'approved',
+    subscription_status = p_plan
+  where id = p_business_id;
+
+  update subscription_payments
+  set
+    status = 'approved',
+    paid_at = p_now,
+    renewal_number = coalesce(renewal_number, 0) + 1
+  where id = p_payment_id;
+
+  insert into subscription_audit_log (business_id, action, actor_type, details)
+  values (
+    p_business_id,
+    'SUBSCRIPTION_RENEWED',
+    'payment_provider',
+    jsonb_build_object(
+      'plan', p_plan,
+      'payment_id', p_payment_id,
+      'renewal_number', coalesce(v_payment.renewal_number, 0) + 1,
+      'renewal_date', to_char(v_renewal_date, 'YYYY-MM-DD HH24:MI:SS')
+    )
+  )
+  returning id into v_audit_id;
+
+  return jsonb_build_object(
+    'ok', true,
+    'already_renewed', false,
+    'renewal_number', coalesce(v_payment.renewal_number, 0) + 1,
+    'renewal_date', to_char(v_renewal_date, 'YYYY-MM-DD HH24:MI:SS'),
+    'audit_id', v_audit_id
+  );
+end;
+$$;
+
+revoke all on function public.renew_subscription_server_side(uuid, text, uuid, timestamptz) from public, anon;
+grant execute on function public.renew_subscription_server_side(uuid, text, uuid, timestamptz) to service_role, authenticated;
+
+-- Función: marcar suscripción como vencida
+create or replace function public.expire_subscription_server_side(
+  p_business_id uuid,
+  p_now timestamptz default now()
+)
+returns jsonb
+language plpgsql
+security definer
+as $$
+declare
+  v_audit_id uuid;
+  v_business record;
+begin
+  select * into v_business from businesses where id = p_business_id;
+
+  if not found then
+    raise exception 'Negocio no encontrado: %', p_business_id;
+  end if;
+
+  if auth.uid() is not null then
+    if not exists (
+      select 1 from unnest(public.auth_business_ids()) as bid where bid = p_business_id
+    ) then
+      raise exception 'NOT_A_MEMBER: no perteneces a este negocio.';
+    end if;
+  end if;
+
+  update businesses
+  set
+    payment_status = 'past_due',
+    subscription_status = 'suspended'
+  where id = p_business_id
+    and subscription_status <> 'suspended';
+
+  if not found then
+    return jsonb_build_object('ok', true, 'already_expired', true);
+  end if;
+
+  insert into subscription_audit_log (business_id, action, actor_type, details)
+  values (
+    p_business_id,
+    'SUBSCRIPTION_EXPIRED',
+    'cron',
+    jsonb_build_object('expired_at', to_char(p_now, 'YYYY-MM-DD HH24:MI:SS'))
+  )
+  returning id into v_audit_id;
+
+  return jsonb_build_object('ok', true, 'already_expired', false, 'audit_id', v_audit_id);
+end;
+$$;
+
+revoke all on function public.expire_subscription_server_side(uuid, timestamptz) from public, anon;
+grant execute on function public.expire_subscription_server_side(uuid, timestamptz) to service_role, authenticated;
+
+-- Función: cancelar suscripción (server-side, idempotente)
+create or replace function public.cancel_subscription_server_side(
+  p_business_id uuid,
+  p_now timestamptz default now()
+)
+returns jsonb
+language plpgsql
+security definer
+as $$
+declare
+  v_business record;
+  v_audit_id uuid;
+begin
+  select * into v_business
+  from businesses
+  where id = p_business_id;
+
+  if not found then
+    raise exception 'Negocio no encontrado: %', p_business_id;
+  end if;
+
+  if auth.uid() is not null then
+    if not exists (
+      select 1 from unnest(public.auth_business_ids()) as bid where bid = p_business_id
+    ) then
+      raise exception 'NOT_A_MEMBER: no perteneces a este negocio.';
+    end if;
+  end if;
+
+  if v_business.subscription_status = 'cancelled' then
+    return jsonb_build_object('ok', true, 'already_cancelled', true);
+  end if;
+
+  update businesses
+  set
+    subscription_status = 'cancelled',
+    payment_status = case
+      when payment_status = 'approved' then 'past_due'
+      else payment_status
+    end,
+    next_charge_at = null
+  where id = p_business_id;
+
+  insert into subscription_audit_log (business_id, action, actor_type, details)
+  values (
+    p_business_id,
+    'SUBSCRIPTION_CANCELLED',
+    'user',
+    jsonb_build_object('cancelled_at', to_char(p_now, 'YYYY-MM-DD HH24:MI:SS'))
+  )
+  returning id into v_audit_id;
+
+  return jsonb_build_object('ok', true, 'already_cancelled', false, 'audit_id', v_audit_id);
+end;
+$$;
+
+revoke all on function public.cancel_subscription_server_side(uuid, timestamptz) from public, anon;
+grant execute on function public.cancel_subscription_server_side(uuid, timestamptz) to service_role, authenticated;
+
+-- Trigger: mantener subscription_status sincronizado
+create or replace function public.sync_subscription_status()
+returns trigger
+language plpgsql
+as $$
+declare
+  v_days_remaining integer;
+  v_new_status text;
+begin
+  if NEW.plan = 'trial' then
+    if NEW.trial_ends_at is not null then
+      v_days_remaining := ceil(extract(epoch from (NEW.trial_ends_at - now())) / 86400);
+      if v_days_remaining > 0 then
+        v_new_status := 'trial';
+      else
+        v_new_status := 'suspended';
+      end if;
+    else
+      v_new_status := 'suspended';
+    end if;
+  elsif NEW.payment_status in ('approved') then
+    v_new_status := NEW.plan;
+  elsif NEW.payment_status in ('declined', 'past_due') then
+    v_new_status := 'suspended';
+  else
+    v_new_status := NEW.plan;
+  end if;
+
+  NEW.subscription_status := v_new_status;
+  return NEW;
+end;
+$$;
+
+drop trigger if exists sync_subscription_status_trigger on businesses;
+create trigger sync_subscription_status_trigger
+  before insert or update of plan, trial_ends_at, payment_status on businesses
+  for each row
+  execute function public.sync_subscription_status();

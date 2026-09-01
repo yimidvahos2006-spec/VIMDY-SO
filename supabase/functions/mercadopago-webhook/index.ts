@@ -260,7 +260,10 @@ Deno.serve(async (req: Request) => {
         return json({ error: "PAYMENT_UPDATE_FAILED", detail: declineUpdateError.message }, 500);
       }
 
-      await admin.from("businesses").update({ payment_status: "declined" }).eq("id", paymentRow.business_id);
+      await admin.rpc(
+        "cancel_subscription_server_side",
+        { p_business_id: paymentRow.business_id, p_now: new Date().toISOString() }
+      );
       return json({ ok: true, activated: false });
     }
 

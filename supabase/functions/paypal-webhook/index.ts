@@ -200,7 +200,10 @@ Deno.serve(async (req: Request) => {
 
     if (event.event_type === "PAYMENT.CAPTURE.DENIED") {
       await admin.from("subscription_payments").update({ status: "declined" }).eq("id", paymentRow.id);
-      await admin.from("businesses").update({ payment_status: "declined" }).eq("id", paymentRow.business_id);
+      await admin.rpc(
+        "cancel_subscription_server_side",
+        { p_business_id: paymentRow.business_id, p_now: new Date().toISOString() }
+      );
       return json({ ok: true, activated: false });
     }
 
@@ -225,14 +228,20 @@ Deno.serve(async (req: Request) => {
     if (!captureResponse.ok) {
       const detail = await captureResponse.text();
       await admin.from("subscription_payments").update({ status: "declined" }).eq("id", paymentRow.id);
-      await admin.from("businesses").update({ payment_status: "declined" }).eq("id", paymentRow.business_id);
+      await admin.rpc(
+        "cancel_subscription_server_side",
+        { p_business_id: paymentRow.business_id, p_now: new Date().toISOString() }
+      );
       return json({ error: "PAYPAL_CAPTURE_FAILED", detail }, 502);
     }
 
     const capture = (await captureResponse.json()) as PayPalCaptureResponse;
     if (capture.status !== "COMPLETED") {
       await admin.from("subscription_payments").update({ status: "declined" }).eq("id", paymentRow.id);
-      await admin.from("businesses").update({ payment_status: "declined" }).eq("id", paymentRow.business_id);
+      await admin.rpc(
+        "cancel_subscription_server_side",
+        { p_business_id: paymentRow.business_id, p_now: new Date().toISOString() }
+      );
       return json({ ok: true, activated: false });
     }
 

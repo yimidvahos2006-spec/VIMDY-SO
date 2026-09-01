@@ -99,6 +99,13 @@ export async function syncOne(pending: PendingSale): Promise<Sale> {
     });
   }
 
+  if (!pending.createSaleInput.skipKitchen) {
+    const existingKitchenOrder = await container.kitchenEngine.get().getById(sale.id);
+    if (!existingKitchenOrder) {
+      await container.salesEngine.get().sendToKitchen(sale);
+    }
+  }
+
   return sale;
 }
 
