@@ -3,29 +3,35 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Confirma tu cuenta - VIMDY</title>
+  <title>Verificar cuenta - VIMDY</title>
 </head>
 <body style="margin:0; padding:0; background-color:#0a0a0f; color:#e0e0e0; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px; margin:0 auto; padding:40px 20px;">
     <tr>
-      <td style="text-align:center; padding-bottom:16px;">
-        <img src="https://vimdy.co/vimdy_mano_saludando.gif" width="90" height="90" alt="Bienvenido a VIMDY" style="display:block; margin:0 auto;">
+      <td style="text-align:center; padding-bottom:24px;">
+        <img src="https://vimdy.co/vimdy_mano_saludando.gif" alt="VIMDY" width="120" style="display:block; margin:0 auto;">
       </td>
     </tr>
     <tr>
       <td style="background:rgba(15,15,25,0.8); border:1px solid rgba(0,163,255,0.2); border-radius:12px; padding:32px; text-align:center;">
-        <h1 style="color:#ffffff; font-size:20px; font-weight:600; margin:0 0 16px;">Confirma tu cuenta</h1>
-        <p style="color:#a0a0b0; font-size:15px; line-height:1.6; margin:0 0 24px;">Usa este código para terminar de crear tu cuenta en VIMDY.</p>
-        <div style="font-size:32px; font-weight:700; letter-spacing:8px; color:#ffffff; background:rgba(0,163,255,0.08); border:1px solid rgba(0,163,255,0.25); border-radius:10px; padding:16px 0; margin:0 0 20px;">
-          {{ .Token }}
-        </div>
-        <p style="color:#a0a0b0; font-size:13px; line-height:1.6; margin:0;">Este código expira en 10 minutos.</p>
-        <p style="color:#a0a0b0; font-size:13px; line-height:1.6; margin:8px 0 0;">Si tú no creaste esta cuenta, puedes ignorar este correo.</p>
+        <h1 style="color:#ffffff; font-size:20px; font-weight:600; margin:0 0 16px;">Tu c&oacute;digo de verificaci&oacute;n</h1>
+        <p style="color:#a0a0b0; font-size:15px; line-height:1.6; margin:0 0 24px;">Usa este c&oacute;digo de 6 d&iacute;gitos para completar tu registro en VIMDY:</p>
+        <table width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            <td style="text-align:center;">
+              <div style="display:inline-block; background:rgba(0,163,255,0.1); border:1px solid rgba(0,163,255,0.3); border-radius:12px; padding:20px 40px; margin:0 0 24px;">
+                <span style="color:#38BDF8; font-size:36px; font-weight:700; letter-spacing:8px; font-family:'Courier New', monospace;">{{ .Token }}</span>
+              </div>
+            </td>
+          </tr>
+        </table>
+        <p style="color:#a0a0b0; font-size:13px; line-height:1.6; margin:0;">El c&oacute;digo expira en 5 minutos.</p>
+        <p style="color:#a0a0b0; font-size:13px; line-height:1.6; margin:8px 0 0;">Si no solicitaste este registro, puedes ignorar este correo con seguridad.</p>
       </td>
     </tr>
     <tr>
       <td style="text-align:center; padding-top:24px;">
-        <p style="color:#606070; font-size:12px; line-height:1.4; margin:0;">VIMDY © {{ .GeneratedAt }}</p>
+        <p style="color:#606070; font-size:12px; line-height:1.4; margin:0;">VIMDY &copy; {{ .GeneratedAt }}</p>
       </td>
     </tr>
   </table>
