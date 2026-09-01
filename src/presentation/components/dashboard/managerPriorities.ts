@@ -264,13 +264,11 @@ export function priorityTitle(priority: ManagerPriority, t: TFunction): string {
 }
 
 /** Saludo "vivo" según la hora real del dispositivo del usuario. */
-export function buildGreeting(ownerName: string | undefined, now: Date, t: TFunction): { title: string; subtitle: string } {
+export function buildGreeting(_ownerName: string | undefined, now: Date, t: TFunction): { title: string; subtitle: string } {
   const hour = now.getHours();
   const timeGreeting = hour < 12 ? t("greeting.morning") : hour < 19 ? t("greeting.afternoon") : t("greeting.evening");
-  const firstName = ownerName?.trim().split(" ")[0];
-  const title = firstName ? `${timeGreeting}, ${firstName}.` : `${timeGreeting}.`;
   return {
-    title,
+    title: `${timeGreeting} 👋`,
     subtitle: t("greeting.subtitle")
   };
 }

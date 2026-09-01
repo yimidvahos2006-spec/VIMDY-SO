@@ -42,13 +42,25 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const VIMDY_APP_URL = Deno.env.get("VIMDY_APP_URL") ?? "https://app.vimdy.co";
-const corsHeaders = {
-  "Access-Control-Allow-Origin": VIMDY_APP_URL,
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS"
-};
+const ALLOWED_ORIGINS = new Set([
+  "https://vimdy.co",
+  "https://www.vimdy.co",
+  "https://app.vimdy.co",
+  VIMDY_APP_URL
+]);
 
-function json(body: unknown, status = 200) {
+function getCorsHeaders(req: Request): Record<string, string> {
+  const origin = req.headers.get("origin") ?? "";
+  const allowed = ALLOWED_ORIGINS.has(origin) ? origin : VIMDY_APP_URL;
+  return {
+    "Access-Control-Allow-Origin": allowed,
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Vary": "Origin"
+  };
+}
+
+function json(body: unknown, status = 200, corsHeaders?: Record<string, string>) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" }
@@ -121,17 +133,18 @@ const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
 Deno.serve(async (req: Request) => {
   // Handle CORS preflight requests
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
   if (req.method !== "POST") {
-    return json({ error: "Method not allowed" }, 405);
+    return json({ error: "Method not allowed" }, 405, corsHeaders);
   }
 
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
     console.error("[register-business] SERVER_CONFIG_MISSING: SUPABASE_URL or SERVICE_ROLE_KEY not set");
-    return json({ error: "SERVER_CONFIG_MISSING: faltan SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY" }, 500);
+    return json({ error: "SERVER_CONFIG_MISSING: faltan SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY" }, 500, corsHeaders);
   }
 
   try {
@@ -143,7 +156,7 @@ Deno.serve(async (req: Request) => {
 
     if (!accessToken) {
       console.warn("[register-business] NO_AUTH: missing authorization header");
-      return json({ error: "NO_AUTH: falta el token de sesión. Inicia sesión de nuevo." }, 401);
+      return json({ error: "NO_AUTH: falta el token de sesión. Inicia sesión de nuevo." }, 401, corsHeaders);
     }
 
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
@@ -151,7 +164,7 @@ Deno.serve(async (req: Request) => {
     const { data: userData, error: userError } = await admin.auth.getUser(accessToken);
     if (userError || !userData.user) {
       console.warn("[register-business] SESSION_INVALID:", userError?.message ?? "no user data");
-      return json({ error: "SESSION_INVALID: tu sesión no es válida o expiró." }, 401);
+      return json({ error: "SESSION_INVALID: tu sesión no es válida o expiró." }, 401, corsHeaders);
     }
 
     const authUser = userData.user;
@@ -161,7 +174,7 @@ Deno.serve(async (req: Request) => {
     //    negocio, sin importar qué diga el body.
     if (!authUser.email_confirmed_at) {
       console.warn(`[register-business] EMAIL_NOT_VERIFIED for user ${authUser.id}`);
-      return json({ error: "EMAIL_NOT_VERIFIED: verifica tu correo antes de continuar." }, 403);
+      return json({ error: "EMAIL_NOT_VERIFIED: verifica tu correo antes de continuar." }, 403, corsHeaders);
     }
 
     let payload: RequestPayload;
@@ -169,7 +182,7 @@ Deno.serve(async (req: Request) => {
       payload = await req.json();
     } catch {
       console.warn("[register-business] INVALID_JSON: could not parse request body");
-      return json({ error: "INVALID_JSON" }, 400);
+      return json({ error: "INVALID_JSON" }, 400, corsHeaders);
     }
 
     const businessName = payload.businessName?.trim();
@@ -179,13 +192,13 @@ Deno.serve(async (req: Request) => {
 
     if (!businessName || !ownerName || !country) {
       console.warn("[register-business] MISSING_FIELDS:", { businessName: !!businessName, ownerName: !!ownerName, country: !!country });
-      return json({ error: "Faltan campos: businessName, ownerName y country son obligatorios." }, 400);
+      return json({ error: "Faltan campos: businessName, ownerName y country son obligatorios." }, 400, corsHeaders);
     }
 
     const countryDefaults = COUNTRY_DEFAULTS[country];
     if (!countryDefaults) {
       console.warn(`[register-business] COUNTRY_INVALID: ${country}`);
-      return json({ error: "COUNTRY_INVALID: país no reconocido." }, 400);
+      return json({ error: "COUNTRY_INVALID: país no reconocido." }, 400, corsHeaders);
     }
 
     // Calcular módulos por defecto según el tipo de negocio
@@ -204,14 +217,14 @@ Deno.serve(async (req: Request) => {
 
     if (hasUsedTrialError) {
       console.error("[register-business] TRIAL_CHECK_FAILED:", hasUsedTrialError.message);
-      return json({ error: "TRIAL_CHECK_FAILED", detail: hasUsedTrialError.message }, 500);
+      return json({ error: "TRIAL_CHECK_FAILED", detail: hasUsedTrialError.message }, 500, corsHeaders);
     }
 
     if (hasUsedTrial) {
       console.log(`[register-business] TRIAL_YA_USADO for user ${authUser.id}`);
       return json({
         error: "TRIAL_YA_USADO: ya utilizaste tu prueba gratuita de 14 días. Puedes contratar un plan mensual o anual para continuar."
-      }, 403);
+      }, 403, corsHeaders);
     }
 
     // 4) Idempotencia: si el usuario ya tiene un negocio, devolverlo en vez
@@ -224,7 +237,7 @@ Deno.serve(async (req: Request) => {
 
     if (existingError) {
       console.error("[register-business] BUSINESS_LOOKUP_FAILED:", existingError.message);
-      return json({ error: "BUSINESS_LOOKUP_FAILED", detail: existingError.message }, 500);
+      return json({ error: "BUSINESS_LOOKUP_FAILED", detail: existingError.message }, 500, corsHeaders);
     }
 
     if (existingBusinesses && existingBusinesses.length > 0) {
@@ -237,7 +250,7 @@ Deno.serve(async (req: Request) => {
 
       if (existingBizError) {
         console.error("[register-business] EXISTING_BUSINESS_LOOKUP_FAILED:", existingBizError.message);
-        return json({ error: "EXISTING_BUSINESS_LOOKUP_FAILED", detail: existingBizError.message }, 500);
+        return json({ error: "EXISTING_BUSINESS_LOOKUP_FAILED", detail: existingBizError.message }, 500, corsHeaders);
       }
 
       if (existingBiz) {
@@ -246,7 +259,7 @@ Deno.serve(async (req: Request) => {
           ok: true,
           businessId: existingBiz.id,
           idempotent: true
-        });
+        }, 200, corsHeaders);
       }
     }
 
@@ -273,7 +286,8 @@ Deno.serve(async (req: Request) => {
         console.error("[register-business] BUSINESS_INSERT_FAILED:", businessInsertError?.message ?? "no business data");
         return json(
           { error: "BUSINESS_INSERT_FAILED", detail: businessInsertError?.message ?? "Sin detalle." },
-          500
+          500,
+          corsHeaders
         );
       }
 
@@ -291,7 +305,7 @@ Deno.serve(async (req: Request) => {
       if (memberInsertError) {
         console.error("[register-business] MEMBER_INSERT_FAILED:", memberInsertError.message);
         await admin.from("businesses").delete().eq("id", business.id);
-        return json({ error: "MEMBER_INSERT_FAILED", detail: memberInsertError.message }, 500);
+        return json({ error: "MEMBER_INSERT_FAILED", detail: memberInsertError.message }, 500, corsHeaders);
       }
 
       // 7) Perfil del dueño en app_users (opcional) — mismo directorio de
@@ -331,7 +345,7 @@ Deno.serve(async (req: Request) => {
         console.error("[register-business] BRANCH_INSERT_FAILED:", branchInsertError.message);
         await admin.from("business_members").delete().eq("user_id", authUser.id).eq("business_id", business.id);
         await admin.from("businesses").delete().eq("id", business.id);
-        return json({ error: "BRANCH_INSERT_FAILED", detail: branchInsertError.message }, 500);
+        return json({ error: "BRANCH_INSERT_FAILED", detail: branchInsertError.message }, 500, corsHeaders);
       }
 
       // 8) Registrar el uso del trial (opcional) — si la función SQL no existe
@@ -350,13 +364,13 @@ Deno.serve(async (req: Request) => {
       }
 
       console.log(`[register-business] Registration complete for user ${authUser.id}, business ${business.id}`);
-      return json({ ok: true, businessId: business.id });
+      return json({ ok: true, businessId: business.id }, 200, corsHeaders);
     } catch (error) {
       console.error("[register-business] UNEXPECTED_ERROR:", String(error));
-      return json({ error: "REGISTER_BUSINESS_FAILED", detail: String(error) }, 500);
+      return json({ error: "REGISTER_BUSINESS_FAILED", detail: String(error) }, 500, corsHeaders);
     }
   } catch (error) {
     console.error("[register-business] FATAL_ERROR:", String(error));
-    return json({ error: "INTERNAL_SERVER_ERROR", detail: String(error) }, 500);
+    return json({ error: "INTERNAL_SERVER_ERROR", detail: String(error) }, 500, corsHeaders);
   }
 });
