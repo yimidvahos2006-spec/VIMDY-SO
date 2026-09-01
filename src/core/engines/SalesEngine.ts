@@ -1488,7 +1488,8 @@ export class SalesEngine {
             const result = await provider.createInvoice(request);
             finalSale = await this.updateSale({
               ...updatedSale,
-              invoiceId: result.id
+              invoiceId: result.id,
+              invoiceCufe: result.trackingCode
             });
           }
         } catch (error) {

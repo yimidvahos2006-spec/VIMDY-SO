@@ -379,6 +379,13 @@ export interface Sale {
    */
   readonly invoiceId?: string;
   /**
+   * CUFE (Código Único de Factura Electrónica) de la factura asociada
+   * a invoiceId. Requisito legal para poder vincular una futura nota
+   * crédito a su factura original (Resolución DIAN 000042 de 2020,
+   * art. 30). Ausente = la venta no tiene factura electrónica emitida.
+   */
+  readonly invoiceCufe?: string;
+  /**
    * Prioridad manual elegida al crear el pedido (Caja, Pedidos rápidos,
    * Para llevar, Domicilios). Ausente = tratar como "NORMAL". Viaja tal
    * cual hasta el KitchenOrder que genera SalesEngine.sendToKitchen().
