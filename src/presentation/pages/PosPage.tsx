@@ -14,7 +14,7 @@ export function PosPage() {
 
       <PosTopBar />
 
-      <div className="grid grid-cols-[220px_1fr_360px] gap-4 flex-1 min-h-0">
+      <div className="grid grid-cols-[180px_1fr_280px] lg:grid-cols-[220px_1fr_360px] gap-4 flex-1 min-h-0">
 
         {/* Columna 1: Categorías */}
         <div className="min-h-0 bg-vimdy-surface border border-vimdy-border rounded-vimdy-lg overflow-hidden">
