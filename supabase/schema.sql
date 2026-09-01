@@ -585,6 +585,7 @@ create policy business_members_self_insert on business_members
              or user_id = auth.uid())
         and accepted_at is null
         and expires_at > now()
+        and role = business_members.role
     )
     and public.is_business_subscription_active(business_members.business_id)
   );

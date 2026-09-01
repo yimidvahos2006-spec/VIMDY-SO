@@ -157,7 +157,17 @@ async function declineBusiness(admin: any, row: PendingRow, paymentMethod: strin
     .update({ status: "declined", payment_method: paymentMethod })
     .eq("id", row.id);
 
-  await admin.from("businesses").update({ payment_status: "declined" }).eq("id", row.business_id);
+  const { error: expireError } = await admin.rpc("expire_subscription_server_side", {
+    p_business_id: row.business_id,
+    p_now: new Date().toISOString()
+  });
+
+  if (expireError) {
+    console.error(
+      "PAYMENTS_RECONCILE_EXPIRE_FAILED",
+      JSON.stringify({ id: row.id, business_id: row.business_id, error: expireError.message })
+    );
+  }
 }
 
 // deno-lint-ignore no-explicit-any
