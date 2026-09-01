@@ -4,10 +4,10 @@ import { VimdyLogo } from "../../presentation/components/ui/VimdyLogo";
 
 const navLinks = [
   { href: "/funciones", label: "Funciones" },
-  { href: "#soluciones", label: "Soluciones" },
-  { href: "#precios", label: "Precios" },
-  { href: "#como-funciona", label: "Cómo funciona" },
-  { href: "#faq", label: "Preguntas" }
+  { href: "/#soluciones", label: "Soluciones" },
+  { href: "/#precios", label: "Precios" },
+  { href: "/#como-funciona", label: "Cómo funciona" },
+  { href: "/#faq", label: "Preguntas" }
 ];
 
 export function Navbar() {

@@ -26,6 +26,7 @@
 // ============================================================================
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { sentryCaptureException } from "../_shared/sentry.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -256,6 +257,7 @@ Deno.serve(async (req: Request) => {
 
     return json({ ok: true, activated: false });
   } catch (error) {
+    sentryCaptureException(error, { context: "wompi-webhook", reference: transaction?.reference });
     return json({ error: "WOMPI_WEBHOOK_FAILED", detail: String(error) }, 500);
   }
 });

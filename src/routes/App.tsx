@@ -28,11 +28,26 @@ import { PrivacyPage } from "../marketing/pages/PrivacyPage";
 import { TermsPage } from "../marketing/pages/TermsPage";
 import { CookiesPage } from "../marketing/pages/CookiesPage";
 import { MarketingLayout } from "../marketing/components/MarketingLayout";
+import { APP_URL } from "../core/config/appUrl";
 
 function isAppSubdomain(): boolean {
   if (typeof window === "undefined") return false;
   const hostname = window.location.hostname.toLowerCase();
   return hostname.startsWith("app.") || hostname === "localhost" && new URLSearchParams(window.location.search).get("app") === "1";
+}
+
+// vimdy.co (la página web) y app.vimdy.co (la app) deben quedar separados:
+// vimdy.co solo sirve para mercadeo. Si alguien llega a una ruta de la app
+// (login, registro, onboarding, etc.) mientras está parado en el dominio de
+// mercadeo — por un link viejo, un favorito guardado, o el flujo de
+// registro — esto lo manda automáticamente a la misma ruta pero en
+// app.vimdy.co, en vez de dejarlo servido ahí mismo (que era el bug: la
+// app entera funcionaba en los dos dominios a la vez).
+function RedirectToApp() {
+  if (typeof window !== "undefined") {
+    window.location.replace(`${APP_URL}${window.location.pathname}${window.location.search}`);
+  }
+  return null;
 }
 
 // Lazy loading: cada módulo solo se descarga y se ejecuta cuando el
@@ -346,52 +361,18 @@ export function App() {
           autoconfigura idioma + moneda + hora de toda la app al instante
           (ver companyConfigStore.markCountrySelected). No lleva
           RequireCountry: es la propia pantalla a la que ese guard redirige. */}
-      <Route path="/pais" element={<CountrySelectionPage />} />
-
-      <Route
-        path="/login"
-        element={
-          <RequireCountry>
-            <LoginPage />
-          </RequireCountry>
-        }
-      />
-      <Route
-        path="/registro"
-        element={
-          <RequireCountry>
-            <RegisterPage />
-          </RequireCountry>
-        }
-      />
-      {/* PASO 2 del registro seguro: verifica el código OTP de 6 dígitos
-          enviado tras RegisterPage. Va fuera de ProtectedRoute porque
-          todavía no hay negocio (ni sesión confirmada) en este punto. */}
-      <Route
-        path="/verificar-codigo"
-        element={
-          <RequireCountry>
-            <OtpPage />
-          </RequireCountry>
-        }
-      />
-      <Route
-        path="/recuperar-password"
-        element={
-          <RequireCountry>
-            <ForgotPasswordPage />
-          </RequireCountry>
-        }
-      />
-      <Route
-        path="/actualizar-password"
-        element={
-          <RequireCountry>
-            <UpdatePasswordPage />
-          </RequireCountry>
-        }
-      />
-      <Route path="/auth/callback" element={<AuthCallbackPage />} />
+      {/* Rutas de la app: vimdy.co (mercadeo) nunca las sirve él mismo —
+          rebota de una a app.vimdy.co conservando la misma ruta. */}
+      <Route path="/pais" element={<RedirectToApp />} />
+      <Route path="/login" element={<RedirectToApp />} />
+      <Route path="/registro" element={<RedirectToApp />} />
+      <Route path="/verificar-codigo" element={<RedirectToApp />} />
+      <Route path="/recuperar-password" element={<RedirectToApp />} />
+      <Route path="/actualizar-password" element={<RedirectToApp />} />
+      <Route path="/auth/callback" element={<RedirectToApp />} />
+      <Route path="/onboarding" element={<RedirectToApp />} />
+      <Route path="/business-selector" element={<RedirectToApp />} />
+      <Route path="/crear-negocio" element={<RedirectToApp />} />
 
       {/* Marketing público — sin autenticación, sin MainLayout */}
       <Route element={<MarketingLayout />}>
@@ -404,35 +385,10 @@ export function App() {
         <Route path="/cookies" element={<CookiesPage />} />
       </Route>
 
-      {/* PASO 1: ruta del asistente de onboarding. Va fuera de MainLayout
-          (pantalla completa, sin sidebar) pero sigue exigiendo sesión
-          iniciada — por eso usa ProtectedRoute igual que el resto. */}
-      <Route
-        path="/onboarding"
-        element={
-          <ProtectedRoute>
-            <OnboardingPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/business-selector"
-        element={
-          <ProtectedRoute>
-            <BusinessSelectorPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/crear-negocio"
-        element={
-          <ProtectedRoute>
-            <CreateBusinessPage />
-          </ProtectedRoute>
-        }
-      />
-
-      <Route path="/*" element={<AuthenticatedApp />} />
+      {/* Cualquier otra ruta desconocida en vimdy.co (por ejemplo, un
+          deep link viejo hacia una pantalla de la app) también rebota a
+          app.vimdy.co en vez de mostrar la app ahí mismo. */}
+      <Route path="/*" element={<RedirectToApp />} />
     </Routes>
   );
 }
