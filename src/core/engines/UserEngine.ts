@@ -5,6 +5,14 @@ import { RoleEngine } from "./RoleEngine";
 import { AuditEngine } from "./AuditEngine";
 import { vimdyCore } from "../VimdyCore";
 
+const VALID_STAFF_ROLE_IDS = new Set(["ADMIN", "CAJERO", "MESERO", "COCINA"]);
+
+function assertValidRoleId(roleId: string): void {
+  if (!VALID_STAFF_ROLE_IDS.has(roleId.trim().toUpperCase())) {
+    throw new Error(`ROLE_NOT_FOUND: el rol "${roleId}" no es válido. Usa ADMIN, CAJERO, MESERO o COCINA.`);
+  }
+}
+
 /* ===========================================================================
    UserEngine
    ---------------------------------------------------------------------------
@@ -39,8 +47,7 @@ export class UserEngine {
     actorId: string,
     data: { name: string; email: string; password: string; roleId: string }
   ): Promise<User> {
-    // Lanza ROLE_NOT_FOUND si el rol no existe en el catálogo local.
-    await this.roles.getRole(data.roleId);
+    assertValidRoleId(data.roleId);
 
     const user = await this.repository.createStaffAccount(data);
 
@@ -74,7 +81,7 @@ export class UserEngine {
     const user = await this.getUser(userId);
 
     if (changes.roleId) {
-      await this.roles.getRole(changes.roleId);
+      assertValidRoleId(changes.roleId);
     }
 
     if (changes.email && changes.email !== user.email) {

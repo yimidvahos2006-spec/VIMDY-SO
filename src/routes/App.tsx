@@ -17,6 +17,7 @@ import { OnboardingPage } from "../presentation/pages/OnboardingPage";
 import { CountrySelectionPage } from "../presentation/pages/CountrySelectionPage";
 import { BusinessSelectorPage } from "../presentation/pages/BusinessSelectorPage";
 import { CreateBusinessPage } from "../presentation/pages/CreateBusinessPage";
+import { AuthCallbackPage } from "../presentation/pages/AuthCallbackPage";
 import { RequireCountry } from "../presentation/navigation/RequireCountry";
 
 import { LandingPage } from "../marketing/pages/LandingPage";
@@ -307,6 +308,7 @@ export function App() {
             </RequireCountry>
           }
         />
+        <Route path="/auth/callback" element={<AuthCallbackPage />} />
         <Route
           path="/onboarding"
           element={
@@ -389,6 +391,7 @@ export function App() {
           </RequireCountry>
         }
       />
+      <Route path="/auth/callback" element={<AuthCallbackPage />} />
 
       {/* Marketing público — sin autenticación, sin MainLayout */}
       <Route element={<MarketingLayout />}>

@@ -410,6 +410,19 @@ export async function completeRegistration(): Promise<BusinessSession> {
   clearPendingRegistration();
   setCurrentBusinessId(businessSession.businessId);
   setCurrentBranchId(await resolveDefaultBranchId(businessSession.businessId));
+
+  const { data: sessionData } = await supabase.auth.getSession();
+  if (sessionData.session) {
+    const { access_token, refresh_token, expires_in } = sessionData.session;
+    const appUrl = "https://app.vimdy.co";
+    const hashParams = new URLSearchParams({
+      access_token,
+      refresh_token: refresh_token ?? "",
+      expires_in: String(expires_in ?? 3600)
+    });
+    location.href = `${appUrl}/auth/callback#${hashParams.toString()}`;
+  }
+
   return businessSession;
 }
 

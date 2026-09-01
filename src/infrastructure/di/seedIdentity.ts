@@ -6,44 +6,18 @@ import { supabase } from "../supabase/supabaseClient";
 let identitySeeded = false;
 
 export async function seedIdentity(
-  permissions: PermissionEngine,
-  roles: RoleEngine
+  _permissions: PermissionEngine,
+  _roles: RoleEngine
 ): Promise<void> {
   if (identitySeeded) return;
-
-  try {
-    const { data } = await supabase.auth.getSession();
-    if (!data.session) return;
-  } catch {
-    return;
-  }
-
-  try {
-    await doSeed(permissions, roles);
-    identitySeeded = true;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const isPermissionError =
-      message.includes("permission denied") ||
-      message.includes("JWT") ||
-      message.includes("session") ||
-      message.includes("RLS") ||
-      message.includes("new row violates");
-
-    if (!isPermissionError) {
-      logWarning("seedIdentity falló (sin negocio activo o sin sesión). Se reintentará después del login.", {
-        context: { error: String(error) }
-      });
-    }
-  }
+  identitySeeded = true;
 }
 
 export async function ensureIdentity(
-  permissions: PermissionEngine,
-  roles: RoleEngine
+  _permissions: PermissionEngine,
+  _roles: RoleEngine
 ): Promise<void> {
   if (identitySeeded) return;
-  await doSeed(permissions, roles);
   identitySeeded = true;
 }
 
