@@ -261,7 +261,7 @@ Deno.serve(async (req: Request) => {
       }
 
       await admin.rpc(
-        "cancel_subscription_server_side",
+        "expire_subscription_server_side",
         { p_business_id: paymentRow.business_id, p_now: new Date().toISOString() }
       );
       return json({ ok: true, activated: false });

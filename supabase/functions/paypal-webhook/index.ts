@@ -201,7 +201,7 @@ Deno.serve(async (req: Request) => {
     if (event.event_type === "PAYMENT.CAPTURE.DENIED") {
       await admin.from("subscription_payments").update({ status: "declined" }).eq("id", paymentRow.id);
       await admin.rpc(
-        "cancel_subscription_server_side",
+        "expire_subscription_server_side",
         { p_business_id: paymentRow.business_id, p_now: new Date().toISOString() }
       );
       return json({ ok: true, activated: false });
@@ -229,7 +229,7 @@ Deno.serve(async (req: Request) => {
       const detail = await captureResponse.text();
       await admin.from("subscription_payments").update({ status: "declined" }).eq("id", paymentRow.id);
       await admin.rpc(
-        "cancel_subscription_server_side",
+        "expire_subscription_server_side",
         { p_business_id: paymentRow.business_id, p_now: new Date().toISOString() }
       );
       return json({ error: "PAYPAL_CAPTURE_FAILED", detail }, 502);
@@ -239,7 +239,7 @@ Deno.serve(async (req: Request) => {
     if (capture.status !== "COMPLETED") {
       await admin.from("subscription_payments").update({ status: "declined" }).eq("id", paymentRow.id);
       await admin.rpc(
-        "cancel_subscription_server_side",
+        "expire_subscription_server_side",
         { p_business_id: paymentRow.business_id, p_now: new Date().toISOString() }
       );
       return json({ ok: true, activated: false });
