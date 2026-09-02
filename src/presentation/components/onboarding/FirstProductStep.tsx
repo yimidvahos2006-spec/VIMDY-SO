@@ -3,6 +3,7 @@ import { useState, type FormEvent } from "react";
 import { GlassCard } from "../ui/GlassCard";
 import { VimdyButton } from "../ui/VimdyButton";
 import { VimdyInput } from "../ui/VimdyInput";
+import { VimdySelect } from "../ui/VimdySelect";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { useAuth } from "../../context/AuthContext";
 import { translateBusinessError } from "../../../core/errors/translateBusinessError";
@@ -101,17 +102,18 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-3">
         <VimdyInput
-          placeholder="Nombre del producto"
+          label="Nombre del producto *"
+          placeholder="Ej: Café americano"
           value={name}
           onChange={(e) => setName(e.target.value)}
           disabled={saving}
         />
 
-        <select
+        <VimdySelect
+          label="Categoría *"
           value={categoryId}
           onChange={(e) => setCategoryId(e.target.value)}
           disabled={saving || categories.length === 0}
-          className="w-full rounded-2xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-white outline-none transition-colors duration-300 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20"
         >
           {categories.length === 0 && <option value="">Sin categorías</option>}
           {categories.map((category) => (
@@ -119,14 +121,15 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
               {category.name}
             </option>
           ))}
-        </select>
+        </VimdySelect>
 
         <div className="grid grid-cols-2 gap-3">
           <VimdyInput
             type="number"
             min={0}
             step="0.01"
-            placeholder="Precio"
+            label="Precio de venta *"
+            placeholder="0"
             value={price}
             onChange={(e) => setPrice(e.target.value)}
             disabled={saving}
@@ -135,7 +138,8 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
             type="number"
             min={0}
             step="0.01"
-            placeholder="Costo (opcional)"
+            label="Costo (opcional)"
+            placeholder="0"
             value={cost}
             onChange={(e) => setCost(e.target.value)}
             disabled={saving}
@@ -145,16 +149,13 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
         <VimdyInput
           type="number"
           min={0}
-          placeholder="Stock inicial (unidades que tienes ahora)"
+          label="Stock inicial"
+          placeholder="0"
+          hint="Si lo dejas vacío, el producto se crea con 0 unidades y se verá como Agotado."
           value={stock}
           onChange={(e) => setStock(e.target.value)}
           disabled={saving}
         />
-        {!stock.trim() && (
-          <p className="text-center text-xs text-amber-400 -mt-2">
-            Si lo dejas vacío, el producto se crea con 0 unidades y se verá como "Agotado".
-          </p>
-        )}
 
         {error && <p className="text-center text-sm text-red-400">{error}</p>}
 

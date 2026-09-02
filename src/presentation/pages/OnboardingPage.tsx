@@ -14,6 +14,7 @@ import { FirstProductStep } from "../components/onboarding/FirstProductStep";
 import { CashOpeningStep } from "../components/onboarding/CashOpeningStep";
 import { LoadingStep } from "../components/onboarding/LoadingStep";
 import { FinalStep } from "../components/onboarding/FinalStep";
+import { OnboardingProgress } from "../components/onboarding/OnboardingProgress";
 import {
   ONBOARDING_STEPS_BUILT,
   nextOnboardingStep,
@@ -143,6 +144,8 @@ export function OnboardingPage() {
   return (
     <VimdyBackground>
       <div className="min-h-screen flex flex-col items-center justify-center px-4 py-10">
+        <OnboardingProgress step={step} />
+
         {stepIsBuilt && step === "welcome" && (
           <WelcomeStep
             ownerName={user?.name}
