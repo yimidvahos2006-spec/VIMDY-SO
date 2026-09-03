@@ -73,7 +73,7 @@ async function persist(
       return;
     }
 
-    await supabase.from("system_errors").insert({
+    const { error: insertError } = await supabase.from("system_errors").insert({
       severity,
       category: options.category ?? "unknown",
       message: message.slice(0, 4000),
@@ -83,6 +83,10 @@ async function persist(
       context: options.context ?? {},
       source: "web"
     });
+
+    if (insertError && !(insertError.message?.includes("does not exist") || insertError.code === "PGRST200")) {
+      console.warn(`[opsLogger] system_errors insert failed: ${insertError.message}`);
+    }
   } catch {
     // Silencioso a propósito — ver nota de "best effort" arriba. Ya quedó
     // impreso en consola por logError/logWarning antes de llegar acá.

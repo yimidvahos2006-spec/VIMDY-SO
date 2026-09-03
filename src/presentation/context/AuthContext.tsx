@@ -223,8 +223,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             ensureIdentity(container.permissionEngine.get(), container.roleEngine.get())
           ]);
           setCurrentBranchId(resolvedBranchId);
+          if (cancelled) return;
           startRealtimeSync(session.businessId);
-          startOfflineSalesSync();
+           startOfflineSalesSync();
           startOfflineInventorySync();
           startOfflineTableSync();
           startOfflineCustomerSync();
@@ -275,10 +276,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    return () => {
-      cancelled = true;
-      subscription.subscription.unsubscribe();
-    };
+     return () => {
+       cancelled = true;
+       stopRealtimeSync();
+       subscription.subscription.unsubscribe();
+     };
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
