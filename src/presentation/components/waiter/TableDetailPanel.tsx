@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Minus, Plus, Trash2, X, ChefHat, Wallet, AlertTriangle, ArrowUpCircle, CircleDot, Search, Mic, MicOff, CheckCircle2, MessageSquarePlus } from "lucide-react";
+import { Minus, Plus, Trash2, X, ChefHat, Wallet, AlertTriangle, ArrowUpCircle, CircleDot, Search, Mic, MicOff, CheckCircle2, MessageSquarePlus, ClipboardList, UtensilsCrossed } from "lucide-react";
 
 import { Table, Product, OrderPriority } from "../../../core/entities/Entities";
 import { container } from "../../../infrastructure/di/CompositionRoot";
@@ -42,6 +42,7 @@ export function TableDetailPanel({
   const [voiceSuccess, setVoiceSuccess] = useState<string | null>(null);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
+  const [mobileTab, setMobileTab] = useState<"order" | "products">("products");
 
   const { listening, result, listen } = useVoiceOrder({
     onSuccess: (voiceResult) => {
@@ -231,171 +232,369 @@ export function TableDetailPanel({
           </div>
         )}
 
-        <div className="flex-1 grid grid-cols-3 gap-4 p-6 overflow-hidden">
-          {/* Pedido actual */}
-          <div className="flex flex-col overflow-hidden">
-            <h3 className="text-slate-300 font-bold mb-3">Pedido actual</h3>
-            <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-              {!hasItems && (
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-6 text-center text-slate-500">
-                  {search.trim() || category !== "Todos"
-                    ? "No se encontraron productos con ese filtro."
-                    : "Toca un producto para agregarlo a esta mesa."}
-                </div>
+        <div className="flex-1 overflow-hidden">
+          {/* Mobile tab switcher */}
+          <div className="flex md:hidden border-b border-slate-700 bg-vimdy-background">
+            <button
+              onClick={() => setMobileTab("products")}
+              className={`flex-1 flex items-center justify-center gap-2 h-12 text-sm font-bold transition ${
+                mobileTab === "products"
+                  ? "text-vimdy-accent border-b-2 border-vimdy-accent"
+                  : "text-slate-400"
+              }`}
+            >
+              <UtensilsCrossed size={18} />
+              Productos
+            </button>
+            <button
+              onClick={() => setMobileTab("order")}
+              className={`flex-1 flex items-center justify-center gap-2 h-12 text-sm font-bold transition relative ${
+                mobileTab === "order"
+                  ? "text-vimdy-accent border-b-2 border-vimdy-accent"
+                  : "text-slate-400"
+              }`}
+            >
+              <ClipboardList size={18} />
+              Pedido
+              {hasItems && (
+                <span className="absolute top-2 right-4 w-2 h-2 rounded-full bg-cyan-400" />
               )}
-              {table.items.map(item => {
-                const product = productMap.get(item.productId);
-                const isEditing = editingNoteId === item.productId;
-                return (
-                  <div
-                    key={item.productId}
-                    className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4"
-                  >
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <p className="text-white font-semibold">
-                          {product?.name ?? item.productId}
-                        </p>
-                        {isEditing ? (
-                          <input
-                            autoFocus
-                            value={noteDraft}
-                            onChange={(e) => setNoteDraft(e.target.value)}
-                            onBlur={() => saveNote(item.productId)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") saveNote(item.productId);
-                              if (e.key === "Escape") setEditingNoteId(null);
-                            }}
-                            placeholder="Ej: sin arroz, al punto..."
-                            className="mt-1 w-full h-9 rounded-lg bg-slate-800 border border-slate-700 text-white text-sm px-2 outline-none focus:border-cyan-500"
-                          />
-                        ) : (
-                          <>
-                            {item.note && (
-                              <p className="text-amber-400 text-xs mt-1">
-                                {item.note}
-                              </p>
-                            )}
-                            {!item.note && (
-                              <button
-                                onClick={() => startEditNote(item.productId)}
-                                className="text-slate-500 hover:text-slate-300 text-xs mt-1 flex items-center gap-1"
-                              >
-                                <MessageSquarePlus size={12} />
-                                Agregar nota
-                              </button>
-                            )}
-                          </>
-                        )}
-                        <p className="text-cyan-400 text-sm">
-                          ${item.price.toLocaleString("es-CO")}
-                        </p>
-                      </div>
-                      <button
-                        disabled={busy}
-                        onClick={() => removeItem(item.productId)}
-                        className="text-red-400 hover:text-red-300 disabled:opacity-40"
-                      >
-                        <Trash2 size={18} />
-                      </button>
-                    </div>
-                    <div className="flex items-center gap-3 mt-3">
-                      <button
-                        disabled={busy}
-                        onClick={() => decreaseItem(item.productId, item.quantity)}
-                        className="w-8 h-8 rounded-lg bg-slate-700 hover:bg-slate-600 flex items-center justify-center disabled:opacity-40"
-                      >
-                        <Minus size={14} />
-                      </button>
-                      <span className="text-white font-bold w-6 text-center">
-                        {item.quantity}
-                      </span>
-                      <button
-                        disabled={busy}
-                        onClick={() => increaseItem(item.productId, item.quantity)}
-                        className="w-8 h-8 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center justify-center disabled:opacity-40"
-                      >
-                        <Plus size={14} />
-                      </button>
-                    </div>
+            </button>
+          </div>
+
+          {/* Desktop: 3 columns. Mobile: tabbed single column */}
+          <div className="hidden md:grid grid-cols-3 gap-4 h-full p-6 overflow-hidden">
+            {/* Pedido actual */}
+            <div className="flex flex-col overflow-hidden">
+              <h3 className="text-slate-300 font-bold mb-3">Pedido actual</h3>
+              <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+                {!hasItems && (
+                  <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-6 text-center text-slate-500">
+                    {search.trim() || category !== "Todos"
+                      ? "No se encontraron productos con ese filtro."
+                      : "Toca un producto para agregarlo a esta mesa."}
                   </div>
-                );
-              })}
+                )}
+                {table.items.map(item => {
+                  const product = productMap.get(item.productId);
+                  const isEditing = editingNoteId === item.productId;
+                  return (
+                    <div
+                      key={item.productId}
+                      className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4"
+                    >
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="text-white font-semibold">
+                            {product?.name ?? item.productId}
+                          </p>
+                          {isEditing ? (
+                            <input
+                              autoFocus
+                              value={noteDraft}
+                              onChange={(e) => setNoteDraft(e.target.value)}
+                              onBlur={() => saveNote(item.productId)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") saveNote(item.productId);
+                                if (e.key === "Escape") setEditingNoteId(null);
+                              }}
+                              placeholder="Ej: sin arroz, al punto..."
+                              className="mt-1 w-full h-9 rounded-lg bg-slate-800 border border-slate-700 text-white text-sm px-2 outline-none focus:border-cyan-500"
+                            />
+                          ) : (
+                            <>
+                              {item.note && (
+                                <p className="text-amber-400 text-xs mt-1">
+                                  {item.note}
+                                </p>
+                              )}
+                              {!item.note && (
+                                <button
+                                  onClick={() => startEditNote(item.productId)}
+                                  className="text-slate-500 hover:text-slate-300 text-xs mt-1 flex items-center gap-1"
+                                >
+                                  <MessageSquarePlus size={12} />
+                                  Agregar nota
+                                </button>
+                              )}
+                            </>
+                          )}
+                          <p className="text-cyan-400 text-sm">
+                            ${item.price.toLocaleString("es-CO")}
+                          </p>
+                        </div>
+                        <button
+                          disabled={busy}
+                          onClick={() => removeItem(item.productId)}
+                          className="text-red-400 hover:text-red-300 disabled:opacity-40"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-3 mt-3">
+                        <button
+                          disabled={busy}
+                          onClick={() => decreaseItem(item.productId, item.quantity)}
+                          className="w-8 h-8 rounded-lg bg-slate-700 hover:bg-slate-600 flex items-center justify-center disabled:opacity-40"
+                        >
+                          <Minus size={14} />
+                        </button>
+                        <span className="text-white font-bold w-6 text-center">
+                          {item.quantity}
+                        </span>
+                        <button
+                          disabled={busy}
+                          onClick={() => increaseItem(item.productId, item.quantity)}
+                          className="w-8 h-8 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center justify-center disabled:opacity-40"
+                        >
+                          <Plus size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Totales */}
+              <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4 space-y-1 flex-shrink-0">
+                <div className="flex justify-between text-slate-400 text-sm">
+                  <span>Subtotal</span>
+                  <span>${table.subtotal.toLocaleString("es-CO")}</span>
+                </div>
+                <div className="flex justify-between text-slate-400 text-sm">
+                  <span>Impuesto</span>
+                  <span>${table.tax.toLocaleString("es-CO")}</span>
+                </div>
+                <div className="flex justify-between text-white font-bold text-lg pt-1 border-t border-slate-800 mt-1">
+                  <span>Total</span>
+                  <span>${table.total.toLocaleString("es-CO")}</span>
+                </div>
+              </div>
             </div>
 
-            {/* Totales */}
-            <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4 space-y-1 flex-shrink-0">
-              <div className="flex justify-between text-slate-400 text-sm">
-                <span>Subtotal</span>
-                <span>${table.subtotal.toLocaleString("es-CO")}</span>
+            {/* Catálogo de productos */}
+            <div className="col-span-2 flex flex-col overflow-hidden">
+              <div className="flex gap-2 mb-3 flex-shrink-0">
+                <div className="relative flex-1">
+                  <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Buscar producto..."
+                    className="w-full h-10 pl-9 pr-4 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm outline-none focus:border-cyan-500 transition"
+                  />
+                </div>
+                <button
+                  onClick={listen}
+                  disabled={listening}
+                  className={`h-10 px-4 rounded-xl flex items-center gap-2 text-sm font-bold transition ${
+                    listening
+                      ? "bg-red-500 text-white animate-pulse"
+                      : "bg-cyan-500 hover:bg-cyan-400 text-slate-950"
+                  }`}
+                >
+                  {listening ? <MicOff size={16} /> : <Mic size={16} />}
+                  {listening ? "Escuchando..." : "Voz"}
+                </button>
               </div>
-              <div className="flex justify-between text-slate-400 text-sm">
-                <span>Impuesto</span>
-                <span>${table.tax.toLocaleString("es-CO")}</span>
+
+              <div className="flex gap-2 mb-3 overflow-x-auto pb-1 flex-shrink-0">
+                {categories.map(cat => (
+                  <button
+                    key={cat}
+                    onClick={() => setCategory(cat)}
+                    className={`px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition ${
+                      category === cat
+                        ? "bg-cyan-500 text-slate-950"
+                        : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
               </div>
-              <div className="flex justify-between text-white font-bold text-lg pt-1 border-t border-slate-800 mt-1">
-                <span>Total</span>
-                <span>${table.total.toLocaleString("es-CO")}</span>
+              <div className="flex-1 overflow-y-auto grid grid-cols-3 gap-4 content-start pr-1">
+                {visibleProducts.map(product => (
+                  <button
+                    key={product.id}
+                    disabled={busy}
+                    onClick={() => addProduct(product)}
+                    className="bg-slate-950/60 border border-slate-800 hover:border-cyan-500 rounded-2xl p-4 text-left transition disabled:opacity-40 active:scale-[0.98]"
+                  >
+                    <h4 className="text-white font-semibold">{product.name}</h4>
+                    <p className="text-cyan-400 mt-2 font-bold">
+                      ${product.price.toLocaleString("es-CO")}
+                    </p>
+                  </button>
+                ))}
               </div>
             </div>
           </div>
 
-          {/* Catálogo de productos */}
-          <div className="col-span-2 flex flex-col overflow-hidden">
-            <div className="flex gap-2 mb-3 flex-shrink-0">
-              <div className="relative flex-1">
-                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Buscar producto..."
-                  className="w-full h-10 pl-9 pr-4 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm outline-none focus:border-cyan-500 transition"
-                />
-              </div>
-              <button
-                onClick={listen}
-                disabled={listening}
-                className={`h-10 px-4 rounded-xl flex items-center gap-2 text-sm font-bold transition ${
-                  listening
-                    ? "bg-red-500 text-white animate-pulse"
-                    : "bg-cyan-500 hover:bg-cyan-400 text-slate-950"
-                }`}
-              >
-                {listening ? <MicOff size={16} /> : <Mic size={16} />}
-                {listening ? "Escuchando..." : "Voz"}
-              </button>
-            </div>
+          {/* Mobile layout */}
+          <div className="md:hidden h-full flex flex-col">
+            {mobileTab === "order" ? (
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                <h3 className="text-slate-300 font-bold text-lg">Pedido actual</h3>
+                {!hasItems && (
+                  <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-6 text-center text-slate-500">
+                    {search.trim() || category !== "Todos"
+                      ? "No se encontraron productos con ese filtro."
+                      : "Toca un producto para agregarlo a esta mesa."}
+                  </div>
+                )}
+                {table.items.map(item => {
+                  const product = productMap.get(item.productId);
+                  const isEditing = editingNoteId === item.productId;
+                  return (
+                    <div
+                      key={item.productId}
+                      className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4"
+                    >
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="text-white font-semibold">
+                            {product?.name ?? item.productId}
+                          </p>
+                          {isEditing ? (
+                            <input
+                              autoFocus
+                              value={noteDraft}
+                              onChange={(e) => setNoteDraft(e.target.value)}
+                              onBlur={() => saveNote(item.productId)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") saveNote(item.productId);
+                                if (e.key === "Escape") setEditingNoteId(null);
+                              }}
+                              placeholder="Ej: sin arroz, al punto..."
+                              className="mt-1 w-full h-10 rounded-lg bg-slate-800 border border-slate-700 text-white text-sm px-2 outline-none focus:border-cyan-500"
+                            />
+                          ) : (
+                            <>
+                              {item.note && (
+                                <p className="text-amber-400 text-xs mt-1">
+                                  {item.note}
+                                </p>
+                              )}
+                              {!item.note && (
+                                <button
+                                  onClick={() => startEditNote(item.productId)}
+                                  className="text-slate-500 hover:text-slate-300 text-xs mt-1 flex items-center gap-1"
+                                >
+                                  <MessageSquarePlus size={12} />
+                                  Agregar nota
+                                </button>
+                              )}
+                            </>
+                          )}
+                          <p className="text-cyan-400 text-sm mt-1">
+                            ${item.price.toLocaleString("es-CO")}
+                          </p>
+                        </div>
+                        <button
+                          disabled={busy}
+                          onClick={() => removeItem(item.productId)}
+                          className="text-red-400 hover:text-red-300 disabled:opacity-40 p-2"
+                        >
+                          <Trash2 size={20} />
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-3 mt-3">
+                        <button
+                          disabled={busy}
+                          onClick={() => decreaseItem(item.productId, item.quantity)}
+                          className="w-10 h-10 rounded-lg bg-slate-700 hover:bg-slate-600 flex items-center justify-center disabled:opacity-40 active:scale-95 transition"
+                        >
+                          <Minus size={18} />
+                        </button>
+                        <span className="text-white font-bold text-lg w-8 text-center">
+                          {item.quantity}
+                        </span>
+                        <button
+                          disabled={busy}
+                          onClick={() => increaseItem(item.productId, item.quantity)}
+                          className="w-10 h-10 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center justify-center disabled:opacity-40 active:scale-95 transition"
+                        >
+                          <Plus size={18} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
 
-            <div className="flex gap-2 mb-3 overflow-x-auto pb-1 flex-shrink-0">
-              {categories.map(cat => (
-                <button
-                  key={cat}
-                  onClick={() => setCategory(cat)}
-                  className={`px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition ${
-                    category === cat
-                      ? "bg-cyan-500 text-slate-950"
-                      : "bg-slate-800 text-slate-300 hover:bg-slate-700"
-                  }`}
-                >
-                  {cat}
-                </button>
-              ))}
-            </div>
-            <div className="flex-1 overflow-y-auto grid grid-cols-3 gap-4 content-start pr-1">
-              {visibleProducts.map(product => (
-                <button
-                  key={product.id}
-                  disabled={busy}
-                  onClick={() => addProduct(product)}
-                  className="bg-slate-950/60 border border-slate-800 hover:border-cyan-500 rounded-2xl p-4 text-left transition disabled:opacity-40 active:scale-[0.98]"
-                >
-                  <h4 className="text-white font-semibold">{product.name}</h4>
-                  <p className="text-cyan-400 mt-2 font-bold">
-                    ${product.price.toLocaleString("es-CO")}
-                  </p>
-                </button>
-              ))}
-            </div>
+                {/* Totales mobile */}
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 space-y-2">
+                  <div className="flex justify-between text-slate-400">
+                    <span>Subtotal</span>
+                    <span>${table.subtotal.toLocaleString("es-CO")}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Impuesto</span>
+                    <span>${table.tax.toLocaleString("es-CO")}</span>
+                  </div>
+                  <div className="flex justify-between text-white font-bold text-lg pt-2 border-t border-slate-800">
+                    <span>Total</span>
+                    <span>${table.total.toLocaleString("es-CO")}</span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="flex-1 flex flex-col overflow-hidden">
+                <div className="p-4 space-y-3 flex-shrink-0">
+                  <div className="relative">
+                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      placeholder="Buscar producto..."
+                      className="w-full h-11 pl-9 pr-4 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm outline-none focus:border-cyan-500 transition"
+                    />
+                  </div>
+                  <button
+                    onClick={listen}
+                    disabled={listening}
+                    className={`w-full h-11 rounded-xl flex items-center justify-center gap-2 text-sm font-bold transition ${
+                      listening
+                        ? "bg-red-500 text-white animate-pulse"
+                        : "bg-cyan-500 hover:bg-cyan-400 text-slate-950"
+                    }`}
+                  >
+                    {listening ? <MicOff size={16} /> : <Mic size={16} />}
+                    {listening ? "Escuchando..." : "Pedir por voz"}
+                  </button>
+                  <div className="flex gap-2 overflow-x-auto pb-1">
+                    {categories.map(cat => (
+                      <button
+                        key={cat}
+                        onClick={() => setCategory(cat)}
+                        className={`px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition ${
+                          category === cat
+                            ? "bg-cyan-500 text-slate-950"
+                            : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                        }`}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex-1 overflow-y-auto px-4 pb-4 grid grid-cols-2 gap-3 content-start">
+                  {visibleProducts.map(product => (
+                    <button
+                      key={product.id}
+                      disabled={busy}
+                      onClick={() => addProduct(product)}
+                      className="bg-slate-950/60 border border-slate-800 hover:border-cyan-500 rounded-2xl p-4 text-left transition disabled:opacity-40 active:scale-[0.98]"
+                    >
+                      <h4 className="text-white font-semibold text-base">{product.name}</h4>
+                      <p className="text-cyan-400 mt-2 font-bold">
+                        ${product.price.toLocaleString("es-CO")}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

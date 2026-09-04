@@ -111,7 +111,7 @@ export function PosProducts() {
         )}
       </div>
 
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(128px,1fr))] gap-3 auto-rows-fr">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-[repeat(auto-fill,minmax(128px,1fr))] gap-3 auto-rows-fr">
 
       {
         products.length === 0 ? (
@@ -235,7 +235,7 @@ const ProductCard = React.memo(function ProductCard({
       aria-label={t("pos.products.addAria", { name, price: formattedPrice })}
       className={`
         group relative flex flex-col items-center text-center
-        rounded-vimdy-md border bg-vimdy-surface p-2.5
+        rounded-vimdy-md border bg-vimdy-surface p-3 sm:p-2.5
         transition-all duration-vimdy-fast
         active:scale-[0.96]
         focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-vimdy-accent/40
@@ -252,7 +252,7 @@ const ProductCard = React.memo(function ProductCard({
         </div>
       )}
 
-      <div className="w-12 h-12 rounded-vimdy-sm bg-vimdy-background flex items-center justify-center text-xl mb-2 overflow-hidden group-hover:scale-105 transition-transform duration-vimdy-fast">
+      <div className="w-14 h-14 sm:w-12 sm:h-12 rounded-vimdy-sm bg-vimdy-background flex items-center justify-center text-xl mb-2 overflow-hidden group-hover:scale-105 transition-transform duration-vimdy-fast">
         {image ? (
           <img
             src={image}
@@ -265,7 +265,7 @@ const ProductCard = React.memo(function ProductCard({
         )}
       </div>
 
-      <h3 className="w-full text-vimdy-text font-semibold text-vimdy-small leading-tight truncate">
+      <h3 className="w-full text-vimdy-text font-semibold text-vimdy-small sm:text-vimdy-micro leading-tight truncate">
         {name}
       </h3>
 
