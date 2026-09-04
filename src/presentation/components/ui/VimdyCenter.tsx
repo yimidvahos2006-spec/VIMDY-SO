@@ -275,20 +275,9 @@ export function VimdyCenter() {
               <Settings size={16} />
               Configuración
             </button>
-          </div>
 
-          {/* Estado del turno */}
-          <div className="px-4 py-2 border-t border-slate-800">
-            <div className="flex items-center gap-1.5 text-xs">
-              <span className={`w-1.5 h-1.5 rounded-full ${shiftOpen ? "bg-emerald-400" : "bg-red-400"}`} />
-              <span className={shiftOpen ? "text-emerald-300" : "text-red-300"}>
-                {shiftOpen === null ? "Cargando..." : shiftOpen ? "Turno abierto" : "Turno cerrado"}
-              </span>
-            </div>
-          </div>
+            <div className="h-px bg-slate-800 my-2" />
 
-          {/* Cerrar sesión */}
-          <div className="p-2 border-t border-slate-800">
             <button
               onClick={() => {
                 setOpen(false);
@@ -299,6 +288,16 @@ export function VimdyCenter() {
               <LogOut size={16} />
               Cerrar sesión
             </button>
+          </div>
+
+          {/* Estado del turno */}
+          <div className="px-4 py-2 border-t border-slate-800/60 bg-slate-900/50">
+            <div className="flex items-center gap-1.5 text-[11px]">
+              <span className={`w-1.5 h-1.5 rounded-full ${shiftOpen ? "bg-emerald-400" : "bg-red-400"}`} />
+              <span className={shiftOpen ? "text-emerald-300" : "text-red-300"}>
+                {shiftOpen === null ? "Cargando..." : shiftOpen ? "Turno abierto" : "Turno cerrado"}
+              </span>
+            </div>
           </div>
         </div>
       )}
