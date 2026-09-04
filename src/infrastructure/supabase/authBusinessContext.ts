@@ -414,7 +414,7 @@ export async function completeRegistration(): Promise<BusinessSession> {
   const { data: sessionData } = await supabase.auth.getSession();
   if (sessionData.session) {
     const { access_token, refresh_token, expires_in } = sessionData.session;
-    const appUrl = "https://app.vimdy.co";
+    const appUrl = APP_URL;
     const hashParams = new URLSearchParams({
       access_token,
       refresh_token: refresh_token ?? "",
