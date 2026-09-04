@@ -20,7 +20,6 @@ import {
 
 import { NavLink } from "react-router-dom";
 import { VimdyLogo } from "./VimdyLogo";
-import { VimdyCenter } from "./VimdyCenter";
 import { useSidebar } from "../../../core/store/useSidebar";
 import { useMobileSidebar } from "../../../core/store/useMobileSidebar";
 import { useEnabledModules } from "../../../core/store/useEnabledModules";
@@ -167,9 +166,6 @@ export function VimdySidebar() {
                 </p>
               </div>
             </div>
-
-            {/* Centro VIMDY: perfil, notificaciones, IA y más */}
-            <VimdyCenter />
 
             {/* Botón de colapsar — solo tiene sentido en escritorio */}
             <button

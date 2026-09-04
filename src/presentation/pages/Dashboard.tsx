@@ -1,8 +1,7 @@
-import { Gauge, Zap, Activity, LogOut, Settings } from "lucide-react";
+import { Gauge, Zap, Activity } from "lucide-react";
 
 import { useTranslation } from "../../core/i18n/useTranslation";
-import { useAuth } from "../context/AuthContext";
-import { useNavigate } from "react-router-dom";
+import { VimdyCenter } from "../components/ui/VimdyCenter";
 import { DashboardWelcome } from "../components/dashboard/DashboardWelcome";
 import { DashboardIndicators } from "../components/dashboard/DashboardIndicators";
 import { GerenteInteligente } from "../components/dashboard/GerenteInteligente";
@@ -33,26 +32,11 @@ import { DashboardSection } from "../components/dashboard/DashboardSection";
  */
 export function Dashboard() {
   const { t } = useTranslation();
-  const { logout } = useAuth();
-  const navigate = useNavigate();
 
   return (
     <div className="w-full min-h-screen flex flex-col">
-      <div className="flex justify-end gap-3 px-8 py-4">
-        <button
-          onClick={() => navigate("/configuracion")}
-          className="flex items-center gap-2 h-10 px-4 rounded-xl bg-slate-800/50 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 transition-all text-sm font-medium"
-        >
-          <Settings size={16} />
-          Configuración
-        </button>
-        <button
-          onClick={logout}
-          className="flex items-center gap-2 h-10 px-4 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 border border-red-500/20 transition-all text-sm font-medium"
-        >
-          <LogOut size={16} />
-          Cerrar sesión
-        </button>
+      <div className="flex justify-end px-8 py-4">
+        <VimdyCenter />
       </div>
       <main className="flex-1 w-full px-8 pb-10">
         <div className="max-w-[1800px] mx-auto grid grid-cols-12 gap-8">
