@@ -20,6 +20,7 @@ import {
 
 import { NavLink } from "react-router-dom";
 import { VimdyLogo } from "./VimdyLogo";
+import { VimdyCenter } from "./VimdyCenter";
 import { useSidebar } from "../../../core/store/useSidebar";
 import { useMobileSidebar } from "../../../core/store/useMobileSidebar";
 import { useEnabledModules } from "../../../core/store/useEnabledModules";
@@ -144,35 +145,40 @@ export function VimdySidebar() {
             ${!expanded ? "md:justify-center md:px-0" : ""}
           `}
         >
-          <div className="flex items-center gap-4">
-            <VimdyLogo size={42} />
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-4">
+              <VimdyLogo size={42} />
 
-            <div className={labelClass}>
-              <h2 className="text-vimdy-text text-lg font-semibold tracking-wide">
-                VIMDY
-              </h2>
-              <p
-                className={`text-xs font-medium flex items-center gap-1.5 ${
-                  shiftOpen ? "text-vimdy-success" : "text-vimdy-danger"
-                }`}
-              >
-                <span
-                  className={`w-1.5 h-1.5 rounded-full ${
-                    shiftOpen ? "bg-vimdy-success" : "bg-vimdy-danger"
+              <div className={labelClass}>
+                <h2 className="text-vimdy-text text-lg font-semibold tracking-wide">
+                  VIMDY
+                </h2>
+                <p
+                  className={`text-xs font-medium flex items-center gap-1.5 ${
+                    shiftOpen ? "text-vimdy-success" : "text-vimdy-danger"
                   }`}
-                />
-                {shiftOpen === null ? "..." : shiftOpen ? "En línea" : "Fuera de línea"}
-              </p>
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      shiftOpen ? "bg-vimdy-success" : "bg-vimdy-danger"
+                    }`}
+                  />
+                  {shiftOpen === null ? "..." : shiftOpen ? "En línea" : "Fuera de línea"}
+                </p>
+              </div>
             </div>
-          </div>
 
-          {/* Botón de colapsar — solo tiene sentido en escritorio */}
-          <button
-            onClick={toggle}
-            className={`hidden ${expanded ? "md:flex" : "md:hidden"} w-10 h-10 rounded-xl items-center justify-center text-vimdy-text-secondary hover:bg-vimdy-surface hover:text-vimdy-text transition-all`}
-          >
-            <PanelLeftClose size={18} />
-          </button>
+            {/* Centro VIMDY: perfil, notificaciones, IA y más */}
+            <VimdyCenter />
+
+            {/* Botón de colapsar — solo tiene sentido en escritorio */}
+            <button
+              onClick={toggle}
+              className={`hidden ${expanded ? "md:flex" : "md:hidden"} w-9 h-9 rounded-xl items-center justify-center text-vimdy-text-secondary hover:bg-vimdy-surface hover:text-vimdy-text transition-all`}
+            >
+              <PanelLeftClose size={18} />
+            </button>
+          </div>
         </div>
 
         {/* Botón de expandir — solo aparece en escritorio colapsado */}

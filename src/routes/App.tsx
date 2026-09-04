@@ -5,7 +5,6 @@ import { MainLayout } from "../presentation/layout/MainLayout";
 import { ProtectedRoute } from "../presentation/navigation/ProtectedRoute";
 import { OnboardingGate } from "../presentation/navigation/OnboardingGate";
 import { RequireModule } from "../presentation/navigation/RequireModule";
-import { UserSessionBadge } from "../presentation/components/ui/UserSessionBadge";
 import { ErrorBoundary } from "../presentation/components/ui/ErrorBoundary";
 
 import { LoginPage } from "../presentation/pages/LoginPage";
@@ -126,7 +125,6 @@ function AuthenticatedApp() {
           (Dashboard, Caja, Cocina...) se muestra — se redirige a /onboarding. */}
       <OnboardingGate>
         <MainLayout>
-          <UserSessionBadge />
           <ErrorBoundary scope="route" resetKey={pathname}>
             <Suspense fallback={<RouteFallback />}>
               <Routes>

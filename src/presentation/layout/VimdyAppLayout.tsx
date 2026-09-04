@@ -10,14 +10,8 @@ import { useAutoAlerts } from "../../hooks/useAutoAlerts";
 import { useDashboardSync } from "../../hooks/useDashboardSync";
 import { companyConfigStore } from "../../core/store/companyConfigStore";
 
-const NotificationBell = lazy(() =>
-  import("../components/ui/NotificationBell").then((m) => ({ default: m.NotificationBell }))
-);
 const CopilotPanel = lazy(() =>
   import("../components/copilot/CopilotPanel").then((m) => ({ default: m.CopilotPanel }))
-);
-const CopilotButton = lazy(() =>
-  import("../components/copilot/CopilotButton").then((m) => ({ default: m.CopilotButton }))
 );
 const SubscriptionWarningBanner = lazy(() =>
   import("../components/subscription/SubscriptionWarningBanner").then((m) => ({ default: m.SubscriptionWarningBanner }))
@@ -59,9 +53,10 @@ export function VimdyAppLayout({ children }: Props) {
     <div className="min-h-screen relative">
       <VimdyAmbientBackground className="opacity-40" />
       <div className="relative z-10">
+
         {companyConfigStore.get().enableAI && (
           <LazySection>
-            <NotificationBell />
+            <CopilotPanel />
           </LazySection>
         )}
 
@@ -102,19 +97,11 @@ export function VimdyAppLayout({ children }: Props) {
 
         </div>
 
-        {companyConfigStore.get().enableAI && (
-          <LazySection>
-            <>
-              <CopilotPanel />
-              <CopilotButton />
-            </>
-          </LazySection>
-        )}
-
         <LazySection>
           <SubscriptionWarningBanner />
           <TrialEndedOverlay />
         </LazySection>
+
       </div>
     </div>
   );
