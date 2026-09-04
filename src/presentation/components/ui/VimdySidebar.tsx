@@ -25,10 +25,7 @@ import { useSidebar } from "../../../core/store/useSidebar";
 import { useMobileSidebar } from "../../../core/store/useMobileSidebar";
 import { useEnabledModules } from "../../../core/store/useEnabledModules";
 import { useCashierShiftStatus } from "../../../hooks/useCashierShiftStatus";
-import { useAuth } from "../../../presentation/context/AuthContext";
 import { MODULE_CATALOG } from "../../../core/config/modules";
-import { LogOut } from "lucide-react";
-import { useLocation } from "react-router-dom";
 
 const menu = [
   { icon: LayoutDashboard, title: "Dashboard", path: "/dashboard" },
@@ -71,8 +68,6 @@ export function VimdySidebar() {
   const { open: mobileOpen, close: closeMobile } = useMobileSidebar();
   const enabledModules = useEnabledModules();
   const shiftOpen = useCashierShiftStatus();
-  const { logout } = useAuth();
-  const location = useLocation();
 
    const visibleMenu = useMemo(() => {
      if (!enabledModules || enabledModules.length === 0) return menu;
@@ -173,19 +168,6 @@ export function VimdySidebar() {
               </div>
             </div>
 
-            {/* Logout solo en dashboard */}
-            {location.pathname === "/dashboard" && (
-              <button
-                onClick={logout}
-                className="hidden md:flex w-9 h-9 rounded-xl items-center justify-center text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-all"
-                title="Cerrar sesión"
-              >
-                <LogOut size={18} />
-              </button>
-            )}
-          </div>
-
-          <div className="flex items-center gap-3">
             {/* Centro VIMDY: perfil, notificaciones, IA y más */}
             <VimdyCenter />
 

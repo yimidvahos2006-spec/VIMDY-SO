@@ -1,6 +1,7 @@
-import { Gauge, Zap, Activity } from "lucide-react";
+import { Gauge, Zap, Activity, LogOut } from "lucide-react";
 
 import { useTranslation } from "../../core/i18n/useTranslation";
+import { useAuth } from "../context/AuthContext";
 import { DashboardWelcome } from "../components/dashboard/DashboardWelcome";
 import { DashboardIndicators } from "../components/dashboard/DashboardIndicators";
 import { GerenteInteligente } from "../components/dashboard/GerenteInteligente";
@@ -31,10 +32,20 @@ import { DashboardSection } from "../components/dashboard/DashboardSection";
  */
 export function Dashboard() {
   const { t } = useTranslation();
+  const { logout } = useAuth();
 
   return (
     <div className="w-full min-h-screen flex flex-col">
-      <main className="flex-1 w-full px-8 py-10">
+      <div className="flex justify-end px-8 py-4">
+        <button
+          onClick={logout}
+          className="flex items-center gap-2 h-10 px-4 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 border border-red-500/20 transition-all text-sm font-medium"
+        >
+          <LogOut size={16} />
+          Cerrar sesión
+        </button>
+      </div>
+      <main className="flex-1 w-full px-8 pb-10">
         <div className="max-w-[1800px] mx-auto grid grid-cols-12 gap-8">
 
           {/* Bloque 1 — Bienvenida Inteligente */}
