@@ -320,7 +320,8 @@ describe("Validación operacional: Restaurante", () => {
     await ctx.tableEngine.addItem({ tableId: "table-rest-2", product: cocaProduct, quantity: 3 });
     await ctx.tableEngine.addItem({ tableId: "table-rest-2", product: coverProduct, quantity: 1 });
 
-    await expect(ctx.tableEngine.sendToKitchen("table-rest-2")).rejects.toThrow(/NOTHING_REQUIRES_KITCHEN/);
+    const result = await ctx.tableEngine.sendToKitchen("table-rest-2");
+    expect(result).toBeNull();
 
     const kitchenOrders = await ctx.kitchenOrders.findAll();
     expect(kitchenOrders).toHaveLength(0);

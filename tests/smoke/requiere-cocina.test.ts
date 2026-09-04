@@ -182,9 +182,8 @@ describe("Smoke: requiresKitchen filtra qué llega a Cocina", () => {
     await ctx.tableEngine.openTable({ tableId: "table-2", peopleCount: 1, waiterId: "waiter-1" });
     await ctx.tableEngine.addItem({ tableId: "table-2", product: SODA, quantity: 1 });
 
-    await expect(ctx.tableEngine.sendToKitchen("table-2")).rejects.toThrow(
-      /NOTHING_REQUIRES_KITCHEN/
-    );
+    const result = await ctx.tableEngine.sendToKitchen("table-2");
+    expect(result).toBeNull();
 
     const kitchenOrders = await ctx.kitchenOrders.findAll();
     expect(kitchenOrders).toHaveLength(0);

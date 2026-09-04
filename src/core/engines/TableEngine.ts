@@ -4,7 +4,8 @@ import {
   Product,
   Sale,
   OrderPriority,
-  Order
+  Order,
+  KitchenOrder
 } from "../entities/Entities";
 
 import { IRepository } from "../../infrastructure/di/repositories/IRepository";
@@ -373,7 +374,7 @@ export class TableEngine {
   public async sendToKitchen(
     tableId: string,
     priority: OrderPriority = "NORMAL"
-  ): Promise<void> {
+  ): Promise<KitchenOrder | null> {
     const table = await this.getTable(tableId);
 
     if (NOT_OPEN_STATUSES.has(table.status)) {
@@ -382,15 +383,31 @@ export class TableEngine {
       );
     }
 
+    const order = await this.sendPendingKitchenItems(tableId, priority);
+
+    await this.updateTable(tableId, { status: "CUENTA_SOLICITADA" });
+
+    this.emit(await this.getTable(tableId), "table.sent_to_kitchen");
+
+    return order;
+  }
+
+  /** Envía solo los items de cocina pendientes de esta mesa, sin tocar el estado. */
+  private async sendPendingKitchenItems(
+    tableId: string,
+    priority: OrderPriority = "NORMAL"
+  ): Promise<KitchenOrder | null> {
+    const table = await this.getTable(tableId);
+
     const items = table.items;
 
     if (items.length === 0) {
-      throw new Error("EMPTY_ORDER: no hay productos para enviar a cocina.");
+      return null;
     }
 
     if (!connectionStore.isOnline()) {
       await queueSendToKitchenOffline({ table, priority });
-      return;
+      return null;
     }
 
     const previousOrders = await this.kitchen.getByTableId(table.id);
@@ -411,12 +428,10 @@ export class TableEngine {
       .filter((item): item is NonNullable<typeof item> => item !== null);
 
     if (kitchenItems.length === 0) {
-      throw new Error(
-        "NOTHING_REQUIRES_KITCHEN: ningún producto nuevo de este pedido necesita preparación en cocina."
-      );
+      return null;
     }
 
-    await createKitchenOutput(kitchenOutputModeStore.get(), this.kitchen).send({
+    const order: KitchenOrder = {
       id: crypto.randomUUID(),
       items: kitchenItems,
       status: "PENDIENTE",
@@ -428,11 +443,11 @@ export class TableEngine {
       branchId: table.branchId,
       tableId: table.id,
       orderId: table.orderId
-    });
+    };
 
-    await this.updateTable(tableId, { status: "CUENTA_SOLICITADA" });
+    await createKitchenOutput(kitchenOutputModeStore.get(), this.kitchen).send(order);
 
-    this.emit(await this.getTable(tableId), "table.sent_to_kitchen");
+    return order;
   }
 
   /* =======================================================================
@@ -588,11 +603,8 @@ export class TableEngine {
       throw new Error("EMPTY_TABLE: la mesa no tiene productos para cobrar.");
     }
 
-    const previousStatus = table.status;
+    await this.sendPendingKitchenItems(input.tableId);
 
-    await this.updateTable(input.tableId, { status: "PAYING" });
-
-    try {
     const sale = await this.sales.tableSale({
       id: input.saleId,
       tableId: input.tableId,
@@ -604,55 +616,46 @@ export class TableEngine {
       skipKitchen: true
     });
 
-      const { sale: paidSale, payment } = await this.sales.registerPayment(
-        sale,
-        input.method,
-        { received: input.received, reference: input.reference }
-      );
+    const { sale: paidSale, payment } = await this.sales.registerPayment(
+      sale,
+      input.method,
+      { received: input.received, reference: input.reference }
+    );
 
-      const existingReceipt = await this.sales.getReceiptBySaleId(paidSale.id);
-      const receipt = existingReceipt
-        ? existingReceipt
-        : await this.sales.generateReceipt(
-            paidSale,
-            input.customerName ?? "Cliente General",
-            input.cashier ?? "Administrador",
-            input.method,
-            input.received ?? paidSale.total,
-            paidSale.discount ?? 0
-          );
+    const existingReceipt = await this.sales.getReceiptBySaleId(paidSale.id);
+    const receipt = existingReceipt
+      ? existingReceipt
+      : await this.sales.generateReceipt(
+          paidSale,
+          input.customerName ?? "Cliente General",
+          input.cashier ?? "Administrador",
+          input.method,
+          input.received ?? paidSale.total,
+          paidSale.discount ?? 0
+        );
 
-      if (!existingReceipt) {
-        this.sales.printReceipt(receipt);
-      }
-
-      if (table.orderId) {
-        try {
-          await this.orders.updateOrder(table.orderId, {
-            status: "COMPLETED",
-            saleId: paidSale.id
-          });
-        } catch (orderError) {
-          logWarning(`No se pudo marcar COMPLETED el Order ${table.orderId} tras cerrar mesa ${input.tableId}`, {
-            context: { error: String(orderError), saleId: paidSale.id }
-          });
-        }
-      }
-
-      const closed = await this.resetTable(input.tableId);
-
-      this.emit(closed, "table.closed");
-
-      return { sale: paidSale, payment, receipt };
-    } catch (error) {
-      // Compensación: devolver la mesa a su estado anterior para que no quede atascada en PAYING
-      try {
-        await this.updateTable(input.tableId, { status: previousStatus });
-      } catch {
-        // No bloquear
-      }
-      throw error;
+    if (!existingReceipt) {
+      this.sales.printReceipt(receipt);
     }
+
+    if (table.orderId) {
+      try {
+        await this.orders.updateOrder(table.orderId, {
+          status: "COMPLETED",
+          saleId: paidSale.id
+        });
+      } catch (orderError) {
+        logWarning(`No se pudo marcar COMPLETED el Order ${table.orderId} tras cerrar mesa ${input.tableId}`, {
+          context: { error: String(orderError), saleId: paidSale.id }
+        });
+      }
+    }
+
+    const closed = await this.resetTable(input.tableId);
+
+    this.emit(closed, "table.closed");
+
+    return { sale: paidSale, payment, receipt };
   }
 
   /* =======================================================================

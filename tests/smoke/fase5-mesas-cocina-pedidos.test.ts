@@ -248,9 +248,8 @@ describe("FASE 5 — Mesas + Cocina + Pedidos", () => {
       quantity: 2
     });
 
-    await expect(ctx.tableEngine.sendToKitchen("table-1")).rejects.toThrow(
-      /NOTHING_REQUIRES_KITCHEN/
-    );
+    const result = await ctx.tableEngine.sendToKitchen("table-1");
+    expect(result).toBeNull();
 
     const kitchenOrders = await ctx.kitchenOrders.findAll();
     expect(kitchenOrders).toHaveLength(0);
@@ -271,9 +270,8 @@ describe("FASE 5 — Mesas + Cocina + Pedidos", () => {
     });
 
     await ctx.tableEngine.sendToKitchen("table-1");
-    await expect(ctx.tableEngine.sendToKitchen("table-1")).rejects.toThrow(
-      /NOTHING_REQUIRES_KITCHEN/
-    );
+    const secondResult = await ctx.tableEngine.sendToKitchen("table-1");
+    expect(secondResult).toBeNull();
 
     const kitchenOrders = await ctx.kitchenOrders.findAll();
     expect(kitchenOrders).toHaveLength(1);

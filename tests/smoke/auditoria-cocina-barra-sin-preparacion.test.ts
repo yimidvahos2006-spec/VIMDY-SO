@@ -368,9 +368,8 @@ describe("Auditoría funcional: Cocina / Barra / Sin preparación", () => {
 
       await ctx.tableEngine.openTable({ tableId: "table-servicio-2", peopleCount: 2, waiterId: "waiter-1" });
       await ctx.tableEngine.addItem({ tableId: "table-servicio-2", product: SERVICIO_SIN_PREPARACION, quantity: 1 });
-      await expect(ctx.tableEngine.sendToKitchen("table-servicio-2")).rejects.toThrow(
-        /NOTHING_REQUIRES_KITCHEN/
-      );
+      const result = await ctx.tableEngine.sendToKitchen("table-servicio-2");
+      expect(result).toBeNull();
 
       kitchenOrders = await ctx.kitchenOrders.findAll();
       expect(kitchenOrders).toHaveLength(0);

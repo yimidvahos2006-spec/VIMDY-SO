@@ -260,9 +260,8 @@ describe("FASE 5 — Cierre definitivo: cocina multi-tenant, envío sin duplicad
       await ctx.tableEngine.openTable({ tableId: "table-1", peopleCount: 2, waiterId: "w1" });
       await ctx.tableEngine.addItem({ tableId: "table-1", product: BURGER, quantity: 1 });
       await ctx.tableEngine.sendToKitchen("table-1");
-      await expect(ctx.tableEngine.sendToKitchen("table-1")).rejects.toThrow(
-        /NOTHING_REQUIRES_KITCHEN/
-      );
+      const secondResult = await ctx.tableEngine.sendToKitchen("table-1");
+      expect(secondResult).toBeNull();
 
       const orders = await ctx.kitchenOrders.findAll();
       expect(orders).toHaveLength(1);

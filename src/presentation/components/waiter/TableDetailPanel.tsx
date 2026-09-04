@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Minus, Plus, Trash2, X, ChefHat, Receipt, Wallet, AlertTriangle, ArrowUpCircle, CircleDot, Search, Mic, MicOff, CheckCircle2, MessageSquarePlus } from "lucide-react";
+import { Minus, Plus, Trash2, X, ChefHat, Wallet, AlertTriangle, ArrowUpCircle, CircleDot, Search, Mic, MicOff, CheckCircle2, MessageSquarePlus } from "lucide-react";
 
 import { Table, Product, OrderPriority } from "../../../core/entities/Entities";
 import { container } from "../../../infrastructure/di/CompositionRoot";
@@ -179,14 +179,10 @@ export function TableDetailPanel({
     } finally {
       setBusy(false);
     }
-  }
-
-  function requestBill() {
-    run(() => container.tableEngine.get().requestBill(table.id));
-  }
+   }
 
   const hasItems = table.items.length > 0;
-  const hasKitchenItems = table.items.some(item => item.requiresKitchen !== false);
+  const hasKitchenItems = table.items.some(item => item.requiresKitchen === true);
 
   return (
     <div className="fixed inset-0 z-[999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
@@ -448,19 +444,11 @@ export function TableDetailPanel({
           </button>
           <button
             disabled={busy || !hasItems}
-            onClick={requestBill}
-            className="flex items-center gap-2 h-12 px-6 rounded-xl bg-slate-700 hover:bg-slate-600 disabled:opacity-40 text-white font-bold transition"
-          >
-            <Receipt size={18} />
-            Pedir cuenta
-          </button>
-          <button
-            disabled={busy || !hasItems}
             onClick={() => setShowCloseDialog(true)}
             className="flex items-center gap-2 h-12 px-6 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-bold transition"
           >
             <Wallet size={18} />
-            Cobrar mesa
+            Cerrar y cobrar
           </button>
         </div>
       </div>
