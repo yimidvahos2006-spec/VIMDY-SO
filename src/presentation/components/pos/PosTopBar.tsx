@@ -105,7 +105,7 @@ export function PosTopBar() {
         name: product.name,
         price: product.price,
         unit: product.unit as string,
-        requiresKitchen: product.requiresKitchen ?? true
+        requiresKitchen: product.requiresKitchen ?? false
       });
       clearSearch();
       return;
@@ -116,7 +116,7 @@ export function PosTopBar() {
         id: product.id,
         name: product.name,
         price: product.price,
-        requiresKitchen: product.requiresKitchen ?? true,
+        requiresKitchen: product.requiresKitchen ?? false,
         sizes: product.sizes,
         extras: product.extras
       });
@@ -124,7 +124,7 @@ export function PosTopBar() {
       return;
     }
 
-    add({ id: product.id, name: product.name, price: product.price, requiresKitchen: product.requiresKitchen ?? true });
+    add({ id: product.id, name: product.name, price: product.price, requiresKitchen: product.requiresKitchen ?? false });
     clearSearch();
   }
 

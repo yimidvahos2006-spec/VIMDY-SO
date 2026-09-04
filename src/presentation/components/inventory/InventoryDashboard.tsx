@@ -1855,7 +1855,7 @@ function ProductFormModal({
   // si un producto nuevo no dice lo contrario, se asume que SÍ necesita
   // preparación — mismo default seguro que usa InventoryEngine.
   const [requiresKitchen, setRequiresKitchen] = useState<boolean>(
-    product?.requiresKitchen ?? true
+    product?.requiresKitchen ?? false
   );
   const [estimatedPrepMinutes, setEstimatedPrepMinutes] = useState(
     product?.estimatedPrepMinutes ? String(product.estimatedPrepMinutes) : ""

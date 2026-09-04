@@ -70,7 +70,7 @@ export function PosWeightEntryModal() {
       id: product.id,
       name: product.name,
       price: product.price,
-      requiresKitchen: product.requiresKitchen ?? true,
+      requiresKitchen: product.requiresKitchen ?? false,
       unit: product.unit,
       soldByWeight: true,
       quantity: roundWeight(parsedWeight)

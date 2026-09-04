@@ -365,7 +365,7 @@ export class InventoryEngine {
             : undefined
           : current.recipe,
       productionMode: input.productionMode ?? current.productionMode ?? 'ON_DEMAND',
-      requiresKitchen: input.isIngredient ? false : (input.requiresKitchen ?? current.requiresKitchen ?? true),
+      requiresKitchen: input.isIngredient ? false : (input.requiresKitchen ?? current.requiresKitchen ?? false),
       estimatedPrepMinutes: input.estimatedPrepMinutes ?? current.estimatedPrepMinutes,
       printStationOverride:
         input.printStationOverride !== undefined

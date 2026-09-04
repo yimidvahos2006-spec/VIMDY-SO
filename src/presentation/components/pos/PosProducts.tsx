@@ -148,7 +148,7 @@ export function PosProducts() {
                     name: product.name,
                     price: product.price,
                     unit: product.unit as string,
-                    requiresKitchen: product.requiresKitchen ?? true
+                    requiresKitchen: product.requiresKitchen ?? false
                   });
                   return;
                 }
@@ -158,14 +158,14 @@ export function PosProducts() {
                     id: product.id,
                     name: product.name,
                     price: product.price,
-                    requiresKitchen: product.requiresKitchen ?? true,
+                    requiresKitchen: product.requiresKitchen ?? false,
                     sizes: product.sizes,
                     extras: product.extras
                   });
                   return;
                 }
 
-                add({ id: product.id, name: product.name, price: product.price, requiresKitchen: product.requiresKitchen ?? true });
+                add({ id: product.id, name: product.name, price: product.price, requiresKitchen: product.requiresKitchen ?? false });
               }}
             />
 

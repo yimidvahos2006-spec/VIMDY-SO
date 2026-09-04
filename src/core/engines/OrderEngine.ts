@@ -190,7 +190,7 @@ export class OrderEngine {
         // prohibido tocarlo directamente — ver cabecera de este archivo).
         // FASE 1: un ingrediente nunca debe entrar a cocina, sin importar
         // lo que diga el flag del producto en ese momento.
-        requiresKitchen: !input.product.isIngredient && (input.product.requiresKitchen ?? true)
+        requiresKitchen: !input.product.isIngredient && (input.product.requiresKitchen ?? false)
       }
     );
 

@@ -31,7 +31,7 @@ export class CartEngine {
         quantity,
         price: product.price,
         ...(note ? { note } : {}),
-        requiresKitchen: product.requiresKitchen ?? true
+        requiresKitchen: product.requiresKitchen ?? false
       }
     ];
   }
