@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bell, User, Sparkles, Settings, LogOut, ChevronDown, X, CheckCheck } from "lucide-react";
+import { Bell, User, Sparkles, Settings, ChevronDown, X, CheckCheck } from "lucide-react";
 
 import { useAuth } from "../../context/AuthContext";
 import { useNotifications } from "../../../core/store/useNotifications";
@@ -232,63 +232,6 @@ export function VimdyCenter() {
               </select>
             </div>
           )}
-
-          {/* Accesos rápidos */}
-          <div className="p-2 space-y-1">
-            <button
-              onClick={() => {
-                setOpen(false);
-                navigate("/notificaciones");
-              }}
-              className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm text-slate-300 hover:bg-slate-800 hover:text-white transition"
-            >
-              <Bell size={16} />
-              Notificaciones
-              {unreadCount > 0 && (
-                <span className="ml-auto text-[10px] font-bold bg-cyan-500/20 text-cyan-300 px-1.5 py-0.5 rounded-full">
-                  {unreadCount}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => {
-                setOpen(false);
-                copilotStore.toggle();
-              }}
-              className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm text-slate-300 hover:bg-slate-800 hover:text-white transition"
-            >
-              <Sparkles size={16} />
-              VIMDY IA
-              {copilotLoading && (
-                <span className="ml-auto text-[10px] font-bold bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded-full">
-                  Cargando...
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => {
-                setOpen(false);
-                navigate("/configuracion");
-              }}
-              className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm text-slate-300 hover:bg-slate-800 hover:text-white transition"
-            >
-              <Settings size={16} />
-              Configuración
-            </button>
-
-            <div className="h-px bg-slate-800 my-2" />
-
-            <button
-              onClick={() => {
-                setOpen(false);
-                logout();
-              }}
-              className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm text-red-400 hover:bg-red-500/10 transition"
-            >
-              <LogOut size={16} />
-              Cerrar sesión
-            </button>
-          </div>
 
           {/* Estado del turno */}
           <div className="px-4 py-2 border-t border-slate-800/60 bg-slate-900/50">
