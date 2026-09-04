@@ -24,7 +24,9 @@ import { useSidebar } from "../../../core/store/useSidebar";
 import { useMobileSidebar } from "../../../core/store/useMobileSidebar";
 import { useEnabledModules } from "../../../core/store/useEnabledModules";
 import { useCashierShiftStatus } from "../../../hooks/useCashierShiftStatus";
+import { useAuth } from "../../../presentation/context/AuthContext";
 import { MODULE_CATALOG } from "../../../core/config/modules";
+import { LogOut } from "lucide-react";
 
 const menu = [
   { icon: LayoutDashboard, title: "Dashboard", path: "/dashboard" },
@@ -67,6 +69,7 @@ export function VimdySidebar() {
   const { open: mobileOpen, close: closeMobile } = useMobileSidebar();
   const enabledModules = useEnabledModules();
   const shiftOpen = useCashierShiftStatus();
+  const { logout } = useAuth();
 
    const visibleMenu = useMemo(() => {
      if (!enabledModules || enabledModules.length === 0) return menu;
@@ -256,6 +259,18 @@ export function VimdySidebar() {
               </React.Fragment>
             );
           })}
+
+          <div className="mt-auto px-3 py-4 border-t border-vimdy-border">
+            <button
+              onClick={logout}
+              className={`w-full flex items-center gap-3 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-xl transition-all ${
+                expanded ? "md:px-4" : "md:justify-center md:px-0"
+              }`}
+            >
+              <LogOut size={20} className="flex-shrink-0" />
+              <span className={`text-sm font-medium ${labelClass}`}>Cerrar sesión</span>
+            </button>
+          </div>
         </div>
       </aside>
     </>
