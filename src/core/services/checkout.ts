@@ -104,14 +104,10 @@ export async function syncDashboardAfterSale(sale: Sale): Promise<void> {
   );
   dashboardStore.addSale(sale.total, totalProductsSold);
 
-  const [remainingProducts, activeKitchenOrders] = await Promise.all([
-    container.inventoryEngine.get().listAll(),
+  const [activeKitchenOrders] = await Promise.all([
     container.kitchenService.get().getOrders()
   ]);
 
-  dashboardStore.updateInventory(
-    remainingProducts.reduce((sum, product) => sum + product.stock, 0)
-  );
   dashboardStore.updateKitchenPending(activeKitchenOrders.length);
 }
 
@@ -128,13 +124,9 @@ export async function syncDashboardAfterReversal(sale: Sale): Promise<void> {
   );
   dashboardStore.reverseSale(sale.total, totalProductsReturned);
 
-  const [remainingProducts, activeKitchenOrders] = await Promise.all([
-    container.inventoryEngine.get().listAll(),
+  const [activeKitchenOrders] = await Promise.all([
     container.kitchenService.get().getOrders()
   ]);
 
-  dashboardStore.updateInventory(
-    remainingProducts.reduce((sum, product) => sum + product.stock, 0)
-  );
   dashboardStore.updateKitchenPending(activeKitchenOrders.length);
 }

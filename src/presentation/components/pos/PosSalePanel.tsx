@@ -150,7 +150,12 @@ export function PosSalePanel() {
         if (result.invoiceError) {
           toast.warning(result.invoiceError);
         }
+      } else {
+        toast.error(t("pos.sale.genericError"));
       }
+    } catch (error) {
+      console.error("[PosSalePanel] Error al procesar la venta:", error);
+      toast.error(t("pos.sale.genericError"));
     } finally {
       setProcessing(false);
     }
@@ -165,7 +170,7 @@ export function PosSalePanel() {
   //   - si NINGÚN producto del carrito es de cocina -> "Cobrar"
   // Factura sigue mandando sobre esto (un cobro con factura siempre avisa
   // que factura, aunque también mande a cocina por dentro).
-  const hasKitchenItems = items.some((item) => item.requiresKitchen !== false);
+  const hasKitchenItems = items.some((item) => item.requiresKitchen === true);
   const chargeLabel = requiresInvoice
     ? t("pos.sale.chargeAndInvoice")
     : hasKitchenItems
