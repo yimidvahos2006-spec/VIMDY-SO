@@ -1873,6 +1873,9 @@ function ProductFormModal({
   const [categoryError, setCategoryError] = useState<string | null>(null);
   const [showNewSupplierModal, setShowNewSupplierModal] = useState(false);
   const [creatingSupplier, setCreatingSupplier] = useState(false);
+  const [showQuickIngredient, setShowQuickIngredient] = useState(false);
+  const [quickIngredientName, setQuickIngredientName] = useState("");
+  const [creatingIngredient, setCreatingIngredient] = useState(false);
   // stock, se descuenta cada ingrediente (ver InventoryEngine.consumeForSale).
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [hasRecipe, setHasRecipe] = useState<boolean>(!!product?.recipe && product.recipe.length > 0);
@@ -2000,11 +2003,10 @@ function ProductFormModal({
     );
   }
 
-  // Ingredientes disponibles: cualquier otro producto del inventario (no el
-  // producto que se está editando, para evitar que una receta se referencie
-  // a sí misma).
+  // Ingredientes disponibles: solo productos marcados como ingrediente
+  // (no se mezclan productos de venta directa ni servicios).
   const ingredientOptions = useMemo(
-    () => allProducts.filter((p) => p.id !== product?.id),
+    () => allProducts.filter((p) => p.id !== product?.id && p.isIngredient === true),
     [allProducts, product]
   );
 
@@ -2950,51 +2952,64 @@ function ProductFormModal({
 
             {hasRecipe && (
               <div className="space-y-2">
-                {recipeRows.map((row) => (
-                  <div key={row.rowId} className="flex items-center gap-2">
-                    <select
-                      value={row.productId}
-                      onChange={(e) => updateRecipeRow(row.rowId, "productId", e.target.value)}
-                      className="flex-1 h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-recipe"
-                    >
-                      <option value="">Selecciona un ingrediente...</option>
-                      {ingredientOptions.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} {p.unit ? `(${p.unit})` : ""}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={row.quantity}
-                      onChange={(e) => updateRecipeRow(row.rowId, "quantity", e.target.value)}
-                      placeholder="Cant."
-                      className="w-24 h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-recipe"
-                    />
-                    <label
-                      title="El cliente puede pedirlo sin este ingrediente, o agregarlo aparte."
-                      className="flex items-center gap-1.5 h-10 px-2.5 shrink-0 rounded-vimdy-sm border border-vimdy-border text-vimdy-text-secondary text-xs cursor-pointer hover:bg-vimdy-surface"
-                    >
+                {recipeRows.map((row) => {
+                  const selectedIngredient = allProducts.find((p) => p.id === row.productId);
+                  return (
+                    <div key={row.rowId} className="flex items-center gap-2">
+                      <div className="flex-1 flex gap-2">
+                        <select
+                          value={row.productId}
+                          onChange={(e) => updateRecipeRow(row.rowId, "productId", e.target.value)}
+                          className="flex-1 h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-recipe"
+                        >
+                          <option value="">Selecciona un ingrediente...</option>
+                          {ingredientOptions.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name} {p.unit ? `(${p.unit})` : ""}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => setShowQuickIngredient(true)}
+                          className="h-10 px-3 rounded-vimdy-sm bg-vimdy-recipe/10 border border-vimdy-border text-vimdy-recipe hover:bg-vimdy-recipe/20 transition text-xs font-medium whitespace-nowrap"
+                          title="Crear nuevo ingrediente"
+                        >
+                          + Nuevo
+                        </button>
+                      </div>
                       <input
-                        type="checkbox"
-                        checked={row.optional}
-                        onChange={() => toggleRecipeRowOptional(row.rowId)}
-                        className="w-3.5 h-3.5 rounded border-vimdy-border bg-vimdy-surface accent-vimdy-recipe"
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={row.quantity}
+                        onChange={(e) => updateRecipeRow(row.rowId, "quantity", e.target.value)}
+                        placeholder="Cant."
+                        className="w-24 h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-recipe"
                       />
-                      Opcional
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => removeRecipeRow(row.rowId)}
-                      aria-label="Quitar ingrediente"
-                      className="h-10 w-10 shrink-0 rounded-vimdy-sm border border-vimdy-danger/30 text-vimdy-danger hover:bg-vimdy-danger/10 flex items-center justify-center"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                ))}
+                      <label
+                        title="El cliente puede pedirlo sin este ingrediente, o agregarlo aparte."
+                        className="flex items-center gap-1.5 h-10 px-2.5 shrink-0 rounded-vimdy-sm border border-vimdy-border text-vimdy-text-secondary text-xs cursor-pointer hover:bg-vimdy-surface"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={row.optional}
+                          onChange={() => toggleRecipeRowOptional(row.rowId)}
+                          className="w-3.5 h-3.5 rounded border-vimdy-border bg-vimdy-surface accent-vimdy-recipe"
+                        />
+                        Opcional
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => removeRecipeRow(row.rowId)}
+                        aria-label="Quitar ingrediente"
+                        className="h-10 w-10 shrink-0 rounded-vimdy-sm border border-vimdy-danger/30 text-vimdy-danger hover:bg-vimdy-danger/10 flex items-center justify-center"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  );
+                })}
 
                 <VimdyButton
                   type="button"
@@ -3005,6 +3020,96 @@ function ProductFormModal({
                 >
                   Agregar ingrediente
                 </VimdyButton>
+
+                {showQuickIngredient && (
+                  <div className="flex items-center gap-2 p-3 rounded-vimdy-sm bg-vimdy-recipe/5 border border-vimdy-recipe/20">
+                    <input
+                      autoFocus
+                      value={quickIngredientName}
+                      onChange={(e) => setQuickIngredientName(e.target.value)}
+                      placeholder="Nombre del ingrediente (ej: Leche, Harina...)"
+                      className="flex-1 h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-recipe"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          const trimmed = quickIngredientName.trim();
+                          if (!trimmed) return;
+                          setCreatingIngredient(true);
+                          container.inventoryEngine.get().createProduct({
+                            name: trimmed,
+                            categoryId: categoryId || categories[0]?.id || "",
+                            price: 0,
+                            stock: 0,
+                            isIngredient: true,
+                            active: true
+                          } as any).then((created) => {
+                            setAllProducts((prev) => [...prev, created]);
+                            addRecipeRow();
+                            const lastRowId = recipeRows[recipeRows.length - 1]?.rowId;
+                            if (lastRowId) {
+                              updateRecipeRow(lastRowId, "productId", created.id);
+                            }
+                            setShowQuickIngredient(false);
+                            setQuickIngredientName("");
+                            toast.success(`Ingrediente "${trimmed}" creado.`);
+                          }).catch(() => {
+                            toast.error("No se pudo crear el ingrediente.");
+                          }).finally(() => {
+                            setCreatingIngredient(false);
+                          });
+                        }
+                        if (e.key === "Escape") {
+                          setShowQuickIngredient(false);
+                          setQuickIngredientName("");
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const trimmed = quickIngredientName.trim();
+                        if (!trimmed) return;
+                        setCreatingIngredient(true);
+                        try {
+                          const created = await container.inventoryEngine.get().createProduct({
+                            name: trimmed,
+                            categoryId: categoryId || categories[0]?.id || "",
+                            price: 0,
+                            stock: 0,
+                            isIngredient: true,
+                            active: true
+                          } as any);
+                          setAllProducts((prev) => [...prev, created]);
+                          addRecipeRow();
+                          const lastRowId = recipeRows[recipeRows.length - 1]?.rowId;
+                          if (lastRowId) {
+                            updateRecipeRow(lastRowId, "productId", created.id);
+                          }
+                          setShowQuickIngredient(false);
+                          setQuickIngredientName("");
+                          toast.success(`Ingrediente "${trimmed}" creado.`);
+                        } catch {
+                          toast.error("No se pudo crear el ingrediente.");
+                        } finally {
+                          setCreatingIngredient(false);
+                        }
+                      }}
+                      disabled={creatingIngredient || !quickIngredientName.trim()}
+                      className="h-10 px-4 rounded-vimdy-sm bg-vimdy-recipe text-white hover:bg-vimdy-recipe/90 disabled:opacity-40 transition text-sm font-medium whitespace-nowrap"
+                    >
+                      {creatingIngredient ? "Creando..." : "Crear y agregar"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowQuickIngredient(false);
+                        setQuickIngredientName("");
+                      }}
+                      className="h-10 w-10 rounded-vimdy-sm border border-vimdy-border text-vimdy-text-secondary hover:bg-vimdy-surface flex items-center justify-center"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                )}
 
                 {recipeSummary && (
                   <div className="mt-2">
