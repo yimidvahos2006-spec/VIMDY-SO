@@ -19,7 +19,16 @@ export class CategoryEngine {
 
   public async listAll(): Promise<Category[]> {
     const categories = await this.repository.findAll();
-    return categories.sort((a, b) => a.name.localeCompare(b.name));
+    const seen = new Set<string>();
+    const deduped: Category[] = [];
+    for (const category of categories) {
+      const key = category.name.trim().toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduped.push(category);
+      }
+    }
+    return deduped.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   public async getById(id: string): Promise<Category | null> {
