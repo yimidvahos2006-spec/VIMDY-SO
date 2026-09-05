@@ -19,17 +19,22 @@ import { companyConfigStore } from "../store/companyConfigStore";
  */
 export function formatMoney(value: number, currency: string, language?: string): string {
   const lang = language ?? companyConfigStore.get().language;
-  const digits = getCurrencyDecimalDigits(currency);
+  const normalizedCurrency = (currency || "").trim().toUpperCase();
+  const digits = getCurrencyDecimalDigits(normalizedCurrency);
 
   try {
     return new Intl.NumberFormat(lang, {
       style: "currency",
-      currency,
+      currency: normalizedCurrency,
       minimumFractionDigits: digits,
       maximumFractionDigits: digits
-    }).format(roundMoney(value, currency));
+    }).format(roundMoney(value, normalizedCurrency));
   } catch {
-    // Código de moneda o idioma no reconocido por Intl — evita que la app se rompa.
-    return `${roundMoney(value, currency).toLocaleString("es-CO")} ${currency}`;
+    const rounded = roundMoney(value, normalizedCurrency);
+    const formatted = new Intl.NumberFormat(lang, {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits
+    }).format(rounded);
+    return `${formatted} ${normalizedCurrency}`;
   }
 }
