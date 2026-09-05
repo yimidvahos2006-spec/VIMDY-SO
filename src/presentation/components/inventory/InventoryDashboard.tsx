@@ -3039,15 +3039,13 @@ function ProductFormModal({
                             categoryId: categoryId || categories[0]?.id || "",
                             price: 0,
                             stock: 0,
+                            minStock: 0,
                             isIngredient: true,
                             active: true
                           } as any).then((created) => {
                             setAllProducts((prev) => [...prev, created]);
-                            addRecipeRow();
-                            const lastRowId = recipeRows[recipeRows.length - 1]?.rowId;
-                            if (lastRowId) {
-                              updateRecipeRow(lastRowId, "productId", created.id);
-                            }
+                            const newRowId = crypto.randomUUID();
+                            setRecipeRows((prev) => [...prev, { rowId: newRowId, productId: created.id, quantity: "1", optional: false }]);
                             setShowQuickIngredient(false);
                             setQuickIngredientName("");
                             toast.success(`Ingrediente "${trimmed}" creado.`);
@@ -3075,15 +3073,13 @@ function ProductFormModal({
                             categoryId: categoryId || categories[0]?.id || "",
                             price: 0,
                             stock: 0,
+                            minStock: 0,
                             isIngredient: true,
                             active: true
                           } as any);
                           setAllProducts((prev) => [...prev, created]);
-                          addRecipeRow();
-                          const lastRowId = recipeRows[recipeRows.length - 1]?.rowId;
-                          if (lastRowId) {
-                            updateRecipeRow(lastRowId, "productId", created.id);
-                          }
+                          const newRowId = crypto.randomUUID();
+                          setRecipeRows((prev) => [...prev, { rowId: newRowId, productId: created.id, quantity: "1", optional: false }]);
                           setShowQuickIngredient(false);
                           setQuickIngredientName("");
                           toast.success(`Ingrediente "${trimmed}" creado.`);
