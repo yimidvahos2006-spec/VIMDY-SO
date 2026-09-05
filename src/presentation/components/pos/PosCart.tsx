@@ -286,7 +286,7 @@ export function PosCart() {
                 >
                   <span className="text-lg flex-shrink-0">🍽️</span>
                   <span className="flex-1 min-w-0">
-                    <span className="block text-vimdy-text font-semibold text-vimdy-small truncate">{item.name}</span>
+                    <span className="block text-vimdy-text font-semibold text-vimdy-small leading-tight">{item.name}</span>
                     {item.note && (
                       <span className="block text-vimdy-accent-hover text-vimdy-micro truncate">{item.note}</span>
                     )}
@@ -295,9 +295,12 @@ export function PosCart() {
                     x{item.soldByWeight ? item.quantity.toFixed(3) : item.quantity}
                     {item.soldByWeight && item.unit ? ` ${item.unit}` : ""}
                   </span>
-                  <span className="text-vimdy-text font-bold text-vimdy-small flex-shrink-0">
-                    {money(item.quantity * item.price)}
-                  </span>
+                  <div className="text-right flex-shrink-0">
+                    <span className="block text-vimdy-text font-bold text-vimdy-small">{money(item.quantity * item.price)}</span>
+                    {item.quantity > 1 && (
+                      <span className="block text-vimdy-text-tertiary text-vimdy-micro">{money(item.price)} c/u</span>
+                    )}
+                  </div>
                   {expanded ? (
                     <ChevronUp size={16} className="text-vimdy-text-tertiary flex-shrink-0" />
                   ) : (
@@ -424,66 +427,12 @@ export function PosCart() {
             <span className="text-vimdy-text">{money(tax)}</span>
           </div>
 
-          <div className="flex justify-between text-vimdy-small items-center">
-            <button
-              onClick={() => setDiscountOpen(true)}
-              className="text-vimdy-text-secondary flex items-center gap-1 hover:text-vimdy-accent-hover transition"
-            >
-              <Tag size={13} />
-              {t("pos.cart.discount")}
-              {discountType && (
-                <span className="text-vimdy-accent-hover font-semibold">
-                  ({discountType === "PERCENT" ? `${discountValue}%` : money(discountValue)})
-                </span>
-              )}
-            </button>
-            <div className="flex items-center gap-2">
-              <span className={realDiscountAmount > 0 ? "text-vimdy-success" : "text-vimdy-text"}>
-                {realDiscountAmount > 0 ? `-${money(realDiscountAmount)}` : money(0)}
-              </span>
-              {discountType && (
-                <button
-                  onClick={removeDiscount}
-                  aria-label={t("pos.cart.removeDiscountAria")}
-                  className="w-8 h-8 flex items-center justify-center text-vimdy-text-tertiary hover:text-vimdy-danger"
-                >
-                  <X size={13} />
-                </button>
-              )}
-            </div>
-          </div>
+          <div className="h-px bg-vimdy-border my-1" />
 
-          {/* BLOQUEANTE (auditoría Fase 2 — rama Bar): propina voluntaria,
-              mismo patrón visual que el descuento de arriba. */}
-          <div className="flex justify-between text-vimdy-small items-center">
-            <button
-              onClick={() => setTipOpen(true)}
-              className="text-vimdy-text-secondary flex items-center gap-1 hover:text-vimdy-accent-hover transition"
-            >
-              <HandCoins size={13} />
-              {t("pos.cart.tip")}
-              {tipType && (
-                <span className="text-vimdy-accent-hover font-semibold">
-                  ({tipType === "PERCENT" ? `${tipValue}%` : money(tipValue)})
-                </span>
-              )}
-            </button>
-            <div className="flex items-center gap-2">
-              <span className={realTipAmount > 0 ? "text-vimdy-success" : "text-vimdy-text"}>
-                {realTipAmount > 0 ? `+${money(realTipAmount)}` : money(0)}
-              </span>
-              {tipType && (
-                <button
-                  onClick={removeTip}
-                  aria-label={t("pos.cart.removeTipAria")}
-                  className="w-8 h-8 flex items-center justify-center text-vimdy-text-tertiary hover:text-vimdy-danger"
-                >
-                  <X size={13} />
-                </button>
-              )}
-            </div>
+          <div className="flex justify-between text-vimdy-body font-bold">
+            <span className="text-vimdy-text">{t("pos.sale.totalWithTax")}</span>
+            <span className="text-vimdy-accent-hover">{money(totalConImpuesto)}</span>
           </div>
-
         </div>
 
         {discountOpen && (

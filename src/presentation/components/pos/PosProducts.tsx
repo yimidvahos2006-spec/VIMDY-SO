@@ -265,7 +265,7 @@ const ProductCard = React.memo(function ProductCard({
         )}
       </div>
 
-      <h3 className="w-full text-vimdy-text font-semibold text-vimdy-small sm:text-vimdy-micro leading-tight truncate">
+      <h3 className="w-full text-vimdy-text font-semibold text-vimdy-small sm:text-vimdy-micro leading-tight">
         {name}
       </h3>
 
