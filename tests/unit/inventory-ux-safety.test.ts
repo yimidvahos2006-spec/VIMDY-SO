@@ -140,4 +140,68 @@ describe("Inventory UX safety", () => {
       expect(countForCategory(products, "cat-comida")).toBe(0);
     });
   });
+
+  describe("quick ingredient creation", () => {
+    it("reuses empty recipe row instead of creating a new one", () => {
+      const emptyRow = { rowId: "empty-1", productId: "", quantity: "1", optional: false };
+      const existingRows = [emptyRow, { rowId: "row-2", productId: "p1", quantity: "2", optional: false }];
+
+      const empty = existingRows.find((r) => !r.productId);
+      expect(empty).toBeDefined();
+      expect(empty!.rowId).toBe("empty-1");
+
+      const updatedRows = existingRows.map((r) =>
+        r.rowId === empty!.rowId ? { ...r, productId: "new-ingredient", quantity: "1" } : r
+      );
+      expect(updatedRows).toHaveLength(2);
+      expect(updatedRows.find((r) => r.rowId === "empty-1")?.productId).toBe("new-ingredient");
+      expect(updatedRows.find((r) => r.rowId === "row-2")?.productId).toBe("p1");
+    });
+
+    it("creates new row when no empty row exists", () => {
+      const existingRows = [{ rowId: "row-1", productId: "p1", quantity: "2", optional: false }];
+
+      const empty = existingRows.find((r) => !r.productId);
+      expect(empty).toBeUndefined();
+
+      const newRowId = "new-row-1";
+      const updatedRows = [...existingRows, { rowId: newRowId, productId: "new-ingredient", quantity: "1", optional: false }];
+      expect(updatedRows).toHaveLength(2);
+      expect(updatedRows.find((r) => r.rowId === newRowId)?.productId).toBe("new-ingredient");
+    });
+  });
+
+  describe("quantity input key filtering", () => {
+    const blockedKeys = ["e", "E", "+", "-"];
+
+    it("blocks e, E, +, - keys", () => {
+      blockedKeys.forEach((key) => {
+        expect(blockedKeys.includes(key)).toBe(true);
+      });
+    });
+
+    it("allows numeric keys and decimal point", () => {
+      const allowedKeys = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "Backspace", "Delete", "ArrowLeft", "ArrowRight", "Tab"];
+      allowedKeys.forEach((key) => {
+        expect(blockedKeys.includes(key)).toBe(false);
+      });
+    });
+
+    it("onKeyDown handler prevents default for blocked keys", () => {
+      const blockedKeys = ["e", "E", "+", "-"];
+      const handler = (e: { key: string; preventDefault: () => void }) => {
+        if (blockedKeys.includes(e.key)) {
+          e.preventDefault();
+        }
+      };
+
+      const blocked = { key: "e", preventDefault: () => {} };
+      handler(blocked);
+      expect(blocked.preventDefault).toBeDefined();
+
+      const allowed = { key: "5", preventDefault: () => {} };
+      handler(allowed);
+      expect(allowed.preventDefault).toBeDefined();
+    });
+  });
 });

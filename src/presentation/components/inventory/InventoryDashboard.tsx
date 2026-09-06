@@ -1660,15 +1660,21 @@ function AiImportModal({
                               </option>
                             ))}
                           </select>
-                          <input
-                            type="number"
-                            min={0}
-                            step="0.01"
-                            value={ing.quantity}
-                            onChange={(e) => updateIngredientRow(row.id, ing.rowId, "quantity", e.target.value)}
-                            placeholder="Cant."
-                            className="w-20 h-9 px-2 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-recipe"
-                          />
+                           <input
+                             type="number"
+                             min={0}
+                             step="0.01"
+                             value={ing.quantity}
+                             onChange={(e) => updateIngredientRow(row.id, ing.rowId, "quantity", e.target.value)}
+                             onKeyDown={(e) => {
+                               if (["e", "E", "+", "-"].includes(e.key)) {
+                                 e.preventDefault();
+                               }
+                             }}
+                             inputMode="decimal"
+                             placeholder="Cant."
+                             className="w-20 h-9 px-2 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-recipe"
+                           />
                           <button
                             type="button"
                             onClick={() => removeIngredientRow(row.id, ing.rowId)}
@@ -1975,6 +1981,7 @@ function ProductFormModal({
   const [creatingSupplier, setCreatingSupplier] = useState(false);
   const [showQuickIngredient, setShowQuickIngredient] = useState(false);
   const [quickIngredientName, setQuickIngredientName] = useState("");
+  const [quickIngredientPurchasePrice, setQuickIngredientPurchasePrice] = useState("");
   const [creatingIngredient, setCreatingIngredient] = useState(false);
   // stock, se descuenta cada ingrediente (ver InventoryEngine.consumeForSale).
   const [allProducts, setAllProducts] = useState<Product[]>([]);
@@ -2423,6 +2430,44 @@ function ProductFormModal({
           ? "No se pudo guardar los cambios. Intenta de nuevo."
           : "No se pudo guardar el producto. Intenta de nuevo."
       );
+    }
+  }
+
+  async function handleCreateQuickIngredient(name: string) {
+    const purchasePrice = quickIngredientPurchasePrice.trim() ? Number(quickIngredientPurchasePrice) : undefined;
+    setCreatingIngredient(true);
+    try {
+      const created = await container.inventoryEngine.get().createProduct({
+        name,
+        categoryId: categoryId || categories[0]?.id || "",
+        price: 0,
+        purchasePrice,
+        stock: 0,
+        minStock: 0,
+        unit: "unidad",
+        isIngredient: true,
+        active: true
+      });
+      setAllProducts((prev) => [...prev, created]);
+
+      const emptyRow = recipeRows.find((r) => !r.productId);
+      if (emptyRow) {
+        setRecipeRows((prev) =>
+          prev.map((r) => (r.rowId === emptyRow.rowId ? { ...r, productId: created.id, quantity: "1" } : r))
+        );
+      } else {
+        const newRowId = crypto.randomUUID();
+        setRecipeRows((prev) => [...prev, { rowId: newRowId, productId: created.id, quantity: "1", optional: false }]);
+      }
+
+      setShowQuickIngredient(false);
+      setQuickIngredientName("");
+      setQuickIngredientPurchasePrice("");
+      toast.success(`Ingrediente "${name}" creado.`);
+    } catch {
+      toast.error("No se pudo crear el ingrediente.");
+    } finally {
+      setCreatingIngredient(false);
     }
   }
 
@@ -3088,6 +3133,12 @@ function ProductFormModal({
                         step="0.01"
                         value={row.quantity}
                         onChange={(e) => updateRecipeRow(row.rowId, "quantity", e.target.value)}
+                        onKeyDown={(e) => {
+                          if (["e", "E", "+", "-"].includes(e.key)) {
+                            e.preventDefault();
+                          }
+                        }}
+                        inputMode="decimal"
                         placeholder="Cant."
                         className="w-24 h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-recipe"
                       />
@@ -3137,61 +3188,30 @@ function ProductFormModal({
                         if (e.key === "Enter") {
                           const trimmed = quickIngredientName.trim();
                           if (!trimmed) return;
-                          setCreatingIngredient(true);
-                          container.inventoryEngine.get().createProduct({
-                            name: trimmed,
-                            categoryId: categoryId || categories[0]?.id || "",
-                            price: 0,
-                            stock: 0,
-                            minStock: 0,
-                            isIngredient: true,
-                            active: true
-                          } as any).then((created) => {
-                            setAllProducts((prev) => [...prev, created]);
-                            const newRowId = crypto.randomUUID();
-                            setRecipeRows((prev) => [...prev, { rowId: newRowId, productId: created.id, quantity: "1", optional: false }]);
-                            setShowQuickIngredient(false);
-                            setQuickIngredientName("");
-                            toast.success(`Ingrediente "${trimmed}" creado.`);
-                          }).catch(() => {
-                            toast.error("No se pudo crear el ingrediente.");
-                          }).finally(() => {
-                            setCreatingIngredient(false);
-                          });
+                          handleCreateQuickIngredient(trimmed);
                         }
                         if (e.key === "Escape") {
                           setShowQuickIngredient(false);
                           setQuickIngredientName("");
+                          setQuickIngredientPurchasePrice("");
                         }
                       }}
+                    />
+                    <input
+                      type="number"
+                      value={quickIngredientPurchasePrice}
+                      onChange={(e) => setQuickIngredientPurchasePrice(e.target.value)}
+                      placeholder="Precio compra (opcional)"
+                      min={0}
+                      step="0.01"
+                      className="w-36 h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-recipe"
                     />
                     <button
                       type="button"
                       onClick={async () => {
                         const trimmed = quickIngredientName.trim();
                         if (!trimmed) return;
-                        setCreatingIngredient(true);
-                        try {
-                          const created = await container.inventoryEngine.get().createProduct({
-                            name: trimmed,
-                            categoryId: categoryId || categories[0]?.id || "",
-                            price: 0,
-                            stock: 0,
-                            minStock: 0,
-                            isIngredient: true,
-                            active: true
-                          } as any);
-                          setAllProducts((prev) => [...prev, created]);
-                          const newRowId = crypto.randomUUID();
-                          setRecipeRows((prev) => [...prev, { rowId: newRowId, productId: created.id, quantity: "1", optional: false }]);
-                          setShowQuickIngredient(false);
-                          setQuickIngredientName("");
-                          toast.success(`Ingrediente "${trimmed}" creado.`);
-                        } catch {
-                          toast.error("No se pudo crear el ingrediente.");
-                        } finally {
-                          setCreatingIngredient(false);
-                        }
+                        await handleCreateQuickIngredient(trimmed);
                       }}
                       disabled={creatingIngredient || !quickIngredientName.trim()}
                       className="h-10 px-4 rounded-vimdy-sm bg-vimdy-recipe text-white hover:bg-vimdy-recipe/90 disabled:opacity-40 transition text-sm font-medium whitespace-nowrap"
@@ -3203,6 +3223,7 @@ function ProductFormModal({
                       onClick={() => {
                         setShowQuickIngredient(false);
                         setQuickIngredientName("");
+                        setQuickIngredientPurchasePrice("");
                       }}
                       className="h-10 w-10 rounded-vimdy-sm border border-vimdy-border text-vimdy-text-secondary hover:bg-vimdy-surface flex items-center justify-center"
                     >
