@@ -32,7 +32,7 @@ export class WaiterEngine {
     return await this.repository.findById(id);
   }
 
-  public async create(input: { name: string }): Promise<Waiter> {
+  public async create(input: { name: string; photoUrl?: string }): Promise<Waiter> {
     const name = input.name.trim();
 
     if (!name) {
@@ -43,7 +43,8 @@ export class WaiterEngine {
       id: crypto.randomUUID(),
       name,
       active: true,
-      createdAt: new Date()
+      createdAt: new Date(),
+      ...(input.photoUrl ? { photoUrl: input.photoUrl } : {})
     };
 
     await this.repository.save(waiter);
@@ -78,6 +79,19 @@ export class WaiterEngine {
     }
 
     const updated: Waiter = { ...current, active };
+    await this.repository.update(updated);
+    vimdyCore.emit("waiter", { action: "UPDATED", waiter: updated });
+    return updated;
+  }
+
+  public async updatePhoto(id: string, photoUrl: string | undefined): Promise<Waiter> {
+    const current = await this.repository.findById(id);
+
+    if (!current) {
+      throw new Error("WAITER_NOT_FOUND");
+    }
+
+    const updated: Waiter = { ...current, photoUrl };
     await this.repository.update(updated);
     vimdyCore.emit("waiter", { action: "UPDATED", waiter: updated });
     return updated;

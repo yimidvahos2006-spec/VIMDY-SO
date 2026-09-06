@@ -4,6 +4,7 @@ import { UserCircle2, Users, Plus, X } from "lucide-react";
 import { Waiter } from "../../../core/entities/Entities";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { EmptyState } from "../ui/EmptyState";
+import { useWaiterPhotoVisibility } from "../../../core/store/waiterSettingsStore";
 
 interface Props {
   waiters: Waiter[];
@@ -15,6 +16,7 @@ export function WaiterSelect({ waiters, onSelect }: Props) {
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { showPhotos } = useWaiterPhotoVisibility();
 
   async function handleCreate(event: React.FormEvent) {
     event.preventDefault();
@@ -114,7 +116,15 @@ export function WaiterSelect({ waiters, onSelect }: Props) {
             onClick={() => onSelect(waiter)}
             className="flex flex-col items-center justify-center gap-3 bg-vimdy-surface rounded-3xl border border-slate-800 hover:border-cyan-500 hover:bg-slate-800/60 transition-all p-8"
           >
-            <UserCircle2 size={48} className="text-cyan-400" />
+            {showPhotos && waiter.photoUrl ? (
+              <img
+                src={waiter.photoUrl}
+                alt={waiter.name}
+                className="w-24 h-24 rounded-full object-cover border-2 border-slate-700 shadow-lg"
+              />
+            ) : (
+              <UserCircle2 size={48} className="text-cyan-400" />
+            )}
             <span className="text-white text-xl font-bold text-center">
               {waiter.name}
             </span>

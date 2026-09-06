@@ -436,6 +436,7 @@ export interface Waiter {
   readonly name: string;
   readonly active: boolean;
   readonly createdAt: Date;
+  readonly photoUrl?: string;
 }
 
 /** Estado de una cuenta de usuario. */
