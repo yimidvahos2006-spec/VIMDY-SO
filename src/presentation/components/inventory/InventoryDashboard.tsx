@@ -30,7 +30,8 @@ import {
   Scale,
   Download,
   ArrowLeftRight,
-  UserPlus
+  UserPlus,
+  RefreshCw
 } from "lucide-react";
 
 import { useInventory, getStockStatus, StockStatus } from "../../../core/store/useInventory";
@@ -107,6 +108,7 @@ export function InventoryDashboard() {
     createProduct,
     updateProduct,
     deleteProduct,
+    reactivateProduct,
     productsWithCost
   } = useInventory();
 
@@ -124,6 +126,7 @@ export function InventoryDashboard() {
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StockStatus | "todos">("todos");
+  const [showInactive, setShowInactive] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<string>("todos");
   const [productTypeFilter, setProductTypeFilter] = useState<ProductType | "todos">("todos");
   const [sortKey, setSortKey] = useState<SortKey>("name");
@@ -255,6 +258,10 @@ export function InventoryDashboard() {
 
   const filtered = useMemo(() => {
     let list = products;
+
+    if (!showInactive) {
+      list = list.filter((p) => p.active !== false);
+    }
 
     if (search.trim() !== "") {
       const value = search.trim().toLowerCase();
@@ -394,6 +401,15 @@ export function InventoryDashboard() {
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
+          <label className="flex items-center gap-2 text-sm text-vimdy-text-secondary cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={showInactive}
+              onChange={(e) => setShowInactive(e.target.checked)}
+              className="rounded border-vimdy-border"
+            />
+            Mostrar desactivados
+          </label>
           {/*
             Fase 3 (5.1): "Producir tanda" e "Importar menú con IA" se
             quedan como botones con estilo propio a propósito — no son
@@ -441,14 +457,6 @@ export function InventoryDashboard() {
               Exportar CSV
             </VimdyButton>
           )}
-          <VimdyButton
-            onClick={() => navigate("/insumos")}
-            variant="secondary"
-            size="lg"
-            icon={<Package size={18} />}
-          >
-            Insumos
-          </VimdyButton>
           <VimdyButton
             onClick={() => navigate("/insumos")}
             variant="secondary"
@@ -769,6 +777,19 @@ export function InventoryDashboard() {
                           >
                             <Trash2 size={14} />
                           </button>
+                          {product.active === false && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                reactivateProduct(product.id);
+                              }}
+                              aria-label="Reactivar"
+                              title="Reactivar producto"
+                              className="w-8 h-8 rounded-vimdy-sm border border-vimdy-success/30 text-vimdy-success hover:bg-vimdy-success/10 flex items-center justify-center"
+                            >
+                              <RefreshCw size={14} />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -851,7 +872,9 @@ export function InventoryDashboard() {
           title="Eliminar producto"
           message={
             <>
-              ¿Eliminar <span className="text-vimdy-text font-semibold">"{productToDelete.name}"</span> definitivamente? Esta acción no se puede deshacer.
+              {productToDelete.price > 0 || (productToDelete.stock ?? 0) > 0
+                ? <>Si el producto tiene historial de ventas o movimientos, se ocultará del inventario en vez de borrarse por completo, para no perder ese historial. Si nunca se ha usado, se elimina para siempre.</>
+                : <>Este producto no tiene historial y se eliminará permanentemente. Esta acción no se puede deshacer.</>}
             </>
           }
           confirmLabel="Eliminar"
@@ -3731,7 +3754,7 @@ function AlertsPanel({
   onSelect: (p: Product) => void;
 }) {
   const alerts = products
-    .filter((p) => getStockStatus(p) !== "normal")
+    .filter((p) => p.active !== false && getStockStatus(p) !== "normal")
     .sort((a, b) => a.stock - b.stock);
 
   return (

@@ -22,6 +22,7 @@ export function getStockStatus(product: Product): StockStatus {
   // de "stock bajo" — mismo criterio que InventoryEngine/SalesEngine/
   // AlertEngine.
   if (product.trackStock === false) return "normal";
+  if (product.price <= 0) return "normal";
   if (product.stock <= 0) return "agotado";
   if (product.stock <= product.minStock) return "bajo";
   return "normal";
@@ -77,6 +78,7 @@ export function useInventory() {
     let productsWithCost = 0;
 
     for (const p of products) {
+      if (p.active === false) continue;
       if (p.trackStock !== false && p.purchasePrice !== undefined) {
         totalValue += p.purchasePrice * p.stock;
         productsWithCost += 1;
@@ -84,16 +86,16 @@ export function useInventory() {
     }
 
     return {
-      totalProducts: products.length,
-      lowStockCount: products.filter((p) => getStockStatus(p) === "bajo").length,
-      outOfStockCount: products.filter((p) => getStockStatus(p) === "agotado").length,
+      totalProducts: products.filter((p) => p.active !== false).length,
+      lowStockCount: products.filter((p) => p.active !== false && getStockStatus(p) === "bajo").length,
+      outOfStockCount: products.filter((p) => p.active !== false && getStockStatus(p) === "agotado" && p.price > 0).length,
       totalValue,
       productsWithCost,
     };
   }, [products]);
 
   const lowStockProducts = useMemo(
-    () => products.filter((p) => getStockStatus(p) !== "normal"),
+    () => products.filter((p) => p.active !== false && getStockStatus(p) !== "normal"),
     [products]
   );
 
@@ -283,6 +285,53 @@ export function useInventory() {
     }
   }
 
+  async function reactivateProduct(id: string): Promise<boolean> {
+    setError(null);
+    try {
+      const current = products.find((p) => p.id === id);
+      if (!current) {
+        setError("Este producto ya no existe.");
+        return false;
+      }
+
+      await container.inventoryEngine.get().updateProduct(id, {
+        name: current.name,
+        categoryId: current.categoryId,
+        price: current.price,
+        stock: current.stock,
+        minStock: current.minStock,
+        active: true,
+        ...(current.description ? { description: current.description } : {}),
+        ...(current.barcode ? { barcode: current.barcode } : {}),
+        ...(current.sku ? { sku: current.sku } : {}),
+        ...(current.purchasePrice !== undefined ? { purchasePrice: current.purchasePrice } : {}),
+        ...(current.taxRate !== undefined ? { taxRate: current.taxRate } : {}),
+        ...(current.supplierId ? { supplierId: current.supplierId } : {}),
+        ...(current.alternateSupplierId ? { alternateSupplierId: current.alternateSupplierId } : {}),
+        ...(current.image ? { image: current.image } : {}),
+        unit: current.unit,
+        favorite: current.favorite,
+        aliases: current.aliases,
+        ...(current.recipe && current.recipe.length > 0 ? { recipe: current.recipe } : {}),
+        productionMode: current.productionMode,
+        requiresKitchen: current.requiresKitchen,
+        ...(current.estimatedPrepMinutes ? { estimatedPrepMinutes: current.estimatedPrepMinutes } : {}),
+        ...(current.printStationOverride ? { printStationOverride: current.printStationOverride } : {}),
+        ...(current.sizes && current.sizes.length > 0 ? { sizes: current.sizes } : {}),
+        ...(current.extras && current.extras.length > 0 ? { extras: current.extras } : {}),
+        trackStock: current.trackStock,
+        isIngredient: current.isIngredient,
+      });
+      await load();
+      await productCatalogStore.refresh();
+      vimdyCore.emit("inventory");
+      return true;
+    } catch (e: any) {
+      setError(e?.message ?? "No se pudo reactivar el producto. Intenta de nuevo.");
+      return false;
+    }
+  }
+
   async function deleteProduct(id: string): Promise<boolean> {
     setError(null);
     try {
@@ -356,6 +405,7 @@ export function useInventory() {
     createProduct,
     updateProduct,
     deleteProduct,
+    reactivateProduct,
     productsWithCost: kpis.productsWithCost,
   };
 }
