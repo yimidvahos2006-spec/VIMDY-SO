@@ -1,7 +1,7 @@
 // src/core/store/useInventory.ts
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { container, productsReady } from "../../infrastructure/di/CompositionRoot";
-import { Product, InventoryMovement, LossCategory } from "../entities/Entities";
+import { Product, InventoryMovement, LossCategory, Category } from "../entities/Entities";
 import { productCatalogStore } from "./productCatalogStore";
 import { ProductInput } from "../engines/InventoryEngine";
 import { vimdyCore } from "../VimdyCore";
@@ -26,6 +26,26 @@ export function getStockStatus(product: Product): StockStatus {
   if (product.stock <= 0) return "agotado";
   if (product.stock <= product.minStock) return "bajo";
   return "normal";
+}
+
+export interface CategoryProductCount {
+  id: string;
+  name: string;
+  count: number;
+}
+
+export function getCategoryProductCounts(
+  products: Product[],
+  categories: Category[]
+): CategoryProductCount[] {
+  const countByCategory: Record<string, number> = {};
+  products.forEach((p) => {
+    if (p.active === false) return;
+    countByCategory[p.categoryId] = (countByCategory[p.categoryId] ?? 0) + 1;
+  });
+  return categories
+    .filter((c) => countByCategory[c.id] > 0)
+    .map((c) => ({ id: c.id, name: c.name, count: countByCategory[c.id] }));
 }
 
 export interface InventoryKpis {

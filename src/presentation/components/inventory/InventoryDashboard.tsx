@@ -312,6 +312,7 @@ export function InventoryDashboard() {
   const categoryChips = useMemo(() => {
     const countByCategory: Record<string, number> = {};
     products.forEach((p) => {
+      if (p.active === false) return;
       countByCategory[p.categoryId] = (countByCategory[p.categoryId] ?? 0) + 1;
     });
     return categories
@@ -330,7 +331,8 @@ export function InventoryDashboard() {
 
   function exportInventoryToCsv() {
     const headers = ["nombre", "sku", "categoria", "stockActual", "stockMinimo", "precioCompra", "precioVenta", "estado"];
-    const rows = products.map((p) => {
+    const activeProducts = products.filter((p) => p.active !== false);
+    const rows = activeProducts.map((p) => {
       const status = getStockStatus(p);
       return [
         p.name,

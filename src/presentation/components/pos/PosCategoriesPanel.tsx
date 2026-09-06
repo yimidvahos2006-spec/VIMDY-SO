@@ -14,6 +14,7 @@ import { useCategory } from "../../../core/store/useCategory";
 import { useProductCatalog } from "../../../core/store/useProductCatalog";
 import { useCategories } from "../../../hooks/useCategories";
 import { useTranslation } from "../../../core/i18n/useTranslation";
+import type { Product } from "../../../core/entities/Entities";
 
 /**
  * Antes esta lista era texto hardcodeado ("Hamburguesas", "Pizzas"...)
@@ -45,6 +46,15 @@ function iconFor(name: string): React.ElementType {
  * un POS. Ahora es UNA sola lista: Favoritas primero (si hay), luego
  * Todas, luego el resto — cada categoría aparece una sola vez.
  */
+export function countForCategory(products: Product[], categoryId: string): number {
+  const sellable = products.filter(
+    (product) => product.active !== false && product.isIngredient !== true
+  );
+  if (categoryId === "Favoritos") return sellable.filter((product) => product.favorite).length;
+  if (categoryId === "Todos") return sellable.length;
+  return sellable.filter((product) => product.categoryId === categoryId).length;
+}
+
 export function PosCategoriesPanel() {
 
   const { selected, select } = useCategory();
@@ -53,9 +63,7 @@ export function PosCategoriesPanel() {
   const { t } = useTranslation();
 
   function countFor(categoryId: string) {
-    if (categoryId === "Favoritos") return products.filter((product) => product.favorite).length;
-    if (categoryId === "Todos") return products.length;
-    return products.filter((product) => product.categoryId === categoryId).length;
+    return countForCategory(products, categoryId);
   }
 
   function renderButton(category: { id: string; name: string; icon: React.ElementType }) {

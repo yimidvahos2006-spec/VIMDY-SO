@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { getStockStatus } from "../../src/core/store/useInventory";
-import type { Product } from "../../src/core/entities/Entities";
+import { getStockStatus, getCategoryProductCounts } from "../../src/core/store/useInventory";
+import { countForCategory } from "../../src/presentation/components/pos/PosCategoriesPanel";
+import type { Product, Category } from "../../src/core/entities/Entities";
 
 function makeProduct(overrides: Partial<Product> = {}): Product {
   return {
@@ -79,6 +80,64 @@ describe("Inventory UX safety", () => {
       
       const allList = allProducts; // when showInactive is true, no filter
       expect(allList).toHaveLength(2);
+    });
+  });
+
+  describe("category chip counts exclude inactive products", () => {
+    const categories: Category[] = [
+      { id: "cat-bebidas", name: "Bebidas", description: "", requiresKitchenByDefault: false, printStation: undefined, active: true },
+      { id: "cat-comida", name: "Comida", description: "", requiresKitchenByDefault: false, printStation: undefined, active: true }
+    ];
+
+    it("getCategoryProductCounts excludes inactive products", () => {
+      const products: Product[] = [
+        makeProduct({ id: "p1", categoryId: "cat-bebidas", active: true }),
+        makeProduct({ id: "p2", categoryId: "cat-bebidas", active: true }),
+        makeProduct({ id: "p3", categoryId: "cat-bebidas", active: false }),
+        makeProduct({ id: "p4", categoryId: "cat-comida", active: true }),
+      ];
+
+      const counts = getCategoryProductCounts(products, categories);
+      const bebidas = counts.find((c) => c.id === "cat-bebidas");
+      const comida = counts.find((c) => c.id === "cat-comida");
+
+      expect(bebidas).toBeDefined();
+      expect(bebidas!.count).toBe(2);
+      expect(comida).toBeDefined();
+      expect(comida!.count).toBe(1);
+    });
+
+    it("does not include categories with only inactive products", () => {
+      const products: Product[] = [
+        makeProduct({ id: "p1", categoryId: "cat-bebidas", active: false }),
+      ];
+
+      const counts = getCategoryProductCounts(products, categories);
+      expect(counts.find((c) => c.id === "cat-bebidas")).toBeUndefined();
+    });
+  });
+
+  describe("POS category counts exclude inactive and ingredients", () => {
+    it("countForCategory excludes inactive products and ingredients", () => {
+      const products: Product[] = [
+        makeProduct({ id: "p1", categoryId: "cat-bebidas", active: true, isIngredient: false, favorite: false }),
+        makeProduct({ id: "p2", categoryId: "cat-bebidas", active: true, isIngredient: true, favorite: false }),
+        makeProduct({ id: "p3", categoryId: "cat-bebidas", active: false, isIngredient: false, favorite: false }),
+        makeProduct({ id: "p4", categoryId: "cat-comida", active: true, isIngredient: false, favorite: true }),
+      ];
+
+      expect(countForCategory(products, "cat-bebidas")).toBe(1);
+      expect(countForCategory(products, "cat-comida")).toBe(1);
+      expect(countForCategory(products, "Favoritos")).toBe(1);
+      expect(countForCategory(products, "Todos")).toBe(2);
+    });
+
+    it("returns 0 for empty category", () => {
+      const products: Product[] = [
+        makeProduct({ id: "p1", categoryId: "cat-bebidas", active: true, isIngredient: false }),
+      ];
+
+      expect(countForCategory(products, "cat-comida")).toBe(0);
     });
   });
 });
