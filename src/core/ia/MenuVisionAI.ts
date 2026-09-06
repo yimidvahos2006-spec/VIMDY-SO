@@ -44,6 +44,13 @@ export interface MenuVisionItem {
    * llamadas viejas que todavía no mandan categorías).
    */
   categoryId: string | null;
+  /**
+   * Tipo de item detectado por la IA:
+   * - "plato_final": plato compuesto o preparado que se vende como un todo.
+   * - "ingrediente": materia prima o insumo que no se vende directamente.
+   * - "producto_simple": producto individual envasado o preparado.
+   */
+  tipo: "plato_final" | "ingrediente" | "producto_simple";
 }
 
 // Compatibilidad con el código existente que importaba MenuOcrItem.
@@ -99,6 +106,7 @@ interface RawMenuVisionItem {
   confidence: number;
   requiresReview: boolean;
   category?: string;
+  tipo?: string;
 }
 
 /**
@@ -168,14 +176,23 @@ export async function readMenuImage(
       const category = item.category?.trim() || SIN_CLASIFICAR;
       const matched = categoryByLowerName.get(category.toLowerCase());
 
-      return {
+      const validTipos = ["plato_final", "ingrediente", "producto_simple"] as const;
+      const rawTipo = typeof item.tipo === "string" ? item.tipo.trim().toLowerCase() : "producto_simple";
+      const tipo: typeof validTipos[number] = validTipos.includes(rawTipo as typeof validTipos[number])
+        ? (rawTipo as typeof validTipos[number])
+        : "producto_simple";
+
+      const menuItem: MenuVisionItem = {
         name: cleanName(item.name),
         price: item.price,
         confidence: item.confidence,
         requiresReview: item.requiresReview,
         category: matched ? matched.name : SIN_CLASIFICAR,
-        categoryId: matched ? matched.id : null
+        categoryId: matched ? matched.id : null,
+        tipo
       };
+
+      return menuItem;
     })
     .filter((item) => item.name.length >= 2);
 }

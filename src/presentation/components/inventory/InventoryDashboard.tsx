@@ -48,6 +48,7 @@ import { fileToProductImage } from "../../utils/imageUtils";
 import { ProductionIntelligencePanel } from "./ProductionIntelligencePanel";
 import { buildProductInputFromImportRow, inferUnitFromProductName, ImportedProductRow } from "./importHelpers";
 import { LOSS_CATEGORY_LABEL } from "../../../core/engines/lossCategoryLabels";
+import { useNavigate } from "react-router-dom";
 import { getBranches, getCurrentBranchId, getCurrentBusinessId } from "../../../infrastructure/supabase/supabaseClient";
 import { formatMoney } from "../../../core/utils/formatMoney";
 import { companyConfigStore } from "../../../core/store/companyConfigStore";
@@ -92,6 +93,7 @@ type SortKey = "name" | "stock" | "price";
  */
 
 export function InventoryDashboard() {
+  const navigate = useNavigate();
   const {
     products,
     recentMovements,
@@ -439,6 +441,22 @@ export function InventoryDashboard() {
               Exportar CSV
             </VimdyButton>
           )}
+          <VimdyButton
+            onClick={() => navigate("/insumos")}
+            variant="secondary"
+            size="lg"
+            icon={<Package size={18} />}
+          >
+            Insumos
+          </VimdyButton>
+          <VimdyButton
+            onClick={() => navigate("/insumos")}
+            variant="secondary"
+            size="lg"
+            icon={<Package size={18} />}
+          >
+            Insumos
+          </VimdyButton>
           <VimdyButton
             onClick={() => setShowNewProduct(true)}
             variant="primary"
@@ -1031,19 +1049,16 @@ function AiImportModal({
           name: item.name,
           price: String(item.price),
           requiresReview: item.requiresReview,
-          // Precargado con la sugerencia de la IA (item.categoryId ya viene
-          // resuelto contra las categorías reales del negocio, o null si no
-          // matcheó ninguna) — pero el negocio puede cambiarlo en la tabla.
           categoryId: item.categoryId ?? "",
-          // Default true (igual que el resto del catálogo): el negocio
-          // apaga el switch fila por fila para lo que no va a cocina.
           requiresKitchen: true,
           stock: "0",
           recipeRows: [],
           taxRate: "",
           unit: inferUnitFromProductName(item.name),
           productionMode: "NONE",
-          isIngredient: false
+          isIngredient: item.tipo === "ingrediente",
+          pendingReview: item.requiresReview || item.price <= 0,
+          tipo: item.tipo
         }))
       );
     } catch (err: any) {
@@ -1068,7 +1083,7 @@ function AiImportModal({
     setScreen("capture");
   }
 
-  function updateRow(id: string, field: "name" | "price" | "categoryId" | "stock" | "taxRate", value: string) {
+  function updateRow(id: string, field: "name" | "price" | "categoryId" | "stock" | "taxRate" | "pendingReview", value: string | boolean) {
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
   }
 
@@ -1161,7 +1176,9 @@ function AiImportModal({
         taxRate: "",
         unit: "unidad",
         productionMode: "NONE",
-        isIngredient: false
+        isIngredient: false,
+        pendingReview: false,
+        tipo: "producto_simple"
       }
     ]);
   }
@@ -1204,8 +1221,9 @@ function AiImportModal({
     (r) => r.name.trim() && Number(r.price) > 0 && !r.categoryId
   ).length;
   const validRowsCount = rows.filter(
-    (r) => r.name.trim() && Number(r.price) > 0 && !!r.categoryId
+    (r) => r.name.trim() && Number(r.price) > 0 && !!r.categoryId && !r.pendingReview
   ).length;
+  const pendingRowsCount = rows.filter((r) => r.pendingReview).length;
   const canImport = validRowsCount > 0 && screen === "review";
 
   /**
@@ -1213,6 +1231,10 @@ function AiImportModal({
    * sin nombre, sin precio válido o sin categoría elegida (Paso 2.4: la
    * categoría ahora es por fila) se saltan y quedan listadas para que el
    * negocio las revise manualmente después.
+   *
+   * Las filas marcadas como pendingReview NO se importan automáticamente:
+   * la IA no está segura del precio/stock y el usuario debe confirmarlas
+   * manualmente antes de crearlas en el inventario activo.
    */
   async function handleImport() {
     if (!canImport) return;
@@ -1221,24 +1243,43 @@ function AiImportModal({
 
     let success = 0;
     const failed: string[] = [];
+    const pending: string[] = [];
+
+    const existingNames = new Set(
+      (await container.inventoryEngine.get().listAll()).map((p) => p.name.trim().toLowerCase())
+    );
 
     for (const row of rows) {
       const name = row.name.trim();
       const price = Number(row.price);
+
+      if (row.pendingReview) {
+        pending.push(name);
+        continue;
+      }
 
       if (!name || !price || price <= 0 || !row.categoryId) {
         if (name) failed.push(name);
         continue;
       }
 
+      if (existingNames.has(name.toLowerCase())) {
+        failed.push(`${name} (ya existe)`);
+        continue;
+      }
+
       const input = buildProductInputFromImportRow(row, batchTax);
       const ok = await createProduct(input);
 
-      if (ok) success++;
-      else failed.push(name);
+      if (ok) {
+        success++;
+        existingNames.add(name.toLowerCase());
+      } else {
+        failed.push(name);
+      }
     }
 
-    setResult({ success, failed });
+    setResult({ success, failed: [...failed, ...pending] });
     setScreen("done");
   }
 
@@ -1405,14 +1446,16 @@ function AiImportModal({
                   rows.map((row) => (
                     <React.Fragment key={row.id}>
                     <div
-                      className={`grid ${REVIEW_GRID_COLS} gap-2 items-center px-3 py-2 border-t border-vimdy-border`}
+                      className={`grid ${REVIEW_GRID_COLS} gap-2 items-center px-3 py-2 border-t border-vimdy-border ${
+                        row.pendingReview ? "bg-vimdy-warning/5" : ""
+                      }`}
                     >
                     <input
                       value={row.name}
                       onChange={(e) => updateRow(row.id, "name", e.target.value)}
                       placeholder="Nombre del producto"
                       className={`h-9 px-2 rounded-vimdy-sm bg-vimdy-surface border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-ai ${
-                        row.requiresReview ? "border-vimdy-warning/50" : "border-vimdy-border"
+                        row.requiresReview || row.pendingReview ? "border-vimdy-warning/50" : "border-vimdy-border"
                       }`}
                     />
                     <div className="relative">
@@ -1423,25 +1466,36 @@ function AiImportModal({
                         type="number"
                         min={0}
                         value={row.price}
-                        onChange={(e) => updateRow(row.id, "price", e.target.value)}
+                        onChange={(e) => {
+                          const newPrice = e.target.value;
+                          updateRow(row.id, "price", newPrice);
+                          if (row.pendingReview && Number(newPrice) > 0 && row.categoryId) {
+                            updateRow(row.id, "pendingReview", false);
+                          }
+                        }}
                         placeholder="0"
                         className={`w-full h-9 pl-5 pr-2 rounded-vimdy-sm bg-vimdy-surface border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-ai ${
-                          row.requiresReview ? "border-vimdy-warning/50" : "border-vimdy-border"
+                          row.requiresReview || row.pendingReview ? "border-vimdy-warning/50" : "border-vimdy-border"
                         }`}
                       />
                     </div>
-                    <select
-                      value={row.categoryId}
-                      onChange={(e) => updateRow(row.id, "categoryId", e.target.value)}
-                      title={
-                        row.categoryId
-                          ? undefined
-                          : "La IA no pudo sugerir categoría para este producto — elígela a mano."
-                      }
-                      className={`h-9 px-2 rounded-vimdy-sm bg-vimdy-surface border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-ai ${
-                        row.categoryId ? "border-vimdy-border" : "border-vimdy-warning/50"
-                      }`}
-                    >
+                     <select
+                       value={row.categoryId}
+                       onChange={(e) => {
+                         updateRow(row.id, "categoryId", e.target.value);
+                         if (row.pendingReview && e.target.value) {
+                           updateRow(row.id, "pendingReview", false);
+                         }
+                       }}
+                       title={
+                         row.categoryId
+                           ? undefined
+                           : "La IA no pudo sugerir categoría para este producto — elígela a mano."
+                       }
+                       className={`h-9 px-2 rounded-vimdy-sm bg-vimdy-surface border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-ai ${
+                         row.categoryId ? "border-vimdy-border" : "border-vimdy-warning/50"
+                       }`}
+                     >
                       <option value="">Sin clasificar</option>
                       {categories.map((c) => (
                         <option key={c.id} value={c.id}>
@@ -1449,9 +1503,19 @@ function AiImportModal({
                         </option>
                       ))}
                     </select>
-                    {row.requiresReview ? (
+                    {(row.pendingReview || row.requiresReview) ? (
                       <span className="inline-flex items-center gap-1 h-6 px-2 rounded-full bg-vimdy-warning/10 border border-vimdy-warning/40 text-vimdy-warning text-[11px] font-semibold w-fit">
-                        Revisar
+                        {row.pendingReview ? "Pendiente" : "Revisar"}
+                        {row.pendingReview && (
+                          <button
+                            type="button"
+                            onClick={() => updateRow(row.id, "pendingReview", false)}
+                            title="Marcar como revisado"
+                            className="ml-1 text-vimdy-warning hover:text-vimdy-text"
+                          >
+                            ✓
+                          </button>
+                        )}
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1 h-6 px-2 rounded-full bg-vimdy-success/10 border border-vimdy-success/30 text-vimdy-success text-[11px] font-semibold w-fit">
@@ -1710,8 +1774,16 @@ function AiImportModal({
                 className="flex-1 h-11 rounded-vimdy-md bg-vimdy-ai text-vimdy-background font-bold flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-vimdy-ai-hover"
               >
                 Importar {validRowsCount > 0 ? `${validRowsCount} ` : ""}productos
+                {pendingRowsCount > 0 && (
+                  <span className="text-xs opacity-80">({pendingRowsCount} pendientes)</span>
+                )}
               </button>
             </div>
+            {pendingRowsCount > 0 && (
+              <p className="text-vimdy-warning text-xs text-center">
+                Los productos pendientes no se importan automáticamente. Corrígelos en la tabla para aprobarlos.
+              </p>
+            )}
             <VimdyButton
               onClick={handleCloseAndReset}
               variant="ghost"
@@ -1761,7 +1833,7 @@ function AiImportModal({
                   ))}
                 </ul>
                 <p className="text-vimdy-warning/60 text-xs mt-2">
-                  Puedes crearlos manualmente desde "Nuevo producto".
+                  Los productos pendientes requieren que revises el precio o la categoría en la tabla antes de importarlos.
                 </p>
               </div>
             )}
@@ -1770,7 +1842,7 @@ function AiImportModal({
               onClick={handleCloseAndReset}
               className="w-full h-11 rounded-vimdy-md bg-vimdy-accent text-vimdy-background font-bold hover:bg-vimdy-accent-hover"
             >
-              Aceptar
+              Cerrar
             </button>
           </div>
         )}
@@ -1821,6 +1893,9 @@ function ProductFormModal({
 }) {
   const isEditing = !!product;
   const recipeSectionRef = React.useRef<HTMLDivElement>(null);
+
+  // Wizard corto: paso 1 = datos básicos, paso 2 = tipo/precios, paso 3 = receta, paso 4 = extras
+  const [wizardStep, setWizardStep] = useState<1 | 2 | 3 | 4>(1);
 
   // PASO 1 (rediseño formulario de producto): el campo más importante, va
   // arriba de todo. Los pasos siguientes lo usarán para decidir qué otras
@@ -1932,6 +2007,10 @@ function ProductFormModal({
   // plato y Claude propone ingredientes (solo del inventario real, ver
   // RecipeAI.ts), categoría y precio sugerido.
   const [showRecipeAiPrompt, setShowRecipeAiPrompt] = useState(false);
+
+  // Wizard corto de producto: paso 1 = nombre + categoría + precio (obligatorio),
+  // pasos 2-4 son opcionales (tipo, receta, variantes).
+  const [productWizardStep, setProductWizardStep] = useState<1 | 2 | 3 | 4>(1);
   const [recipeAiDishName, setRecipeAiDishName] = useState("");
   const [generatingRecipe, setGeneratingRecipe] = useState(false);
   const [recipeAiError, setRecipeAiError] = useState<string | null>(null);

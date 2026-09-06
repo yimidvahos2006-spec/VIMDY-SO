@@ -13,7 +13,9 @@ const baseRow = {
   taxRate: "",
   unit: "unidad",
   productionMode: "NONE" as const,
-  isIngredient: false
+  isIngredient: false,
+  pendingReview: false,
+  tipo: "producto_simple" as const
 };
 
 describe("importHelpers", () => {

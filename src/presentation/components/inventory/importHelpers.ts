@@ -20,6 +20,8 @@ export type ImportedProductRow = {
   unit: string;
   productionMode: "ON_DEMAND" | "BATCH" | "NONE";
   isIngredient: boolean;
+  pendingReview: boolean;
+  tipo: "plato_final" | "ingrediente" | "producto_simple";
 };
 
 const UNIT_PATTERNS: Array<[RegExp, string]> = [
