@@ -460,14 +460,6 @@ export function InventoryDashboard() {
             </VimdyButton>
           )}
           <VimdyButton
-            onClick={() => navigate("/insumos")}
-            variant="secondary"
-            size="lg"
-            icon={<Package size={18} />}
-          >
-            Insumos
-          </VimdyButton>
-          <VimdyButton
             onClick={() => setShowNewProduct(true)}
             variant="primary"
             size="lg"
@@ -1982,6 +1974,7 @@ function ProductFormModal({
   const [showQuickIngredient, setShowQuickIngredient] = useState(false);
   const [quickIngredientName, setQuickIngredientName] = useState("");
   const [quickIngredientPurchasePrice, setQuickIngredientPurchasePrice] = useState("");
+  const [quickIngredientUnit, setQuickIngredientUnit] = useState("unidad");
   const [creatingIngredient, setCreatingIngredient] = useState(false);
   // stock, se descuenta cada ingrediente (ver InventoryEngine.consumeForSale).
   const [allProducts, setAllProducts] = useState<Product[]>([]);
@@ -2444,7 +2437,7 @@ function ProductFormModal({
         purchasePrice,
         stock: 0,
         minStock: 0,
-        unit: "unidad",
+        unit: quickIngredientUnit,
         isIngredient: true,
         active: true
       });
@@ -2463,6 +2456,7 @@ function ProductFormModal({
       setShowQuickIngredient(false);
       setQuickIngredientName("");
       setQuickIngredientPurchasePrice("");
+      setQuickIngredientUnit("unidad");
       toast.success(`Ingrediente "${name}" creado.`);
     } catch {
       toast.error("No se pudo crear el ingrediente.");
@@ -3196,10 +3190,24 @@ function ProductFormModal({
                           setQuickIngredientPurchasePrice("");
                         }
                       }}
-                    />
-                    <input
-                      type="number"
-                      value={quickIngredientPurchasePrice}
+                     />
+                     <select
+                       value={quickIngredientUnit}
+                       onChange={(e) => setQuickIngredientUnit(e.target.value)}
+                       className="h-10 px-2 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-recipe"
+                     >
+                       <option value="unidad">Unidad</option>
+                       <option value="kg">kg</option>
+                       <option value="g">g</option>
+                       <option value="lt">lt</option>
+                       <option value="ml">ml</option>
+                       <option value="lb">lb</option>
+                       <option value="paquete">Paquete</option>
+                       <option value="caja">Caja</option>
+                     </select>
+                     <input
+                       type="number"
+                       value={quickIngredientPurchasePrice}
                       onChange={(e) => setQuickIngredientPurchasePrice(e.target.value)}
                       placeholder="Precio compra (opcional)"
                       min={0}

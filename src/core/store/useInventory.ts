@@ -274,7 +274,12 @@ export function useInventory() {
         INGREDIENTE_DUPLICADO: "No puedes repetir el mismo ingrediente dentro de una receta.",
         INGREDIENTE_CANTIDAD_INVALIDA: "La cantidad de los ingredientes debe ser mayor a cero.",
       };
-      setError(messages[e?.message] ?? "No se pudo crear el producto. Intenta de nuevo.");
+      setError(
+        messages[e?.message]
+          ?? (typeof e?.message === "string" && e.message.includes(" ")
+            ? e.message
+            : "No se pudo crear el producto. Intenta de nuevo.")
+      );
       return false;
     }
   }
@@ -300,7 +305,12 @@ export function useInventory() {
         INGREDIENTE_DUPLICADO: "No puedes repetir el mismo ingrediente dentro de una receta.",
         INGREDIENTE_CANTIDAD_INVALIDA: "La cantidad de los ingredientes debe ser mayor a cero.",
       };
-      setError(messages[e?.message] ?? "No se pudo actualizar el producto. Intenta de nuevo.");
+      setError(
+        messages[e?.message]
+          ?? (typeof e?.message === "string" && e.message.includes(" ")
+            ? e.message
+            : "No se pudo actualizar el producto. Intenta de nuevo.")
+      );
       return false;
     }
   }
