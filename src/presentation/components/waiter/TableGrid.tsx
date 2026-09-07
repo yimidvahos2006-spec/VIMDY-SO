@@ -41,12 +41,6 @@ export function TableGrid({ tables, onSelect, avgDurationMs = 45 * 60 * 1000 }: 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<Table["status"] | "ALL">("ALL");
 
-  const zones = useMemo(() => {
-    const set = new Set<string>();
-    tables.forEach(table => set.add(table.zone ?? "Sin zona"));
-    return Array.from(set);
-  }, [tables]);
-
   const mergedCountByTable = useMemo(() => {
     const map = new Map<string, number>();
     tables.forEach(t => {
@@ -128,20 +122,6 @@ export function TableGrid({ tables, onSelect, avgDurationMs = 45 * 60 * 1000 }: 
             </button>
           ))}
         </div>
-
-        {zones.length > 1 && (
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            {zones.map(zone => (
-              <button
-                key={zone}
-                onClick={() => {}}
-                className="px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition bg-slate-800 text-slate-300 hover:bg-slate-700"
-              >
-                {zone}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
 
       {grouped.length === 0 ? (
