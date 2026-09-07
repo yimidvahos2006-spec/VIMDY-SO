@@ -61,6 +61,7 @@ export function ShiftPanel() {
   const [closingNotes, setClosingNotes] = useState("");
   const [closing, setClosing] = useState(false);
   const [closeResult, setCloseResult] = useState<Shift | null>(null);
+  const [openResult, setOpenResult] = useState<{ shift: Shift; amount: number } | null>(null);
 
   const [movementType, setMovementType] = useState<"OUT" | "IN">("OUT");
   const [movementAmount, setMovementAmount] = useState("");
@@ -101,6 +102,8 @@ export function ShiftPanel() {
   async function handleOpenShift(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
+    setCloseResult(null);
+    setOpenResult(null);
 
     const amount = Number(openingAmount);
 
@@ -117,11 +120,12 @@ export function ShiftPanel() {
     setOpening(true);
 
     try {
-      await container.shiftEngine.get().openShift(user.id, amount, openingNotes || undefined);
+      const opened = await container.shiftEngine.get().openShift(user.id, amount, openingNotes || undefined);
       notificationStore.addCashOpen(
         `${user.name} abrió turno con fondo inicial de ${formatCOP(amount)}.`,
         `CAJA_ABIERTA:${user.id}:${Date.now()}`
       );
+      setOpenResult({ shift: opened, amount });
       setOpeningAmount("");
       setOpeningNotes("");
       await refresh();
@@ -230,6 +234,18 @@ export function ShiftPanel() {
               <span className={(closeResult.difference ?? 0) < 0 ? "text-red-400" : "text-emerald-300"}>
                 {formatCOP(closeResult.difference ?? 0)}
               </span>
+            </p>
+          </div>
+        </div>
+      )}
+
+      {openResult && (
+        <div className="flex items-start gap-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 rounded-xl px-4 py-3 text-sm">
+          <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-semibold">Turno abierto correctamente.</p>
+            <p className="text-emerald-400/80 mt-1">
+              Fondo inicial: {formatCOP(openResult.amount)}
             </p>
           </div>
         </div>
