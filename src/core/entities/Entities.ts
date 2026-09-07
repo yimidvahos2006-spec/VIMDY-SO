@@ -892,6 +892,8 @@ export interface Table {
   readonly zone?: string;
   /** id de la mesa con la que fue unida, si aplica. */
   readonly mergedInto?: string;
+  /** Fecha/hora en que esta mesa fue absorbida dentro de otra (merge). */
+  readonly mergedAt?: Date;
   readonly openedAt?: Date;
   readonly openOperationId?: string;
   /** id del pedido (Order) asociado a esta mesa, si existe. */

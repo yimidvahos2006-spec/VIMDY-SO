@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Minus, Plus, Trash2, X, ChefHat, Wallet, AlertTriangle, ArrowUpCircle, CircleDot, Search, Mic, MicOff, CheckCircle2, MessageSquarePlus, ClipboardList, UtensilsCrossed } from "lucide-react";
+import { Minus, Plus, Trash2, X, ChefHat, Wallet, AlertTriangle, ArrowUpCircle, CircleDot, Search, Mic, MicOff, CheckCircle2, MessageSquarePlus, ClipboardList, UtensilsCrossed, Users, GitMerge, ArrowRightLeft, Receipt } from "lucide-react";
 
 import { Table, Product, OrderPriority } from "../../../core/entities/Entities";
 import { container } from "../../../infrastructure/di/CompositionRoot";
@@ -11,6 +11,7 @@ import { CloseTableDialog } from "./CloseTableDialog";
 
 interface Props {
   table: Table;
+  tables: Table[];
   products: Product[];
   onClose: () => void;
   /** Se llama después de cualquier operación exitosa, para refrescar la mesa. */
@@ -27,6 +28,7 @@ interface Props {
 
 export function TableDetailPanel({
   table,
+  tables,
   products,
   onClose,
   onChanged,
@@ -43,6 +45,13 @@ export function TableDetailPanel({
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [mobileTab, setMobileTab] = useState<"order" | "products">("products");
+  const [showActions, setShowActions] = useState(false);
+  const [addPeopleCount, setAddPeopleCount] = useState(1);
+  const [showAddPeople, setShowAddPeople] = useState(false);
+  const [showSplitBill, setShowSplitBill] = useState(false);
+  const [splitPeople, setSplitPeople] = useState(2);
+  const [showMergeDialog, setShowMergeDialog] = useState(false);
+  const [showTransferDialog, setShowTransferDialog] = useState(false);
 
   const { listening, result, listen } = useVoiceOrder({
     onSuccess: (voiceResult) => {
@@ -73,6 +82,10 @@ export function TableDetailPanel({
     products.forEach(p => map.set(p.id, p));
     return map;
   }, [products]);
+
+  const tablesList = useMemo(() => {
+    return tables.filter(t => t.id !== table.id && t.status === "FREE");
+  }, [tables, table.id]);
 
   const categories = useMemo(() => {
     const set = new Set(products.map(p => p.categoryId));
@@ -163,7 +176,7 @@ export function TableDetailPanel({
     setNoteDraft("");
   }
 
-  async function sendToKitchen() {
+   async function sendToKitchen() {
     setBusy(true);
     setErrorMsg(null);
     try {
@@ -180,6 +193,35 @@ export function TableDetailPanel({
     } finally {
       setBusy(false);
     }
+   }
+
+   async function handleAddPeople() {
+     if (addPeopleCount <= 0) return;
+     run(() => container.tableEngine.get().addPeople(table.id, table.peopleCount + addPeopleCount));
+     setShowAddPeople(false);
+     setAddPeopleCount(1);
+   }
+
+   async function handleRequestBill() {
+     run(() => container.tableEngine.get().requestBill(table.id));
+   }
+
+   async function handleMerge(targetTableId: string) {
+     run(() => container.tableEngine.get().mergeTables(table.id, targetTableId));
+     setShowMergeDialog(false);
+   }
+
+   async function handleTransfer(targetTableId: string) {
+     run(() => container.tableEngine.get().transferTable(table.id, targetTableId));
+     setShowTransferDialog(false);
+   }
+
+   function handleSplit() {
+     if (splitPeople <= 0) return;
+     const result = container.tableEngine.get().splitBill(table, splitPeople);
+     alert(`División igualitaria:\n${splitPeople} personas\nPor persona: $${result.perPerson.toLocaleString("es-CO")}\nTotal: $${result.total.toLocaleString("es-CO")}`);
+     setShowSplitBill(false);
+     setSplitPeople(2);
    }
 
   const hasItems = table.items.length > 0;
@@ -632,23 +674,52 @@ export function TableDetailPanel({
         )}
 
         {/* Acciones */}
-        <div className="flex items-center justify-end gap-3 px-6 py-5 border-t border-slate-700 flex-shrink-0">
-          <button
-            disabled={busy || !hasKitchenItems}
-            onClick={sendToKitchen}
-            className="flex items-center gap-2 h-12 px-6 rounded-xl bg-orange-500 hover:bg-orange-400 disabled:opacity-40 disabled:hover:bg-orange-500 text-slate-950 font-bold transition"
-          >
-            <ChefHat size={18} />
-            Enviar a cocina
-          </button>
-          <button
-            disabled={busy || !hasItems}
-            onClick={() => setShowCloseDialog(true)}
-            className="flex items-center gap-2 h-12 px-6 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-bold transition"
-          >
-            <Wallet size={18} />
-            Cerrar y cobrar
-          </button>
+        <div className="flex items-center justify-between px-6 py-5 border-t border-slate-700 flex-shrink-0">
+          <div className="relative">
+            <button
+              onClick={() => setShowActions(!showActions)}
+              className="flex items-center gap-2 h-12 px-5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold transition"
+            >
+              Más acciones
+            </button>
+            {showActions && (
+              <div className="absolute bottom-full left-0 mb-2 w-64 rounded-2xl border border-slate-700 bg-vimdy-surface shadow-2xl overflow-hidden z-50">
+                <button onClick={() => { setShowAddPeople(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
+                  <Users size={16} /> Agregar personas
+                </button>
+                <button onClick={() => { setShowMergeDialog(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
+                  <GitMerge size={16} /> Unir mesa
+                </button>
+                <button onClick={() => { setShowTransferDialog(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
+                  <ArrowRightLeft size={16} /> Transferir mesa
+                </button>
+                <button onClick={() => { setShowSplitBill(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
+                  <Receipt size={16} /> Dividir cuenta
+                </button>
+                <button onClick={() => { handleRequestBill(); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
+                  <ClipboardList size={16} /> Solicitar cuenta
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              disabled={busy || !hasKitchenItems}
+              onClick={sendToKitchen}
+              className="flex items-center gap-2 h-12 px-6 rounded-xl bg-orange-500 hover:bg-orange-400 disabled:opacity-40 disabled:hover:bg-orange-500 text-slate-950 font-bold transition"
+            >
+              <ChefHat size={18} />
+              Enviar a cocina
+            </button>
+            <button
+              disabled={busy || !hasItems}
+              onClick={() => setShowCloseDialog(true)}
+              className="flex items-center gap-2 h-12 px-6 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-bold transition"
+            >
+              <Wallet size={18} />
+              Cerrar y cobrar
+            </button>
+          </div>
         </div>
       </div>
 
@@ -660,6 +731,59 @@ export function TableDetailPanel({
             setShowCloseDialog(false);
             onClosedTable();
           }}
+        />
+      )}
+
+      {showAddPeople && (
+        <div className="fixed inset-0 z-[1001] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-vimdy-surface p-6 shadow-2xl">
+            <h3 className="text-white text-lg font-bold mb-4">Agregar personas</h3>
+            <div className="flex items-center gap-3 mb-6">
+              <button onClick={() => setAddPeopleCount(v => Math.max(1, v - 1))} className="w-10 h-10 rounded-lg bg-slate-700 text-white font-bold">−</button>
+              <input type="number" min={1} value={addPeopleCount} onChange={e => setAddPeopleCount(Math.max(1, Number(e.target.value)))} className="flex-1 h-10 rounded-lg bg-slate-800 border border-slate-700 text-center text-white font-bold outline-none" />
+              <button onClick={() => setAddPeopleCount(v => v + 1)} className="w-10 h-10 rounded-lg bg-cyan-500 text-slate-950 font-bold">+</button>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowAddPeople(false)} className="px-4 py-2 rounded-lg bg-slate-700 text-white text-sm">Cancelar</button>
+              <button onClick={handleAddPeople} className="px-4 py-2 rounded-lg bg-cyan-500 text-slate-950 text-sm font-bold">Guardar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSplitBill && (
+        <div className="fixed inset-0 z-[1001] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-vimdy-surface p-6 shadow-2xl">
+            <h3 className="text-white text-lg font-bold mb-4">Dividir cuenta</h3>
+            <p className="text-slate-400 text-sm mb-4">La cuenta se divide en partes iguales entre la cantidad de personas.</p>
+            <div className="flex items-center gap-3 mb-6">
+              <button onClick={() => setSplitPeople(v => Math.max(1, v - 1))} className="w-10 h-10 rounded-lg bg-slate-700 text-white font-bold">−</button>
+              <input type="number" min={1} value={splitPeople} onChange={e => setSplitPeople(Math.max(1, Number(e.target.value)))} className="flex-1 h-10 rounded-lg bg-slate-800 border border-slate-700 text-center text-white font-bold outline-none" />
+              <button onClick={() => setSplitPeople(v => v + 1)} className="w-10 h-10 rounded-lg bg-cyan-500 text-slate-950 font-bold">+</button>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowSplitBill(false)} className="px-4 py-2 rounded-lg bg-slate-700 text-white text-sm">Cancelar</button>
+              <button onClick={handleSplit} className="px-4 py-2 rounded-lg bg-cyan-500 text-slate-950 text-sm font-bold">Dividir</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showMergeDialog && (
+        <MergeTableDialog
+          tables={tablesList}
+          currentTableId={table.id}
+          onSelect={handleMerge}
+          onClose={() => setShowMergeDialog(false)}
+        />
+      )}
+
+      {showTransferDialog && (
+        <TransferTableDialog
+          tables={tablesList}
+          currentTableId={table.id}
+          onSelect={handleTransfer}
+          onClose={() => setShowTransferDialog(false)}
         />
       )}
     </div>
@@ -689,5 +813,87 @@ function PriorityButton({ value, current, onSelect, label, icon, activeClass }: 
       {icon}
       {label}
     </button>
+  );
+}
+
+interface MergeTableDialogProps {
+  tables: Table[];
+  currentTableId: string;
+  onSelect: (tableId: string) => void;
+  onClose: () => void;
+}
+
+function MergeTableDialog({ tables, currentTableId, onSelect, onClose }: MergeTableDialogProps) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  return (
+    <div className="fixed inset-0 z-[1002] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-vimdy-surface p-6 shadow-2xl">
+        <h3 className="text-white text-lg font-bold mb-2">Unir mesa</h3>
+        <p className="text-slate-400 text-sm mb-4">Selecciona la mesa que querés unir a esta.</p>
+        <div className="space-y-2 max-h-60 overflow-y-auto mb-6">
+          {tables.length === 0 && (
+            <p className="text-slate-500 text-sm text-center py-4">No hay mesas libres disponibles.</p>
+          )}
+          {tables.map(t => (
+            <button
+              key={t.id}
+              onClick={() => setSelectedId(t.id)}
+              className={`w-full text-left px-4 py-3 rounded-xl border transition ${
+                selectedId === t.id ? "border-cyan-500 bg-cyan-500/10" : "border-slate-700 hover:border-slate-600"
+              }`}
+            >
+              <p className="text-white font-semibold">{t.name}</p>
+              <p className="text-slate-400 text-xs">{t.zone ?? "Sin zona"} • {t.capacity} personas</p>
+            </button>
+          ))}
+        </div>
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg bg-slate-700 text-white text-sm">Cancelar</button>
+          <button disabled={!selectedId} onClick={() => selectedId && onSelect(selectedId)} className="px-4 py-2 rounded-lg bg-cyan-500 text-slate-950 text-sm font-bold disabled:opacity-40">Unir</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface TransferTableDialogProps {
+  tables: Table[];
+  currentTableId: string;
+  onSelect: (tableId: string) => void;
+  onClose: () => void;
+}
+
+function TransferTableDialog({ tables, currentTableId, onSelect, onClose }: TransferTableDialogProps) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  return (
+    <div className="fixed inset-0 z-[1002] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-vimdy-surface p-6 shadow-2xl">
+        <h3 className="text-white text-lg font-bold mb-2">Transferir mesa</h3>
+        <p className="text-slate-400 text-sm mb-4">Selecciona la mesa destino (libre). Esta mesa quedará libre.</p>
+        <div className="space-y-2 max-h-60 overflow-y-auto mb-6">
+          {tables.length === 0 && (
+            <p className="text-slate-500 text-sm text-center py-4">No hay mesas libres disponibles.</p>
+          )}
+          {tables.map(t => (
+            <button
+              key={t.id}
+              onClick={() => setSelectedId(t.id)}
+              className={`w-full text-left px-4 py-3 rounded-xl border transition ${
+                selectedId === t.id ? "border-cyan-500 bg-cyan-500/10" : "border-slate-700 hover:border-slate-600"
+              }`}
+            >
+              <p className="text-white font-semibold">{t.name}</p>
+              <p className="text-slate-400 text-xs">{t.zone ?? "Sin zona"} • {t.capacity} personas</p>
+            </button>
+          ))}
+        </div>
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg bg-slate-700 text-white text-sm">Cancelar</button>
+          <button disabled={!selectedId} onClick={() => selectedId && onSelect(selectedId)} className="px-4 py-2 rounded-lg bg-cyan-500 text-slate-950 text-sm font-bold disabled:opacity-40">Transferir</button>
+        </div>
+      </div>
+    </div>
   );
 }

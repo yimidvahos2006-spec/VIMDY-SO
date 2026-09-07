@@ -17,17 +17,13 @@ interface Props {
 
 export function OpenTableDialog({ table, waiterId, onClose, onOpened }: Props) {
   const [peopleCount, setPeopleCount] = useState(2);
+  const [mode, setMode] = useState<"open" | "reserve">("open");
   const [busy, setBusy] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // IDEMPOTENCIA: la misma apertura de mesa puede reintentarse si la
-  // red falla después de enviar el request, o si la operación queda en
-  // la cola offline y se reintenta más tarde. El `operationId` debe
-  // generarse una sola vez por intento y permanecer igual durante todo
-  // el ciclo de ese intento.
   const openAttemptIdRef = React.useRef<string | null>(null);
 
-  async function handleOpen() {
+  async function handleAction() {
     setBusy(true);
     setErrorMsg(null);
 
@@ -43,24 +39,23 @@ export function OpenTableDialog({ table, waiterId, onClose, onOpened }: Props) {
     };
 
     try {
-      // PASO 1.8 (Cola offline): sin conexión real no tiene sentido
-      // siquiera intentar hablar con Supabase (ver connectionStore) — se
-      // va directo al camino offline, igual que sendOrderToKitchen en
-      // processSale.ts.
-      if (!connectionStore.isOnline()) {
-        await queueOpenTableOffline({ table, input });
+      if (mode === "open") {
+        if (!connectionStore.isOnline()) {
+          await queueOpenTableOffline({ table, input });
+        } else {
+          await container.tableEngine.get().openTable(input);
+        }
       } else {
-        await container.tableEngine.get().openTable(input);
+        await container.tableEngine.get().reserveTable(table.id);
       }
+
       openAttemptIdRef.current = null;
       onOpened();
     } catch (err) {
       if (isNetworkFailure(err)) {
-        // La red se cayó a mitad del intento: no se le muestra un error
-        // al mesero, la apertura se guarda en la cola local y se
-        // sincroniza sola cuando vuelva internet (ver
-        // syncPendingTableOperations.ts).
-        await queueOpenTableOffline({ table, input });
+        if (mode === "open") {
+          await queueOpenTableOffline({ table, input });
+        }
         openAttemptIdRef.current = null;
         onOpened();
       } else {
@@ -71,11 +66,15 @@ export function OpenTableDialog({ table, waiterId, onClose, onOpened }: Props) {
     }
   }
 
+  const exceedsCapacity = peopleCount > table.capacity;
+
   return (
     <div className="fixed inset-0 z-[999] bg-black/70 backdrop-blur-sm flex items-center justify-center">
       <div className="w-[420px] rounded-3xl bg-vimdy-surface border border-slate-700 shadow-2xl">
         <div className="flex items-center justify-between px-6 py-5 border-b border-slate-700">
-          <h2 className="text-2xl font-bold text-white">Abrir {table.name}</h2>
+          <h2 className="text-2xl font-bold text-white">
+            {mode === "open" ? `Abrir ${table.name}` : `Reservar ${table.name}`}
+          </h2>
           <button
             onClick={onClose}
             className="text-slate-400 hover:text-white text-2xl"
@@ -91,34 +90,48 @@ export function OpenTableDialog({ table, waiterId, onClose, onOpened }: Props) {
             </div>
           )}
 
-          <div>
-            <p className="text-slate-400 mb-2">Número de personas</p>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setPeopleCount(v => Math.max(1, v - 1))}
-                className="w-12 h-12 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-bold"
-              >
-                −
-              </button>
-              <input
-                type="number"
-                min={1}
-                max={table.capacity}
-                value={peopleCount}
-                onChange={e => setPeopleCount(Math.max(1, Number(e.target.value)))}
-                className="flex-1 h-12 rounded-xl bg-slate-800 border border-slate-700 text-center text-white font-bold outline-none"
-              />
-              <button
-                onClick={() => setPeopleCount(v => v + 1)}
-                className="w-12 h-12 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold"
-              >
-                +
-              </button>
+          {mode === "open" && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-slate-400">Personas</p>
+                {exceedsCapacity && (
+                  <span className="text-xs text-amber-400 font-semibold">
+                    Supera capacidad ({table.capacity})
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setPeopleCount(v => Math.max(1, v - 1))}
+                  className="w-12 h-12 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-bold"
+                >
+                  −
+                </button>
+                <input
+                  type="number"
+                  min={1}
+                  value={peopleCount}
+                  onChange={e => setPeopleCount(Math.max(1, Number(e.target.value)))}
+                  className="flex-1 h-12 rounded-xl bg-slate-800 border border-slate-700 text-center text-white font-bold outline-none"
+                />
+                <button
+                  onClick={() => setPeopleCount(v => v + 1)}
+                  className="w-12 h-12 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold"
+                >
+                  +
+                </button>
+              </div>
+              <p className="text-slate-500 text-xs mt-2">
+                Capacidad de la mesa: {table.capacity} personas (se puede exceder).
+              </p>
             </div>
-            <p className="text-slate-500 text-xs mt-2">
-              Capacidad de la mesa: {table.capacity} personas
-            </p>
-          </div>
+          )}
+
+          {mode === "reserve" && (
+            <div className="rounded-xl border border-slate-700 bg-slate-800 p-4 text-sm text-slate-300">
+              Se reservará <strong className="text-white">{table.name}</strong> para el turno actual. Podés abrirla desde la pantalla Mesas cuando llegue el cliente.
+            </div>
+          )}
 
           <div className="flex justify-end gap-3 pt-2">
             <button
@@ -127,12 +140,27 @@ export function OpenTableDialog({ table, waiterId, onClose, onOpened }: Props) {
             >
               Cancelar
             </button>
+            {mode === "open" ? (
+              <button
+                onClick={() => setMode("reserve")}
+                className="h-12 px-6 rounded-xl bg-slate-800 border border-slate-600 text-white font-semibold"
+              >
+                Reservar
+              </button>
+            ) : (
+              <button
+                onClick={() => setMode("open")}
+                className="h-12 px-6 rounded-xl bg-slate-800 border border-slate-600 text-white font-semibold"
+              >
+                Abrir
+              </button>
+            )}
             <button
               disabled={busy}
-              onClick={handleOpen}
+              onClick={handleAction}
               className="h-12 px-8 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 text-slate-950 font-bold"
             >
-              {busy ? "Abriendo..." : "Abrir mesa"}
+              {busy ? (mode === "open" ? "Abriendo..." : "Reservando...") : (mode === "open" ? "Abrir mesa" : "Reservar")}
             </button>
           </div>
         </div>

@@ -153,6 +153,7 @@ function MesasContent() {
       {dialog === "detail" && selectedTable && (
         <TableDetailPanel
           table={selectedTable}
+          tables={tables}
           products={products}
           onClose={closeDialogs}
           onChanged={reloadTables}

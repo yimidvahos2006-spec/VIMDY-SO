@@ -545,12 +545,17 @@ export class TableEngine {
    * de forma independiente una vez se cierre la mesa principal.
    */
   public async mergeTables(mainTableId: string, otherTableId: string): Promise<Table> {
+    const main = await this.getTable(mainTableId);
     const other = await this.getTable(otherTableId);
 
     if (NOT_OPEN_STATUSES.has(other.status)) {
       throw new Error(
         `TABLE_NOT_OPEN: la mesa "${other.name}" no tiene un pedido en curso.`
       );
+    }
+
+    if (main.id === other.id) {
+      throw new Error("TABLE_MERGE_SAME: no se puede unir una mesa consigo misma.");
     }
 
     const merged = await this.mutateItems(mainTableId, cart => {
@@ -566,14 +571,60 @@ export class TableEngine {
       });
     });
 
+    const now = new Date();
     await this.persist(
-      { ...other, status: "CLOSED", mergedInto: mainTableId },
+      {
+        ...other,
+        status: "BUSY",
+        mergedInto: mainTableId,
+        mergedAt: now,
+        items: []
+      },
       []
     );
 
     this.emit(merged, "table.merged");
 
     return merged;
+  }
+
+  public async getMergedTables(mainTableId: string): Promise<Table[]> {
+    const tables = await this.getAllTables();
+    return tables.filter(t => t.mergedInto === mainTableId && t.id !== mainTableId);
+  }
+
+  public async unmergeTable(mainTableId: string, otherTableId: string): Promise<Table> {
+    const main = await this.getTable(mainTableId);
+    const other = await this.getTable(otherTableId);
+
+    if (other.mergedInto !== mainTableId) {
+      throw new Error("TABLE_NOT_MERGED: esta mesa no está unida a la mesa principal indicada.");
+    }
+
+    const currentMainItems = main.items;
+    const mergedCount = await this.getMergedTables(mainTableId).then(list => list.length + 1);
+    const share = Math.max(1, Math.floor(currentMainItems.length / mergedCount));
+
+    const itemsForOther = currentMainItems.slice(0, share);
+    const remainingMainItems = currentMainItems.slice(share);
+
+    await this.persist(main, remainingMainItems);
+
+    await this.persist(
+      {
+        ...other,
+        mergedInto: undefined,
+        mergedAt: undefined,
+        status: "FREE",
+        items: itemsForOther
+      },
+      itemsForOther
+    );
+
+    const refreshedMain = await this.getTable(mainTableId);
+    this.emit(refreshedMain, "table.unmerged");
+
+    return refreshedMain;
   }
 
   /**
@@ -696,6 +747,15 @@ export class TableEngine {
     }
 
     const closed = await this.resetTable(input.tableId);
+
+    try {
+      const merged = await this.getMergedTables(input.tableId);
+      await Promise.all(merged.map(m => this.resetTable(m.id)));
+    } catch (releaseError) {
+      logWarning(`No se pudieron liberar todas las mesas unidas tras cerrar mesa ${input.tableId}`, {
+        context: { error: String(releaseError) }
+      });
+    }
 
     this.emit(closed, "table.closed");
 
@@ -853,7 +913,9 @@ export class TableEngine {
       notes: undefined,
       openedAt: undefined,
       openOperationId: undefined,
-      orderId: undefined
+      orderId: undefined,
+      mergedInto: undefined,
+      mergedAt: undefined
     });
   }
 

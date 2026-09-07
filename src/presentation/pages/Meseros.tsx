@@ -189,6 +189,7 @@ function MeserosContent() {
       {dialog === "detail" && selectedTable && (
         <TableDetailPanel
           table={selectedTable}
+          tables={tables}
           products={products}
           onClose={closeDialogs}
           onChanged={reloadTables}
@@ -197,9 +198,7 @@ function MeserosContent() {
             reloadTables();
           }}
           onOrderSent={() => {
-            // Enviado el pedido: vuelve sola a las tarjetas de mesero,
-            // lista para que la use la siguiente persona en el tablet.
-            returnToWaiterSelect();
+            closeDialogs();
             reloadTables();
           }}
         />

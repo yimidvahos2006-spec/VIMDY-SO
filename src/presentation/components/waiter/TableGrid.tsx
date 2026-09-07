@@ -57,7 +57,11 @@ export function TableGrid({ tables, onSelect, avgDurationMs = 45 * 60 * 1000 }: 
   }, [tables]);
 
   const filtered = useMemo(() => {
-    let result = tables.filter(t => t.status !== "CLOSED");
+    let result = tables.filter(t => {
+      if (t.status === "CLOSED") return false;
+      if (t.mergedInto) return false;
+      return true;
+    });
 
     if (statusFilter !== "ALL") {
       result = result.filter(t => t.status === statusFilter);
@@ -88,6 +92,16 @@ export function TableGrid({ tables, onSelect, avgDurationMs = 45 * 60 * 1000 }: 
     });
     return Array.from(grouped.entries());
   }, [filtered]);
+
+  const mergedCountByTable = useMemo(() => {
+    const map = new Map<string, number>();
+    tables.forEach(t => {
+      if (t.mergedInto) {
+        map.set(t.mergedInto, (map.get(t.mergedInto) ?? 0) + 1);
+      }
+    });
+    return map;
+  }, [tables]);
 
   const activeFilterCount =
     (statusFilter !== "ALL" ? 1 : 0) +
@@ -211,6 +225,12 @@ export function TableGrid({ tables, onSelect, avgDurationMs = 45 * 60 * 1000 }: 
                       <span className="text-xs text-slate-400">{style.label}</span>
                     </div>
                     <h2 className="text-white text-xl font-bold">{table.name}</h2>
+                    {mergedCountByTable.get(table.id) ? (
+                      <span className="inline-flex items-center gap-1 mt-2 text-xs font-semibold text-cyan-400 bg-cyan-500/10 border border-cyan-500/30 px-2 py-1 rounded-full">
+                        <Users size={12} />
+                        {mergedCountByTable.get(table.id)} mesa{mergedCountByTable.get(table.id)! > 1 ? "s" : ""} unida{mergedCountByTable.get(table.id)! > 1 ? "s" : ""}
+                      </span>
+                    ) : null}
                     <div className="flex items-center justify-between mt-3">
                       <p className="text-slate-400 flex items-center gap-1.5 text-sm">
                         <Users size={14} />

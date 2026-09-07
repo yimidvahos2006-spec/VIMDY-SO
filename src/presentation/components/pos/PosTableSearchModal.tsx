@@ -83,24 +83,25 @@ export function PosTableSearchModal({ onClose }: Props) {
     ? tables.find((table) => table.id === selectedTableId) ?? null
     : null;
 
-  // Con una mesa elegida, esto SE CONVIERTE en TableDetailPanel — el mismo
-  // panel de cobro que usa Meseros, sin reimplementar nada del cobro.
-  if (selectedTable) {
-    return (
-      <TableDetailPanel
-        table={selectedTable}
-        products={products}
-        onClose={() => setSelectedTableId(null)}
-        onChanged={reloadTables}
-        onClosedTable={() => {
-          // Mesa cobrada: se cierra todo y Caja vuelve a su pantalla normal.
-          setSelectedTableId(null);
-          reloadTables();
-          onClose();
-        }}
-      />
-    );
-  }
+   // Con una mesa elegida, esto SE CONVIERTE en TableDetailPanel — el mismo
+   // panel de cobro que usa Meseros, sin reimplementar nada del cobro.
+   if (selectedTable) {
+     return (
+       <TableDetailPanel
+         table={selectedTable}
+         tables={tables}
+         products={products}
+         onClose={() => setSelectedTableId(null)}
+         onChanged={reloadTables}
+         onClosedTable={() => {
+           // Mesa cobrada: se cierra todo y Caja vuelve a su pantalla normal.
+           setSelectedTableId(null);
+           reloadTables();
+           onClose();
+         }}
+       />
+     );
+   }
 
   return (
     <div className="fixed inset-0 z-[999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
