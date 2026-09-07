@@ -37,7 +37,24 @@ function MeserosContent() {
 
   const reloadTables = useCallback(async () => {
     const all = await container.tableEngine.get().getAllTables();
-    setTables(all);
+
+    const seen = new Set<string>();
+    const unique = all.filter((table) => {
+      if (seen.has(table.id)) {
+        return false;
+      }
+      seen.add(table.id);
+      return true;
+    });
+
+    if (unique.length !== all.length) {
+      console.warn("[Meseros] Se detectaron mesas duplicadas en la respuesta del engine, se deduplicaron antes de actualizar el estado.", {
+        total: all.length,
+        unicas: unique.length
+      });
+    }
+
+    setTables(unique);
   }, []);
 
   const reloadWaiters = useCallback(async () => {

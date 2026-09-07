@@ -43,7 +43,23 @@ export class TableRepository extends SupabaseRepository<Table> {
         });
     }
 
-    return cached;
+    const seen = new Set<string>();
+    const unique = cached.filter((table) => {
+      if (seen.has(table.id)) {
+        return false;
+      }
+      seen.add(table.id);
+      return true;
+    });
+
+    if (unique.length !== cached.length) {
+      console.warn("[TableRepository] Se detectaron mesas duplicadas en el catálogo local, se deduplicaron antes de devolver.", {
+        cached: cached.length,
+        unique: unique.length
+      });
+    }
+
+    return unique;
   }
 
   /**
