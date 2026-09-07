@@ -162,7 +162,7 @@ function AuthenticatedApp() {
               <Route
                 path="/meseros"
                 element={
-                  <ProtectedRoute requires="tables.view">
+                  <ProtectedRoute requires="staff.view">
                     <RequireModule module="mesas">
                       <Meseros />
                     </RequireModule>
