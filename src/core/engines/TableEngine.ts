@@ -899,6 +899,97 @@ export class TableEngine {
     );
   }
 
+  public async releaseEmptyTable(tableId: string): Promise<Table> {
+    const table = await this.getTable(tableId);
+
+    if (table.status === "FREE" || table.status === "RESERVED") {
+      return table;
+    }
+
+    if (table.items.length > 0) {
+      throw new Error(
+        "TABLE_NOT_EMPTY: la mesa tiene productos en el pedido. Usá cancelar pedido en su lugar."
+      );
+    }
+
+    const released = await this.resetTable(tableId);
+
+    try {
+      const merged = await this.getMergedTables(tableId);
+      await Promise.all(merged.map(m => this.resetTable(m.id)));
+    } catch (releaseError) {
+      logWarning(`No se pudieron liberar todas las mesas unidas tras liberar mesa ${tableId}`, {
+        context: { error: String(releaseError) }
+      });
+    }
+
+    this.emit(released, "table.released");
+
+    return released;
+  }
+
+  public async cancelTableOrder(tableId: string, reason: string): Promise<Table> {
+    const table = await this.getTable(tableId);
+
+    if (NOT_OPEN_STATUSES.has(table.status)) {
+      throw new Error(
+        `TABLE_NOT_OPEN: la mesa "${table.name}" no tiene un pedido en curso.`
+      );
+    }
+
+    if (table.items.length === 0) {
+      throw new Error(
+        "EMPTY_TABLE: la mesa no tiene productos para cancelar. Usá liberar mesa en su lugar."
+      );
+    }
+
+    if (table.orderId) {
+      try {
+        await this.orders.cancelOrder(table.orderId, reason);
+      } catch (orderError) {
+        logWarning(`No se pudo cancelar el Order ${table.orderId} de la mesa ${tableId}`, {
+          context: { error: String(orderError) }
+        });
+      }
+    }
+
+    try {
+      const byTable = await this.kitchen.getByTableId(tableId);
+      const byOrder = table.orderId ? await this.kitchen.getByOrderId(table.orderId) : [];
+      const kitchenOrders = [...byTable, ...byOrder];
+      const uniqueIds = new Set(kitchenOrders.map(o => o.id));
+
+      for (const id of uniqueIds) {
+        try {
+          await this.kitchen.cancelOrder(id, reason, "mesero");
+        } catch (kitchenError) {
+          logWarning(`No se pudo cancelar la comanda ${id} de la mesa ${tableId}`, {
+            context: { error: String(kitchenError) }
+          });
+        }
+      }
+    } catch (kitchenError) {
+      logWarning(`Error al buscar/comandar comandas para mesa ${tableId}`, {
+        context: { error: String(kitchenError) }
+      });
+    }
+
+    const cancelled = await this.resetTable(tableId);
+
+    try {
+      const merged = await this.getMergedTables(tableId);
+      await Promise.all(merged.map(m => this.resetTable(m.id)));
+    } catch (releaseError) {
+      logWarning(`No se pudieron liberar todas las mesas unidas tras cancelar pedido de mesa ${tableId}`, {
+        context: { error: String(releaseError) }
+      });
+    }
+
+    this.emit(cancelled, "table.order_cancelled");
+
+    return cancelled;
+  }
+
   private async resetTable(tableId: string): Promise<Table> {
     return this.updateTable(tableId, {
       status: "FREE",

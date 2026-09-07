@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Minus, Plus, Trash2, X, ChefHat, Wallet, Search, Mic, MicOff, CheckCircle2, MessageSquarePlus, ClipboardList, UtensilsCrossed, Users, GitMerge, ArrowRightLeft, Receipt, MoreVertical } from "lucide-react";
+import { Minus, Plus, Trash2, X, ChefHat, Wallet, Search, Mic, MicOff, CheckCircle2, MessageSquarePlus, ClipboardList, UtensilsCrossed, Users, GitMerge, ArrowRightLeft, Receipt, MoreVertical, XCircle } from "lucide-react";
 
 import { Table, Product, OrderPriority } from "../../../core/entities/Entities";
 import { container } from "../../../infrastructure/di/CompositionRoot";
@@ -45,6 +45,8 @@ export function TableDetailPanel({
   const [splitPeople, setSplitPeople] = useState(2);
   const [showMergeDialog, setShowMergeDialog] = useState(false);
   const [showTransferDialog, setShowTransferDialog] = useState(false);
+  const [showReleaseConfirm, setShowReleaseConfirm] = useState(false);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
   const { listening, listen } = useVoiceOrder({
     onSuccess: (voiceResult) => {
@@ -202,6 +204,16 @@ export function TableDetailPanel({
     run(() => container.tableEngine.get().requestBill(table.id));
   }
 
+  async function handleRelease() {
+    run(() => container.tableEngine.get().releaseEmptyTable(table.id));
+    setShowReleaseConfirm(false);
+  }
+
+  async function handleCancelOrder() {
+    run(() => container.tableEngine.get().cancelTableOrder(table.id, "Cancelado por mesero"));
+    setShowCancelConfirm(false);
+  }
+
   async function handleMerge(targetTableId: string) {
     run(() => container.tableEngine.get().mergeTables(table.id, targetTableId));
     setShowMergeDialog(false);
@@ -269,12 +281,24 @@ export function TableDetailPanel({
                   <button onClick={() => { setShowTransferDialog(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
                     <ArrowRightLeft size={16} /> Transferir mesa
                   </button>
-                  <button onClick={() => { setShowSplitBill(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
-                    <Receipt size={16} /> Dividir cuenta
-                  </button>
-                  <button onClick={() => { handleRequestBill(); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
-                    <ClipboardList size={16} /> Solicitar cuenta
-                  </button>
+                  {table.items.length > 0 && (
+                    <>
+                      <button onClick={() => { setShowSplitBill(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
+                        <Receipt size={16} /> Dividir cuenta
+                      </button>
+                      <button onClick={() => { handleRequestBill(); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
+                        <ClipboardList size={16} /> Solicitar cuenta
+                      </button>
+                      <button onClick={() => { setShowCancelConfirm(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-300 hover:bg-red-500/10 transition">
+                        <XCircle size={16} /> Cancelar pedido
+                      </button>
+                    </>
+                  )}
+                  {table.items.length === 0 && (
+                    <button onClick={() => { setShowReleaseConfirm(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-300 hover:bg-red-500/10 transition">
+                      <Trash2 size={16} /> Liberar mesa
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -771,6 +795,20 @@ export function TableDetailPanel({
           onClose={() => setShowTransferDialog(false)}
         />
       )}
+
+      {showReleaseConfirm && (
+        <ConfirmReleaseDialog
+          onConfirm={handleRelease}
+          onCancel={() => setShowReleaseConfirm(false)}
+        />
+      )}
+
+      {showCancelConfirm && (
+        <ConfirmCancelOrderDialog
+          onConfirm={handleCancelOrder}
+          onCancel={() => setShowCancelConfirm(false)}
+        />
+      )}
     </div>
   );
 }
@@ -851,6 +889,40 @@ function TransferTableDialog({ tables, currentTableId, onSelect, onClose }: Tran
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 rounded-lg bg-slate-700 text-white text-sm">Cancelar</button>
           <button disabled={!selectedId} onClick={() => selectedId && onSelect(selectedId)} className="px-4 py-2 rounded-lg bg-cyan-500 text-slate-950 text-sm font-bold disabled:opacity-40">Transferir</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmReleaseDialog({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[1003] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-vimdy-surface p-6 shadow-2xl">
+        <h3 className="text-white text-lg font-bold mb-2">¿Liberar esta mesa?</h3>
+        <p className="text-slate-400 text-sm mb-6">
+          Se eliminarán las personas registradas y la mesa volverá a estar disponible.
+        </p>
+        <div className="flex justify-end gap-2">
+          <button onClick={onCancel} className="px-4 py-2 rounded-lg bg-slate-700 text-white text-sm">Volver</button>
+          <button onClick={onConfirm} className="px-4 py-2 rounded-lg bg-red-500 text-white text-sm font-bold">Sí, liberar mesa</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmCancelOrderDialog({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[1003] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-vimdy-surface p-6 shadow-2xl">
+        <h3 className="text-white text-lg font-bold mb-2">¿Cancelar este pedido?</h3>
+        <p className="text-slate-400 text-sm mb-6">
+          Esta acción cancelará los productos pendientes y liberará la mesa. Revisa cuidadosamente los efectos sobre cocina e inventario antes de confirmar.
+        </p>
+        <div className="flex justify-end gap-2">
+          <button onClick={onCancel} className="px-4 py-2 rounded-lg bg-slate-700 text-white text-sm">Volver</button>
+          <button onClick={onConfirm} className="px-4 py-2 rounded-lg bg-red-500 text-white text-sm font-bold">Cancelar pedido</button>
         </div>
       </div>
     </div>
