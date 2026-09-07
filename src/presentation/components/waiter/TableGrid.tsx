@@ -3,13 +3,7 @@ import { Users, Search, Filter, Clock } from "lucide-react";
 
 import { Table } from "../../../core/entities/Entities";
 import { EmptyState } from "../ui/EmptyState";
-import {
-  getTableUrgency,
-  getUrgencyBorder,
-  getUrgencyBg,
-  getUrgencyProgress,
-  getUrgencyDot
-} from "../../../core/services/tableUrgency";
+import { getTableUrgency, getUrgencyBorder, getUrgencyBg } from "../../../core/services/tableUrgency";
 
 interface Props {
   tables: Table[];
@@ -17,27 +11,25 @@ interface Props {
   avgDurationMs?: number;
 }
 
-const STATUS_STYLES: Record<Table["status"], { dot: string; label: string }> = {
-  FREE: { dot: "bg-green-500", label: "Libre" },
-  RESERVED: { dot: "bg-yellow-500", label: "Reservada" },
-  BUSY: { dot: "bg-red-500", label: "Ocupada" },
-  WAITING_FOOD: { dot: "bg-orange-500", label: "Esperando comida" },
-  EATING: { dot: "bg-blue-500", label: "Comiendo" },
-  CUENTA_SOLICITADA: { dot: "bg-amber-500", label: "Cuenta solicitada" },
-  WAITING_BILL: { dot: "bg-cyan-500", label: "Esperando cuenta" },
-  PAYING: { dot: "bg-purple-500", label: "Cobrando" },
-  CLOSED: { dot: "bg-slate-600", label: "Unida" }
+const STATUS_STYLES: Record<Table["status"], { dot: string; label: string; bg: string; border: string }> = {
+  FREE: { dot: "bg-emerald-500", label: "Libre", bg: "bg-emerald-500/5", border: "border-emerald-500/40" },
+  RESERVED: { dot: "bg-amber-500", label: "Reservada", bg: "bg-amber-500/5", border: "border-amber-500/40" },
+  BUSY: { dot: "bg-red-500", label: "Ocupada", bg: "bg-red-500/5", border: "border-red-500/40" },
+  WAITING_FOOD: { dot: "bg-orange-500", label: "Esperando comida", bg: "bg-orange-500/5", border: "border-orange-500/40" },
+  EATING: { dot: "bg-blue-500", label: "Comiendo", bg: "bg-blue-500/5", border: "border-blue-500/40" },
+  CUENTA_SOLICITADA: { dot: "bg-amber-500", label: "Cuenta solicitada", bg: "bg-amber-500/5", border: "border-amber-500/40" },
+  WAITING_BILL: { dot: "bg-cyan-500", label: "Esperando cuenta", bg: "bg-cyan-500/5", border: "border-cyan-500/40" },
+  PAYING: { dot: "bg-purple-500", label: "Cobrando", bg: "bg-purple-500/5", border: "border-purple-500/40" },
+  CLOSED: { dot: "bg-slate-600", label: "Unida", bg: "bg-slate-800/40", border: "border-slate-700" }
 };
 
-const FILTERABLE_STATUSES: Table["status"][] = [
-  "FREE",
-  "BUSY",
-  "EATING",
-  "WAITING_FOOD",
-  "CUENTA_SOLICITADA",
-  "WAITING_BILL",
-  "PAYING",
-  "RESERVED"
+const QUICK_FILTERS: { key: Table["status"] | "ALL"; label: string }[] = [
+  { key: "ALL", label: "Todas" },
+  { key: "FREE", label: "Libres" },
+  { key: "BUSY", label: "Ocupadas" },
+  { key: "EATING", label: "Comiendo" },
+  { key: "WAITING_FOOD", label: "Esperando" },
+  { key: "RESERVED", label: "Reservadas" }
 ];
 
 function formatMinutes(ms: number): string {
@@ -48,12 +40,21 @@ function formatMinutes(ms: number): string {
 export function TableGrid({ tables, onSelect, avgDurationMs = 45 * 60 * 1000 }: Props) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<Table["status"] | "ALL">("ALL");
-  const [zoneFilter, setZoneFilter] = useState<string | "ALL">("ALL");
 
   const zones = useMemo(() => {
     const set = new Set<string>();
     tables.forEach(table => set.add(table.zone ?? "Sin zona"));
     return Array.from(set);
+  }, [tables]);
+
+  const mergedCountByTable = useMemo(() => {
+    const map = new Map<string, number>();
+    tables.forEach(t => {
+      if (t.mergedInto) {
+        map.set(t.mergedInto, (map.get(t.mergedInto) ?? 0) + 1);
+      }
+    });
+    return map;
   }, [tables]);
 
   const filtered = useMemo(() => {
@@ -67,10 +68,6 @@ export function TableGrid({ tables, onSelect, avgDurationMs = 45 * 60 * 1000 }: 
       result = result.filter(t => t.status === statusFilter);
     }
 
-    if (zoneFilter !== "ALL") {
-      result = result.filter(t => (t.zone ?? "Sin zona") === zoneFilter);
-    }
-
     if (search.trim()) {
       const term = search.trim().toLowerCase();
       result = result.filter(t => {
@@ -81,7 +78,7 @@ export function TableGrid({ tables, onSelect, avgDurationMs = 45 * 60 * 1000 }: 
     }
 
     return result;
-  }, [tables, statusFilter, zoneFilter, search]);
+  }, [tables, statusFilter, search]);
 
   const grouped = useMemo(() => {
     const grouped = new Map<string, Table[]>();
@@ -92,20 +89,6 @@ export function TableGrid({ tables, onSelect, avgDurationMs = 45 * 60 * 1000 }: 
     });
     return Array.from(grouped.entries());
   }, [filtered]);
-
-  const mergedCountByTable = useMemo(() => {
-    const map = new Map<string, number>();
-    tables.forEach(t => {
-      if (t.mergedInto) {
-        map.set(t.mergedInto, (map.get(t.mergedInto) ?? 0) + 1);
-      }
-    });
-    return map;
-  }, [tables]);
-
-  const activeFilterCount =
-    (statusFilter !== "ALL" ? 1 : 0) +
-    (zoneFilter !== "ALL" ? 1 : 0);
 
   if (tables.length === 0) {
     return (
@@ -130,60 +113,29 @@ export function TableGrid({ tables, onSelect, avgDurationMs = 45 * 60 * 1000 }: 
           />
         </div>
 
-        <div className="flex items-center gap-2">
-          <Filter size={16} className="text-slate-400 shrink-0" />
-          <div className="flex gap-2 overflow-x-auto pb-1 flex-1">
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {QUICK_FILTERS.map(item => (
             <button
-              onClick={() => setStatusFilter("ALL")}
+              key={item.key}
+              onClick={() => setStatusFilter(item.key)}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition ${
-                statusFilter === "ALL"
+                statusFilter === item.key
                   ? "bg-cyan-500 text-slate-950"
                   : "bg-slate-800 text-slate-300 hover:bg-slate-700"
               }`}
             >
-              Todas
+              {item.label}
             </button>
-            {FILTERABLE_STATUSES.map(status => {
-              const style = STATUS_STYLES[status];
-              return (
-                <button
-                  key={status}
-                  onClick={() => setStatusFilter(status)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition flex items-center gap-1.5 ${
-                    statusFilter === status
-                      ? "bg-cyan-500 text-slate-950"
-                      : "bg-slate-800 text-slate-300 hover:bg-slate-700"
-                  }`}
-                >
-                  <span className={`w-2 h-2 rounded-full ${style.dot}`} />
-                  {style.label}
-                </button>
-              );
-            })}
-          </div>
+          ))}
         </div>
 
         {zones.length > 1 && (
           <div className="flex gap-2 overflow-x-auto pb-1">
-            <button
-              onClick={() => setZoneFilter("ALL")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition ${
-                zoneFilter === "ALL"
-                  ? "bg-slate-700 text-white"
-                  : "bg-slate-800 text-slate-300 hover:bg-slate-700"
-              }`}
-            >
-              Todas las zonas
-            </button>
             {zones.map(zone => (
               <button
                 key={zone}
-                onClick={() => setZoneFilter(zone)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition ${
-                  zoneFilter === zone
-                    ? "bg-slate-700 text-white"
-                    : "bg-slate-800 text-slate-300 hover:bg-slate-700"
-                }`}
+                onClick={() => {}}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition bg-slate-800 text-slate-300 hover:bg-slate-700"
               >
                 {zone}
               </button>
@@ -200,70 +152,56 @@ export function TableGrid({ tables, onSelect, avgDurationMs = 45 * 60 * 1000 }: 
         grouped.map(([zone, zoneTables]) => (
           <div key={zone}>
             <h3 className="text-slate-300 font-bold text-lg mb-4">{zone}</h3>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
               {zoneTables.map(table => {
                 const style = STATUS_STYLES[table.status];
-                const urgency = getTableUrgency(table, avgDurationMs);
-                const borderClass = getUrgencyBorder(urgency.level);
-                const bgClass = getUrgencyBg(urgency.level);
-                const progressClass = getUrgencyProgress(urgency.level);
-                const dotClass = getUrgencyDot(urgency.level);
                 const isFree = table.status === "FREE" || table.status === "RESERVED";
                 const elapsedMs = table.openedAt ? Date.now() - table.openedAt.getTime() : 0;
+                const mergedLabel = mergedCountByTable.get(table.id)
+                  ? ` / ${Array.from({ length: mergedCountByTable.get(table.id)! + 1 }).map((_, i) => `Mesa ${String.fromCharCode(64 + (i + 1))}`).join(" + ")}`
+                  : "";
 
                 return (
                   <button
                     key={table.id}
                     onClick={() => onSelect(table)}
-                    className={`${bgClass} rounded-3xl border ${isFree ? "border-slate-800" : borderClass} hover:border-cyan-500 transition-all p-6 text-left relative overflow-hidden`}
+                    className={`${style.bg} rounded-2xl border ${style.border} hover:border-cyan-500 transition-all p-5 text-left relative overflow-hidden`}
                   >
-                    {!isFree && (
-                      <div className={`absolute top-0 left-0 w-1.5 h-full rounded-l-3xl ${dotClass}`} />
-                    )}
-                    <div className="flex items-center justify-between mb-4">
-                      <div className={`w-3 h-3 rounded-full ${style.dot}`} />
-                      <span className="text-xs text-slate-400">{style.label}</span>
-                    </div>
-                    <h2 className="text-white text-xl font-bold">{table.name}</h2>
-                    {mergedCountByTable.get(table.id) ? (
-                      <span className="inline-flex items-center gap-1 mt-2 text-xs font-semibold text-cyan-400 bg-cyan-500/10 border border-cyan-500/30 px-2 py-1 rounded-full">
-                        <Users size={12} />
-                        {mergedCountByTable.get(table.id)} mesa{mergedCountByTable.get(table.id)! > 1 ? "s" : ""} unida{mergedCountByTable.get(table.id)! > 1 ? "s" : ""}
-                      </span>
-                    ) : null}
-                    <div className="flex items-center justify-between mt-3">
-                      <p className="text-slate-400 flex items-center gap-1.5 text-sm">
-                        <Users size={14} />
-                        {table.peopleCount} / {table.capacity}
-                      </p>
-                      {!isFree && table.openedAt && (
-                        <p className="text-slate-400 flex items-center gap-1 text-xs">
-                          <Clock size={12} />
-                          {formatMinutes(elapsedMs)}
+                    <div className={`absolute top-0 left-0 w-1 h-full ${style.dot}`} />
+                    <div className="pl-2">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className={`text-xs font-bold uppercase tracking-wide ${style.dot.replace('bg-', 'text-')}`}>
+                          {style.label}
+                        </span>
+                      </div>
+                      <h2 className="text-white text-xl font-bold leading-tight">
+                        {table.name}
+                        {mergedLabel && <span className="text-slate-400 text-sm font-normal ml-1">{mergedLabel}</span>}
+                      </h2>
+                      <div className="flex items-center justify-between mt-4">
+                        {isFree ? (
+                          <span className="text-cyan-400 font-bold text-sm">Abrir mesa →</span>
+                        ) : (
+                          <>
+                            <p className="text-slate-400 flex items-center gap-1.5 text-sm">
+                              <Users size={14} />
+                              {table.peopleCount} / {table.capacity}
+                            </p>
+                            {table.openedAt && (
+                              <p className="text-slate-400 flex items-center gap-1 text-xs">
+                                <Clock size={12} />
+                                {formatMinutes(elapsedMs)}
+                              </p>
+                            )}
+                          </>
+                        )}
+                      </div>
+                      {!isFree && (
+                        <p className="text-white font-bold text-lg mt-3">
+                          ${table.total.toLocaleString("es-CO")}
                         </p>
                       )}
                     </div>
-                    {!isFree && (
-                      <>
-                        <div className="mt-3 h-1.5 rounded-full bg-slate-700 overflow-hidden">
-                          <div
-                            className={`h-full rounded-full transition-all ${progressClass}`}
-                            style={{ width: `${urgency.progress}%` }}
-                          />
-                        </div>
-                        <div className="flex items-center justify-between mt-3">
-                          <span className="text-xs font-semibold text-slate-300">{urgency.action}</span>
-                          <span className="text-cyan-400 font-bold text-sm">
-                            ${table.total.toLocaleString("es-CO")}
-                          </span>
-                        </div>
-                      </>
-                    )}
-                    {isFree && (
-                      <p className="text-cyan-400 mt-3 font-bold">
-                        ${table.total.toLocaleString("es-CO")}
-                      </p>
-                    )}
                   </button>
                 );
               })}

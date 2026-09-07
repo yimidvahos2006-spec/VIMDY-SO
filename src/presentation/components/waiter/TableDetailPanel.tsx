@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Minus, Plus, Trash2, X, ChefHat, Wallet, AlertTriangle, ArrowUpCircle, CircleDot, Search, Mic, MicOff, CheckCircle2, MessageSquarePlus, ClipboardList, UtensilsCrossed, Users, GitMerge, ArrowRightLeft, Receipt } from "lucide-react";
+import { Minus, Plus, Trash2, X, ChefHat, Wallet, Search, Mic, MicOff, CheckCircle2, MessageSquarePlus, ClipboardList, UtensilsCrossed, Users, GitMerge, ArrowRightLeft, Receipt, MoreVertical } from "lucide-react";
 
 import { Table, Product, OrderPriority } from "../../../core/entities/Entities";
 import { container } from "../../../infrastructure/di/CompositionRoot";
@@ -14,15 +14,8 @@ interface Props {
   tables: Table[];
   products: Product[];
   onClose: () => void;
-  /** Se llama después de cualquier operación exitosa, para refrescar la mesa. */
   onChanged: () => void;
-  /** Se llama cuando la mesa termina de cobrarse y vuelve a quedar libre. */
   onClosedTable: () => void;
-  /**
-   * Se llama justo después de enviar el pedido a cocina con éxito. La
-   * pantalla Meseros lo usa para cerrar todo y volver sola a las tarjetas
-   * de mesero — así el siguiente mesero puede tocar su nombre de inmediato.
-   */
   onOrderSent?: () => void;
 }
 
@@ -53,7 +46,7 @@ export function TableDetailPanel({
   const [showMergeDialog, setShowMergeDialog] = useState(false);
   const [showTransferDialog, setShowTransferDialog] = useState(false);
 
-  const { listening, result, listen } = useVoiceOrder({
+  const { listening, listen } = useVoiceOrder({
     onSuccess: (voiceResult) => {
       if (voiceResult.added.length > 0) {
         setVoiceSuccess(voiceResult.added.join(", "));
@@ -112,6 +105,9 @@ export function TableDetailPanel({
 
     return filtered;
   }, [sellable, category, search]);
+
+  const hasItems = table.items.length > 0;
+  const hasKitchenItems = table.items.some(item => item.requiresKitchen === true);
 
   async function run(action: () => Promise<unknown>) {
     setBusy(true);
@@ -176,7 +172,7 @@ export function TableDetailPanel({
     setNoteDraft("");
   }
 
-   async function sendToKitchen() {
+  async function sendToKitchen() {
     setBusy(true);
     setErrorMsg(null);
     try {
@@ -193,72 +189,99 @@ export function TableDetailPanel({
     } finally {
       setBusy(false);
     }
-   }
+  }
 
-   async function handleAddPeople() {
-     if (addPeopleCount <= 0) return;
-     run(() => container.tableEngine.get().addPeople(table.id, table.peopleCount + addPeopleCount));
-     setShowAddPeople(false);
-     setAddPeopleCount(1);
-   }
+  async function handleAddPeople() {
+    if (addPeopleCount <= 0) return;
+    run(() => container.tableEngine.get().addPeople(table.id, table.peopleCount + addPeopleCount));
+    setShowAddPeople(false);
+    setAddPeopleCount(1);
+  }
 
-   async function handleRequestBill() {
-     run(() => container.tableEngine.get().requestBill(table.id));
-   }
+  async function handleRequestBill() {
+    run(() => container.tableEngine.get().requestBill(table.id));
+  }
 
-   async function handleMerge(targetTableId: string) {
-     run(() => container.tableEngine.get().mergeTables(table.id, targetTableId));
-     setShowMergeDialog(false);
-   }
+  async function handleMerge(targetTableId: string) {
+    run(() => container.tableEngine.get().mergeTables(table.id, targetTableId));
+    setShowMergeDialog(false);
+  }
 
-   async function handleTransfer(targetTableId: string) {
-     run(() => container.tableEngine.get().transferTable(table.id, targetTableId));
-     setShowTransferDialog(false);
-   }
+  async function handleTransfer(targetTableId: string) {
+    run(() => container.tableEngine.get().transferTable(table.id, targetTableId));
+    setShowTransferDialog(false);
+  }
 
-   function handleSplit() {
-     if (splitPeople <= 0) return;
-     const result = container.tableEngine.get().splitBill(table, splitPeople);
-     alert(`División igualitaria:\n${splitPeople} personas\nPor persona: $${result.perPerson.toLocaleString("es-CO")}\nTotal: $${result.total.toLocaleString("es-CO")}`);
-     setShowSplitBill(false);
-     setSplitPeople(2);
-   }
+  function handleSplit() {
+    if (splitPeople <= 0) return;
+    const result = container.tableEngine.get().splitBill(table, splitPeople);
+    alert(`División igualitaria:\n${splitPeople} personas\nPor persona: $${result.perPerson.toLocaleString("es-CO")}\nTotal: $${result.total.toLocaleString("es-CO")}`);
+    setShowSplitBill(false);
+    setSplitPeople(2);
+  }
 
-  const hasItems = table.items.length > 0;
-  const hasKitchenItems = table.items.some(item => item.requiresKitchen === true);
+  const statusLabel =
+    table.status === "CUENTA_SOLICITADA"
+      ? "Cuenta solicitada"
+      : table.status === "WAITING_BILL"
+        ? "Esperando cuenta"
+        : table.status === "WAITING_FOOD"
+          ? "Esperando comida"
+          : table.status === "EATING"
+            ? "Comiendo"
+            : table.status === "PAYING"
+              ? "Pagando"
+              : table.status === "BUSY"
+                ? "Ocupada"
+                : table.status === "RESERVED"
+                  ? "Reservada"
+                  : "Disponible";
 
   return (
-    <div className="fixed inset-0 z-[999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
-      <div className="w-full max-w-6xl h-[85vh] rounded-3xl bg-vimdy-surface border border-slate-700 shadow-2xl flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-[999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="w-full max-w-6xl h-[90vh] rounded-3xl bg-vimdy-surface border border-slate-700 shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-700 flex-shrink-0">
-          <div>
-            <h2 className="text-2xl font-bold text-white">{table.name}</h2>
-            <p className="text-slate-400 text-sm mt-1">
-              {table.peopleCount} personas • {table.zone ?? "Sin zona"} •{" "}
-              {table.status === "CUENTA_SOLICITADA"
-                ? "Cuenta solicitada"
-                : table.status === "WAITING_BILL"
-                  ? "Esperando cuenta"
-                  : table.status === "WAITING_FOOD"
-                    ? "Esperando comida"
-                    : table.status === "EATING"
-                      ? "Comiendo"
-                      : table.status === "PAYING"
-                        ? "Pagando"
-                        : table.status === "BUSY"
-                          ? "Ocupada"
-                          : table.status === "RESERVED"
-                            ? "Reservada"
-                            : "Disponible"}
-            </p>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700 flex-shrink-0">
+          <div className="flex items-center gap-4">
+            <div>
+              <h2 className="text-2xl font-bold text-white">{table.name}</h2>
+              <p className="text-slate-400 text-sm">
+                {table.peopleCount} personas • {table.zone ?? "Sin zona"} • {statusLabel}
+              </p>
+            </div>
           </div>
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-white transition"
-          >
-            <X size={26} />
-          </button>
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <button
+                onClick={() => setShowActions(!showActions)}
+                className="w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition"
+              >
+                <MoreVertical size={18} />
+              </button>
+              {showActions && (
+                <div className="absolute top-full right-0 mt-2 w-64 rounded-2xl border border-slate-700 bg-vimdy-surface shadow-2xl overflow-hidden z-50">
+                  <button onClick={() => { setShowAddPeople(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
+                    <Users size={16} /> Agregar personas
+                  </button>
+                  <button onClick={() => { setShowMergeDialog(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
+                    <GitMerge size={16} /> Unir mesa
+                  </button>
+                  <button onClick={() => { setShowTransferDialog(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
+                    <ArrowRightLeft size={16} /> Transferir mesa
+                  </button>
+                  <button onClick={() => { setShowSplitBill(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
+                    <Receipt size={16} /> Dividir cuenta
+                  </button>
+                  <button onClick={() => { handleRequestBill(); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
+                    <ClipboardList size={16} /> Solicitar cuenta
+                  </button>
+                </div>
+              )}
+            </div>
+            <button onClick={onClose} className="w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition">
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         {errorMsg && (
@@ -423,7 +446,7 @@ export function TableDetailPanel({
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     placeholder="Buscar producto..."
-                    className="w-full h-10 pl-9 pr-4 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm outline-none focus:border-cyan-500 transition"
+                    className="w-full h-10 pl-9 pr-4 rounded-xl bg-vimdy-surface border border-slate-700 text-white text-sm outline-none focus:border-cyan-500 transition"
                   />
                 </div>
                 <button
@@ -589,7 +612,7 @@ export function TableDetailPanel({
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
                       placeholder="Buscar producto..."
-                      className="w-full h-11 pl-9 pr-4 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm outline-none focus:border-cyan-500 transition"
+                      className="w-full h-11 pl-9 pr-4 rounded-xl bg-vimdy-surface border border-slate-700 text-white text-sm outline-none focus:border-cyan-500 transition"
                     />
                   </div>
                   <button
@@ -602,7 +625,7 @@ export function TableDetailPanel({
                     }`}
                   >
                     {listening ? <MicOff size={16} /> : <Mic size={16} />}
-                    {listening ? "Escuchando..." : "Pedir por voz"}
+                    Pedir por voz
                   </button>
                   <div className="flex gap-2 overflow-x-auto pb-1">
                     {categories.map(cat => (
@@ -640,73 +663,35 @@ export function TableDetailPanel({
           </div>
         </div>
 
-        {/* Prioridad de la comanda */}
-        {hasItems && (
-          <div className="flex items-center gap-3 px-6 pt-4 flex-shrink-0">
-            <span className="text-slate-400 text-sm font-semibold">Prioridad:</span>
-            <div className="flex gap-2">
-              <PriorityButton
-                value="NORMAL"
-                current={priority}
-                onSelect={setPriority}
-                label="Normal"
-                icon={<CircleDot size={16} />}
-                activeClass="bg-slate-600 text-white"
-              />
-              <PriorityButton
-                value="HIGH"
-                current={priority}
-                onSelect={setPriority}
-                label="Alta"
-                icon={<ArrowUpCircle size={16} />}
-                activeClass="bg-orange-500 text-slate-950"
-              />
-              <PriorityButton
-                value="URGENT"
-                current={priority}
-                onSelect={setPriority}
-                label="Urgente"
-                icon={<AlertTriangle size={16} />}
-                activeClass="bg-red-500 text-slate-950"
-              />
+        {/* Acciones principales */}
+        <div className="flex items-center justify-between px-6 py-4 border-t border-slate-700 flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="text-slate-400 text-xs font-semibold uppercase tracking-wide">Prioridad:</span>
+            <div className="flex gap-1">
+              {(["NORMAL", "HIGH", "URGENT"] as OrderPriority[]).map(value => (
+                <button
+                  key={value}
+                  onClick={() => setPriority(value)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                    priority === value
+                      ? value === "NORMAL"
+                        ? "bg-slate-600 text-white"
+                        : value === "HIGH"
+                          ? "bg-orange-500 text-slate-950"
+                          : "bg-red-500 text-slate-950"
+                      : "bg-slate-800 text-slate-400 hover:bg-slate-700"
+                  }`}
+                >
+                  {value === "NORMAL" ? "Normal" : value === "HIGH" ? "Alta" : "Urgente"}
+                </button>
+              ))}
             </div>
           </div>
-        )}
-
-        {/* Acciones */}
-        <div className="flex items-center justify-between px-6 py-5 border-t border-slate-700 flex-shrink-0">
-          <div className="relative">
-            <button
-              onClick={() => setShowActions(!showActions)}
-              className="flex items-center gap-2 h-12 px-5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold transition"
-            >
-              Más acciones
-            </button>
-            {showActions && (
-              <div className="absolute bottom-full left-0 mb-2 w-64 rounded-2xl border border-slate-700 bg-vimdy-surface shadow-2xl overflow-hidden z-50">
-                <button onClick={() => { setShowAddPeople(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
-                  <Users size={16} /> Agregar personas
-                </button>
-                <button onClick={() => { setShowMergeDialog(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
-                  <GitMerge size={16} /> Unir mesa
-                </button>
-                <button onClick={() => { setShowTransferDialog(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
-                  <ArrowRightLeft size={16} /> Transferir mesa
-                </button>
-                <button onClick={() => { setShowSplitBill(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
-                  <Receipt size={16} /> Dividir cuenta
-                </button>
-                <button onClick={() => { handleRequestBill(); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
-                  <ClipboardList size={16} /> Solicitar cuenta
-                </button>
-              </div>
-            )}
-          </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <button
               disabled={busy || !hasKitchenItems}
               onClick={sendToKitchen}
-              className="flex items-center gap-2 h-12 px-6 rounded-xl bg-orange-500 hover:bg-orange-400 disabled:opacity-40 disabled:hover:bg-orange-500 text-slate-950 font-bold transition"
+              className="flex items-center gap-2 h-11 px-5 rounded-xl bg-orange-500 hover:bg-orange-400 disabled:opacity-40 disabled:hover:bg-orange-500 text-slate-950 font-bold transition"
             >
               <ChefHat size={18} />
               Enviar a cocina
@@ -714,7 +699,7 @@ export function TableDetailPanel({
             <button
               disabled={busy || !hasItems}
               onClick={() => setShowCloseDialog(true)}
-              className="flex items-center gap-2 h-12 px-6 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-bold transition"
+              className="flex items-center gap-2 h-11 px-5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-bold transition"
             >
               <Wallet size={18} />
               Cerrar y cobrar
@@ -787,32 +772,6 @@ export function TableDetailPanel({
         />
       )}
     </div>
-  );
-}
-
-interface PriorityButtonProps {
-  value: OrderPriority;
-  current: OrderPriority;
-  onSelect: (value: OrderPriority) => void;
-  label: string;
-  icon: React.ReactNode;
-  /** Clases aplicadas solo cuando este botón es el seleccionado. */
-  activeClass: string;
-}
-
-function PriorityButton({ value, current, onSelect, label, icon, activeClass }: PriorityButtonProps) {
-  const active = value === current;
-  return (
-    <button
-      type="button"
-      onClick={() => onSelect(value)}
-      className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition ${
-        active ? activeClass : "bg-slate-800 text-slate-400 hover:bg-slate-700"
-      }`}
-    >
-      {icon}
-      {label}
-    </button>
   );
 }
 

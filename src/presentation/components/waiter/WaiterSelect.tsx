@@ -51,9 +51,9 @@ export function WaiterSelect({ waiters, onSelect }: Props) {
         <p className="text-slate-400 text-lg">Toca tu nombre para empezar.</p>
         <button
           onClick={() => setShowCreateForm(true)}
-          className="w-14 h-14 rounded-full bg-vimdy-accent hover:bg-vimdy-accent-hover text-white flex items-center justify-center transition shadow-lg shadow-vimdy-accent/20"
+          className="w-12 h-12 rounded-full bg-vimdy-accent hover:bg-vimdy-accent-hover text-white flex items-center justify-center transition shadow-lg shadow-vimdy-accent/20"
         >
-          <Plus size={28} />
+          <Plus size={24} />
         </button>
       </div>
 
@@ -109,23 +109,23 @@ export function WaiterSelect({ waiters, onSelect }: Props) {
         </div>
       )}
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
         {waiters.map(waiter => (
           <button
             key={waiter.id}
             onClick={() => onSelect(waiter)}
-            className="flex flex-col items-center justify-center gap-3 bg-vimdy-surface rounded-3xl border border-slate-800 hover:border-cyan-500 hover:bg-slate-800/60 transition-all p-8"
+            className="flex flex-col items-center justify-center gap-3 bg-vimdy-surface rounded-2xl border border-slate-800 hover:border-cyan-500 hover:bg-slate-800/60 transition-all p-6"
           >
             {showPhotos && waiter.photoUrl ? (
               <img
                 src={waiter.photoUrl}
                 alt={waiter.name}
-                className="w-24 h-24 rounded-full object-cover border-2 border-slate-700 shadow-lg"
+                className="w-20 h-20 rounded-full object-cover border-2 border-slate-700 shadow-lg"
               />
             ) : (
-              <UserCircle2 size={48} className="text-cyan-400" />
+              <UserCircle2 size={40} className="text-cyan-400" />
             )}
-            <span className="text-white text-xl font-bold text-center">
+            <span className="text-white text-lg font-bold text-center">
               {waiter.name}
             </span>
           </button>
