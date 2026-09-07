@@ -154,12 +154,24 @@ export class TableEngine {
 
   public async createTable(input: CreateTableInput): Promise<Table> {
     const now = new Date();
+    const businessId = input.businessId ?? getCurrentBusinessId();
+    const branchId = input.branchId ?? getCurrentBranchId() ?? undefined;
+    const name = input.name.trim();
+
+    const existing = await this.tableRepository.findAll();
+    const duplicate = existing.find(
+      (t) => t.businessId === businessId && t.branchId === branchId && t.name.toLowerCase() === name.toLowerCase()
+    );
+
+    if (duplicate) {
+      throw new Error(`TABLE_NAME_DUPLICATE: ya existe una mesa llamada "${input.name}" en esta sucursal.`);
+    }
 
     const table: Table = {
       id: crypto.randomUUID(),
-      businessId: input.businessId ?? getCurrentBusinessId(),
-      branchId: input.branchId ?? getCurrentBranchId() ?? undefined,
-      name: input.name,
+      businessId,
+      branchId,
+      name,
       capacity: input.capacity,
       peopleCount: 0,
       status: "FREE",
@@ -781,6 +793,21 @@ export class TableEngine {
   ): Promise<Table> {
     for (let attempt = 1; attempt <= MAX_CONFLICT_RETRIES; attempt++) {
       const table = await this.getTable(tableId);
+
+      if (patch.name && patch.name.trim() !== table.name) {
+        const businessId = table.businessId;
+        const branchId = table.branchId;
+        const newName = patch.name.trim();
+
+        const allTables = await this.tableRepository.findAll();
+        const duplicate = allTables.find(
+          (t) => t.id !== tableId && t.businessId === businessId && t.branchId === branchId && t.name.toLowerCase() === newName.toLowerCase()
+        );
+
+        if (duplicate) {
+          throw new Error(`TABLE_NAME_DUPLICATE: ya existe otra mesa llamada "${newName}" en esta sucursal.`);
+        }
+      }
 
       const updated: Table = {
         ...table,
