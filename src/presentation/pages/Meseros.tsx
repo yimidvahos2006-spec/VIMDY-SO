@@ -6,6 +6,7 @@ import {
   tablesReady,
   productsReady
 } from "../../infrastructure/di/CompositionRoot";
+import { getCurrentBusinessId } from "../../infrastructure/supabase/supabaseClient";
 import { useVimdyEvent } from "../../hooks/useVimdyCore";
 
 import { WaiterSelect } from "../components/waiter/WaiterSelect";
@@ -21,6 +22,7 @@ function MeserosContent() {
   const [tables, setTables] = useState<Table[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [waiters, setWaiters] = useState<Waiter[]>([]);
+  const [avgDurationMs, setAvgDurationMs] = useState<number>(45 * 60 * 1000);
 
   // PASO 1.10 (offline elegante en Mesas) — cuántas aperturas/cierres de
   // mesa hechos sin conexión siguen esperando sincronizarse, para el badge
@@ -48,10 +50,12 @@ function MeserosContent() {
 
     Promise.all([tablesReady, productsReady])
       .then(async () => {
-        const [allTables, allProducts, allWaiters] = await Promise.all([
+        const businessId = getCurrentBusinessId();
+        const [allTables, allProducts, allWaiters, avgDuration] = await Promise.all([
           container.tableEngine.get().getAllTables(),
           container.inventoryEngine.get().listAll(),
-          container.waiterEngine.get().listActive()
+          container.waiterEngine.get().listActive(),
+          businessId ? container.tableEngine.get().getAverageDuration(businessId) : Promise.resolve(45 * 60 * 1000)
         ]);
 
         if (cancelled) return;
@@ -59,6 +63,7 @@ function MeserosContent() {
         setTables(allTables);
         setProducts(allProducts);
         setWaiters(allWaiters);
+        setAvgDurationMs(avgDuration);
         setReady(true);
       })
       .catch(() => {
@@ -149,7 +154,7 @@ function MeserosContent() {
 
       {/* Paso 2: mesas, ya con el mesero identificado. */}
       {ready && activeWaiter && (
-        <TableGrid tables={tables} onSelect={handleSelectTable} />
+        <TableGrid tables={tables} onSelect={handleSelectTable} avgDurationMs={avgDurationMs} />
       )}
 
       {dialog === "open" && selectedTable && activeWaiter && (

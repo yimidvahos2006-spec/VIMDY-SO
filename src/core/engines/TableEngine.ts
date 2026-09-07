@@ -221,6 +221,38 @@ export class TableEngine {
     return tables.filter(table => table.status !== "FREE" && table.status !== "RESERVED" && table.status !== "CLOSED");
   }
 
+  public async getAverageDuration(businessId: string): Promise<number> {
+    const [tables, sales] = await Promise.all([
+      this.getAllTables(),
+      this.sales.getAllSales()
+    ]);
+
+    const tableMap = new Map(
+      tables
+        .filter(t => t.businessId === businessId && t.openedAt)
+        .map(t => [t.id, t.openedAt!])
+    );
+
+    const closedSales = sales
+      .filter(s => s.businessId === businessId && s.tableId && ["PAID", "CLOSED"].includes(s.status || ""))
+      .filter(s => tableMap.has(s.tableId!))
+      .map(s => ({
+        tableId: s.tableId!,
+        duration: s.updatedAt.getTime() - tableMap.get(s.tableId!)!.getTime(),
+        closedAt: s.updatedAt.getTime()
+      }))
+      .sort((a, b) => b.closedAt - a.closedAt)
+      .slice(0, 30);
+
+    if (closedSales.length < 5) {
+      // fallback, no dato real: no hay suficientes mesas cerradas en el historial
+      return 45 * 60 * 1000;
+    }
+
+    const total = closedSales.reduce((sum, s) => sum + s.duration, 0);
+    return total / closedSales.length;
+  }
+
   /* =======================================================================
      APERTURA Y CLIENTES
   ======================================================================= */

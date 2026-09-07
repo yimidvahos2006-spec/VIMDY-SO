@@ -1,15 +1,23 @@
 import React, { useMemo, useState } from "react";
-import { Users, Search, Filter } from "lucide-react";
+import { Users, Search, Filter, Clock } from "lucide-react";
 
-import { Table, TableStatus } from "../../../core/entities/Entities";
+import { Table } from "../../../core/entities/Entities";
 import { EmptyState } from "../ui/EmptyState";
+import {
+  getTableUrgency,
+  getUrgencyBorder,
+  getUrgencyBg,
+  getUrgencyProgress,
+  getUrgencyDot
+} from "../../../core/services/tableUrgency";
 
 interface Props {
   tables: Table[];
   onSelect: (table: Table) => void;
+  avgDurationMs?: number;
 }
 
-const STATUS_STYLES: Record<TableStatus, { dot: string; label: string }> = {
+const STATUS_STYLES: Record<Table["status"], { dot: string; label: string }> = {
   FREE: { dot: "bg-green-500", label: "Libre" },
   RESERVED: { dot: "bg-yellow-500", label: "Reservada" },
   BUSY: { dot: "bg-red-500", label: "Ocupada" },
@@ -21,7 +29,7 @@ const STATUS_STYLES: Record<TableStatus, { dot: string; label: string }> = {
   CLOSED: { dot: "bg-slate-600", label: "Unida" }
 };
 
-const FILTERABLE_STATUSES: TableStatus[] = [
+const FILTERABLE_STATUSES: Table["status"][] = [
   "FREE",
   "BUSY",
   "EATING",
@@ -32,9 +40,14 @@ const FILTERABLE_STATUSES: TableStatus[] = [
   "RESERVED"
 ];
 
-export function TableGrid({ tables, onSelect }: Props) {
+function formatMinutes(ms: number): string {
+  const minutes = Math.max(0, Math.floor(ms / 60000));
+  return `${minutes} min`;
+}
+
+export function TableGrid({ tables, onSelect, avgDurationMs = 45 * 60 * 1000 }: Props) {
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<TableStatus | "ALL">("ALL");
+  const [statusFilter, setStatusFilter] = useState<Table["status"] | "ALL">("ALL");
   const [zoneFilter, setZoneFilter] = useState<string | "ALL">("ALL");
 
   const zones = useMemo(() => {
@@ -176,24 +189,61 @@ export function TableGrid({ tables, onSelect }: Props) {
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-5">
               {zoneTables.map(table => {
                 const style = STATUS_STYLES[table.status];
+                const urgency = getTableUrgency(table, avgDurationMs);
+                const borderClass = getUrgencyBorder(urgency.level);
+                const bgClass = getUrgencyBg(urgency.level);
+                const progressClass = getUrgencyProgress(urgency.level);
+                const dotClass = getUrgencyDot(urgency.level);
+                const isFree = table.status === "FREE" || table.status === "RESERVED";
+                const elapsedMs = table.openedAt ? Date.now() - table.openedAt.getTime() : 0;
+
                 return (
                   <button
                     key={table.id}
                     onClick={() => onSelect(table)}
-                    className="bg-vimdy-surface rounded-3xl border border-slate-800 hover:border-cyan-500 transition-all p-6 text-left"
+                    className={`${bgClass} rounded-3xl border ${isFree ? "border-slate-800" : borderClass} hover:border-cyan-500 transition-all p-6 text-left relative overflow-hidden`}
                   >
+                    {!isFree && (
+                      <div className={`absolute top-0 left-0 w-1.5 h-full rounded-l-3xl ${dotClass}`} />
+                    )}
                     <div className="flex items-center justify-between mb-4">
-                      <div className={`w-4 h-4 rounded-full ${style.dot}`} />
+                      <div className={`w-3 h-3 rounded-full ${style.dot}`} />
                       <span className="text-xs text-slate-400">{style.label}</span>
                     </div>
                     <h2 className="text-white text-xl font-bold">{table.name}</h2>
-                    <p className="text-slate-400 flex items-center gap-1.5 mt-2 text-sm">
-                      <Users size={14} />
-                      {table.peopleCount} / {table.capacity}
-                    </p>
-                    <p className="text-cyan-400 mt-2 font-bold">
-                      ${table.total.toLocaleString("es-CO")}
-                    </p>
+                    <div className="flex items-center justify-between mt-3">
+                      <p className="text-slate-400 flex items-center gap-1.5 text-sm">
+                        <Users size={14} />
+                        {table.peopleCount} / {table.capacity}
+                      </p>
+                      {!isFree && table.openedAt && (
+                        <p className="text-slate-400 flex items-center gap-1 text-xs">
+                          <Clock size={12} />
+                          {formatMinutes(elapsedMs)}
+                        </p>
+                      )}
+                    </div>
+                    {!isFree && (
+                      <>
+                        <div className="mt-3 h-1.5 rounded-full bg-slate-700 overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all ${progressClass}`}
+                            style={{ width: `${urgency.progress}%` }}
+                          />
+                        </div>
+                        <div className="flex items-center justify-between mt-3">
+                          <span className="text-xs font-semibold text-slate-300">{urgency.action}</span>
+                          <span className="text-cyan-400 font-bold text-sm">
+                            ${table.total.toLocaleString("es-CO")}
+                          </span>
+                        </div>
+                      </>
+                    )}
+                    {isFree && (
+                      <p className="text-cyan-400 mt-3 font-bold">
+                        ${table.total.toLocaleString("es-CO")}
+                      </p>
+                    )}
                   </button>
                 );
               })}
