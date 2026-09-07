@@ -388,21 +388,30 @@ export function InventoryDashboard() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4">
-        <div>
-          <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
             <h1 className="text-3xl font-bold text-vimdy-text">Inventario</h1>
+            <p className="text-vimdy-text-secondary text-sm mt-1">
+              Productos, stock y movimientos en tiempo real.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
             <OfflineStatusBadge
               pendingCount={pendingAdjustmentsCount}
               pendingLabelSingular="1 ajuste de stock pendiente"
               pendingLabelPlural="{count} ajustes de stock pendientes"
             />
+            <VimdyButton
+              onClick={() => setShowNewProduct(true)}
+              size="sm"
+              icon={<Plus size={16} />}
+            >
+              Nuevo producto
+            </VimdyButton>
           </div>
-          <p className="text-vimdy-text-secondary text-sm mt-1">
-            Productos, stock y movimientos en tiempo real.
-          </p>
         </div>
 
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-2 text-sm text-vimdy-text-secondary cursor-pointer select-none">
             <input
               type="checkbox"
@@ -412,61 +421,22 @@ export function InventoryDashboard() {
             />
             Mostrar desactivados
           </label>
-          {/*
-            Fase 3 (5.1): "Producir tanda" e "Importar menú con IA" se
-            quedan como botones con estilo propio a propósito — no son
-            VimdyButton. Usan vimdy-warning/vimdy-ai, tokens que YA existían
-            en tailwind.config.js específicamente para marcar visualmente
-            una función especial (IA, producción por lotes) distinta de una
-            acción neutra. Forzarlos a "secondary" les quitaría esa señal
-            visual a propósito. "Nuevo producto" sí es la acción principal
-            real de la pantalla -> VimdyButton primary, y por la regla
-            suprema del sistema no puede haber un segundo primary aquí.
-          */}
           {batchProducts.length > 0 && (
             <button
               onClick={() => setShowProduceModal(true)}
-              className="h-11 px-5 rounded-vimdy-md border border-vimdy-warning/40 bg-vimdy-warning/10 text-vimdy-warning font-bold hover:bg-vimdy-warning/20 flex items-center gap-2"
+              className="h-10 px-4 rounded-vimdy-md border border-vimdy-warning/40 bg-vimdy-warning/10 text-vimdy-warning font-bold hover:bg-vimdy-warning/20 flex items-center gap-2 text-sm"
             >
-              <Flame size={18} />
+              <Flame size={16} />
               Producir tanda
             </button>
           )}
           <button
             onClick={() => setShowAiImport(true)}
-            className="h-11 px-5 rounded-vimdy-md border border-vimdy-ai/40 bg-vimdy-ai/10 text-vimdy-ai font-bold hover:bg-vimdy-ai/20 flex items-center gap-2"
+            className="h-10 px-4 rounded-vimdy-md border border-vimdy-ai/40 bg-vimdy-ai/10 text-vimdy-ai font-bold hover:bg-vimdy-ai/20 flex items-center gap-2 text-sm"
           >
-            <Sparkles size={18} />
-            Importar menú con IA
+            <Sparkles size={16} />
+            Importar con IA
           </button>
-          {products.length > 0 && (
-            <VimdyButton
-              onClick={() => openTransferModal(selected ?? products[0])}
-              variant="secondary"
-              size="lg"
-              icon={<ArrowLeftRight size={18} />}
-            >
-              Transferir
-            </VimdyButton>
-          )}
-          {products.length > 0 && (
-            <VimdyButton
-              onClick={exportInventoryToCsv}
-              variant="secondary"
-              size="lg"
-              icon={<Download size={18} />}
-            >
-              Exportar CSV
-            </VimdyButton>
-          )}
-          <VimdyButton
-            onClick={() => setShowNewProduct(true)}
-            variant="primary"
-            size="lg"
-            icon={<Plus size={18} />}
-          >
-            Nuevo producto
-          </VimdyButton>
         </div>
       </div>
 
