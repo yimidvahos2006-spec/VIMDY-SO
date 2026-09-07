@@ -257,13 +257,13 @@ export function PosCart() {
       )}
 
       {/* Lista de productos */}
-      <div className="px-4 py-3 space-y-3">
+      <div className="px-3 py-2 space-y-2">
         {items.length === 0 ? (
-          <div className="py-10 flex flex-col justify-center items-center text-center px-6">
-            <div className="w-16 h-16 rounded-vimdy-lg bg-vimdy-surface border border-vimdy-border flex items-center justify-center">
-              <ShoppingCart size={28} className="text-vimdy-text-tertiary" />
+          <div className="py-8 flex flex-col justify-center items-center text-center px-4">
+            <div className="w-14 h-14 rounded-vimdy-lg bg-vimdy-surface border border-vimdy-border flex items-center justify-center">
+              <ShoppingCart size={24} className="text-vimdy-text-tertiary" />
             </div>
-            <p className="mt-4 text-vimdy-text font-semibold text-vimdy-small">{t("pos.cart.emptyTitle")}</p>
+            <p className="mt-3 text-vimdy-text font-semibold text-vimdy-small">{t("pos.cart.emptyTitle")}</p>
             <p className="mt-1 text-vimdy-text-tertiary text-vimdy-micro">{t("pos.cart.emptySubtitle")}</p>
           </div>
         ) : (
@@ -282,9 +282,9 @@ export function PosCart() {
                   type="button"
                   onClick={() => setExpandedItemId(expanded ? null : item.id)}
                   aria-expanded={expanded}
-                  className="w-full flex items-center gap-2 px-3 py-2.5 text-left"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-left"
                 >
-                  <span className="text-lg flex-shrink-0">🍽️</span>
+                  <span className="text-base flex-shrink-0">🍽️</span>
                   <span className="flex-1 min-w-0">
                     <span className="block text-vimdy-text font-semibold text-vimdy-small leading-tight">{item.name}</span>
                     {item.note && (
@@ -302,21 +302,21 @@ export function PosCart() {
                     )}
                   </div>
                   {expanded ? (
-                    <ChevronUp size={16} className="text-vimdy-text-tertiary flex-shrink-0" />
+                    <ChevronUp size={14} className="text-vimdy-text-tertiary flex-shrink-0" />
                   ) : (
-                    <ChevronDown size={16} className="text-vimdy-text-tertiary flex-shrink-0" />
+                    <ChevronDown size={14} className="text-vimdy-text-tertiary flex-shrink-0" />
                   )}
                 </button>
 
                 {/* Controles de cantidad + eliminar */}
-                <div className="flex items-center justify-between px-3 pb-2.5">
-                  <div className="flex items-center gap-2">
+                <div className="flex items-center justify-between px-3 pb-2">
+                  <div className="flex items-center gap-1.5">
                     <button
                       onClick={() => decrease(item.id)}
                       aria-label={t("pos.cart.decreaseAria", { name: item.name })}
-                      className="w-8 h-8 rounded-vimdy-sm bg-vimdy-surface-active"
+                      className="w-8 h-8 rounded-vimdy-sm bg-vimdy-surface-active flex items-center justify-center active:scale-95 transition"
                     >
-                      <Minus size={15} className="mx-auto" />
+                      <Minus size={14} className="mx-auto" />
                     </button>
                     <CartQuantityInput
                       quantity={item.quantity}
@@ -326,9 +326,9 @@ export function PosCart() {
                     <button
                       onClick={() => increase(item.id)}
                       aria-label={t("pos.cart.increaseAria", { name: item.name })}
-                      className="w-8 h-8 rounded-vimdy-sm bg-vimdy-accent text-vimdy-background"
+                      className="w-8 h-8 rounded-vimdy-sm bg-vimdy-accent text-vimdy-background flex items-center justify-center active:scale-95 transition"
                     >
-                      <Plus size={15} className="mx-auto" />
+                      <Plus size={14} className="mx-auto" />
                     </button>
                   </div>
                   <button
@@ -336,17 +336,17 @@ export function PosCart() {
                     aria-label={t("pos.cart.removeItemAria", { name: item.name })}
                     className="w-8 h-8 flex items-center justify-center text-vimdy-danger hover:text-vimdy-danger/80"
                   >
-                    <Trash2 size={16} />
+                    <Trash2 size={15} />
                   </button>
                 </div>
 
                 {/* Panel de notas del producto: se abre al tocar la fila de arriba */}
                 {expanded && (
-                  <div className="border-t border-vimdy-border bg-vimdy-background/50 p-3 space-y-3">
+                  <div className="border-t border-vimdy-border bg-vimdy-background/50 p-2.5 space-y-2.5">
 
                     {recipeIngredients.length > 0 && (
                       <div>
-                        <p className="text-vimdy-micro text-vimdy-text-secondary font-semibold mb-1.5">{t("pos.cart.removeIngredients")}</p>
+                        <p className="text-vimdy-micro text-vimdy-text-secondary font-semibold mb-1">{t("pos.cart.removeIngredients")}</p>
                         <div className="flex flex-wrap gap-1.5">
                           {recipeIngredients.map((ingredientName) => {
                             const phrase = t("pos.cart.withoutIngredient", { ingredient: ingredientName });
@@ -359,7 +359,7 @@ export function PosCart() {
                                 key={ingredientName}
                                 onClick={() => updateNote(item.id, toggleNotePhrase(item.note ?? "", phrase))}
                                 aria-pressed={active}
-                                className={`text-vimdy-micro px-2.5 py-1 rounded-vimdy-xs border transition ${
+                                className={`text-vimdy-micro px-2 py-1 rounded-vimdy-xs border transition ${
                                   active
                                     ? "bg-vimdy-danger-bg border-vimdy-danger/50 text-vimdy-danger"
                                     : "bg-vimdy-surface border-vimdy-border text-vimdy-text-secondary hover:border-vimdy-danger/40"
@@ -383,7 +383,7 @@ export function PosCart() {
                         value={item.note ?? ""}
                         onChange={(event) => updateNote(item.id, event.target.value)}
                         placeholder={t("pos.cart.kitchenNotesPlaceholder")}
-                        className="mt-1 w-full h-14 resize-none rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border px-2.5 py-2 text-vimdy-micro text-vimdy-text outline-none focus:border-vimdy-accent"
+                        className="mt-1 w-full h-12 resize-none rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border px-2.5 py-2 text-vimdy-micro text-vimdy-text outline-none focus:border-vimdy-accent"
                       />
                     </div>
 
