@@ -52,25 +52,46 @@ const ICONS: Record<BusinessTypeId, React.ElementType> = {
 
 export function BusinessTypeStep({ businessId, onSaved }: BusinessTypeStepProps) {
   const [selected, setSelected] = useState<BusinessTypeId | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [customLabel, setCustomLabel] = useState("");
   const [showCustomInput, setShowCustomInput] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  async function handleSelect(businessType: BusinessTypeId, customLabel?: string) {
+  function handleCardClick(businessType: BusinessTypeId) {
     if (saving) return;
-
+    setError(null);
     setSelected(businessType);
+    if (businessType !== "otro") {
+      setCustomLabel("");
+      setShowCustomInput(false);
+    }
+  }
+
+  function handleOtroClick() {
+    if (saving) return;
+    setError(null);
+    setSelected("otro");
+    setShowCustomInput(true);
+  }
+
+  async function handleContinue() {
+    if (saving || !selected) return;
+
+    if (selected === "otro" && !customLabel.trim()) {
+      setError("Escribe el nombre de tu negocio para continuar.");
+      return;
+    }
+
     setSaving(true);
     setError(null);
 
     try {
-      await setBusinessType(businessId, businessType, customLabel);
-      onSaved(businessType, customLabel);
+      const label = selected === "otro" ? customLabel.trim() : undefined;
+      await setBusinessType(businessId, selected, label);
+      onSaved(selected, label);
     } catch (err) {
       const message = err instanceof Error ? err.message : "No se pudo guardar el tipo de negocio.";
       setError(message);
-      setSelected(null);
     } finally {
       setSaving(false);
     }
@@ -89,14 +110,13 @@ export function BusinessTypeStep({ businessId, onSaved }: BusinessTypeStepProps)
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         {BUSINESS_TYPES.filter((t) => t.id !== "otro").map((type) => {
           const isSelected = selected === type.id;
-          const isLocked = saving && !isSelected;
           const Icon = ICONS[type.id];
 
           return (
             <button
               key={type.id}
               type="button"
-              onClick={() => handleSelect(type.id)}
+              onClick={() => handleCardClick(type.id)}
               disabled={saving}
               className={`
                 group relative flex flex-col items-center justify-center gap-3 rounded-vimdy-lg border-2 px-4 py-6
@@ -107,7 +127,6 @@ export function BusinessTypeStep({ businessId, onSaved }: BusinessTypeStepProps)
                     ? "border-vimdy-accent bg-vimdy-accent/10 shadow-vimdy-accent scale-[1.02]"
                     : "border-vimdy-border bg-vimdy-surface hover:border-vimdy-accent/60 hover:bg-vimdy-surface-hover hover:-translate-y-0.5"
                 }
-                ${isLocked ? "opacity-40" : ""}
               `}
             >
               {isSelected && (
@@ -126,20 +145,13 @@ export function BusinessTypeStep({ businessId, onSaved }: BusinessTypeStepProps)
               <span className={`text-sm font-semibold ${isSelected ? "text-vimdy-text" : "text-vimdy-text-secondary group-hover:text-vimdy-text"}`}>
                 {type.label}
               </span>
-
-              {isSelected && saving && (
-                <span className="text-xs text-vimdy-blue font-medium flex items-center gap-1.5">
-                  <Loader2 size={13} className="animate-spin" />
-                  Guardando...
-                </span>
-              )}
             </button>
           );
         })}
 
         <button
           type="button"
-          onClick={() => setShowCustomInput(true)}
+          onClick={handleOtroClick}
           disabled={saving}
           className={`
             flex flex-col items-center justify-center gap-3 rounded-vimdy-lg border-2 border-dashed px-4 py-6
@@ -163,7 +175,7 @@ export function BusinessTypeStep({ businessId, onSaved }: BusinessTypeStepProps)
         </button>
       </div>
 
-      {showCustomInput && (
+      {showCustomInput && selected === "otro" && (
         <div className="mt-8 flex flex-col gap-4 max-w-md mx-auto">
           <div>
             <label htmlFor="custom-business" className="block text-vimdy-small font-medium text-vimdy-text-secondary mb-1.5">
@@ -180,30 +192,27 @@ export function BusinessTypeStep({ businessId, onSaved }: BusinessTypeStepProps)
               className="w-full rounded-vimdy-md border-2 border-vimdy-border bg-vimdy-surface px-4 py-3 text-vimdy-body text-vimdy-text placeholder-vimdy-text-muted outline-none transition-all duration-200 focus:border-vimdy-accent focus:ring-4 focus:ring-vimdy-accent/10 disabled:opacity-50"
             />
           </div>
-          <VimdyButton
-            onClick={() => {
-              if (!customLabel.trim()) {
-                setError("Escribe el nombre de tu negocio para continuar.");
-                return;
-              }
-              handleSelect("otro", customLabel.trim());
-            }}
-            disabled={saving || !customLabel.trim()}
-            variant="primary"
-            size="lg"
-            fullWidth
-          >
-            {saving && selected === "otro" ? (
-              <span className="flex items-center gap-2">
-                <Loader2 size={18} className="animate-spin" />
-                Guardando...
-              </span>
-            ) : (
-              "Continuar"
-            )}
-          </VimdyButton>
         </div>
       )}
+
+      <div className="mt-8 flex justify-center">
+        <VimdyButton
+          onClick={handleContinue}
+          disabled={saving || !selected || (selected === "otro" && !customLabel.trim())}
+          variant="primary"
+          size="lg"
+          className="min-w-[200px]"
+        >
+          {saving ? (
+            <span className="flex items-center gap-2">
+              <Loader2 size={18} className="animate-spin" />
+              Guardando...
+            </span>
+          ) : (
+            "Continuar"
+          )}
+        </VimdyButton>
+      </div>
 
       {error && (
         <div className="mt-6 flex items-start gap-2 rounded-vimdy-md border border-vimdy-danger/40 bg-vimdy-danger-bg px-4 py-3 text-vimdy-small text-vimdy-danger">

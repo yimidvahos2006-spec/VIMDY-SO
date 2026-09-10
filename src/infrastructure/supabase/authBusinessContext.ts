@@ -1,6 +1,6 @@
 import { supabase, setCurrentBusinessId, setCurrentBranchId } from "./supabaseClient";
 import { APP_URL } from "../../core/config/appUrl";
-import { resendRegistrationOtp } from "./authOtp";
+import { resendRegistrationOtp, translateOtpError } from "./authOtp";
 import type { BusinessTypeId } from "../../core/config/businessTypes";
 import type { ModuleId } from "../../core/config/modules";
 import type { KitchenOutputMode } from "../../core/services/kitchenOutput";
@@ -115,6 +115,9 @@ function translateAuthError(rawMessage: string | undefined): string {
   }
   if (message.includes("signups not allowed") || message.includes("signup is disabled")) {
     return "El registro de cuentas nuevas no está disponible en este momento.";
+  }
+  if (message.includes("provider_disabled") || message.includes("provider not configured")) {
+    return "El método de autenticación con Google no está disponible. Usa correo y contraseña o el código por email.";
   }
   if (message.includes("fetch") || message.includes("network")) {
     return "No hay conexión con el servidor. Revisa tu internet e inténtalo de nuevo.";
@@ -306,18 +309,42 @@ export function clearPendingRegistration(): void {
  * el código en authOtp.ts.
  */
 export async function beginRegistration(input: RegisterBusinessInput): Promise<void> {
-  const { data, error } = await supabase.auth.signUp({
-    email: input.email,
-    password: input.password,
-    options: {
-      data: { full_name: input.ownerName },
-      emailRedirectTo: `${APP_URL}/verificar-codigo`
-    }
+  const startTime = Date.now();
+  console.log("[VIMDY-AUTH] beginRegistration: signUp called for email:", input.email.replace(/(.).*?(.)@/, "$1***$2@"));
+
+  let data: { user: { id?: string; identities?: unknown[]; email_confirmed_at?: string | null } | null } | undefined;
+  let error: { message: string; status?: number } | null = null;
+
+  try {
+    const result = await supabase.auth.signUp({
+      email: input.email,
+      password: input.password,
+      options: {
+        data: { full_name: input.ownerName }
+      }
+    });
+    data = result.data as typeof data;
+    error = result.error as typeof error;
+  } catch (err) {
+    error = { message: err instanceof Error ? err.message : String(err) };
+  }
+
+  const elapsed = Date.now() - startTime;
+  console.log("[VIMDY-AUTH] signUp response:", {
+    elapsedMs: elapsed,
+    hasError: !!error,
+    hasUser: !!data?.user,
+    userId: data?.user?.id,
+    identitiesCount: data?.user?.identities?.length,
+    emailConfirmed: data?.user?.email_confirmed_at,
+    errorMessage: error?.message,
+    errorStatus: error?.status
   });
 
   if (error) {
     const msg = error.message.toLowerCase();
     if (msg.includes("user already registered") || msg.includes("already registered")) {
+      console.log("[VIMDY-AUTH] signUp returned 'user already registered' — calling resendRegistrationOtp");
       savePendingRegistration({
         businessName: input.businessName,
         ownerName: input.ownerName,
@@ -327,10 +354,12 @@ export async function beginRegistration(input: RegisterBusinessInput): Promise<v
       await resendRegistrationOtp();
       return;
     }
+    console.error("[VIMDY-AUTH] signUp error:", error.message);
     throw new Error(translateAuthError(error.message));
   }
 
-  if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+  if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+    console.log("[VIMDY-AUTH] signUp returned existing unconfirmed user (identities=[]), calling resendRegistrationOtp");
     savePendingRegistration({
       businessName: input.businessName,
       ownerName: input.ownerName,
@@ -341,6 +370,7 @@ export async function beginRegistration(input: RegisterBusinessInput): Promise<v
     return;
   }
 
+  console.log("[VIMDY-AUTH] signUp succeeded for new user — email should have been sent by Supabase");
   savePendingRegistration({
     businessName: input.businessName,
     ownerName: input.ownerName,
@@ -407,23 +437,11 @@ export async function completeRegistration(): Promise<BusinessSession> {
     throw new Error("El negocio se creó pero no se pudo cargar. Intenta iniciar sesión de nuevo.");
   }
 
-  clearPendingRegistration();
-  setCurrentBusinessId(businessSession.businessId);
-  setCurrentBranchId(await resolveDefaultBranchId(businessSession.businessId));
+   clearPendingRegistration();
+   setCurrentBusinessId(businessSession.businessId);
+   setCurrentBranchId(await resolveDefaultBranchId(businessSession.businessId));
 
-  const { data: sessionData } = await supabase.auth.getSession();
-  if (sessionData.session) {
-    const { access_token, refresh_token, expires_in } = sessionData.session;
-    const appUrl = APP_URL;
-    const hashParams = new URLSearchParams({
-      access_token,
-      refresh_token: refresh_token ?? "",
-      expires_in: String(expires_in ?? 3600)
-    });
-    location.href = `${appUrl}/auth/callback#${hashParams.toString()}`;
-  }
-
-  return businessSession;
+   return businessSession;
 }
 
 /**
@@ -464,7 +482,7 @@ export async function resolveDefaultBranchId(businessId: string): Promise<string
   return insertedBranch.id as string | null;
 }
 
-export async function getUserBusinesses(userId: string): Promise<BusinessSession[]> {
+export async function getUserBusinesses(userId: string, ownerName: string): Promise<BusinessSession[]> {
   const { data: memberships, error } = await supabase
     .from("business_members")
     .select(
@@ -478,7 +496,7 @@ export async function getUserBusinesses(userId: string): Promise<BusinessSession
 
   return memberships.map((membership: Record<string, unknown>) => {
     const businessRow = membership.businesses as unknown as BusinessRow | undefined;
-    return toBusinessSession(userId, membership.business_id as string, membership.role as string, "", businessRow);
+    return toBusinessSession(userId, membership.business_id as string, membership.role as string, ownerName, businessRow);
   });
 }
 
@@ -493,7 +511,7 @@ export async function signIn(email: string, password: string): Promise<BusinessS
   }
 
   const ownerName = (authData.user.user_metadata?.full_name as string | undefined) ?? "";
-  const businesses = await getUserBusinesses(authData.user.id);
+  const businesses = await getUserBusinesses(authData.user.id, ownerName);
 
   if (businesses.length === 0) {
     return null;
@@ -507,6 +525,122 @@ export async function signIn(email: string, password: string): Promise<BusinessS
   }
 
   return businesses;
+}
+
+const LOGIN_OTP_RESEND_COOLDOWN_MS = 30_000;
+let lastLoginOtpResendAt = 0;
+
+/**
+ * Inicia el flujo de "Ingresar con código": envía un email con un código OTP
+ * de 6 dígitos al correo ingresado. NO inicia sesión aún — el usuario debe
+ * verificar el código con verifyLoginOtp(). Supabase no revela si el email
+ * está registrado (responde éxito igual), por lo que esta función tampoco lo
+ * hace: evita enumeración de usuarios.
+ */
+export async function requestLoginOtp(email: string): Promise<void> {
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: {
+      shouldCreateUser: false
+    }
+  });
+
+  if (error) {
+    throw new Error(translateAuthError(error.message));
+  }
+}
+
+/**
+ * Verifica el código OTP recibido por email para iniciar sesión. Debe
+ * llamarse después de requestLoginOtp(). Si es correcto, Supabase deja
+ * la sesión activa con email_confirmado.
+ */
+export async function verifyLoginOtp(email: string, token: string): Promise<BusinessSession | BusinessSession[] | null> {
+  const { data: otpData, error: otpError } = await supabase.auth.verifyOtp({
+    email,
+    token,
+    type: "email"
+  });
+
+  if (otpError || !otpData.session) {
+    throw new Error(translateOtpError(otpError?.message ?? "No se pudo verificar el código."));
+  }
+
+  const authUser = otpData.user;
+  if (!authUser) {
+    throw new Error("No se pudo iniciar sesión con el código.");
+  }
+
+  const ownerName = (authUser.user_metadata?.full_name as string | undefined) ?? "";
+  const businesses = await getUserBusinesses(authUser.id, ownerName);
+
+  if (businesses.length === 0) {
+    return null;
+  }
+
+  if (businesses.length === 1) {
+    const session = businesses[0];
+    setCurrentBusinessId(session.businessId);
+    setCurrentBranchId(await resolveDefaultBranchId(session.businessId));
+    return session;
+  }
+
+  return businesses;
+}
+
+/**
+ * Reenvía el código OTP de login. Aplica un cooldown de 30s en cliente
+ * para evitar rate-limit de Supabase y doble clic.
+ *
+ * Usa supabase.auth.signInWithOtp({ shouldCreateUser: false }) para reenviar
+ * en lugar de resend(), porque resend() solo admite type:"signup" |
+ * "email_change" (no "email"), y signInWithOtp es el mismo mecanismo que
+ * requestLoginOtp() usa para disparar el código inicial.
+ */
+export async function resendLoginOtp(email: string): Promise<void> {
+  const now = Date.now();
+  const elapsed = now - lastLoginOtpResendAt;
+  if (lastLoginOtpResendAt !== 0 && elapsed < LOGIN_OTP_RESEND_COOLDOWN_MS) {
+    const secondsLeft = Math.ceil((LOGIN_OTP_RESEND_COOLDOWN_MS - elapsed) / 1000);
+    throw new Error(`Espera ${secondsLeft}s antes de pedir otro código.`);
+  }
+
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: {
+      shouldCreateUser: false
+    }
+  });
+
+  if (error) {
+    throw new Error(translateAuthError(error.message));
+  }
+
+  lastLoginOtpResendAt = now;
+}
+
+export function getLoginOtpCooldownSeconds(): number {
+  if (lastLoginOtpResendAt === 0) return 0;
+  const elapsed = Date.now() - lastLoginOtpResendAt;
+  const remaining = LOGIN_OTP_RESEND_COOLDOWN_MS - elapsed;
+  return remaining > 0 ? Math.ceil(remaining / 1000) : 0;
+}
+
+/**
+ * Inicia sesión con Google OAuth. Redirige al usuario al popup de Google
+ * y luego resuelve el business session con la sesión que Supabase deja activa.
+ */
+export async function signInWithGoogle(): Promise<void> {
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: `${APP_URL}/auth/callback`
+    }
+  });
+
+  if (error) {
+    throw new Error(translateAuthError(error.message));
+  }
 }
 
 export async function signOut(): Promise<void> {
@@ -567,14 +701,21 @@ export async function markOnboardingCompleted(businessId: string): Promise<void>
  * Se llama al terminar el PASO 3 del asistente de /onboarding.
  * Requiere la policy `businesses_update_own` (ver supabase/schema.sql).
  */
-export async function setBusinessType(businessId: string, businessType: BusinessTypeId): Promise<void> {
+export async function setBusinessType(
+  businessId: string,
+  businessType: BusinessTypeId,
+  customLabel?: string
+): Promise<void> {
   const { error } = await supabase
     .from("businesses")
-    .update({ business_type: businessType })
+    .update({
+      business_type: businessType,
+      business_type_label: businessType === "otro" ? (customLabel?.trim() || null) : null
+    })
     .eq("id", businessId);
 
   if (error) {
-    throw new Error(error.message ?? "No se pudo guardar el tipo de negocio.");
+    throw new Error("No se pudo guardar el tipo de negocio. Intenta nuevamente.");
   }
 }
 
@@ -695,4 +836,8 @@ export async function createAdditionalBusiness(
   setCurrentBusinessId(businessSession.businessId);
   setCurrentBranchId(await resolveDefaultBranchId(businessSession.businessId));
   return businessSession;
+}
+
+export function __resetLoginOtpCooldown(): void {
+  lastLoginOtpResendAt = 0;
 }
