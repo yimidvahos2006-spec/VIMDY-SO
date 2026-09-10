@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
+import { Plus, X, Loader2, CheckCircle2 } from "lucide-react";
 
-import { GlassCard } from "../ui/GlassCard";
+import { VimdyCard } from "../ui/VimdyCard";
 import { VimdyButton } from "../ui/VimdyButton";
 import { VimdyInput } from "../ui/VimdyInput";
 import { container } from "../../../infrastructure/di/CompositionRoot";
@@ -104,98 +105,132 @@ export function CategoriesStep({ businessType, onSaved }: CategoriesStepProps) {
   const allNames = [...Array.from(selectedSuggestions), ...customNames];
 
   return (
-    <GlassCard className="w-full max-w-lg px-6 py-10 sm:px-10 hover:translate-y-0 hover:scale-100 hover:border-slate-800 hover:shadow-xl">
-      <div className="flex flex-col items-center gap-2 text-center mb-6">
-        <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-wide">
-          Organiza tus categorías
-        </h2>
-        <p className="text-slate-400 text-sm max-w-sm">
+    <div className="w-full max-w-3xl mx-auto">
+      <div className="text-center mb-10">
+        <p className="text-vimdy-micro uppercase tracking-widest text-vimdy-accent font-semibold mb-3">Paso 6 de 7</p>
+        <h2 className="text-vimdy-h2 text-vimdy-text mb-2">Organiza tus categorías</h2>
+        <p className="text-vimdy-small text-vimdy-text-secondary max-w-md mx-auto">
           Selecciona las categorías sugeridas para tu negocio o escribe las tuyas propias.
         </p>
       </div>
 
-      <div className="flex flex-col gap-2 mb-6">
-        {suggestedNames.map((name) => {
-          const isChecked = selectedSuggestions.has(name);
-
-          return (
-            <div
-              key={name}
-              className="flex items-center gap-3 rounded-xl border px-4 py-3"
-            >
-              <input
-                id={`cat-${name}`}
-                type="checkbox"
-                checked={isChecked}
-                onChange={() => toggleSuggestion(name)}
-                disabled={saving}
-                className="h-5 w-5 rounded border border-slate-600 text-cyan-400 focus:ring-cyan-400/50 bg-slate-950 cursor-pointer disabled:cursor-not-allowed"
-              />
-              <label htmlFor={`cat-${name}`} className="flex-1 text-sm font-medium text-white cursor-pointer">
-                {name}
-              </label>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="flex flex-col gap-2 mb-6">
-        {customNames.map((name, index) => (
-          <div
-            key={index}
-            className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-2"
-          >
-            <span className="flex-1 text-sm font-medium text-white">{name}</span>
-            <button
-              type="button"
-              onClick={() => removeCustom(index)}
-              disabled={saving}
-              className="text-slate-500 hover:text-red-400 transition-colors disabled:cursor-not-allowed"
-            >
-              ✕
-            </button>
+      <VimdyCard padding="lg" className="w-full">
+        {created.length > 0 && (
+          <div className="flex flex-col gap-2 mb-6">
+            {created.map((cat) => (
+              <div
+                key={cat.id}
+                className="flex items-center gap-3 rounded-vimdy-md border border-vimdy-border-subtle bg-vimdy-surface-hover/60 px-4 py-2.5"
+              >
+                <span className="text-vimdy-success shrink-0">
+                  <CheckCircle2 size={18} />
+                </span>
+                <span className="flex-1 text-sm font-medium text-vimdy-text">{cat.name}</span>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        )}
 
-      <div className="flex gap-2 mb-6">
-        <VimdyInput
-          placeholder="Nombre de categoría personalizada"
-          value={customInput}
-          onChange={(e) => setCustomInput(e.target.value)}
-          disabled={saving}
-          className="flex-1"
-        />
-        <button
-          type="button"
-          onClick={addCustom}
-          disabled={saving || !customInput.trim()}
-          className="px-4 py-2 rounded-xl border border-slate-700 bg-slate-900/60 text-cyan-400 hover:border-cyan-500/60 hover:bg-slate-800/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
-        >
-          + Agregar
-        </button>
-      </div>
+        <div className="flex flex-wrap gap-2 mb-6">
+          {suggestedNames.map((name) => {
+            const isSelected = selectedSuggestions.has(name);
 
-      {saving && (
-        <p className="text-center text-sm text-slate-400 mb-4">Guardando categorías...</p>
-      )}
+            return (
+              <button
+                key={name}
+                type="button"
+                onClick={() => toggleSuggestion(name)}
+                disabled={saving}
+                className={`
+                  inline-flex items-center gap-2 rounded-vimdy-md border-2 px-4 py-2.5
+                  transition-all duration-200 text-sm font-medium
+                  disabled:cursor-not-allowed
+                  ${
+                    isSelected
+                      ? "border-vimdy-accent bg-vimdy-accent/10 text-vimdy-accent"
+                      : "border-vimdy-border bg-vimdy-surface text-vimdy-text-secondary hover:border-vimdy-accent/60 hover:text-vimdy-text"
+                  }
+                `}
+              >
+                {isSelected && <CheckCircle2 size={16} />}
+                {name}
+              </button>
+            );
+          })}
+        </div>
 
-      {error && (
-        <p className="text-center text-sm text-red-400 mb-4">{error}</p>
-      )}
+        <div className="flex flex-col gap-2 mb-6">
+          {customNames.map((name, index) => (
+            <div
+              key={index}
+              className="flex items-center gap-3 rounded-vimdy-md border border-vimdy-border-subtle bg-vimdy-surface-hover/60 px-4 py-2.5"
+            >
+              <span className="flex-1 text-sm font-medium text-vimdy-text">{name}</span>
+              <button
+                type="button"
+                onClick={() => removeCustom(index)}
+                disabled={saving}
+                className="text-vimdy-text-tertiary hover:text-vimdy-danger transition-colors disabled:cursor-not-allowed p-1 rounded-md hover:bg-vimdy-danger/10"
+              >
+                <X size={16} strokeWidth={2} />
+              </button>
+            </div>
+          ))}
+        </div>
 
-      <div className="flex justify-center gap-3">
-        <VimdyButton
-          onClick={handleSave}
-          disabled={saving}
-          className="min-w-[200px]"
-        >
-          {saving ? "Guardando..." : "Continuar"}
-        </VimdyButton>
-        <VimdyButton variant="ghost" onClick={handleSkip} disabled={saving}>
-          Omitir
-        </VimdyButton>
-      </div>
-    </GlassCard>
+        <div className="flex gap-2 mb-6">
+          <VimdyInput
+            placeholder="Nombre de categoría personalizada"
+            value={customInput}
+            onChange={(e) => setCustomInput(e.target.value)}
+            disabled={saving}
+            className="flex-1"
+          />
+          <button
+            type="button"
+            onClick={addCustom}
+            disabled={saving || !customInput.trim()}
+            className="px-4 py-2 rounded-vimdy-md border-2 border-vimdy-border bg-vimdy-surface text-vimdy-blue hover:border-vimdy-accent hover:text-vimdy-accent transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm font-semibold inline-flex items-center gap-1.5"
+          >
+            <Plus size={16} strokeWidth={2} />
+            Agregar
+          </button>
+        </div>
+
+        {saving && (
+          <p className="text-center text-sm text-vimdy-text-secondary mb-4 flex items-center justify-center gap-2">
+            <Loader2 size={14} className="animate-spin" />
+            Guardando categorías...
+          </p>
+        )}
+
+        {error && (
+          <div className="flex items-start gap-2 rounded-vimdy-md border border-vimdy-danger/40 bg-vimdy-danger-bg px-4 py-3 text-vimdy-small text-vimdy-danger mb-4">
+            <span className="mt-0.5 shrink-0">⚠</span>
+            <span>{error}</span>
+          </div>
+        )}
+
+        <div className="flex justify-center gap-3">
+          <VimdyButton
+            onClick={handleSave}
+            disabled={saving}
+            className="min-w-[200px]"
+          >
+            {saving ? (
+              <span className="flex items-center gap-2">
+                <Loader2 size={18} className="animate-spin" />
+                Guardando...
+              </span>
+            ) : (
+              "Continuar"
+            )}
+          </VimdyButton>
+          <VimdyButton variant="ghost" onClick={handleSkip} disabled={saving}>
+            Omitir
+          </VimdyButton>
+        </div>
+      </VimdyCard>
+    </div>
   );
 }
