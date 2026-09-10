@@ -1,21 +1,13 @@
 import { useState } from "react";
+import { Users, UserCheck, Loader2, CheckCircle2 } from "lucide-react";
 
-import { GlassCard } from "../ui/GlassCard";
+import { VimdyCard } from "../ui/VimdyCard";
 import { VimdyButton } from "../ui/VimdyButton";
 
 interface MeserosConfigStepProps {
   onSaved: (hasWaiters: boolean) => void;
 }
 
-/**
- * PASO 5.1 condicional del asistente de onboarding.
- *
- * Solo se muestra si el negocio tiene el módulo "mesas" activo.
- * Pregunta si el negocio tiene meseros que atienden las mesas.
- *
- * - Si SÍ tiene meseros → activa módulo "meseros"
- * - Si NO tiene meseros (autoservicio) → desactiva módulo "meseros"
- */
 export function MeserosConfigStep({ onSaved }: MeserosConfigStepProps) {
   const [selected, setSelected] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
@@ -34,36 +26,53 @@ export function MeserosConfigStep({ onSaved }: MeserosConfigStepProps) {
   }
 
   return (
-    <GlassCard className="w-full max-w-lg px-6 py-10 sm:px-10 hover:translate-y-0 hover:scale-100 hover:border-slate-800 hover:shadow-xl">
-      <div className="flex flex-col items-center gap-2 text-center mb-8">
-        <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-wide">
-          ¿Tienes meseros?
-        </h2>
-        <p className="text-slate-400 text-sm max-w-sm">
+    <div className="w-full max-w-3xl mx-auto">
+      <div className="text-center mb-10">
+        <p className="text-vimdy-micro uppercase tracking-widest text-vimdy-accent font-semibold mb-3">Paso 5 de 7</p>
+        <h2 className="text-vimdy-h2 text-vimdy-text mb-2">¿Tienes meseros?</h2>
+        <p className="text-vimdy-small text-vimdy-text-secondary max-w-md mx-auto">
           ¿Hay personal que toma pedidos y atiende las mesas, o los clientes se sientan solos?
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <button
           type="button"
           onClick={() => handleSelect(true)}
           disabled={saving}
           className={`
-            flex flex-col items-center gap-3 rounded-2xl border px-4 py-6
-            transition-all duration-300
+            group relative flex flex-col items-center justify-center gap-4 rounded-vimdy-lg border-2 px-6 py-8
+            transition-all duration-200 text-center
             disabled:cursor-not-allowed
             ${
               selected === true
-                ? "border-cyan-400 bg-cyan-400/10 shadow-[0_0_30px_rgba(143,215,255,.25)] scale-[1.03]"
-                : "border-slate-700 bg-slate-900/60 hover:border-cyan-500/60 hover:bg-slate-800/60"
+                ? "border-vimdy-accent bg-vimdy-accent/10 shadow-vimdy-accent"
+                : "border-vimdy-border bg-vimdy-surface hover:border-vimdy-accent/60 hover:bg-vimdy-surface-hover"
             }
             ${saving && selected !== true ? "opacity-40" : ""}
           `}
         >
-          <span className="text-3xl">🧑‍🍳</span>
-          <span className="text-sm font-semibold text-white">Sí, tengo meseros</span>
-          <span className="text-xs text-slate-400">Servicio tradicional</span>
+          {selected === true && (
+            <span className="absolute top-3 right-3 text-vimdy-accent">
+              <CheckCircle2 size={18} />
+            </span>
+          )}
+
+          <div className={`
+            w-14 h-14 rounded-vimdy-md flex items-center justify-center transition-colors
+            ${selected === true ? "bg-vimdy-accent/15 text-vimdy-accent" : "bg-vimdy-background text-vimdy-text-secondary group-hover:text-vimdy-text"}
+          `}>
+            <Users size={28} strokeWidth={1.8} />
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <span className={`text-base font-semibold ${selected === true ? "text-vimdy-text" : "text-vimdy-text-secondary group-hover:text-vimdy-text"}`}>
+              Sí, tengo meseros
+            </span>
+            <span className="text-xs text-vimdy-text-muted">
+              Servicio tradicional
+            </span>
+          </div>
         </button>
 
         <button
@@ -71,26 +80,47 @@ export function MeserosConfigStep({ onSaved }: MeserosConfigStepProps) {
           onClick={() => handleSelect(false)}
           disabled={saving}
           className={`
-            flex flex-col items-center gap-3 rounded-2xl border px-4 py-6
-            transition-all duration-300
+            group relative flex flex-col items-center justify-center gap-4 rounded-vimdy-lg border-2 px-6 py-8
+            transition-all duration-200 text-center
             disabled:cursor-not-allowed
             ${
               selected === false
-                ? "border-cyan-400 bg-cyan-400/10 shadow-[0_0_30px_rgba(143,215,255,.25)] scale-[1.03]"
-                : "border-slate-700 bg-slate-900/60 hover:border-cyan-500/60 hover:bg-slate-800/60"
+                ? "border-vimdy-accent bg-vimdy-accent/10 shadow-vimdy-accent"
+                : "border-vimdy-border bg-vimdy-surface hover:border-vimdy-accent/60 hover:bg-vimdy-surface-hover"
             }
             ${saving && selected !== false ? "opacity-40" : ""}
           `}
         >
-          <span className="text-3xl">🪑</span>
-          <span className="text-sm font-semibold text-white">No, autoservicio</span>
-          <span className="text-xs text-slate-400">Clientes se sientan solos</span>
+          {selected === false && (
+            <span className="absolute top-3 right-3 text-vimdy-accent">
+              <CheckCircle2 size={18} />
+            </span>
+          )}
+
+          <div className={`
+            w-14 h-14 rounded-vimdy-md flex items-center justify-center transition-colors
+            ${selected === false ? "bg-vimdy-accent/15 text-vimdy-accent" : "bg-vimdy-background text-vimdy-text-secondary group-hover:text-vimdy-text"}
+          `}>
+            <UserCheck size={28} strokeWidth={1.8} />
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <span className={`text-base font-semibold ${selected === false ? "text-vimdy-text" : "text-vimdy-text-secondary group-hover:text-vimdy-text"}`}>
+              No, autoservicio
+            </span>
+            <span className="text-xs text-vimdy-text-muted">
+              Clientes se sientan solos
+            </span>
+          </div>
         </button>
       </div>
 
       {saving && (
-        <p className="text-center text-sm text-slate-400">Guardando configuración...</p>
+        <p className="text-center text-sm text-vimdy-text-secondary mt-6 flex items-center justify-center gap-2">
+          <Loader2 size={14} className="animate-spin" />
+          Guardando configuración...
+        </p>
       )}
-    </GlassCard>
+    </div>
   );
 }
