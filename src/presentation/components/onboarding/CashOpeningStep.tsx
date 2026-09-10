@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
+import { Wallet, Loader2 } from "lucide-react";
 
-import { GlassCard } from "../ui/GlassCard";
+import { VimdyCard } from "../ui/VimdyCard";
 import { VimdyButton } from "../ui/VimdyButton";
 import { VimdyInput } from "../ui/VimdyInput";
 import { container } from "../../../infrastructure/di/CompositionRoot";
@@ -10,14 +11,6 @@ interface CashOpeningStepProps {
   onSaved: () => void;
 }
 
-/**
- * PASO 9 del asistente de onboarding (FASE 3).
- *
- * Abre el turno de caja real del negocio con container.shiftEngine.get().openShift
- * — el mismo motor real que usa el módulo de Caja (ver ShiftPanel.tsx).
- * Si ya hay un turno abierto (por ejemplo, un reintento del asistente),
- * lo detecta y deja continuar sin volver a abrir otro.
- */
 export function CashOpeningStep({ onSaved }: CashOpeningStepProps) {
   const { user } = useAuth();
 
@@ -47,8 +40,6 @@ export function CashOpeningStep({ onSaved }: CashOpeningStepProps) {
       await container.shiftEngine.get().openShift(user.id, amountValue, "Apertura inicial (onboarding)");
       onSaved();
     } catch (err) {
-      // Si el asistente se reintenta y la caja ya quedó abierta, no es un
-      // error real — el negocio ya puede vender, así que se avanza igual.
       if (err instanceof Error && err.message.startsWith("SHIFT_ALREADY_OPEN")) {
         onSaved();
         return;
@@ -61,32 +52,60 @@ export function CashOpeningStep({ onSaved }: CashOpeningStepProps) {
   }
 
   return (
-    <GlassCard className="w-full max-w-sm px-6 py-10 sm:px-10 hover:translate-y-0 hover:scale-100 hover:border-slate-800 hover:shadow-xl">
-      <div className="flex flex-col items-center gap-2 text-center mb-8">
-        <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-wide">
-          Abramos tu caja
-        </h2>
-        <p className="text-slate-400 text-sm max-w-sm">¿Cuánto dinero hay en caja?</p>
+    <div className="w-full max-w-3xl mx-auto">
+      <div className="text-center mb-10">
+        <p className="text-vimdy-micro uppercase tracking-widest text-vimdy-accent font-semibold mb-3">Paso 8 de 7</p>
+        <h2 className="text-vimdy-h2 text-vimdy-text mb-2">Abramos tu caja</h2>
+        <p className="text-vimdy-small text-vimdy-text-secondary max-w-md mx-auto">
+          ¿Cuánto dinero hay en caja?
+        </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-        <VimdyInput
-          type="number"
-          min={0}
-          step="0.01"
-          placeholder="Ej. 100000"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          disabled={saving}
-          autoFocus
-        />
+      <VimdyCard padding="lg" className="w-full max-w-xl mx-auto">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+          <div className="flex items-center gap-3 rounded-vimdy-md border-2 border-vimdy-border bg-vimdy-surface p-4">
+            <div className="w-10 h-10 rounded-vimdy-md bg-vimdy-background text-vimdy-text-secondary flex items-center justify-center shrink-0">
+              <Wallet size={20} strokeWidth={1.8} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-vimdy-text">Apertura de caja</p>
+              <p className="text-xs text-vimdy-text-muted mt-0.5">Ingresa el monto inicial para comenzar a operar</p>
+            </div>
+          </div>
 
-        {error && <p className="text-center text-sm text-red-400">{error}</p>}
+          <VimdyInput
+            type="number"
+            min={0}
+            step="0.01"
+            label="Monto inicial"
+            placeholder="Ej. 100000"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            disabled={saving}
+            autoFocus
+          />
 
-        <VimdyButton type="submit" disabled={saving} className="mt-2">
-          {saving ? "Abriendo caja..." : "Abrir caja"}
-        </VimdyButton>
-      </form>
-    </GlassCard>
+          {error && (
+            <div className="flex items-start gap-2 rounded-vimdy-md border border-vimdy-danger/40 bg-vimdy-danger-bg px-4 py-3 text-vimdy-small text-vimdy-danger">
+              <span className="mt-0.5 shrink-0">⚠</span>
+              <span>{error}</span>
+            </div>
+          )}
+
+          <div className="flex justify-center pt-2">
+            <VimdyButton type="submit" disabled={saving} className="min-w-[200px]">
+              {saving ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 size={18} className="animate-spin" />
+                  Abriendo caja...
+                </span>
+              ) : (
+                "Abrir caja"
+              )}
+            </VimdyButton>
+          </div>
+        </form>
+      </VimdyCard>
+    </div>
   );
 }
