@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import {
   ShoppingCart,
   Users,
@@ -75,7 +75,7 @@ export function ModulesStep({ businessId, businessType, onSaved }: ModulesStepPr
       if (modulesArray.includes("mesas")) {
         const count = parseInt(tableCount.trim(), 10);
         if (isNaN(count) || count < 1) {
-          throw new Error("Debes especificar cuántas mesas tiene tu negocio.");
+          throw new Error("Debes especificar cuÃ¡ntas mesas tiene tu negocio.");
         }
 
         setCreatingTables(true);
@@ -96,7 +96,7 @@ export function ModulesStep({ businessId, businessType, onSaved }: ModulesStepPr
       enabledModulesStore.set(modulesArray);
       onSaved(modulesArray);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "No se pudieron guardar los módulos.";
+      const message = err instanceof Error ? err.message : "No se pudieron guardar los mÃ³dulos.";
       setError(message);
     } finally {
       setSaving(false);
@@ -111,9 +111,9 @@ export function ModulesStep({ businessId, businessType, onSaved }: ModulesStepPr
     <div className="w-full max-w-3xl mx-auto">
       <div className="text-center mb-10">
         <p className="text-vimdy-micro uppercase tracking-widest text-vimdy-accent font-semibold mb-3">Paso 2 de 7</p>
-        <h2 className="text-vimdy-h2 text-vimdy-text mb-2">¿Qué módulos necesitas?</h2>
+        <h2 className="text-vimdy-h2 text-vimdy-text mb-2">Â¿QuÃ© mÃ³dulos necesitas?</h2>
         <p className="text-vimdy-small text-vimdy-text-secondary max-w-md mx-auto">
-          Activa los módulos que usará tu negocio. Puedes cambiarlos después en Configuración.
+          Activa los mÃ³dulos que usarÃ¡ tu negocio. Puedes cambiarlos despuÃ©s en ConfiguraciÃ³n.
         </p>
       </div>
 
@@ -173,7 +173,7 @@ export function ModulesStep({ businessId, businessType, onSaved }: ModulesStepPr
         <VimdyCard padding="lg" className="mt-8">
           <div>
             <label htmlFor="table-count" className="block text-sm font-semibold text-vimdy-text-secondary mb-2">
-              ¿Cuántas mesas tiene tu negocio?
+              Â¿CuÃ¡ntas mesas tiene tu negocio?
             </label>
             <input
               id="table-count"
@@ -198,13 +198,13 @@ export function ModulesStep({ businessId, businessType, onSaved }: ModulesStepPr
 
       {(saving || creatingTables) && !error && (
         <p className="text-center text-sm text-vimdy-text-secondary mt-6">
-          {creatingTables ? "Creando mesas..." : "Guardando configuración..."}
+          {creatingTables ? "Creando mesas..." : "Guardando configuraciÃ³n..."}
         </p>
       )}
 
       {error && (
         <div className="mt-6 flex items-start gap-2 rounded-vimdy-md border border-vimdy-danger/40 bg-vimdy-danger-bg px-4 py-3 text-vimdy-small text-vimdy-danger">
-          <span className="mt-0.5 shrink-0">⚠</span>
+          <span className="mt-0.5 shrink-0">âš </span>
           <span>{error}</span>
         </div>
       )}
@@ -229,3 +229,4 @@ export function ModulesStep({ businessId, businessType, onSaved }: ModulesStepPr
     </div>
   );
 }
+
