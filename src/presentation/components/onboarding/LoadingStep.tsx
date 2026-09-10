@@ -1,20 +1,12 @@
 import { useEffect, useState } from "react";
+import { CheckCircle2, Loader2 } from "lucide-react";
 
-import { GlassCard } from "../ui/GlassCard";
+import { VimdyCard } from "../ui/VimdyCard";
 
 interface LoadingStepProps {
   onDone: () => void;
 }
 
-/**
- * PASO 10 del asistente de onboarding (FASE 3).
- *
- * No guarda nada nuevo en Supabase: todo lo real (módulos, mesas,
- * categorías, producto, caja) ya quedó guardado en los pasos anteriores.
- * Esta pantalla es la transición visual del documento de producto —
- * confirma en orden lo que de verdad ya se hizo, con una duración total
- * de ~4 segundos, y avanza sola al PASO 11.
- */
 const CHECKLIST = [
   "Preparando módulos...",
   "Activando IA...",
@@ -38,28 +30,65 @@ export function LoadingStep({ onDone }: LoadingStepProps) {
     return () => clearTimeout(timer);
   }, [visibleCount, onDone]);
 
-  return (
-    <GlassCard className="w-full max-w-sm px-8 py-12 text-center hover:translate-y-0 hover:scale-100 hover:border-slate-800 hover:shadow-xl">
-      <h2 className="text-xl font-bold text-white tracking-wide mb-8">
-        Configurando negocio...
-      </h2>
+  const isComplete = visibleCount >= CHECKLIST.length;
 
-      <div className="flex flex-col gap-3 text-left">
-        {CHECKLIST.map((label, index) => {
-          const isVisible = index < visibleCount;
-          return (
-            <div
-              key={label}
-              className={`flex items-center gap-3 transition-opacity duration-300 ${
-                isVisible ? "opacity-100" : "opacity-0"
-              }`}
-            >
-              <span className="text-emerald-400">✓</span>
-              <span className="text-sm text-slate-300">{label}</span>
-            </div>
-          );
-        })}
+  return (
+    <div className="w-full max-w-3xl mx-auto">
+      <div className="text-center mb-10">
+        <h2 className="text-vimdy-h2 text-vimdy-text mb-2">Configurando tu negocio</h2>
+        <p className="text-vimdy-small text-vimdy-text-secondary max-w-md mx-auto">
+          Estamos preparando todo para que empieces a vender.
+        </p>
       </div>
-    </GlassCard>
+
+      <VimdyCard padding="lg" className="w-full max-w-md mx-auto text-center">
+        {isComplete ? (
+          <div className="py-8">
+            <div className="w-16 h-16 rounded-full bg-vimdy-accent/15 text-vimdy-accent flex items-center justify-center mx-auto mb-4">
+              <CheckCircle2 size={32} strokeWidth={1.8} />
+            </div>
+            <p className="text-vimdy-h3 text-vimdy-text">Todo listo</p>
+            <p className="text-vimdy-small text-vimdy-text-secondary mt-2">
+              Tu negocio está configurado y listo para usar.
+            </p>
+          </div>
+        ) : (
+          <div className="py-8">
+            <div className="w-12 h-12 rounded-full bg-vimdy-accent/15 text-vimdy-accent flex items-center justify-center mx-auto mb-6">
+              <Loader2 size={24} className="animate-spin" strokeWidth={1.8} />
+            </div>
+
+            <div className="flex flex-col gap-3 text-left">
+              {CHECKLIST.map((label, index) => {
+                const isVisible = index < visibleCount;
+                const isCurrent = index === visibleCount;
+
+                return (
+                  <div
+                    key={label}
+                    className={`flex items-center gap-3 transition-all duration-300 ${
+                      isVisible ? "opacity-100 translate-x-0" : "opacity-0 -translate-x-2"
+                    }`}
+                  >
+                    <span className={`shrink-0 ${isVisible ? "text-vimdy-success" : "text-vimdy-text-muted"}`}>
+                      {isVisible ? (
+                        <CheckCircle2 size={18} strokeWidth={1.8} />
+                      ) : isCurrent ? (
+                        <Loader2 size={18} className="animate-spin" strokeWidth={1.8} />
+                      ) : (
+                        <span className="w-[18px] h-[18px] inline-block rounded-full border-2 border-vimdy-border" />
+                      )}
+                    </span>
+                    <span className={`text-sm ${isVisible ? "text-vimdy-text font-medium" : "text-vimdy-text-muted"}`}>
+                      {label}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </VimdyCard>
+    </div>
   );
 }
