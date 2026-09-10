@@ -27,6 +27,11 @@ import {
   requestPasswordReset,
   updatePassword,
   resolveDefaultBranchId,
+  requestLoginOtp,
+  verifyLoginOtp,
+  resendLoginOtp,
+  getLoginOtpCooldownSeconds,
+  signInWithGoogle,
   type BusinessSession,
   type RegisterBusinessInput
 } from "../../infrastructure/supabase/authBusinessContext";
@@ -97,6 +102,20 @@ interface AuthContextValue {
   requestPasswordReset: (email: string) => Promise<void>;
   /** Recuperación de contraseña — paso 2: fija la nueva, usando la sesión temporal del link del correo. */
   updatePassword: (newPassword: string) => Promise<void>;
+  /**
+   * Login por código OTP — paso 1: envía un email con código de 6 dígitos.
+   * Supabase no revela si el email existe (responde éxito igual), evitando
+   * enumeración de usuarios.
+   */
+  requestLoginOtp: (email: string) => Promise<void>;
+  /** Login por código OTP — paso 2: verifica el código y resuelve la sesión de negocio. */
+  verifyLoginOtp: (email: string, token: string) => Promise<void>;
+  /** Reenvía el código OTP de login. Cooldown de 30s en cliente. */
+  resendLoginOtp: (email: string) => Promise<void>;
+  /** Segundos restantes del cooldown de reenvío de OTP de login; 0 si ya se puede. */
+  loginOtpCooldownSeconds: () => number;
+  /** Inicia sesión con Google OAuth. */
+  signInWithGoogle: () => Promise<void>;
   /** Verificación de permiso en el cliente, contra el rol ya cargado en sesión. */
   can: (permissionId: string) => boolean;
   /** Marca el onboarding como terminado, real en Supabase (PASO 11 del asistente). */
@@ -202,7 +221,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       const ownerName = (authUser.user_metadata?.full_name as string | undefined) ?? "";
-      const businesses = await getUserBusinesses(authUser.id);
+      const businesses = await getUserBusinesses(authUser.id, ownerName);
 
       if (cancelled) return;
 
@@ -366,8 +385,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setError(null);
 
     try {
-      // PASO 2a: confirma el código -> deja la sesión activa y confirmada.
+       // PASO 2a: confirma el código -> deja la sesión activa y confirmada.
       await verifyRegistrationOtp(code);
+      // Capturamos el email antes de completeRegistration(), que limpia el
+      // registro pendiente (clearPendingRegistration). Sin esto, el email
+      // quedaría vacío en el estado de usuario.
+      const pending = getPendingRegistration();
       // PASO 2b: con la sesión ya confirmada, crea el negocio + membresía
       // ADMIN + trial de 14 días, y resuelve la sesión de negocio completa.
       const businessSession = await completeRegistration();
@@ -375,7 +398,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       hydrateBusinessConfig(businessSession);
       hydrateSubscription(businessSession.businessId);
       void ensureIdentity(container.permissionEngine.get(), container.roleEngine.get());
-      const pending = getPendingRegistration();
       const { user: u, role: r } = toAuthState(businessSession, pending?.email ?? "");
 
       setCurrentBusinessId(businessSession.businessId);
@@ -470,13 +492,97 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const completeOnboarding = useCallback(async () => {
+   const completeOnboarding = useCallback(async () => {
     if (!businessId) {
       throw new Error("No hay un negocio activo en la sesión.");
     }
     await markOnboardingCompleted(businessId);
     setOnboardingCompleted(true);
   }, [businessId]);
+
+  const handleRequestLoginOtp = useCallback(async (email: string) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      await requestLoginOtp(email);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "No se pudo enviar el código.";
+      setError(message);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const handleVerifyLoginOtp = useCallback(async (email: string, token: string) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const result = await verifyLoginOtp(email, token);
+
+      if (result === null) {
+        navigate("/onboarding", { replace: true });
+        return;
+      }
+
+      if (Array.isArray(result)) {
+        navigate("/business-selector", { replace: true, state: { businesses: result } });
+        return;
+      }
+
+      const businessSession = result;
+      setCurrentBusinessId(businessSession.businessId);
+      hydrateBusinessConfig(businessSession);
+      hydrateSubscription(businessSession.businessId);
+      void ensureIdentity(container.permissionEngine.get(), container.roleEngine.get());
+      const { user: u, role: r } = toAuthState(businessSession, email);
+
+      startRealtimeSync(businessSession.businessId);
+      startOfflineSalesSync();
+      startOfflineInventorySync();
+      startOfflineTableSync();
+      startOfflineCustomerSync();
+      startOfflineKitchenSync();
+      setUser(u);
+      setRole(r);
+      setSessionId(businessSession.userId);
+      setBusinessId(businessSession.businessId);
+      setOnboardingCompleted(businessSession.onboardingCompleted);
+      navigate("/dashboard", { replace: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "No se pudo iniciar sesión con el código.";
+      setError(message);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [navigate]);
+
+  const handleResendLoginOtp = useCallback(async (email: string) => {
+    setError(null);
+    try {
+      await resendLoginOtp(email);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "No se pudo reenviar el código.";
+      setError(message);
+      throw err;
+    }
+  }, []);
+
+  const loginOtpCooldownSeconds = useCallback(() => getLoginOtpCooldownSeconds(), []);
+
+  const handleSignInWithGoogle = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      await signInWithGoogle();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "No se pudo iniciar sesión con Google.";
+      setError(message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   const can = useCallback(
     (permissionId: string) => {
@@ -512,6 +618,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       logout,
       requestPasswordReset: handleRequestPasswordReset,
       updatePassword: handleUpdatePassword,
+      requestLoginOtp: handleRequestLoginOtp,
+      verifyLoginOtp: handleVerifyLoginOtp,
+      resendLoginOtp: handleResendLoginOtp,
+      loginOtpCooldownSeconds,
+      signInWithGoogle: handleSignInWithGoogle,
       can,
       completeOnboarding,
       switchBusiness
@@ -535,6 +646,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       logout,
       handleRequestPasswordReset,
       handleUpdatePassword,
+      handleRequestLoginOtp,
+      handleVerifyLoginOtp,
+      handleResendLoginOtp,
+      loginOtpCooldownSeconds,
+      handleSignInWithGoogle,
       can,
       completeOnboarding,
       switchBusiness

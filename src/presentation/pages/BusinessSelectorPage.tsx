@@ -16,7 +16,7 @@ export function BusinessSelectorPage() {
 
     let cancelled = false;
 
-    getUserBusinesses(user.id).then((list) => {
+    getUserBusinesses(user.id, user.name).then((list) => {
       if (cancelled) return;
       setBusinesses(list);
       setLoading(false);
@@ -29,8 +29,8 @@ export function BusinessSelectorPage() {
 
   if (!isReady) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-black text-white">
-        <div className="w-8 h-8 rounded-full border-2 border-white/10 border-t-white animate-spin" />
+      <div className="min-h-screen flex items-center justify-center bg-vimdy-background text-vimdy-text">
+        <div className="w-8 h-8 rounded-full border-2 border-vimdy-text/10 border-t-vimdy-text animate-spin" />
       </div>
     );
   }
@@ -41,8 +41,8 @@ export function BusinessSelectorPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-black text-white">
-        <div className="w-8 h-8 rounded-full border-2 border-white/10 border-t-white animate-spin" />
+      <div className="min-h-screen flex items-center justify-center bg-vimdy-background text-vimdy-text">
+        <div className="w-8 h-8 rounded-full border-2 border-vimdy-text/10 border-t-vimdy-text animate-spin" />
       </div>
     );
   }
@@ -56,11 +56,11 @@ export function BusinessSelectorPage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-black px-4 py-12">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-vimdy-background px-4 py-12">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-white mb-2">¿En qué negocio quieres trabajar?</h1>
-          <p className="text-sm text-slate-400">Selecciona el negocio para continuar.</p>
+          <h1 className="text-2xl font-bold text-vimdy-text mb-2">¿En qué negocio quieres trabajar?</h1>
+          <p className="text-sm text-vimdy-text-secondary">Selecciona el negocio para continuar.</p>
         </div>
 
         <div className="space-y-3 mb-6">
@@ -68,17 +68,17 @@ export function BusinessSelectorPage() {
             <button
               key={business.businessId}
               onClick={() => switchBusiness(business)}
-              className="w-full text-left rounded-xl border border-white/10 bg-white/[0.02] p-4 hover:border-white/20 transition-colors"
+              className="w-full text-left rounded-xl border border-vimdy-text/10 bg-vimdy-text/[0.02] p-4 hover:border-vimdy-text/20 transition-colors"
             >
-              <p className="text-white font-medium">{business.businessName}</p>
-              <p className="text-xs text-slate-400 mt-1">{business.role}</p>
+              <p className="text-vimdy-text font-medium">{business.businessName}</p>
+              <p className="text-xs text-vimdy-text-secondary mt-1">{business.role}</p>
             </button>
           ))}
         </div>
 
         <button
           onClick={() => navigate("/crear-negocio")}
-          className="w-full rounded-xl border border-dashed border-white/20 bg-white/[0.02] p-4 text-center text-sm text-slate-300 hover:border-white/30 transition-colors"
+          className="w-full rounded-xl border border-dashed border-vimdy-text/20 bg-vimdy-text/[0.02] p-4 text-center text-sm text-vimdy-text-secondary hover:border-vimdy-text/30 transition-colors"
         >
           + Crear nuevo negocio
         </button>
