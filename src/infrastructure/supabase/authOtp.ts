@@ -34,11 +34,12 @@ function requirePendingEmail(): string {
 }
 
 /**
- * Traduce los errores crudos de Supabase Auth (en inglés, pensados para
+ * Traduce los errores crudos de Supabase Auth (en inglem, pensados para
  * logs) a mensajes claros en español para el usuario final. Cubre los
  * casos reales que devuelve verifyOtp/resend para type: "signup".
+ * Exportado para reutilizarlo en flows de OTP de login (authBusinessContext).
  */
-function translateOtpError(rawMessage: string | undefined): string {
+export function translateOtpError(rawMessage: string | undefined): string {
   const message = (rawMessage ?? "").toLowerCase();
 
   if (message.includes("expired")) {
@@ -130,6 +131,7 @@ export async function verifyRegistrationOtp(code: string): Promise<void> {
  */
 export async function resendRegistrationOtp(): Promise<void> {
   const email = requirePendingEmail();
+  console.log("[VIMDY-AUTH] resendRegistrationOtp called for email:", email.replace(/(.).*?(.)@/, "$1***$2@"));
 
   const now = Date.now();
   const elapsed = now - lastResendAt;
@@ -141,6 +143,12 @@ export async function resendRegistrationOtp(): Promise<void> {
   const { error } = await supabase.auth.resend({
     type: "signup",
     email
+  });
+
+  console.log("[VIMDY-AUTH] resend() response:", {
+    hasError: !!error,
+    errorMessage: error?.message,
+    errorStatus: error?.status
   });
 
   if (error) {

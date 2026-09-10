@@ -23,7 +23,8 @@ export type BusinessTypeId =
   | "pequeno_supermercado"
   | "negocio_bebidas"
   | "negocio_productos"
-  | "negocio_servicios";
+  | "negocio_servicios"
+  | "otro";
 
 export interface BusinessTypeDefinition {
   id: BusinessTypeId;
@@ -47,7 +48,8 @@ export const BUSINESS_TYPES: BusinessTypeDefinition[] = [
   { id: "pequeno_supermercado", label: "Pequeño supermercado", emoji: "🏬" },
   { id: "negocio_bebidas", label: "Negocio de bebidas", emoji: "🥤" },
   { id: "negocio_productos", label: "Negocio de productos", emoji: "📦" },
-  { id: "negocio_servicios", label: "Negocio de servicios", emoji: "🔧" }
+   { id: "negocio_servicios", label: "Negocio de servicios", emoji: "🔧" },
+   { id: "otro", label: "Otro", emoji: "➕" }
 ];
 
 export function isBusinessTypeId(value: string): value is BusinessTypeId {
