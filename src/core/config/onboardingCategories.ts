@@ -31,7 +31,8 @@ export const DEFAULT_CATEGORIES_BY_BUSINESS_TYPE: Record<BusinessTypeId, string[
   pequeno_supermercado: ["Aseo", "Bebidas", "Snacks", "Lácteos", "Frutas", "Verduras"],
   negocio_bebidas: ["Bebidas Frías", "Bebidas Calientes", "Snacks", "Licores"],
   negocio_productos: ["Productos", "Accesorios", "Snacks", "Bebidas"],
-  negocio_servicios: ["Servicios", "Productos", "Snacks", "Bebidas"]
+  negocio_servicios: ["Servicios", "Productos", "Snacks", "Bebidas"],
+  otro: []
 };
 
 export function getDefaultCategoriesForBusinessType(businessType: BusinessTypeId): string[] {

@@ -74,7 +74,8 @@ export const DEFAULT_MODULES_BY_BUSINESS_TYPE: Record<BusinessTypeId, ModuleId[]
   pequeno_supermercado: ["caja", "inventario", "clientes", "ia"],
   negocio_bebidas: ["caja", "inventario", "clientes", "ia"],
   negocio_productos: ["caja", "inventario", "clientes", "ia"],
-  negocio_servicios: ["caja", "clientes", "ia"]
+  negocio_servicios: ["caja", "clientes", "ia"],
+  otro: ["caja", "inventario", "clientes", "ia"]
 };
 
 export function getDefaultModulesForBusinessType(businessType: BusinessTypeId): ModuleId[] {
