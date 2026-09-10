@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
+import { Loader2, Package } from "lucide-react";
 
-import { GlassCard } from "../ui/GlassCard";
+import { VimdyCard } from "../ui/VimdyCard";
 import { VimdyButton } from "../ui/VimdyButton";
 import { VimdyInput } from "../ui/VimdyInput";
 import { VimdySelect } from "../ui/VimdySelect";
@@ -10,21 +11,10 @@ import { translateBusinessError } from "../../../core/errors/translateBusinessEr
 import type { Category } from "../../../core/entities/Entities";
 
 interface FirstProductStepProps {
-  /** Categorías reales creadas en el PASO 7. */
   categories: Category[];
   onSaved: () => void;
 }
 
-/**
- * PASO 8 del asistente de onboarding (FASE 3).
- *
- * Crea el primer producto real del negocio con los campos que pide el
- * documento de producto (Nombre, Precio, Costo, Stock, Categoría), a
- * través de container.inventoryEngine.get().createProduct — el mismo motor real
- * que usa el módulo de Productos. El stock mínimo (para alertas de
- * inventario) no lo pide el asistente; se guarda en 0 (sin alerta) y
- * queda editable después desde Inventario.
- */
 export function FirstProductStep({ categories, onSaved }: FirstProductStepProps) {
   const { user } = useAuth();
 
@@ -90,88 +80,107 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
   }
 
   return (
-    <GlassCard className="w-full max-w-md px-6 py-10 sm:px-10 hover:translate-y-0 hover:scale-100 hover:border-slate-800 hover:shadow-xl">
-      <div className="flex flex-col items-center gap-2 text-center mb-8">
-        <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-wide">
-          Crea tu primer producto
-        </h2>
-        <p className="text-slate-400 text-sm max-w-sm">
+    <div className="w-full max-w-3xl mx-auto">
+      <div className="text-center mb-10">
+        <p className="text-vimdy-micro uppercase tracking-widest text-vimdy-accent font-semibold mb-3">Paso 7 de 7</p>
+        <h2 className="text-vimdy-h2 text-vimdy-text mb-2">Crea tu primer producto</h2>
+        <p className="text-vimdy-small text-vimdy-text-secondary max-w-md mx-auto">
           Así ya tienes algo real para vender apenas termines.
         </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-        <VimdyInput
-          label="Nombre del producto *"
-          placeholder="Ej: Café americano"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          disabled={saving}
-        />
+      <VimdyCard padding="lg" className="w-full max-w-xl mx-auto">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+          <div className="flex items-center gap-3 rounded-vimdy-md border-2 border-vimdy-border bg-vimdy-surface p-4">
+            <div className="w-10 h-10 rounded-vimdy-md bg-vimdy-background text-vimdy-text-secondary flex items-center justify-center shrink-0">
+              <Package size={20} strokeWidth={1.8} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-vimdy-text">Primer producto</p>
+              <p className="text-xs text-vimdy-text-muted mt-0.5">Completa los datos básicos para comenzar a vender</p>
+            </div>
+          </div>
 
-        <VimdySelect
-          label="Categoría *"
-          value={categoryId}
-          onChange={(e) => setCategoryId(e.target.value)}
-          disabled={saving || categories.length === 0}
-        >
-          {categories.length === 0 && <option value="">Sin categorías</option>}
-          {categories.map((category) => (
-            <option key={category.id} value={category.id}>
-              {category.name}
-            </option>
-          ))}
-        </VimdySelect>
+          <VimdyInput
+            label="Nombre del producto *"
+            placeholder="Ej: Café americano"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            disabled={saving}
+          />
 
-        <div className="grid grid-cols-2 gap-3">
+          <VimdySelect
+            label="Categoría *"
+            value={categoryId}
+            onChange={(e) => setCategoryId(e.target.value)}
+            disabled={saving || categories.length === 0}
+          >
+            {categories.length === 0 && <option value="">Sin categorías</option>}
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
+          </VimdySelect>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <VimdyInput
+              type="number"
+              min={0}
+              step="0.01"
+              label="Precio de venta *"
+              placeholder="0"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+              disabled={saving}
+            />
+            <VimdyInput
+              type="number"
+              min={0}
+              step="0.01"
+              label="Costo (opcional)"
+              placeholder="0"
+              value={cost}
+              onChange={(e) => setCost(e.target.value)}
+              disabled={saving}
+            />
+          </div>
+
           <VimdyInput
             type="number"
             min={0}
-            step="0.01"
-            label="Precio de venta *"
+            label="Stock inicial"
             placeholder="0"
-            value={price}
-            onChange={(e) => setPrice(e.target.value)}
+            hint="Si lo dejas vacío, el producto se crea con 0 unidades y se verá como Agotado."
+            value={stock}
+            onChange={(e) => setStock(e.target.value)}
             disabled={saving}
           />
-          <VimdyInput
-            type="number"
-            min={0}
-            step="0.01"
-            label="Costo (opcional)"
-            placeholder="0"
-            value={cost}
-            onChange={(e) => setCost(e.target.value)}
-            disabled={saving}
-          />
-        </div>
 
-        <VimdyInput
-          type="number"
-          min={0}
-          label="Stock inicial"
-          placeholder="0"
-          hint="Si lo dejas vacío, el producto se crea con 0 unidades y se verá como Agotado."
-          value={stock}
-          onChange={(e) => setStock(e.target.value)}
-          disabled={saving}
-        />
+          {error && (
+            <div className="flex items-start gap-2 rounded-vimdy-md border border-vimdy-danger/40 bg-vimdy-danger-bg px-4 py-3 text-vimdy-small text-vimdy-danger">
+              <span className="mt-0.5 shrink-0">⚠</span>
+              <span>{error}</span>
+            </div>
+          )}
 
-        {error && <p className="text-center text-sm text-red-400">{error}</p>}
-
-        <VimdyButton type="submit" disabled={saving} className="mt-2">
-          {saving ? "Guardando..." : "Continuar"}
-        </VimdyButton>
-
-        <button
-          type="button"
-          onClick={onSaved}
-          disabled={saving}
-          className="text-center text-sm text-slate-400 hover:text-cyan-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          Omitir (puedes agregar productos después desde Inventario)
-        </button>
-      </form>
-    </GlassCard>
+          <div className="flex flex-col sm:flex-row justify-center gap-3 pt-2">
+            <VimdyButton type="submit" disabled={saving} className="min-w-[200px]">
+              {saving ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 size={18} className="animate-spin" />
+                  Guardando...
+                </span>
+              ) : (
+                "Continuar"
+              )}
+            </VimdyButton>
+            <VimdyButton variant="ghost" type="button" onClick={onSaved} disabled={saving}>
+              Omitir
+            </VimdyButton>
+          </div>
+        </form>
+      </VimdyCard>
+    </div>
   );
 }
