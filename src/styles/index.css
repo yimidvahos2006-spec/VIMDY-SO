@@ -41,6 +41,7 @@ html {
   --vimdy-surface: #18181B;
   --vimdy-surface-hover: #1F1F23;
   --vimdy-surface-active: #232327;
+  --vimdy-surface-elevated: #1E1E22;
 
   /* --- Bordes --- */
   --vimdy-border: #27272F;
@@ -50,6 +51,7 @@ html {
   --vimdy-text: #F5F5F4;
   --vimdy-text-secondary: #A1A1AA;
   --vimdy-text-tertiary: #5C5C64;
+  --vimdy-text-muted: #3F3F46;
 
   /* --- Acento (marca) --- */
   --vimdy-accent: #2563EB;
@@ -59,9 +61,12 @@ html {
   /* --- Estado --- */
   --vimdy-success: #22C55E;
   --vimdy-success-bg: #132018;
+  --vimdy-success-hover: #16A34A;
   --vimdy-warning: #F59E0B;
+  --vimdy-warning-hover: #FBBF24;
   --vimdy-warning-bg: #221A0C;
   --vimdy-danger: #EF4444;
+  --vimdy-danger-hover: #F87171;
   --vimdy-danger-bg: #241315;
 
   /* --- Marca (decorativo, no interactivo — ver tailwind.config.js) --- */
@@ -308,6 +313,36 @@ textarea:focus-visible,
   );
   background-size: 500% 500%;
   animation: vimdyWave 18s linear infinite;
+}
+
+/* ===========================================================
+   WELCOME STEP — emblema premium (2026-09)
+   -----------------------------------------------------------
+   Solo se usan en WelcomeStep. Barrido de luz UNA sola vez
+   al montar (no en loop) y partículas flotantes. Respetan
+   prefers-reduced-motion.
+=========================================================== */
+
+@keyframes vimdyEmblemSweep {
+  0%   { transform: translateX(-140%); opacity: 0; }
+  15%  { opacity: 1; }
+  60%  { transform: translateX(140%); opacity: 1; }
+  100% { transform: translateX(140%); opacity: 0; }
+}
+
+.animate-vimdy-emblem-sweep {
+  animation: vimdyEmblemSweep 1.1s ease-in-out .3s 1 both;
+}
+
+@keyframes vimdyMoteDrift {
+  0%   { opacity: 0; transform: translateY(0) scale(.6); }
+  12%  { opacity: .5; }
+  85%  { opacity: .3; }
+  100% { opacity: 0; transform: translateY(-420px) scale(1); }
+}
+
+.animate-vimdy-mote {
+  animation: vimdyMoteDrift linear infinite;
 }
 
 /* ===========================================================
