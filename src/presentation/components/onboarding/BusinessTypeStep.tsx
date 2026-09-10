@@ -30,7 +30,7 @@ interface BusinessTypeStepProps {
   onSaved: (businessType: BusinessTypeId, customLabel?: string) => void;
 }
 
-const ICONS: Record<BusinessTypeId, React.ElementType> = {
+const ICONS: Record<string, React.ElementType> = {
   restaurante: UtensilsCrossed,
   cafeteria: Coffee,
   pizzeria: Pizza,
@@ -77,7 +77,8 @@ export function BusinessTypeStep({ businessId, onSaved }: BusinessTypeStepProps)
   async function handleContinue() {
     if (saving || !selected) return;
 
-    if (selected === "otro" && !customLabel.trim()) {
+    const isOtro = selected === "otro";
+    if (isOtro && !customLabel.trim()) {
       setError("Escribe el nombre de tu negocio para continuar.");
       return;
     }
@@ -86,7 +87,7 @@ export function BusinessTypeStep({ businessId, onSaved }: BusinessTypeStepProps)
     setError(null);
 
     try {
-      const label = selected === "otro" ? customLabel.trim() : undefined;
+      const label = isOtro ? customLabel.trim() : undefined;
       await setBusinessType(businessId, selected, label);
       onSaved(selected, label);
     } catch (err) {
@@ -139,7 +140,7 @@ export function BusinessTypeStep({ businessId, onSaved }: BusinessTypeStepProps)
                 w-12 h-12 rounded-vimdy-md flex items-center justify-center transition-colors
                 ${isSelected ? "bg-vimdy-accent/15 text-vimdy-accent" : "bg-vimdy-background text-vimdy-text-secondary group-hover:text-vimdy-text"}
               `}>
-                <Icon size={26} strokeWidth={1.8} />
+                {Icon ? <Icon size={26} strokeWidth={1.8} /> : null}
               </div>
 
               <span className={`text-sm font-semibold ${isSelected ? "text-vimdy-text" : "text-vimdy-text-secondary group-hover:text-vimdy-text"}`}>
