@@ -1,6 +1,17 @@
 import { useState, useEffect } from "react";
+import {
+  ShoppingCart,
+  Users,
+  CalendarCheck,
+  ChefHat,
+  BarChart3,
+  Settings,
+  UtensilsCrossed,
+  CheckCircle2,
+  Loader2
+} from "lucide-react";
 
-import { GlassCard } from "../ui/GlassCard";
+import { VimdyCard } from "../ui/VimdyCard";
 import { VimdyButton } from "../ui/VimdyButton";
 import { setEnabledModules } from "../../../infrastructure/supabase/authBusinessContext";
 import { enabledModulesStore } from "../../../core/store/enabledModulesStore";
@@ -17,6 +28,16 @@ interface ModulesStepProps {
 
 const DEFAULT_TABLE_CAPACITY = 4;
 
+const MODULE_ICONS: Record<ModuleId, React.ElementType> = {
+  mesas: CalendarCheck,
+  cocina: ChefHat,
+  pedidos: UtensilsCrossed,
+  caja: ShoppingCart,
+  inventario: BarChart3,
+  clientes: Users,
+  ia: Settings
+};
+
 export function ModulesStep({ businessId, businessType, onSaved }: ModulesStepProps) {
   const [selectedModules, setSelectedModules] = useState<Set<ModuleId>>(new Set());
   const [tableCount, setTableCount] = useState<string>("");
@@ -25,7 +46,6 @@ export function ModulesStep({ businessId, businessType, onSaved }: ModulesStepPr
   const [createdTables, setCreatedTables] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
-  // Pre-seleccionar módulos según el tipo de negocio al montar el componente
   useEffect(() => {
     if (businessType) {
       const defaultModules = getDefaultModulesForBusinessType(businessType);
@@ -88,99 +108,124 @@ export function ModulesStep({ businessId, businessType, onSaved }: ModulesStepPr
   const canContinue = selectedModules.size > 0;
 
   return (
-    <GlassCard className="w-full max-w-lg px-6 py-10 sm:px-10 hover:translate-y-0 hover:scale-100 hover:border-slate-800 hover:shadow-xl">
-      <div className="flex flex-col items-center gap-2 text-center mb-8">
-        <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-wide">
-          Elige los módulos que tu negocio necesita
-        </h2>
-        <p className="text-slate-400 text-sm max-w-sm">
-          Activa los módulos que usarás. Puedes cambiarlos después en Configuración.
+    <div className="w-full max-w-3xl mx-auto">
+      <div className="text-center mb-10">
+        <p className="text-vimdy-micro uppercase tracking-widest text-vimdy-accent font-semibold mb-3">Paso 2 de 7</p>
+        <h2 className="text-vimdy-h2 text-vimdy-text mb-2">¿Qué módulos necesitas?</h2>
+        <p className="text-vimdy-small text-vimdy-text-secondary max-w-md mx-auto">
+          Activa los módulos que usará tu negocio. Puedes cambiarlos después en Configuración.
         </p>
       </div>
 
-      <div className="flex flex-col gap-2 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {MODULE_CATALOG.map((module) => {
           const isEnabled = selectedModules.has(module.id);
+          const Icon = MODULE_ICONS[module.id];
 
           return (
-            <div key={module.id}>
-              <label
-                htmlFor={`module-${module.id}`}
-                className={`
-                  flex items-center gap-3 rounded-xl border px-4 py-3 cursor-pointer
-                  transition-all duration-200
-                  ${isEnabled
-                    ? "border-cyan-500/50 bg-slate-900/60"
-                    : "border-slate-800 bg-slate-900/20 hover:border-slate-700 hover:bg-slate-800/60"}
-                `}
-              >
-                <input
-                  id={`module-${module.id}`}
-                  type="checkbox"
-                  checked={isEnabled}
-                  onChange={() => toggleModule(module.id)}
-                  disabled={saving}
-                  className="h-5 w-5 rounded border border-slate-600 text-cyan-400 focus:ring-cyan-400/50 bg-slate-950 cursor-pointer disabled:cursor-not-allowed"
-                />
-                <span className="text-lg">{module.emoji}</span>
-                <span className="flex-1 text-sm font-medium text-white">{module.label}</span>
-              </label>
+            <button
+              key={module.id}
+              type="button"
+              onClick={() => toggleModule(module.id)}
+              disabled={saving}
+              className={`
+                group relative flex items-center gap-4 rounded-vimdy-lg border-2 px-5 py-4
+                transition-all duration-200 text-left
+                disabled:cursor-not-allowed
+                ${
+                  isEnabled
+                    ? "border-vimdy-accent bg-vimdy-accent/10 shadow-vimdy-accent"
+                    : "border-vimdy-border bg-vimdy-surface hover:border-vimdy-accent/60 hover:bg-vimdy-surface-hover"
+                }
+              `}
+            >
+              {isEnabled && (
+                <span className="absolute top-3 right-3 text-vimdy-accent">
+                  <CheckCircle2 size={18} />
+                </span>
+              )}
 
-              <div
-                className={`
-                  overflow-hidden transition-all duration-300 ease-out
-                  ${hasTables && module.id === "mesas"
-                    ? "max-h-32 opacity-100 py-3"
-                    : "max-h-0 opacity-0 pointer-events-none"}
-                `}
-              >
-                {module.id === "mesas" && (
-                  <div className="px-4 pt-2">
-                    <label className="text-sm text-slate-300">Cantidad de mesas</label>
-                    <input
-                      type="number"
-                      min="1"
-                      max="999"
-                      value={tableCount}
-                      onChange={(e) => setTableCount(e.target.value)}
-                      placeholder="Ej: 12"
-                      disabled={saving}
-                      className={`
-                        mt-2 w-full rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-2.5
-                        text-center text-white placeholder-slate-500 outline-none
-                        focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/30 transition-colors
-                        disabled:cursor-not-allowed
-                      `}
-                    />
-                  </div>
-                )}
+              <div className={`
+                w-11 h-11 rounded-vimdy-md flex items-center justify-center shrink-0 transition-colors
+                ${isEnabled ? "bg-vimdy-accent/15 text-vimdy-accent" : "bg-vimdy-background text-vimdy-text-secondary group-hover:text-vimdy-text"}
+              `}>
+                <Icon size={22} strokeWidth={1.8} />
               </div>
-            </div>
+
+              <div className="flex-1 min-w-0">
+                <span className={`block text-sm font-semibold ${isEnabled ? "text-vimdy-text" : "text-vimdy-text-secondary group-hover:text-vimdy-text"}`}>
+                  {module.label}
+                </span>
+              </div>
+
+              <div className={`
+                w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all shrink-0
+                ${isEnabled ? "bg-vimdy-accent border-vimdy-accent" : "border-vimdy-border bg-vimdy-surface"}
+              `}>
+                {isEnabled && <CheckCircle2 size={14} className="text-white" />}
+              </div>
+            </button>
           );
         })}
       </div>
 
-      {(saving || creatingTables) && (
-        <p className="text-center text-sm text-slate-400">
-          {creatingTables
-            ? `Creando mesas... ${createdTables}/${tableCount}`
-            : "Guardando configuración..."}
+      {hasTables && (
+        <VimdyCard padding="lg" className="mt-8">
+          <div>
+            <label htmlFor="table-count" className="block text-sm font-semibold text-vimdy-text-secondary mb-2">
+              ¿Cuántas mesas tiene tu negocio?
+            </label>
+            <input
+              id="table-count"
+              type="number"
+              min="1"
+              max="999"
+              value={tableCount}
+              onChange={(e) => setTableCount(e.target.value)}
+              placeholder="Ej: 12"
+              disabled={saving || creatingTables}
+              className="w-full rounded-vimdy-md border-2 border-vimdy-border bg-vimdy-background px-4 py-3 text-center text-vimdy-text placeholder-vimdy-text-muted outline-none transition-all duration-200 focus:border-vimdy-accent focus:ring-4 focus:ring-vimdy-accent/10 disabled:opacity-50"
+            />
+            {creatingTables && (
+              <p className="mt-3 text-sm text-vimdy-text-secondary flex items-center justify-center gap-2">
+                <Loader2 size={14} className="animate-spin" />
+                Creando mesas... {createdTables}/{tableCount}
+              </p>
+            )}
+          </div>
+        </VimdyCard>
+      )}
+
+      {(saving || creatingTables) && !error && (
+        <p className="text-center text-sm text-vimdy-text-secondary mt-6">
+          {creatingTables ? "Creando mesas..." : "Guardando configuración..."}
         </p>
       )}
 
       {error && (
-        <p className="text-center text-sm text-red-400">{error}</p>
+        <div className="mt-6 flex items-start gap-2 rounded-vimdy-md border border-vimdy-danger/40 bg-vimdy-danger-bg px-4 py-3 text-vimdy-small text-vimdy-danger">
+          <span className="mt-0.5 shrink-0">⚠</span>
+          <span>{error}</span>
+        </div>
       )}
 
-      <div className="flex justify-center mt-4">
+      <div className="flex justify-center mt-8">
         <VimdyButton
           onClick={handleSave}
           disabled={saving || creatingTables || !canContinue}
+          size="lg"
           className="min-w-[200px]"
         >
-          {saving || creatingTables ? "Guardando..." : "Continuar"}
+          {saving || creatingTables ? (
+            <span className="flex items-center gap-2">
+              <Loader2 size={18} className="animate-spin" />
+              Guardando...
+            </span>
+          ) : (
+            "Continuar"
+          )}
         </VimdyButton>
       </div>
-    </GlassCard>
+    </div>
   );
 }

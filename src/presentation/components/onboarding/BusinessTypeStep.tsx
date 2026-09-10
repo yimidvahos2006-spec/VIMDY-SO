@@ -1,28 +1,63 @@
 import { useState } from "react";
+import {
+  UtensilsCrossed,
+  Coffee,
+  Pizza,
+  Flame,
+  Wine,
+  Croissant,
+  ShoppingCart,
+  IceCream,
+  Building2,
+  Truck,
+  Utensils,
+  Store,
+  ShoppingBag,
+  CupSoda,
+  Package,
+  Wrench,
+  Plus,
+  CheckCircle2,
+  Loader2
+} from "lucide-react";
 
-import { GlassCard } from "../ui/GlassCard";
+import { VimdyButton } from "../ui/VimdyButton";
 import { setBusinessType } from "../../../infrastructure/supabase/authBusinessContext";
 import { BUSINESS_TYPES, type BusinessTypeId } from "../../../core/config/businessTypes";
 
 interface BusinessTypeStepProps {
   businessId: string;
-  onSaved: (businessType: BusinessTypeId) => void;
+  onSaved: (businessType: BusinessTypeId, customLabel?: string) => void;
 }
 
-/**
- * PASO 3 del asistente de onboarding (FASE 3).
- *
- * Muestra las 10 opciones reales de negocio (ver src/core/config/businessTypes.ts).
- * Al elegir una, guarda business_type en Supabase de inmediato (setBusinessType) —
- * si falla, se muestra el error real y el usuario puede reintentar. Solo avanza
- * al PASO 4 (onSaved) cuando el guardado en la base de datos fue exitoso.
- */
+const ICONS: Record<BusinessTypeId, React.ElementType> = {
+  restaurante: UtensilsCrossed,
+  cafeteria: Coffee,
+  pizzeria: Pizza,
+  asadero: Flame,
+  bar: Wine,
+  panaderia: Croissant,
+  tienda: ShoppingCart,
+  heladeria: IceCream,
+  hotel: Building2,
+  food_truck: Truck,
+  comida_rapida: Utensils,
+  minimercado: Store,
+  pequeno_supermercado: ShoppingBag,
+  negocio_bebidas: CupSoda,
+  negocio_productos: Package,
+  negocio_servicios: Wrench,
+  otro: Plus
+};
+
 export function BusinessTypeStep({ businessId, onSaved }: BusinessTypeStepProps) {
   const [selected, setSelected] = useState<BusinessTypeId | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [customLabel, setCustomLabel] = useState("");
+  const [showCustomInput, setShowCustomInput] = useState(false);
 
-  async function handleSelect(businessType: BusinessTypeId) {
+  async function handleSelect(businessType: BusinessTypeId, customLabel?: string) {
     if (saving) return;
 
     setSelected(businessType);
@@ -30,8 +65,8 @@ export function BusinessTypeStep({ businessId, onSaved }: BusinessTypeStepProps)
     setError(null);
 
     try {
-      await setBusinessType(businessId, businessType);
-      onSaved(businessType);
+      await setBusinessType(businessId, businessType, customLabel);
+      onSaved(businessType, customLabel);
     } catch (err) {
       const message = err instanceof Error ? err.message : "No se pudo guardar el tipo de negocio.";
       setError(message);
@@ -42,20 +77,20 @@ export function BusinessTypeStep({ businessId, onSaved }: BusinessTypeStepProps)
   }
 
   return (
-    <GlassCard className="w-full max-w-2xl px-6 py-10 sm:px-10 hover:translate-y-0 hover:scale-100 hover:border-slate-800 hover:shadow-xl">
-      <div className="flex flex-col items-center gap-2 text-center mb-8">
-        <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-wide">
-          ¿Qué tipo de negocio tienes?
-        </h2>
-        <p className="text-slate-400 text-sm max-w-sm">
-          Con esto activamos los módulos correctos para ti.
+    <div className="w-full max-w-3xl mx-auto">
+      <div className="text-center mb-10">
+        <p className="text-vimdy-micro uppercase tracking-widest text-vimdy-accent font-semibold mb-3">Paso 1 de 7</p>
+        <h2 className="text-vimdy-h2 text-vimdy-text mb-2">¿Qué tipo de negocio tienes?</h2>
+        <p className="text-vimdy-small text-vimdy-text-secondary max-w-md mx-auto">
+          Personalizaremos VIMDY según tu operación. Puedes cambiar esto después en Configuración.
         </p>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        {BUSINESS_TYPES.map((type) => {
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+        {BUSINESS_TYPES.filter((t) => t.id !== "otro").map((type) => {
           const isSelected = selected === type.id;
           const isLocked = saving && !isSelected;
+          const Icon = ICONS[type.id];
 
           return (
             <button
@@ -64,30 +99,118 @@ export function BusinessTypeStep({ businessId, onSaved }: BusinessTypeStepProps)
               onClick={() => handleSelect(type.id)}
               disabled={saving}
               className={`
-                flex flex-col items-center gap-2 rounded-2xl border px-4 py-5
-                transition-all duration-300
+                group relative flex flex-col items-center justify-center gap-3 rounded-vimdy-lg border-2 px-4 py-6
+                transition-all duration-200
                 disabled:cursor-not-allowed
                 ${
                   isSelected
-                    ? "border-cyan-400 bg-cyan-400/10 shadow-[0_0_30px_rgba(143,215,255,.25)] scale-[1.03]"
-                    : "border-slate-700 bg-slate-900/60 hover:border-cyan-500/60 hover:bg-slate-800/60"
+                    ? "border-vimdy-accent bg-vimdy-accent/10 shadow-vimdy-accent scale-[1.02]"
+                    : "border-vimdy-border bg-vimdy-surface hover:border-vimdy-accent/60 hover:bg-vimdy-surface-hover hover:-translate-y-0.5"
                 }
                 ${isLocked ? "opacity-40" : ""}
               `}
             >
-              <span className="text-3xl">{type.emoji}</span>
-              <span className="text-sm font-semibold text-white">{type.label}</span>
+              {isSelected && (
+                <span className="absolute top-2.5 right-2.5 text-vimdy-accent">
+                  <CheckCircle2 size={18} />
+                </span>
+              )}
+
+              <div className={`
+                w-12 h-12 rounded-vimdy-md flex items-center justify-center transition-colors
+                ${isSelected ? "bg-vimdy-accent/15 text-vimdy-accent" : "bg-vimdy-background text-vimdy-text-secondary group-hover:text-vimdy-text"}
+              `}>
+                <Icon size={26} strokeWidth={1.8} />
+              </div>
+
+              <span className={`text-sm font-semibold ${isSelected ? "text-vimdy-text" : "text-vimdy-text-secondary group-hover:text-vimdy-text"}`}>
+                {type.label}
+              </span>
+
               {isSelected && saving && (
-                <span className="text-xs text-cyan-300">Guardando...</span>
+                <span className="text-xs text-vimdy-blue font-medium flex items-center gap-1.5">
+                  <Loader2 size={13} className="animate-spin" />
+                  Guardando...
+                </span>
               )}
             </button>
           );
         })}
+
+        <button
+          type="button"
+          onClick={() => setShowCustomInput(true)}
+          disabled={saving}
+          className={`
+            flex flex-col items-center justify-center gap-3 rounded-vimdy-lg border-2 border-dashed px-4 py-6
+            transition-all duration-200 disabled:cursor-not-allowed
+            ${
+              showCustomInput
+                ? "border-vimdy-accent bg-vimdy-accent/10 shadow-vimdy-accent"
+                : "border-vimdy-border-subtle bg-vimdy-surface/60 hover:border-vimdy-accent/60 hover:bg-vimdy-surface-hover"
+            }
+          `}
+        >
+          <div className={`
+            w-12 h-12 rounded-vimdy-md flex items-center justify-center transition-colors
+            ${showCustomInput ? "bg-vimdy-accent/15 text-vimdy-accent" : "bg-vimdy-background text-vimdy-text-secondary"}
+          `}>
+            <Plus size={26} strokeWidth={1.8} />
+          </div>
+          <span className={`text-sm font-semibold ${showCustomInput ? "text-vimdy-text" : "text-vimdy-text-secondary"}`}>
+            Otro
+          </span>
+        </button>
       </div>
 
-      {error && (
-        <p className="mt-6 text-center text-sm text-red-400">{error}</p>
+      {showCustomInput && (
+        <div className="mt-8 flex flex-col gap-4 max-w-md mx-auto">
+          <div>
+            <label htmlFor="custom-business" className="block text-vimdy-small font-medium text-vimdy-text-secondary mb-1.5">
+              Nombre de tu negocio
+            </label>
+            <input
+              id="custom-business"
+              type="text"
+              value={customLabel}
+              onChange={(e) => setCustomLabel(e.target.value)}
+              disabled={saving}
+              placeholder="Ej. Empanadas El Buen Sabor"
+              autoFocus
+              className="w-full rounded-vimdy-md border-2 border-vimdy-border bg-vimdy-surface px-4 py-3 text-vimdy-body text-vimdy-text placeholder-vimdy-text-muted outline-none transition-all duration-200 focus:border-vimdy-accent focus:ring-4 focus:ring-vimdy-accent/10 disabled:opacity-50"
+            />
+          </div>
+          <VimdyButton
+            onClick={() => {
+              if (!customLabel.trim()) {
+                setError("Escribe el nombre de tu negocio para continuar.");
+                return;
+              }
+              handleSelect("otro", customLabel.trim());
+            }}
+            disabled={saving || !customLabel.trim()}
+            variant="primary"
+            size="lg"
+            fullWidth
+          >
+            {saving && selected === "otro" ? (
+              <span className="flex items-center gap-2">
+                <Loader2 size={18} className="animate-spin" />
+                Guardando...
+              </span>
+            ) : (
+              "Continuar"
+            )}
+          </VimdyButton>
+        </div>
       )}
-    </GlassCard>
+
+      {error && (
+        <div className="mt-6 flex items-start gap-2 rounded-vimdy-md border border-vimdy-danger/40 bg-vimdy-danger-bg px-4 py-3 text-vimdy-small text-vimdy-danger">
+          <span className="mt-0.5 shrink-0">⚠</span>
+          <span>{error}</span>
+        </div>
+      )}
+    </div>
   );
 }
