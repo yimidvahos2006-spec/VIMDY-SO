@@ -715,6 +715,8 @@ export async function setBusinessType(
     .eq("id", businessId);
 
   if (error) {
+    // Log técnico para diagnóstico (no se muestra al usuario)
+    console.error("[VIMDY-ONBOARDING] setBusinessType error:", error);
     throw new Error("No se pudo guardar el tipo de negocio. Intenta nuevamente.");
   }
 }
