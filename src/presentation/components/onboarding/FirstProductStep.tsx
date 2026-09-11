@@ -83,9 +83,9 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
     <div className="w-full max-w-3xl mx-auto">
       <div className="text-center mb-10">
         <p className="text-vimdy-micro uppercase tracking-widest text-vimdy-accent font-semibold mb-3">Paso 7 de 7</p>
-        <h2 className="text-vimdy-h2 text-vimdy-text mb-2">Crea tu primer producto</h2>
+        <h2 className="text-vimdy-h2 text-vimdy-text mb-2">Agrega tu primer producto o servicio</h2>
         <p className="text-vimdy-small text-vimdy-text-secondary max-w-md mx-auto">
-          Así ya tienes algo real para vender apenas termines.
+          Así podrás comenzar a registrar ventas apenas termines la configuración.
         </p>
       </div>
 
@@ -102,8 +102,8 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
           </div>
 
           <VimdyInput
-            label="Nombre del producto *"
-            placeholder="Ej: Café americano"
+            label="Nombre del producto o servicio *"
+            placeholder="Ej. Hamburguesa Clásica, Café Americano, Camiseta, Corte de cabello..."
             value={name}
             onChange={(e) => setName(e.target.value)}
             disabled={saving}
@@ -151,7 +151,7 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
             min={0}
             label="Stock inicial"
             placeholder="0"
-            hint="Si lo dejas vacío, el producto se crea con 0 unidades y se verá como Agotado."
+            hint="Si no ingresas stock, comenzará con 0 unidades."
             value={stock}
             onChange={(e) => setStock(e.target.value)}
             disabled={saving}
@@ -172,7 +172,7 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
                   Guardando...
                 </span>
               ) : (
-                "Creación producto"
+                " crear producto"
               )}
             </VimdyButton>
             <VimdyButton variant="ghost" type="button" onClick={onSaved} disabled={saving}>
