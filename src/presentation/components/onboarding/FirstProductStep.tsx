@@ -172,7 +172,7 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
                   Guardando...
                 </span>
               ) : (
-                "producto"
+                "Crear producto"
               )}
             </VimdyButton>
             <VimdyButton variant="ghost" type="button" onClick={onSaved} disabled={saving}>
