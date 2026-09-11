@@ -96,8 +96,8 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
               <Package size={20} strokeWidth={1.8} />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-vimdy-text">Primer producto</p>
-              <p className="text-xs text-vimdy-text-muted mt-0.5">Completa los datos básicos para comenzar a vender</p>
+              <p className="text-sm font-semibold text-vimdy-text">Producto o servicio</p>
+              <p className="text-xs text-vimdy-text-muted mt-0.5">Completa los datos básicos para comenzar.</p>
             </div>
           </div>
 
@@ -151,7 +151,7 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
             min={0}
             label="Stock inicial"
             placeholder="0"
-            hint="Si no ingresa stock, comenzará con 0 unidades."
+            hint="Si no ingresas stock, comenzará con 0 unidades."
             value={stock}
             onChange={(e) => setStock(e.target.value)}
             disabled={saving}
