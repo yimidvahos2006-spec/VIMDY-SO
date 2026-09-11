@@ -151,7 +151,7 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
             min={0}
             label="Stock inicial"
             placeholder="0"
-            hint="Si no ingresas stock, comenzará con 0 unidades."
+            hint="Si no ingresa stock, comenzará con 0 unidades."
             value={stock}
             onChange={(e) => setStock(e.target.value)}
             disabled={saving}
@@ -172,7 +172,7 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
                   Guardando...
                 </span>
               ) : (
-                " crear producto"
+                "producto"
               )}
             </VimdyButton>
             <VimdyButton variant="ghost" type="button" onClick={onSaved} disabled={saving}>
