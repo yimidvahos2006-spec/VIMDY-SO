@@ -349,7 +349,7 @@ export class DianSoapClient {
     const response = await fetch(endpoint, {
       method: "POST",
       headers: {
-        "Content-Type": "text/xml; charset=utf-8",
+        "Content-Type": "application/soap+xml; charset=utf-8",
         SOAPAction: `"http://wcf.dian.colombia/IWcfDianCustomerServices/SendBillSync"`,
         Accept: "text/xml",
         "User-Agent": "VIMDY-DIAN/1.0",
@@ -381,7 +381,7 @@ export class DianSoapClient {
     const response = await fetch(endpoint, {
       method: "POST",
       headers: {
-        "Content-Type": "text/xml; charset=utf-8",
+        "Content-Type": "application/soap+xml; charset=utf-8",
         SOAPAction: `"http://wcf.dian.colombia/IWcfDianCustomerServices/GetStatus"`,
         Accept: "text/xml",
         "User-Agent": "VIMDY-DIAN/1.0",
@@ -430,7 +430,7 @@ export class DianSoapClient {
     const response = await fetch(endpoint, {
       method: "POST",
       headers: {
-        "Content-Type": "text/xml; charset=utf-8",
+        "Content-Type": "application/soap+xml; charset=utf-8",
         SOAPAction: `"http://wcf.dian.colombia/IWcfDianCustomerServices/SendTestSetAsync"`,
         Accept: "text/xml",
         "User-Agent": "VIMDY-DIAN/1.0",
@@ -463,7 +463,7 @@ export class DianSoapClient {
     const response = await fetch(endpoint, {
       method: "POST",
       headers: {
-        "Content-Type": "text/xml; charset=utf-8",
+        "Content-Type": "application/soap+xml; charset=utf-8",
         SOAPAction: `"http://wcf.dian.colombia/IWcfDianCustomerServices/GetReferenceNotes"`,
         Accept: "text/xml",
         "User-Agent": "VIMDY-DIAN/1.0",
