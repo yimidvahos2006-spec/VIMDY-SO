@@ -246,14 +246,21 @@ export async function loadBusinessOperatingProfile(
   const fullCols =
     "business_type, enabled_modules, sales_channels, inventory_type, production_mode, kds_enabled, printer_enabled, salida_cocina, service_mode, tables_enabled, waiter_mode_enabled, waiter_photos_enabled, kitchen_enabled, kitchen_output_mode, prep_stations";
 
-  let { data, error } = await supabase
+  const primary = await supabase
     .from("businesses")
     .select(fullCols)
     .eq("id", normalizedBusinessId)
     .maybeSingle();
 
-  // Intento 2: fallback a columnas base si las columnas nuevas aún no están migradas en DB remota
-  if (error) {
+  let data: BusinessOperatingProfileRow | null = primary.data
+    ? (primary.data as unknown as BusinessOperatingProfileRow)
+    : null;
+
+  // Intento 2: fallback a columnas base si las columnas nuevas aún no están migradas en DB remota.
+  // Los campos nuevos son opcionales en BusinessOperatingProfileRow, por lo que aquí
+  // se completa explícitamente su ausencia en vez de forzar un objeto parcial a
+  // través de una asignación incompatible.
+  if (primary.error) {
     const baseCols =
       "business_type, enabled_modules, sales_channels, inventory_type, production_mode, kds_enabled, printer_enabled, salida_cocina";
 
@@ -266,7 +273,19 @@ export async function loadBusinessOperatingProfile(
     if (fallback.error) {
       throw new Error(`BUSINESS_CONFIG_LOAD_FAILED: ${fallback.error.message}`);
     }
-    data = fallback.data;
+
+    data = fallback.data
+      ? ({
+          ...(fallback.data as unknown as BusinessOperatingProfileRow),
+          service_mode: undefined,
+          tables_enabled: undefined,
+          waiter_mode_enabled: undefined,
+          waiter_photos_enabled: undefined,
+          kitchen_enabled: undefined,
+          kitchen_output_mode: undefined,
+          prep_stations: undefined,
+        } satisfies BusinessOperatingProfileRow)
+      : null;
   }
 
   if (!data) {

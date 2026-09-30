@@ -3,6 +3,7 @@ import { Navigate } from "react-router-dom";
 
 import { useAuth } from "../../context/AuthContext";
 import { useEnabledModules } from "../../../core/store/useEnabledModules";
+import { useOperationConfig } from "../../../core/store/useOperationConfig";
 import { VimdyButton } from "../ui/VimdyButton";
 import { VimdyLogo } from "../ui/VimdyLogo";
 
@@ -29,10 +30,11 @@ interface GuideStep {
 export function WelcomeGuide({ onComplete }: WelcomeGuideProps) {
   const { user } = useAuth();
   const enabledModules = useEnabledModules();
+  const operationConfig = useOperationConfig();
   const [currentStep, setCurrentStep] = useState(0);
 
   const hasMesas = enabledModules?.includes("mesas") ?? false;
-  const hasMeseros = enabledModules?.includes("mesas") ?? false;
+  const hasMeseros = operationConfig?.waiterModeEnabled ?? false;
   const hasCocina = enabledModules?.includes("cocina") ?? false;
   const hasInventario = enabledModules?.includes("inventario") ?? false;
 

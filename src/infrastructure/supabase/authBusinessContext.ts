@@ -4,6 +4,7 @@ import { markRegistrationOtpSent, resendRegistrationOtp, translateOtpError } fro
 import type { BusinessTypeId } from "../../core/config/businessTypes";
 import type { ModuleId } from "../../core/config/modules";
 import type { KitchenOutputMode } from "../../core/services/kitchenOutput";
+import { kitchenOutputModeStore } from "../../core/store/kitchenOutputModeStore";
 import type { OperationConfig } from "../../core/config/operation";
 import { getCountryDefaults } from "../../core/config/globalization";
 import { getDefaultModulesForBusinessType } from "../../core/config/modules";

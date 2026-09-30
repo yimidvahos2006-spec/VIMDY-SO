@@ -53,7 +53,7 @@ export function OperationSettings() {
       setInventoryType(operationConfig.inventoryType);
       setProductionMode(operationConfig.productionMode);
       setHasTables(operationConfig.tablesEnabled ?? enabledModules?.includes("mesas") ?? false);
-      setHasWaiters(operationConfig.waiterModeEnabled ?? enabledModules?.includes("meseros") ?? false);
+      setHasWaiters(operationConfig.waiterModeEnabled ?? false);
       setHasKitchen(operationConfig.kitchenEnabled ?? enabledModules?.includes("cocina") ?? false);
       setKdsEnabled(operationConfig.kdsEnabled);
       setPrinterEnabled(operationConfig.printerEnabled);
@@ -61,7 +61,7 @@ export function OperationSettings() {
       setUseCustomers(enabledModules?.includes("clientes") ?? false);
     } else if (enabledModules) {
       setHasTables(enabledModules.includes("mesas"));
-      setHasWaiters(enabledModules.includes("meseros"));
+      setHasWaiters(false);
       setHasKitchen(enabledModules.includes("cocina"));
       setHasInventory(enabledModules.includes("inventario"));
       setUseCustomers(enabledModules.includes("clientes"));
@@ -86,7 +86,6 @@ export function OperationSettings() {
     try {
       const modules: ModuleId[] = ["caja", "pedidos"];
       if (hasTables) modules.push("mesas");
-      if (hasWaiters) modules.push("meseros");
       if (hasKitchen) modules.push("cocina");
       if (hasInventory) modules.push("inventario");
       if (useCustomers) modules.push("clientes");
