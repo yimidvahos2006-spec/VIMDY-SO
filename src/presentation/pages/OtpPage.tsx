@@ -24,7 +24,6 @@ export function OtpPage() {
     resendCooldownSeconds,
     pendingRegistrationEmail,
     cancelRegistration,
-    isAuthenticated,
     isLoading,
     error
   } = useAuth();
@@ -50,11 +49,6 @@ export function OtpPage() {
     return () => window.clearInterval(intervalId);
   }, [resendCooldownSeconds]);
 
-  // Una sesión ya autenticada no necesita esta pantalla.
-  if (isAuthenticated) {
-    return <Navigate to="/dashboard" replace />;
-  }
-
   // Si se perdió el contexto del registro pendiente, vuelve a registro.
   if (!email) {
     return <Navigate to="/registro" replace />;
@@ -74,9 +68,12 @@ export function OtpPage() {
 
     try {
       await verifyOtp(trimmedCode);
-      navigate("/dashboard", { replace: true });
-    } catch {
-      // AuthContext ya coloca el mensaje en `error`.
+    } catch (err) {
+      setLocalError(
+        err instanceof Error
+          ? err.message
+          : "No se pudo verificar el código. Inténtalo de nuevo."
+      );
     }
   }
 
@@ -94,14 +91,11 @@ export function OtpPage() {
       setCooldown(resendCooldownSeconds());
       setShowDeliveryHelp(true);
     } catch (err) {
-      // Si AuthContext no propagó un mensaje, mostramos el error local.
-      if (!error) {
-        setLocalError(
-          err instanceof Error
-            ? err.message
-            : "No se pudo reenviar el código. Inténtalo de nuevo."
-        );
-      }
+      setLocalError(
+        err instanceof Error
+          ? err.message
+          : "No se pudo reenviar el código. Inténtalo de nuevo."
+      );
     } finally {
       setIsResending(false);
     }

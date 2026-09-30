@@ -9,23 +9,41 @@ interface Props {
   children: React.ReactNode;
 }
 
-/**
- * Envuelve TODO lo que va detrás del login (Dashboard, Caja, Cocina, etc.)
- * y aplica la regla del PASO 1 del onboarding inteligente:
- *
- *   - Si el negocio todavía no terminó la configuración inicial
- *     (onboardingCompleted === false en Supabase), lo manda automáticamente
- *     a /onboarding en vez de dejarlo entrar al Dashboard.
- *   - Si ya la terminó, muestra la intro cinematográfica de VIMDY UNA sola
- *     vez (appIntroStore, flag en localStorage por dispositivo) y luego
- *     deja pasar a las children (Dashboard, etc.).
- *
- * Se coloca DENTRO de ProtectedRoute (ver App.tsx), así que cuando esto se
- * evalúa ya sabemos que hay una sesión válida y que useAuth().isReady es true.
- */
 export function OnboardingGate({ children }: Props) {
-  const { onboardingCompleted } = useAuth();
+  const {
+    onboardingCompleted,
+    businessId,
+    businessCount,
+    businessBootstrapError,
+    retryBusinessBootstrap
+  } = useAuth();
   const [showIntro, setShowIntro] = useState(() => !appIntroStore.hasBeenShown());
+
+  if (businessBootstrapError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-vimdy-background px-4">
+        <div className="w-full max-w-md rounded-2xl border border-vimdy-border bg-vimdy-surface p-8 text-center">
+          <h1 className="text-lg font-semibold text-vimdy-text">No pudimos cargar tu negocio</h1>
+          <p className="mt-2 text-sm text-vimdy-text-secondary">Tu sesión sigue activa. Revisa tu conexión y vuelve a intentarlo.</p>
+          <button
+            type="button"
+            onClick={() => void retryBusinessBootstrap()}
+            className="mt-6 w-full rounded-xl bg-vimdy-accent px-4 py-3 text-sm font-medium text-white hover:opacity-90"
+          >
+            Reintentar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!businessId && businessCount > 1) {
+    return <Navigate to="/business-selector" replace />;
+  }
+
+  if (!businessId && businessCount === 0) {
+    return <Navigate to="/crear-negocio" replace />;
+  }
 
   if (!onboardingCompleted) {
     return <Navigate to="/onboarding" replace />;

@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+
 import { VimdyLogo } from "../ui/VimdyLogo";
 import { VimdyButton } from "../ui/VimdyButton";
 import { WelcomeEmblem } from "./WelcomeEmblem";
@@ -41,7 +43,7 @@ export function WelcomeStep({ ownerName, onStart }: WelcomeStepProps) {
               "linear-gradient(135deg, rgba(56,189,248,.35), transparent 40%, rgba(37,99,235,.35))",
             backgroundClip: "padding-box",
             WebkitBackgroundClip: "padding-box",
-          } as React.CSSProperties}
+          } as CSSProperties}
         />
 
         {/* Partículas ambientales (dentro del contenedor) */}

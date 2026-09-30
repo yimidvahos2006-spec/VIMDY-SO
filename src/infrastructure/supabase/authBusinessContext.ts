@@ -124,17 +124,46 @@ async function resolveBusinessSessionWithRetry(
   maxAttempts = 4
 ): Promise<BusinessSession | null> {
   const delays = [150, 350, 750, 1500];
+  let lastError: unknown = null;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const session = await resolveBusinessSession(userId, ownerName);
-    if (session) return session;
-
-    if (attempt < maxAttempts - 1) {
+    try {
+      const session = await resolveBusinessSession(userId, ownerName);
+      if (session) return session;
+      return null;
+    } catch (error) {
+      lastError = error;
+      if (attempt === maxAttempts - 1) break;
       await new Promise((resolve) => setTimeout(resolve, delays[attempt] ?? 1500));
     }
   }
 
-  return null;
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("No se pudo resolver el negocio del usuario.");
+}
+
+export async function getUserBusinessesWithRetry(
+  userId: string,
+  ownerName: string,
+  maxAttempts = 4
+): Promise<BusinessSession[]> {
+  const delays = [150, 350, 750, 1500];
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      return await getUserBusinesses(userId, ownerName);
+    } catch (error) {
+      lastError = error;
+      if (attempt === maxAttempts - 1) break;
+      await new Promise((resolve) => setTimeout(resolve, delays[attempt] ?? 1500));
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("No se pudieron cargar los negocios del usuario.");
 }
 
 const PENDING_REGISTRATION_KEY = "vimdy_pending_registration";
@@ -179,8 +208,11 @@ function translateAuthError(rawMessage: string | undefined): string {
   if (message.includes("provider_disabled") || message.includes("provider not configured")) {
     return "El método de autenticación con Google no está disponible. Usa correo y contraseña o el código por email.";
   }
-  if (message.includes("fetch") || message.includes("network")) {
-    return "No hay conexión con el servidor. Revisa tu internet e inténtalo de nuevo.";
+  if (message.includes("fetch") || message.includes("network") || message.includes("timeout") || message.includes("gateway")) {
+    return "No hay conexión estable con VIMDY. Revisa tu internet e inténtalo de nuevo.";
+  }
+  if (message.includes("email rate limit exceeded")) {
+    return "Se alcanzó el límite temporal de correos. Espera unos minutos y vuelve a intentarlo.";
   }
 
   return rawMessage || "Ocurrió un error inesperado. Inténtalo de nuevo.";
@@ -275,7 +307,12 @@ export async function resolveBusinessSession(
     .limit(1)
     .maybeSingle();
 
-  if (error || !membership) return null;
+  if (error) {
+    console.error("[AUTH] business lookup failed", error);
+    throw new Error("No pudimos cargar tu negocio. Revisa tu conexión e inténtalo de nuevo.");
+  }
+
+  if (!membership) return null;
 
   const businessRow = membership.businesses as unknown as BusinessRow | undefined;
 
@@ -367,18 +404,33 @@ export function clearPendingRegistration(): void {
  * el código en authOtp.ts.
  */
 export async function beginRegistration(input: RegisterBusinessInput): Promise<void> {
+  const normalizedEmail = input.email.trim().toLowerCase();
+  const businessName = input.businessName.trim();
+  const ownerName = input.ownerName.trim();
+  const password = input.password;
+
+  if (!businessName || !ownerName) {
+    throw new Error("Completa el nombre del negocio y tu nombre.");
+  }
+  if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    throw new Error("Ingresa un correo válido.");
+  }
+  if (password.length < 8) {
+    throw new Error("La contraseña debe tener al menos 8 caracteres.");
+  }
+
   const startTime = Date.now();
-  console.log("[VIMDY-AUTH] beginRegistration: signUp called for email:", input.email.replace(/(.).*?(.)@/, "$1***$2@"));
+  console.log("[VIMDY-AUTH] beginRegistration: signUp called for email:", normalizedEmail.replace(/(.).*?(.)@/, "$1***$2@"));
 
   let data: { user: { id?: string; identities?: unknown[]; email_confirmed_at?: string | null } | null } | undefined;
   let error: { message: string; status?: number } | null = null;
 
   try {
     const result = await supabase.auth.signUp({
-      email: input.email,
-      password: input.password,
+      email: normalizedEmail,
+      password,
       options: {
-        data: { full_name: input.ownerName }
+        data: { full_name: ownerName }
       }
     });
     data = result.data as typeof data;
@@ -404,10 +456,10 @@ export async function beginRegistration(input: RegisterBusinessInput): Promise<v
     if (msg.includes("user already registered") || msg.includes("already registered")) {
       console.log("[VIMDY-AUTH] signUp returned 'user already registered' — calling resendRegistrationOtp");
       savePendingRegistration({
-        businessName: input.businessName,
-        ownerName: input.ownerName,
+        businessName,
+        ownerName,
         country: input.country,
-        email: input.email
+        email: normalizedEmail
       });
       await resendRegistrationOtp();
       return;
@@ -419,10 +471,10 @@ export async function beginRegistration(input: RegisterBusinessInput): Promise<v
   if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
     console.log("[VIMDY-AUTH] signUp returned existing unconfirmed user (identities=[]), calling resendRegistrationOtp");
     savePendingRegistration({
-      businessName: input.businessName,
-      ownerName: input.ownerName,
+      businessName,
+      ownerName,
       country: input.country,
-      email: input.email
+      email: normalizedEmail
     });
     await resendRegistrationOtp();
     return;
@@ -434,10 +486,10 @@ export async function beginRegistration(input: RegisterBusinessInput): Promise<v
   // aunque la página se recargue.
   markRegistrationOtpSent(input.email);
   savePendingRegistration({
-    businessName: input.businessName,
-    ownerName: input.ownerName,
+    businessName,
+    ownerName,
     country: input.country,
-    email: input.email
+    email: normalizedEmail
   });
 }
 
@@ -594,13 +646,25 @@ export async function getUserBusinesses(userId: string, ownerName: string): Prom
     )
     .eq("user_id", userId);
 
-  if (error || !memberships || memberships.length === 0) {
+  if (error) {
+    console.error("[AUTH] user businesses lookup failed", error);
+    throw new Error("No pudimos cargar tus negocios. Revisa tu conexión e inténtalo de nuevo.");
+  }
+
+  if (!memberships || memberships.length === 0) {
     return [];
   }
 
   return memberships.map((membership: Record<string, unknown>) => {
+    const businessId = membership.business_id;
+    const role = membership.role;
+
+    if (typeof businessId !== "string" || typeof role !== "string") {
+      throw new Error("La sesión contiene una membresía de negocio inválida.");
+    }
+
     const businessRow = membership.businesses as unknown as BusinessRow | undefined;
-    return toBusinessSession(userId, membership.business_id as string, membership.role as string, ownerName, businessRow);
+    return toBusinessSession(userId, businessId, role, ownerName, businessRow);
   });
 }
 
@@ -615,7 +679,7 @@ export async function signIn(email: string, password: string): Promise<BusinessS
   }
 
   const ownerName = (authData.user.user_metadata?.full_name as string | undefined) ?? "";
-  const businesses = await getUserBusinesses(authData.user.id, ownerName);
+  const businesses = await getUserBusinessesWithRetry(authData.user.id, ownerName);
 
   if (businesses.length === 0) {
     return null;
@@ -632,7 +696,41 @@ export async function signIn(email: string, password: string): Promise<BusinessS
 }
 
 const LOGIN_OTP_RESEND_COOLDOWN_MS = 30_000;
-let lastLoginOtpResendAt = 0;
+const LOGIN_OTP_RESEND_STORAGE_PREFIX = "vimdy:auth:login-resend-at:";
+const memoryLoginOtpResendAt = new Map<string, number>();
+
+function loginOtpStorageKey(email: string): string {
+  return `${LOGIN_OTP_RESEND_STORAGE_PREFIX}${encodeURIComponent(email.trim().toLowerCase())}`;
+}
+
+function readLoginOtpResendAt(email: string): number {
+  const key = loginOtpStorageKey(email);
+  const inMemory = memoryLoginOtpResendAt.get(key) ?? 0;
+
+  try {
+    const raw = window.localStorage.getItem(key);
+    const parsed = raw ? Number(raw) : 0;
+    if (Number.isFinite(parsed) && parsed > inMemory) {
+      memoryLoginOtpResendAt.set(key, parsed);
+      return parsed;
+    }
+  } catch {
+    // localStorage puede no estar disponible.
+  }
+
+  return inMemory;
+}
+
+function writeLoginOtpResendAt(email: string, timestamp: number): void {
+  const key = loginOtpStorageKey(email);
+  memoryLoginOtpResendAt.set(key, timestamp);
+
+  try {
+    window.localStorage.setItem(key, String(timestamp));
+  } catch {
+    // El mapa en memoria mantiene el cooldown durante esta sesión.
+  }
+}
 
 /**
  * Inicia el flujo de "Ingresar con código": envía un email con un código OTP
@@ -642,8 +740,20 @@ let lastLoginOtpResendAt = 0;
  * hace: evita enumeración de usuarios.
  */
 export async function requestLoginOtp(email: string): Promise<void> {
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    throw new Error("Ingresa un correo válido.");
+  }
+
+  const lastSentAt = readLoginOtpResendAt(normalizedEmail);
+  const elapsed = Date.now() - lastSentAt;
+  if (lastSentAt !== 0 && elapsed < LOGIN_OTP_RESEND_COOLDOWN_MS) {
+    const secondsLeft = Math.ceil((LOGIN_OTP_RESEND_COOLDOWN_MS - elapsed) / 1000);
+    throw new Error(`Espera ${secondsLeft}s antes de pedir otro código.`);
+  }
+
   const { error } = await supabase.auth.signInWithOtp({
-    email,
+    email: normalizedEmail,
     options: {
       shouldCreateUser: false
     }
@@ -652,6 +762,8 @@ export async function requestLoginOtp(email: string): Promise<void> {
   if (error) {
     throw new Error(translateAuthError(error.message));
   }
+
+  writeLoginOtpResendAt(normalizedEmail, Date.now());
 }
 
 /**
@@ -676,7 +788,7 @@ export async function verifyLoginOtp(email: string, token: string): Promise<Busi
   }
 
   const ownerName = (authUser.user_metadata?.full_name as string | undefined) ?? "";
-  const businesses = await getUserBusinesses(authUser.id, ownerName);
+  const businesses = await getUserBusinessesWithRetry(authUser.id, ownerName);
 
   if (businesses.length === 0) {
     return null;
@@ -702,15 +814,22 @@ export async function verifyLoginOtp(email: string, token: string): Promise<Busi
  * requestLoginOtp() usa para disparar el código inicial.
  */
 export async function resendLoginOtp(email: string): Promise<void> {
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    throw new Error("Ingresa un correo válido.");
+  }
+
   const now = Date.now();
-  const elapsed = now - lastLoginOtpResendAt;
-  if (lastLoginOtpResendAt !== 0 && elapsed < LOGIN_OTP_RESEND_COOLDOWN_MS) {
+  const lastSentAt = readLoginOtpResendAt(normalizedEmail);
+  const elapsed = now - lastSentAt;
+
+  if (lastSentAt !== 0 && elapsed < LOGIN_OTP_RESEND_COOLDOWN_MS) {
     const secondsLeft = Math.ceil((LOGIN_OTP_RESEND_COOLDOWN_MS - elapsed) / 1000);
     throw new Error(`Espera ${secondsLeft}s antes de pedir otro código.`);
   }
 
   const { error } = await supabase.auth.signInWithOtp({
-    email,
+    email: normalizedEmail,
     options: {
       shouldCreateUser: false
     }
@@ -720,15 +839,21 @@ export async function resendLoginOtp(email: string): Promise<void> {
     throw new Error(translateAuthError(error.message));
   }
 
-  lastLoginOtpResendAt = now;
+  writeLoginOtpResendAt(normalizedEmail, now);
 }
 
-export function getLoginOtpCooldownSeconds(): number {
-  if (lastLoginOtpResendAt === 0) return 0;
-  const elapsed = Date.now() - lastLoginOtpResendAt;
+export function getLoginOtpCooldownSeconds(email?: string): number {
+  const pendingEmail = email?.trim().toLowerCase();
+  if (!pendingEmail) return 0;
+
+  const lastSentAt = readLoginOtpResendAt(pendingEmail);
+  if (lastSentAt === 0) return 0;
+
+  const elapsed = Date.now() - lastSentAt;
   const remaining = LOGIN_OTP_RESEND_COOLDOWN_MS - elapsed;
   return remaining > 0 ? Math.ceil(remaining / 1000) : 0;
 }
+
 
 /**
  * Inicia sesión con Google OAuth. Redirige al usuario al popup de Google
@@ -748,7 +873,7 @@ export async function signInWithGoogle(): Promise<void> {
 }
 
 export async function signOut(): Promise<void> {
-  await supabase.auth.signOut();
+  await supabase.auth.signOut({ scope: "local" });
   setCurrentBusinessId(null);
   setCurrentBranchId(null);
 }
@@ -761,7 +886,12 @@ export async function signOut(): Promise<void> {
  * El link del correo apunta a /actualizar-password (ver App.tsx).
  */
 export async function requestPasswordReset(email: string): Promise<void> {
-  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    throw new Error("Ingresa un correo válido.");
+  }
+
+  const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
     redirectTo: `${APP_URL}/actualizar-password`
   });
 
@@ -777,7 +907,17 @@ export async function requestPasswordReset(email: string): Promise<void> {
  * esa sesión exista; si no, Supabase responde con un error claro.
  */
 export async function updatePassword(newPassword: string): Promise<void> {
-  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  const trimmedPassword = newPassword;
+  if (trimmedPassword.length < 8) {
+    throw new Error("La contraseña debe tener al menos 8 caracteres.");
+  }
+
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError || !sessionData.session) {
+    throw new Error("El enlace de recuperación no es válido o ya expiró. Solicita uno nuevo.");
+  }
+
+  const { error } = await supabase.auth.updateUser({ password: trimmedPassword });
 
   if (error) {
     throw new Error(translateAuthError(error.message));
@@ -946,6 +1086,37 @@ export async function setOperationConfig(businessId: string, config: OperationCo
   }
 }
 
+async function resolveBusinessSessionByBusinessId(
+  userId: string,
+  ownerName: string,
+  businessId: string
+): Promise<BusinessSession | null> {
+  const { data: membership, error } = await supabase
+    .from("business_members")
+    .select(
+      "business_id, role, businesses(name, country, currency, language, timezone, tax_rate, onboarding_completed, business_type, enabled_modules, salida_cocina)"
+    )
+    .eq("user_id", userId)
+    .eq("business_id", businessId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[AUTH] created business lookup failed", error);
+    throw new Error("No pudimos cargar el negocio creado. Revisa tu conexión e inténtalo de nuevo.");
+  }
+
+  if (!membership) return null;
+
+  const businessRow = membership.businesses as unknown as BusinessRow | undefined;
+  return toBusinessSession(
+    userId,
+    businessId,
+    String(membership.role ?? "ADMIN"),
+    ownerName,
+    businessRow
+  );
+}
+
 /**
  * Creates an additional business for an existing user.
  *
@@ -1001,16 +1172,42 @@ export async function createAdditionalBusiness(
     throw new Error("Tu sesión no es válida. Vuelve a iniciar sesión.");
   }
 
-  const businessSession = await resolveBusinessSession(userData.user.id, input.ownerName);
+  const returnedBusinessId =
+    fnData && typeof fnData === "object" && typeof (fnData as Record<string, unknown>).businessId === "string"
+      ? String((fnData as Record<string, unknown>).businessId)
+      : null;
+
+  let businessSession: BusinessSession | null = null;
+  if (returnedBusinessId) {
+    businessSession = await resolveBusinessSessionByBusinessId(
+      userData.user.id,
+      input.ownerName,
+      returnedBusinessId
+    );
+
+    if (!businessSession) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      businessSession = await resolveBusinessSessionByBusinessId(
+        userData.user.id,
+        input.ownerName,
+        returnedBusinessId
+      );
+    }
+  }
+
   if (!businessSession) {
-    throw new Error("El negocio se creó pero no se pudo cargar. Intenta iniciar sesión de nuevo.");
+    throw new Error("El negocio se creó pero no se pudo cargar todavía. Vuelve a intentarlo en unos segundos.");
   }
 
   setCurrentBusinessId(businessSession.businessId);
-  setCurrentBranchId(await resolveDefaultBranchId(businessSession.businessId));
+  const returnedBranchId =
+    fnData && typeof fnData === "object" && typeof (fnData as Record<string, unknown>).branchId === "string"
+      ? String((fnData as Record<string, unknown>).branchId)
+      : await resolveDefaultBranchId(businessSession.businessId);
+  setCurrentBranchId(returnedBranchId);
   return businessSession;
 }
 
 export function __resetLoginOtpCooldown(): void {
-  lastLoginOtpResendAt = 0;
+  memoryLoginOtpResendAt.clear();
 }

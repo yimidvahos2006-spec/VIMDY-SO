@@ -10,22 +10,53 @@ export function BusinessSelectorPage() {
   const navigate = useNavigate();
   const [businesses, setBusinesses] = useState<BusinessSession[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     if (!isAuthenticated || !isReady || !user?.id) return;
 
     let cancelled = false;
 
-    getUserBusinesses(user.id, user.name).then((list) => {
-      if (cancelled) return;
-      setBusinesses(list);
-      setLoading(false);
-    });
+    setLoadError(null);
+    setLoading(true);
+
+    getUserBusinesses(user.id, user.name)
+      .then((list) => {
+        if (cancelled) return;
+
+        if (list.length === 1) {
+          // Resolver el contexto antes de entrar al Dashboard. Un simple
+          // <Navigate> aquí dejaría businessId/branchId sin hidratar.
+          void switchBusiness(list[0]).catch((switchError) => {
+            if (cancelled) return;
+            setLoadError(
+              switchError instanceof Error
+                ? switchError.message
+                : "No pudimos abrir tu negocio. Inténtalo de nuevo."
+            );
+            setLoading(false);
+          });
+          return;
+        }
+
+        setBusinesses(list);
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setLoadError(
+          err instanceof Error
+            ? err.message
+            : "No pudimos cargar tus negocios. Inténtalo de nuevo."
+        );
+        setLoading(false);
+      });
 
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, isReady, user?.id]);
+  }, [isAuthenticated, isReady, user?.id, reloadToken, switchBusiness]);
 
   if (!isReady) {
     return (
@@ -39,6 +70,27 @@ export function BusinessSelectorPage() {
     return <Navigate to="/login" replace />;
   }
 
+  if (loadError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-vimdy-background px-4">
+        <div className="w-full max-w-md rounded-2xl border border-vimdy-border bg-vimdy-surface p-8 text-center">
+          <p className="text-vimdy-danger text-sm">{loadError}</p>
+          <button
+            type="button"
+            onClick={() => {
+              setLoadError(null);
+              setLoading(true);
+              setReloadToken((value) => value + 1);
+            }}
+            className="mt-5 w-full rounded-xl border border-vimdy-border px-4 py-3 text-sm text-vimdy-text"
+          >
+            Reintentar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-vimdy-background text-vimdy-text">
@@ -48,7 +100,7 @@ export function BusinessSelectorPage() {
   }
 
   if (businesses.length === 0) {
-    return <Navigate to="/onboarding" replace />;
+    return <Navigate to="/crear-negocio" replace />;
   }
 
   if (businesses.length === 1) {

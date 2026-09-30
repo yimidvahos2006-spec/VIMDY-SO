@@ -1,14 +1,41 @@
-import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
-
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
 import { useNavigate } from "react-router-dom";
+import type { Session } from "@supabase/supabase-js";
 
-import { supabase, setCurrentBusinessId, setCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
+import {
+  supabase,
+  setCurrentBusinessId,
+  setCurrentBranchId
+} from "../../infrastructure/supabase/supabaseClient";
 import { startRealtimeSync, stopRealtimeSync } from "../../infrastructure/supabase/realtimeSync";
-import { startOfflineSalesSync, stopOfflineSalesSync } from "../../core/offline/syncPendingSales";
-import { startOfflineInventorySync, stopOfflineInventorySync } from "../../core/offline/syncPendingInventoryAdjustments";
-import { startOfflineTableSync, stopOfflineTableSync } from "../../core/offline/syncPendingTableOperations";
-import { startOfflineCustomerSync, stopOfflineCustomerSync } from "../../core/offline/syncPendingCustomerOperations";
-import { startOfflineKitchenSync, stopOfflineKitchenSync } from "../../core/offline/syncPendingKitchenOrders";
+import {
+  startOfflineSalesSync,
+  stopOfflineSalesSync
+} from "../../core/offline/syncPendingSales";
+import {
+  startOfflineInventorySync,
+  stopOfflineInventorySync
+} from "../../core/offline/syncPendingInventoryAdjustments";
+import {
+  startOfflineTableSync,
+  stopOfflineTableSync
+} from "../../core/offline/syncPendingTableOperations";
+import {
+  startOfflineCustomerSync,
+  stopOfflineCustomerSync
+} from "../../core/offline/syncPendingCustomerOperations";
+import {
+  startOfflineKitchenSync,
+  stopOfflineKitchenSync
+} from "../../core/offline/syncPendingKitchenOrders";
 import { pendingSalesStore } from "../../core/offline/pendingSalesStore";
 import { pendingCustomerOperationsStore } from "../../core/offline/pendingCustomerOperationsStore";
 import { pendingTableOperationsStore } from "../../core/offline/pendingTableOperationsStore";
@@ -16,11 +43,9 @@ import { pendingInventoryAdjustmentsStore } from "../../core/offline/pendingInve
 import { pendingKitchenOrdersStore } from "../../core/offline/pendingKitchenOrdersStore";
 import {
   signIn,
-  signOut,
   beginRegistration,
   completeRegistration,
-  resolveBusinessSession,
-  getUserBusinesses,
+  getUserBusinessesWithRetry,
   getPendingRegistration,
   clearPendingRegistration,
   markOnboardingCompleted,
@@ -52,7 +77,11 @@ import { subscriptionStore } from "../../core/store/subscriptionStore";
 import { businessOperatingProfileStore } from "../../core/store/businessOperatingProfileStore";
 import { operationConfigStore } from "../../core/store/operationConfigStore";
 import { hydrateBusinessOperatingProfile } from "../../core/bootstrap/businessOperatingProfileBootstrap";
-import { CountryCode, CurrencyCode, LanguageCode } from "../../core/config/globalization";
+import {
+  CountryCode,
+  CurrencyCode,
+  LanguageCode
+} from "../../core/config/globalization";
 import type { ModuleId } from "../../core/config/modules";
 
 interface AuthUser {
@@ -73,70 +102,71 @@ interface AuthContextValue {
   role: AuthRole | null;
   sessionId: string | null;
   businessId: string | null;
+  businessCount: number;
   isAuthenticated: boolean;
   isReady: boolean;
   isLoading: boolean;
   error: string | null;
-  /** Fase 3 — Onboarding inteligente: false hasta terminar el asistente de /onboarding. */
+  businessBootstrapError: string | null;
   onboardingCompleted: boolean;
   login: (email: string, password: string) => Promise<void>;
-  /**
-   * Registro de negocio — PASO 1: crea el usuario en Supabase Auth (sin
-   * confirmar) y dispara el correo con el código OTP de 6 dígitos. NO deja
-   * sesión activa todavía — para eso está verifyOtp().
-   */
   register: (input: RegisterBusinessInput) => Promise<void>;
-  /**
-   * Registro de negocio — PASO 2: verifica el código OTP de 6 dígitos y,
-   * si es correcto, crea el negocio + membresía ADMIN + trial de 14 días
-   * (Edge Function register-business) y deja la sesión activa.
-   */
   verifyOtp: (code: string) => Promise<void>;
-  /** Reenvía el código OTP al correo del registro en curso (cooldown de 30s en cliente). */
   resendOtp: () => Promise<void>;
-  /** Segundos restantes antes de poder reenviar el código; 0 si ya se puede. */
   resendCooldownSeconds: () => number;
-  /** Correo al que se envió el código, para mostrarlo en la pantalla de OTP. Null si no hay registro en curso. */
   pendingRegistrationEmail: () => string | null;
-  /** Cancela un registro en curso (botón "volver" en la pantalla de OTP). */
   cancelRegistration: () => void;
   logout: () => Promise<void>;
-  /** Recuperación de contraseña — paso 1: envía el correo. No lanza si el correo no existe (Supabase no lo revela). */
   requestPasswordReset: (email: string) => Promise<void>;
-  /** Recuperación de contraseña — paso 2: fija la nueva, usando la sesión temporal del link del correo. */
   updatePassword: (newPassword: string) => Promise<void>;
-  /**
-   * Login por código OTP — paso 1: envía un email con código de 6 dígitos.
-   * Supabase no revela si el email existe (responde éxito igual), evitando
-   * enumeración de usuarios.
-   */
   requestLoginOtp: (email: string) => Promise<void>;
-  /** Login por código OTP — paso 2: verifica el código y resuelve la sesión de negocio. */
   verifyLoginOtp: (email: string, token: string) => Promise<void>;
-  /** Reenvía el código OTP de login. Cooldown de 30s en cliente. */
   resendLoginOtp: (email: string) => Promise<void>;
-  /** Segundos restantes del cooldown de reenvío de OTP de login; 0 si ya se puede. */
-  loginOtpCooldownSeconds: () => number;
-  /** Inicia sesión con Google OAuth. */
+  loginOtpCooldownSeconds: (email?: string) => number;
   signInWithGoogle: () => Promise<void>;
-  /** Verificación de permiso en el cliente, contra el rol ya cargado en sesión. */
   can: (permissionId: string) => boolean;
-  /** Marca el onboarding como terminado, real en Supabase (PASO 11 del asistente). */
   completeOnboarding: () => Promise<void>;
   switchBusiness: (businessSession: BusinessSession) => Promise<void>;
+  retryBusinessBootstrap: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-/**
- * Convierte lo que devuelve signIn()/completeRegistration()/la sesión
- * restaurada de Supabase en el shape que ya consumía toda la UI
- * (AuthUser + AuthRole), para no tener que tocar ProtectedRoute,
- * UserSessionBadge, SettingsDashboard, etc.
- */
-function toAuthState(session: BusinessSession, email: string): { user: AuthUser; role: AuthRole } {
+function authUserFromSupabase(user: {
+  id: string;
+  email?: string | null;
+  user_metadata?: Record<string, unknown> | null;
+}): AuthUser {
+  const email = user.email ?? "";
+  const metadata = user.user_metadata ?? {};
+  const name =
+    typeof metadata.full_name === "string" && metadata.full_name.trim()
+      ? metadata.full_name.trim()
+      : email.split("@")[0] || "Usuario";
+
+  const avatar =
+    typeof metadata.avatar_url === "string" && metadata.avatar_url.trim()
+      ? metadata.avatar_url
+      : undefined;
+
   return {
-    user: { id: session.userId, name: session.ownerName || email.split("@")[0], email },
+    id: user.id,
+    name,
+    email,
+    avatar
+  };
+}
+
+function toAuthState(
+  session: BusinessSession,
+  email: string
+): { user: AuthUser; role: AuthRole } {
+  return {
+    user: {
+      id: session.userId,
+      name: session.ownerName || email.split("@")[0],
+      email
+    },
     role: {
       id: session.role,
       name: session.role,
@@ -145,20 +175,13 @@ function toAuthState(session: BusinessSession, email: string): { user: AuthUser;
   };
 }
 
-/**
- * Vuelca en businessStore/companyConfigStore (el estado local que lee toda
- * la UI: Settings, formateo de precios, fechas, etc) la configuración
- * inteligente por país que ya quedó calculada y guardada en `businesses`
- * al registrar el negocio. Se llama al hacer login, al registrarse y al
- * restaurar una sesión guardada — así el usuario "ya encuentra todo listo"
- * (moneda, idioma, zona horaria e impuesto correctos) sin tocar nada.
- */
-function hydrateBusinessConfig(session: BusinessSession) {
+function hydrateBusinessConfig(session: BusinessSession): void {
   businessStore.update({
     name: session.businessName,
     owner: session.ownerName,
     country: session.country as CountryCode
   });
+
   companyConfigStore.update({
     country: session.country as CountryCode,
     currency: session.currency as CurrencyCode,
@@ -166,35 +189,46 @@ function hydrateBusinessConfig(session: BusinessSession) {
     timezone: session.timezone,
     tax: session.taxRate
   });
-  // PASO 4 del onboarding: el Sidebar (VimdySidebar.tsx) lee este store
-  // para mostrar/ocultar Mesas, Cocina, etc. según lo que el negocio
-  // guardó realmente en Supabase (enabled_modules).
+
   enabledModulesStore.set(session.enabledModules as ModuleId[]);
-  // La salida de cocina ya no se hidrata desde el campo legacy de la sesión.
-  // `hydrateBusinessOperatingProfile()` carga la configuración operativa nueva
-  // y sincroniza el store de salida sin arrastrar valores de otro negocio.
 }
 
-/**
- * VIMDY — FASE 7: carga en subscriptionStore el estado real del plan del
- * negocio (trial/monthly/yearly, días restantes, método de pago...) desde
- * Supabase. Se llama en los mismos 3 momentos que hydrateBusinessConfig
- * (restaurar sesión, login, registro) para que el contador de PASO 3 y el
- * gate de cobro de PASO 5/9 tengan datos reales desde el primer render.
- * Si falla (sin red, etc.) no rompe el login — simplemente no bloquea ni
- * muestra avisos hasta que se pueda leer de nuevo.
- */
 async function hydrateSubscription(businessId: string): Promise<void> {
   try {
     const subscription = await fetchSubscription(businessId);
     if (subscription) {
       subscriptionStore.hydrate(subscription);
-      const { evaluateSubscriptionNotifications } = await import("../../core/store/subscriptionNotifications");
+      const { evaluateSubscriptionNotifications } = await import(
+        "../../core/store/subscriptionNotifications"
+      );
       evaluateSubscriptionNotifications();
     }
   } catch {
-    // Sin conexión momentánea: no bloqueamos el login por esto.
+    // No bloqueamos el acceso por un fallo secundario del estado de suscripción.
   }
+}
+
+function stopLocalBusinessSyncs(): void {
+  stopRealtimeSync();
+  stopOfflineSalesSync();
+  stopOfflineInventorySync();
+  stopOfflineTableSync();
+  stopOfflineCustomerSync();
+  stopOfflineKitchenSync();
+
+  void pendingSalesStore.clear();
+  void pendingCustomerOperationsStore.clear();
+  void pendingTableOperationsStore.clear();
+  void pendingInventoryAdjustmentsStore.clear();
+  void pendingKitchenOrdersStore.clear();
+
+  setCurrentBusinessId(null);
+  setCurrentBranchId(null);
+  enabledModulesStore.clear();
+  subscriptionStore.clear();
+  kitchenOutputModeStore.clear();
+  businessOperatingProfileStore.clear();
+  operationConfigStore.clear();
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -202,246 +236,382 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [role, setRole] = useState<AuthRole | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [businessId, setBusinessId] = useState<string | null>(null);
+  const [businessCount, setBusinessCount] = useState(0);
   const [onboardingCompleted, setOnboardingCompleted] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [businessBootstrapError, setBusinessBootstrapError] = useState<string | null>(null);
+
   const navigate = useNavigate();
+  const bootstrapGeneration = useRef(0);
+  const authOperationInFlight = useRef(0);
 
-  // Al montar: si Supabase Auth ya tiene una sesión guardada (localStorage,
-  // la maneja el propio SDK), la restauramos y resolvemos el business_id
-  // automáticamente, sin pedirle credenciales de nuevo al usuario.
-  useEffect(() => {
-    let cancelled = false;
+  const clearAuthState = useCallback(() => {
+    stopLocalBusinessSyncs();
+    setUser(null);
+    setRole(null);
+    setSessionId(null);
+    setBusinessId(null);
+    setBusinessCount(0);
+    setOnboardingCompleted(false);
+    setBusinessBootstrapError(null);
+  }, []);
 
-    supabase.auth.getSession().then(async ({ data }) => {
-      const authUser = data.session?.user;
+  const applyBusinessSession = useCallback(
+    async (businessSession: BusinessSession, email: string) => {
+      const { user: authUserState, role: authRole } = toAuthState(
+        businessSession,
+        email
+      );
 
-      if (!authUser) {
-        if (!cancelled) setIsReady(true);
+      stopLocalBusinessSyncs();
+
+      setCurrentBusinessId(businessSession.businessId);
+      const branchId = await resolveDefaultBranchId(businessSession.businessId);
+      setCurrentBranchId(branchId);
+
+      void hydrateBusinessOperatingProfile(businessSession.businessId);
+      hydrateBusinessConfig(businessSession);
+      void hydrateSubscription(businessSession.businessId);
+      void ensureIdentity(
+        container.permissionEngine.get(),
+        container.roleEngine.get()
+      );
+
+      startRealtimeSync(businessSession.businessId);
+      startOfflineSalesSync();
+      startOfflineInventorySync();
+      startOfflineTableSync();
+      startOfflineCustomerSync();
+      startOfflineKitchenSync();
+
+      setUser(authUserState);
+      setRole(authRole);
+      setSessionId(businessSession.userId);
+      setBusinessId(businessSession.businessId);
+      setBusinessCount(1);
+      setOnboardingCompleted(businessSession.onboardingCompleted);
+      setBusinessBootstrapError(null);
+    },
+    []
+  );
+
+  const hydrateAuthSession = useCallback(
+    async (session: Session | null, navigateOnCompletion = false): Promise<void> => {
+      const generation = ++bootstrapGeneration.current;
+
+      if (!session?.user) {
+        clearAuthState();
+        setIsReady(true);
         return;
       }
 
-      const ownerName = (authUser.user_metadata?.full_name as string | undefined) ?? "";
-      const businesses = await getUserBusinesses(authUser.id, ownerName);
+      const authUser = session.user;
+      const email = authUser.email ?? "";
+      setUser(authUserFromSupabase(authUser));
+      setSessionId(authUser.id);
+      setRole(null);
+      setBusinessId(null);
+      setBusinessCount(0);
+      setOnboardingCompleted(false);
+      setBusinessBootstrapError(null);
+      setIsReady(false);
 
-      if (cancelled) return;
+      let businesses: BusinessSession[];
+
+      try {
+        businesses = await getUserBusinessesWithRetry(
+          authUser.id,
+          typeof authUser.user_metadata?.full_name === "string"
+            ? authUser.user_metadata.full_name
+            : ""
+        );
+      } catch (bootstrapError) {
+        if (generation !== bootstrapGeneration.current) return;
+
+        console.error("[AuthContext] No se pudo resolver el negocio:", bootstrapError);
+        setBusinessBootstrapError(
+          "Tu sesión está activa, pero no pudimos cargar el negocio. Revisa tu conexión y vuelve a intentarlo."
+        );
+        setIsReady(true);
+        return;
+      }
+
+      if (generation !== bootstrapGeneration.current) return;
 
       if (businesses.length === 0) {
-        if (!cancelled) setIsReady(true);
+        stopLocalBusinessSyncs();
+        setUser(authUserFromSupabase(authUser));
+        setSessionId(authUser.id);
+        setRole(null);
+        setBusinessId(null);
+        setBusinessCount(0);
+        setOnboardingCompleted(false);
+        setBusinessBootstrapError(null);
+        setIsReady(true);
+
+        if (navigateOnCompletion) {
+          navigate("/crear-negocio", { replace: true });
+        }
         return;
       }
 
       if (businesses.length === 1) {
-        const session = businesses[0];
-        setCurrentBusinessId(session.businessId);
-        void hydrateBusinessOperatingProfile(session.businessId);
-
         try {
-          const [resolvedBranchId] = await Promise.all([
-            resolveDefaultBranchId(session.businessId),
-            hydrateBusinessConfig(session),
-            hydrateSubscription(session.businessId),
-            ensureIdentity(container.permissionEngine.get(), container.roleEngine.get())
-          ]);
-          setCurrentBranchId(resolvedBranchId);
-          if (cancelled) return;
-          startRealtimeSync(session.businessId);
-           startOfflineSalesSync();
-          startOfflineInventorySync();
-          startOfflineTableSync();
-          startOfflineCustomerSync();
-          startOfflineKitchenSync();
-        } catch (error) {
-          console.error("[AuthContext] Fallo en bootstrap de sesión:", error);
+          await applyBusinessSession(businesses[0], email);
+        } catch (applyError) {
+          if (generation !== bootstrapGeneration.current) return;
+
+          console.error("[AuthContext] Fallo cargando el negocio:", applyError);
+          setBusinessBootstrapError(
+            "Tu sesión está activa, pero no pudimos preparar el negocio. Vuelve a intentarlo."
+          );
+          setIsReady(true);
+          return;
         }
 
-        const { user: u, role: r } = toAuthState(session, authUser.email ?? "");
-        setUser(u);
-        setRole(r);
-        setSessionId(authUser.id);
-        setBusinessId(session.businessId);
-        setOnboardingCompleted(session.onboardingCompleted);
+        if (generation !== bootstrapGeneration.current) return;
 
-        if (!cancelled) setIsReady(true);
-      } else {
-        if (!cancelled) setIsReady(true);
-      }
-    }).catch((error) => {
-      console.error("[AuthContext] Fallo al restaurar sesión:", error);
-      if (!cancelled) setIsReady(true);
-    });
+        setIsReady(true);
 
-    // Mantiene la sesión sincronizada si Supabase la cierra por su cuenta
-    // (token expirado, logout desde otra pestaña, etc).
-    const { data: subscription } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      if (!newSession) {
-        stopRealtimeSync();
-        stopOfflineSalesSync();
-        stopOfflineInventorySync();
-        stopOfflineTableSync();
-        stopOfflineCustomerSync();
-        stopOfflineKitchenSync();
-        void pendingSalesStore.clear();
-        void pendingCustomerOperationsStore.clear();
-        void pendingTableOperationsStore.clear();
-        void pendingInventoryAdjustmentsStore.clear();
-        void pendingKitchenOrdersStore.clear();
-        setCurrentBusinessId(null);
-        setCurrentBranchId(null);
-        setUser(null);
-        setRole(null);
-        setSessionId(null);
-        enabledModulesStore.clear();
-        subscriptionStore.clear();
-        kitchenOutputModeStore.clear();
-        businessOperatingProfileStore.clear();
-        operationConfigStore.clear();
-      }
-    });
-
-     return () => {
-       cancelled = true;
-       stopRealtimeSync();
-       subscription.subscription.unsubscribe();
-     };
-  }, []);
-
-  const login = useCallback(async (email: string, password: string) => {
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const result = await signIn(email, password);
-
-      if (result === null) {
-        navigate("/onboarding", { replace: true });
+        if (
+          navigateOnCompletion &&
+          window.location.pathname !== "/auth/callback" &&
+          window.location.pathname !== "/actualizar-password"
+        ) {
+          navigate("/dashboard", { replace: true });
+        }
         return;
       }
 
-      if (Array.isArray(result)) {
-        navigate("/business-selector", { replace: true, state: { businesses: result } });
+      stopLocalBusinessSyncs();
+      setUser(authUserFromSupabase(authUser));
+      setRole(null);
+      setSessionId(authUser.id);
+      setBusinessId(null);
+      setBusinessCount(businesses.length);
+      setOnboardingCompleted(false);
+      setBusinessBootstrapError(null);
+      setIsReady(true);
+
+      if (navigateOnCompletion) {
+        navigate("/business-selector", {
+          replace: true,
+          state: { businesses }
+        });
+      }
+    },
+    [applyBusinessSession, clearAuthState, navigate]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void supabase.auth.getSession().then(({ data, error: sessionError }) => {
+      if (cancelled) return;
+
+      if (sessionError) {
+        console.error("[AuthContext] Fallo al restaurar la sesión:", sessionError);
+        setBusinessBootstrapError(
+          "No pudimos comprobar tu sesión. Revisa tu conexión y vuelve a intentarlo."
+        );
+        setIsReady(true);
         return;
       }
 
-      const businessSession = result;
-      setCurrentBusinessId(businessSession.businessId);
-      void hydrateBusinessOperatingProfile(businessSession.businessId);
-      hydrateBusinessConfig(businessSession);
-      hydrateSubscription(businessSession.businessId);
-      void ensureIdentity(container.permissionEngine.get(), container.roleEngine.get());
-      const { user: u, role: r } = toAuthState(businessSession, email);
+      void hydrateAuthSession(data.session, false);
+    });
 
-      startRealtimeSync(businessSession.businessId);
-      startOfflineSalesSync();
-      startOfflineInventorySync();
-      startOfflineTableSync();
-      startOfflineCustomerSync();
-      startOfflineKitchenSync();
-      setUser(u);
-      setRole(r);
-      setSessionId(businessSession.userId);
-      setBusinessId(businessSession.businessId);
-      setOnboardingCompleted(businessSession.onboardingCompleted);
-      navigate("/dashboard", { replace: true });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "No se pudo iniciar sesión.";
-      setError(message);
-      throw err;
-    } finally {
-      setIsLoading(false);
-    }
-  }, [navigate]);
+    const { data: authSubscription } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (event === "SIGNED_OUT" || !session) {
+          clearAuthState();
+          setIsReady(true);
+          return;
+        }
 
-  const switchBusiness = useCallback(async (businessSession: BusinessSession) => {
-    setCurrentBusinessId(businessSession.businessId);
-    void hydrateBusinessOperatingProfile(businessSession.businessId);
-    const resolvedBranchId = await resolveDefaultBranchId(businessSession.businessId);
-    setCurrentBranchId(resolvedBranchId);
-    hydrateBusinessConfig(businessSession);
-    hydrateSubscription(businessSession.businessId);
-    void ensureIdentity(container.permissionEngine.get(), container.roleEngine.get());
-    setUser({ id: businessSession.userId, name: businessSession.ownerName, email: user?.email ?? "" });
-    setRole({ id: businessSession.role, name: businessSession.role, permissions: permissionsForRole(businessSession.role) });
-    setSessionId(businessSession.userId);
-    setBusinessId(businessSession.businessId);
-    setOnboardingCompleted(businessSession.onboardingCompleted);
-    navigate("/dashboard", { replace: true });
-  }, [navigate, user?.email]);
+        // Supabase recomienda no ejecutar llamadas async adicionales dentro
+        // de este callback. Diferimos el bootstrap al siguiente tick para
+        // evitar carreras/deadlocks durante refresh o OAuth.
+        if (event === "INITIAL_SESSION") {
+          window.setTimeout(() => {
+            void hydrateAuthSession(session, false);
+          }, 0);
+          return;
+        }
+
+        if (
+          (event === "SIGNED_IN" || event === "USER_UPDATED") &&
+          authOperationInFlight.current === 0
+        ) {
+          window.setTimeout(() => {
+            void hydrateAuthSession(session, false);
+          }, 0);
+        }
+      }
+    );
+
+    return () => {
+      cancelled = true;
+      authSubscription.subscription.unsubscribe();
+      bootstrapGeneration.current += 1;
+      stopRealtimeSync();
+    };
+  }, [clearAuthState, hydrateAuthSession]);
+
+  const login = useCallback(
+    async (email: string, password: string) => {
+      const normalizedEmail = email.trim().toLowerCase();
+
+      if (!normalizedEmail || !password) {
+        throw new Error("Ingresa tu correo y tu contraseña.");
+      }
+
+      setIsLoading(true);
+      setError(null);
+      setBusinessBootstrapError(null);
+      authOperationInFlight.current += 1;
+
+      try {
+        const result = await signIn(normalizedEmail, password);
+
+        if (result === null) {
+          const { data: authUserData, error: authUserError } =
+            await supabase.auth.getUser();
+
+          if (authUserError || !authUserData.user) {
+            throw new Error(
+              "La cuenta existe, pero no tiene un negocio asociado. Intenta crear uno nuevamente."
+            );
+          }
+
+          await hydrateAuthSession(
+            (await supabase.auth.getSession()).data.session,
+            true
+          );
+          return;
+        }
+
+        if (Array.isArray(result)) {
+          setBusinessCount(result.length);
+          setUser({
+            id: result[0]?.userId ?? "",
+            name: result[0]?.ownerName ?? normalizedEmail.split("@")[0],
+            email: normalizedEmail
+          });
+          setSessionId(result[0]?.userId ?? null);
+          setRole(null);
+          setBusinessId(null);
+          setOnboardingCompleted(false);
+          setIsReady(true);
+          navigate("/business-selector", {
+            replace: true,
+            state: { businesses: result }
+          });
+          return;
+        }
+
+        await applyBusinessSession(result, normalizedEmail);
+        setIsReady(true);
+        navigate("/dashboard", { replace: true });
+      } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : "No se pudo iniciar sesión. Inténtalo de nuevo.";
+        setError(message);
+        throw err;
+      } finally {
+        authOperationInFlight.current = Math.max(0, authOperationInFlight.current - 1);
+        setIsLoading(false);
+      }
+    },
+    [applyBusinessSession, hydrateAuthSession, navigate]
+  );
 
   const register = useCallback(async (input: RegisterBusinessInput) => {
     setIsLoading(true);
     setError(null);
+    authOperationInFlight.current += 1;
 
     try {
-      // PASO 1: crea el usuario sin confirmar y dispara el correo con el
-      // código OTP. Todavía no hay sesión ni negocio — eso ocurre en
-      // verifyOtp(), una vez el usuario escribe el código de 6 dígitos.
-      await beginRegistration(input);
+      await beginRegistration({
+        ...input,
+        email: input.email.trim().toLowerCase(),
+        businessName: input.businessName.trim(),
+        ownerName: input.ownerName.trim()
+      });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "No se pudo iniciar el registro.";
+      const message =
+        err instanceof Error
+          ? err.message
+          : "No se pudo iniciar el registro.";
       setError(message);
       throw err;
     } finally {
+      authOperationInFlight.current = Math.max(0, authOperationInFlight.current - 1);
       setIsLoading(false);
     }
   }, []);
 
-  const verifyOtp = useCallback(async (code: string) => {
-    setIsLoading(true);
-    setError(null);
+  const verifyOtp = useCallback(
+    async (code: string) => {
+      setIsLoading(true);
+      setError(null);
+      authOperationInFlight.current += 1;
 
-    try {
-       // PASO 2a: confirma el código -> deja la sesión activa y confirmada.
-      await verifyRegistrationOtp(code);
-      // Capturamos el email antes de completeRegistration(), que limpia el
-      // registro pendiente (clearPendingRegistration). Sin esto, el email
-      // quedaría vacío en el estado de usuario.
-      const pending = getPendingRegistration();
-      // PASO 2b: con la sesión ya confirmada, crea el negocio + membresía
-      // ADMIN + trial de 14 días, y resuelve la sesión de negocio completa.
-      const businessSession = await completeRegistration();
+      try {
+        await verifyRegistrationOtp(code);
 
-      hydrateBusinessConfig(businessSession);
-      hydrateSubscription(businessSession.businessId);
-      void ensureIdentity(container.permissionEngine.get(), container.roleEngine.get());
-      const { user: u, role: r } = toAuthState(businessSession, pending?.email ?? "");
+        const pendingEmail = getPendingRegistration()?.email;
 
-      setCurrentBusinessId(businessSession.businessId);
-      startRealtimeSync(businessSession.businessId);
-      startOfflineSalesSync();
-      startOfflineInventorySync();
-      startOfflineTableSync();
-      startOfflineCustomerSync();
-      startOfflineKitchenSync();
-      setUser(u);
-      setRole(r);
-      setSessionId(businessSession.userId);
-      setBusinessId(businessSession.businessId);
-      setOnboardingCompleted(businessSession.onboardingCompleted);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "No se pudo verificar el código.";
-      setError(message);
-      throw err;
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
+        const businessSession = await completeRegistration();
+        await applyBusinessSession(
+          businessSession,
+          pendingEmail ?? businessSession.ownerName
+        );
+
+        setIsReady(true);
+        navigate("/onboarding", { replace: true });
+      } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : "No se pudo verificar el código.";
+        setError(message);
+        throw err;
+      } finally {
+        authOperationInFlight.current = Math.max(0, authOperationInFlight.current - 1);
+        setIsLoading(false);
+      }
+    },
+    [applyBusinessSession, navigate]
+  );
 
   const resendOtp = useCallback(async () => {
     setError(null);
     try {
       await resendRegistrationOtp();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "No se pudo reenviar el código.";
+      const message =
+        err instanceof Error
+          ? err.message
+          : "No se pudo reenviar el código.";
       setError(message);
       throw err;
     }
   }, []);
 
-  const resendCooldownSeconds = useCallback(() => getResendCooldownSeconds(), []);
+  const resendCooldownSeconds = useCallback(
+    () => getResendCooldownSeconds(),
+    []
+  );
 
-  const pendingRegistrationEmail = useCallback(() => getPendingRegistration()?.email ?? null, []);
+  const pendingRegistrationEmail = useCallback(
+    () => getPendingRegistration()?.email ?? null,
+    []
+  );
 
   const cancelRegistration = useCallback(() => {
     clearPendingRegistration();
@@ -449,62 +619,70 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
-    await signOut().catch(() => {});
-    stopRealtimeSync();
-    stopOfflineSalesSync();
-    stopOfflineInventorySync();
-    stopOfflineTableSync();
-    stopOfflineCustomerSync();
-    stopOfflineKitchenSync();
-    void pendingSalesStore.clear();
-    void pendingCustomerOperationsStore.clear();
-    void pendingTableOperationsStore.clear();
-    void pendingInventoryAdjustmentsStore.clear();
-    void pendingKitchenOrdersStore.clear();
-    enabledModulesStore.clear();
-    subscriptionStore.clear();
-    kitchenOutputModeStore.clear();
-    businessOperatingProfileStore.clear();
-    operationConfigStore.clear();
-    setUser(null);
-    setRole(null);
-    setSessionId(null);
-    setBusinessId(null);
-    setOnboardingCompleted(false);
-  }, []);
-
-  const handleRequestPasswordReset = useCallback(async (email: string) => {
-    setIsLoading(true);
-    setError(null);
     try {
-      await requestPasswordReset(email);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "No se pudo enviar el correo de recuperación.";
-      setError(message);
-      throw err;
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
+      const { error: signOutError } = await supabase.auth.signOut({
+        scope: "local"
+      });
 
-  const handleUpdatePassword = useCallback(async (newPassword: string) => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      await updatePassword(newPassword);
+      if (signOutError) {
+        console.warn("[AuthContext] signOut local falló:", signOutError.message);
+      }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "No se pudo actualizar la contraseña.";
-      setError(message);
-      throw err;
+      console.warn("[AuthContext] signOut lanzó una excepción:", err);
     } finally {
-      setIsLoading(false);
+      clearAuthState();
     }
-  }, []);
+  }, [clearAuthState]);
 
-   const completeOnboarding = useCallback(async () => {
+  const handleRequestPasswordReset = useCallback(
+    async (email: string) => {
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        await requestPasswordReset(email.trim().toLowerCase());
+      } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : "No se pudo enviar el correo de recuperación.";
+        setError(message);
+        throw err;
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    []
+  );
+
+  const handleUpdatePassword = useCallback(
+    async (newPassword: string) => {
+      setIsLoading(true);
+      setError(null);
+      authOperationInFlight.current += 1;
+
+      try {
+        await updatePassword(newPassword);
+      } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : "No se pudo actualizar la contraseña.";
+        setError(message);
+        throw err;
+      } finally {
+        authOperationInFlight.current = Math.max(0, authOperationInFlight.current - 1);
+        setIsLoading(false);
+      }
+    },
+    []
+  );
+
+  const completeOnboarding = useCallback(async () => {
     if (!businessId) {
       throw new Error("No hay un negocio activo en la sesión.");
     }
+
     await markOnboardingCompleted(businessId);
     setOnboardingCompleted(true);
   }, [businessId]);
@@ -512,10 +690,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const handleRequestLoginOtp = useCallback(async (email: string) => {
     setIsLoading(true);
     setError(null);
+
     try {
-      await requestLoginOtp(email);
+      await requestLoginOtp(email.trim().toLowerCase());
     } catch (err) {
-      const message = err instanceof Error ? err.message : "No se pudo enviar el código.";
+      const message =
+        err instanceof Error
+          ? err.message
+          : "No se pudo enviar el código.";
       setError(message);
       throw err;
     } finally {
@@ -523,100 +705,164 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const handleVerifyLoginOtp = useCallback(async (email: string, token: string) => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const result = await verifyLoginOtp(email, token);
+  const handleVerifyLoginOtp = useCallback(
+    async (email: string, token: string) => {
+      setIsLoading(true);
+      setError(null);
+      authOperationInFlight.current += 1;
 
-      if (result === null) {
-        navigate("/onboarding", { replace: true });
-        return;
+      try {
+        const normalizedEmail = email.trim().toLowerCase();
+        const result = await verifyLoginOtp(normalizedEmail, token);
+
+        if (result === null) {
+          await hydrateAuthSession(
+            (await supabase.auth.getSession()).data.session,
+            true
+          );
+          return;
+        }
+
+        if (Array.isArray(result)) {
+          setBusinessCount(result.length);
+          setUser({
+            id: result[0]?.userId ?? "",
+            name: result[0]?.ownerName ?? normalizedEmail.split("@")[0],
+            email: normalizedEmail
+          });
+          setSessionId(result[0]?.userId ?? null);
+          setBusinessId(null);
+          setRole(null);
+          setOnboardingCompleted(false);
+          navigate("/business-selector", {
+            replace: true,
+            state: { businesses: result }
+          });
+          return;
+        }
+
+        await applyBusinessSession(result, normalizedEmail);
+        setIsReady(true);
+        navigate("/dashboard", { replace: true });
+      } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : "No se pudo iniciar sesión con el código.";
+        setError(message);
+        throw err;
+      } finally {
+        authOperationInFlight.current = Math.max(0, authOperationInFlight.current - 1);
+        setIsLoading(false);
       }
-
-      if (Array.isArray(result)) {
-        navigate("/business-selector", { replace: true, state: { businesses: result } });
-        return;
-      }
-
-      const businessSession = result;
-      setCurrentBusinessId(businessSession.businessId);
-      void hydrateBusinessOperatingProfile(businessSession.businessId);
-      hydrateBusinessConfig(businessSession);
-      hydrateSubscription(businessSession.businessId);
-      void ensureIdentity(container.permissionEngine.get(), container.roleEngine.get());
-      const { user: u, role: r } = toAuthState(businessSession, email);
-
-      startRealtimeSync(businessSession.businessId);
-      startOfflineSalesSync();
-      startOfflineInventorySync();
-      startOfflineTableSync();
-      startOfflineCustomerSync();
-      startOfflineKitchenSync();
-      setUser(u);
-      setRole(r);
-      setSessionId(businessSession.userId);
-      setBusinessId(businessSession.businessId);
-      setOnboardingCompleted(businessSession.onboardingCompleted);
-      navigate("/dashboard", { replace: true });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "No se pudo iniciar sesión con el código.";
-      setError(message);
-      throw err;
-    } finally {
-      setIsLoading(false);
-    }
-  }, [navigate]);
+    },
+    [applyBusinessSession, hydrateAuthSession, navigate]
+  );
 
   const handleResendLoginOtp = useCallback(async (email: string) => {
     setError(null);
+
     try {
-      await resendLoginOtp(email);
+      await resendLoginOtp(email.trim().toLowerCase());
     } catch (err) {
-      const message = err instanceof Error ? err.message : "No se pudo reenviar el código.";
+      const message =
+        err instanceof Error
+          ? err.message
+          : "No se pudo reenviar el código.";
       setError(message);
       throw err;
     }
   }, []);
 
-  const loginOtpCooldownSeconds = useCallback(() => getLoginOtpCooldownSeconds(), []);
+  const loginOtpCooldownSeconds = useCallback(
+    (email?: string) => getLoginOtpCooldownSeconds(email),
+    []
+  );
 
   const handleSignInWithGoogle = useCallback(async () => {
     setIsLoading(true);
     setError(null);
+
     try {
       await signInWithGoogle();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "No se pudo iniciar sesión con Google.";
+      const message =
+        err instanceof Error
+          ? err.message
+          : "No se pudo iniciar sesión con Google.";
       setError(message);
     } finally {
       setIsLoading(false);
     }
   }, []);
 
+  const switchBusiness = useCallback(
+    async (businessSession: BusinessSession) => {
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        await applyBusinessSession(
+          businessSession,
+          user?.email ?? businessSession.ownerName
+        );
+        setIsReady(true);
+        navigate("/dashboard", { replace: true });
+      } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : "No se pudo abrir el negocio seleccionado.";
+        setError(message);
+        throw err;
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [applyBusinessSession, navigate, user?.email]
+  );
+
+  const retryBusinessBootstrap = useCallback(async () => {
+    setError(null);
+    setBusinessBootstrapError(null);
+    setIsReady(false);
+
+    const { data, error: sessionError } = await supabase.auth.getSession();
+
+    if (sessionError || !data.session) {
+      setIsReady(true);
+      setBusinessBootstrapError(
+        "No pudimos recuperar tu sesión. Inicia sesión nuevamente si el problema continúa."
+      );
+      return;
+    }
+
+    await hydrateAuthSession(data.session, false);
+  }, [hydrateAuthSession]);
+
   const can = useCallback(
     (permissionId: string) => {
       if (!role) return false;
-      return role.permissions.includes("*") || role.permissions.includes(permissionId);
+      return (
+        role.permissions.includes("*") ||
+        role.permissions.includes(permissionId)
+      );
     },
     [role]
   );
 
-  // Sin useMemo, este objeto se recrea en cada render del AuthProvider
-  // (por ejemplo, cuando isLoading cambia durante un login), y como es
-  // una referencia nueva, TODO lo que consume useAuth() —incluido
-  // ProtectedRoute, que envuelve la app entera— se re-renderiza también,
-  // aunque el dato que le importa no haya cambiado.
-  const value: AuthContextValue = useMemo(
+  const value = useMemo<AuthContextValue>(
     () => ({
       user,
       role,
       sessionId,
       businessId,
+      businessCount,
       isAuthenticated: !!user && !!sessionId,
       isReady,
       isLoading,
       error,
+      businessBootstrapError,
       onboardingCompleted,
       login,
       register,
@@ -635,16 +881,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       signInWithGoogle: handleSignInWithGoogle,
       can,
       completeOnboarding,
-      switchBusiness
+      switchBusiness,
+      retryBusinessBootstrap
     }),
     [
       user,
       role,
       sessionId,
       businessId,
+      businessCount,
       isReady,
       isLoading,
       error,
+      businessBootstrapError,
       onboardingCompleted,
       login,
       register,
@@ -663,7 +912,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       handleSignInWithGoogle,
       can,
       completeOnboarding,
-      switchBusiness
+      switchBusiness,
+      retryBusinessBootstrap
     ]
   );
 
@@ -672,8 +922,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
+
   if (!ctx) {
     throw new Error("useAuth debe usarse dentro de <AuthProvider>.");
   }
+
   return ctx;
 }

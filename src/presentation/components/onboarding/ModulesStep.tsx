@@ -234,4 +234,3 @@ export function ModulesStep({ businessId, businessType, onSaved }: ModulesStepPr
     </div>
   );
 }
-

@@ -1,5 +1,5 @@
 import React, { useState, FormEvent } from "react";
-import { useNavigate, Navigate, Link } from "react-router-dom";
+import { Navigate, Link } from "react-router-dom";
 import { Eye, EyeOff, AlertCircle } from "lucide-react";
 
 import { useAuth } from "../context/AuthContext";
@@ -21,17 +21,27 @@ import { VimdyButton } from "../components/ui/VimdyButton";
  * siempre en el servidor de Supabase, nunca en este componente.
  */
 export function LoginPage() {
-  const { login, isAuthenticated, isReady, isLoading, error } = useAuth();
-  const navigate = useNavigate();
-
+  const { login, isAuthenticated, isReady, isLoading, error, businessCount, onboardingCompleted } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
-  // Si ya hay una sesión activa, no tiene sentido mostrar el login.
-  if (isAuthenticated) {
-    return <Navigate to="/dashboard" replace />;
+  // Nunca redirigimos antes de que AuthContext termine de reconstruir la
+  // sesión y resolver el negocio. Esto evita mandar por error a Dashboard
+  // mientras todavía estamos determinando si el usuario tiene 0, 1 o varios
+  // negocios.
+  if (isReady && isAuthenticated) {
+    const destination =
+      businessCount > 1
+        ? "/business-selector"
+        : businessCount === 0
+          ? "/crear-negocio"
+          : onboardingCompleted
+            ? "/dashboard"
+            : "/onboarding";
+
+    return <Navigate to={destination} replace />;
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -45,7 +55,6 @@ export function LoginPage() {
 
     try {
       await login(email.trim(), password);
-      navigate("/dashboard", { replace: true });
     } catch {
       // El AuthContext ya guarda el mensaje de error en `error`,
       // no hace falta hacer nada más aquí.
@@ -176,7 +185,7 @@ export function LoginPage() {
                 size="lg"
                 fullWidth
                 loading={isLoading}
-                disabled={!isReady}
+                disabled={!isReady || isLoading}
                 className="mt-vimdy-xs"
               >
                 {!isReady ? "Preparando..." : "Iniciar sesión"}

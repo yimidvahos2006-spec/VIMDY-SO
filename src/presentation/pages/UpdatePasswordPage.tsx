@@ -1,7 +1,8 @@
-import React, { useState, FormEvent } from "react";
+import React, { useEffect, useState, FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext";
+import { supabase } from "../../infrastructure/supabase/supabaseClient";
 import { VimdyBackground } from "../components/ui/VimdyBackground";
 import { VimdyLogo } from "../components/ui/VimdyLogo";
 import { GlassCard } from "../components/ui/GlassCard";
@@ -31,11 +32,66 @@ export function UpdatePasswordPage() {
   const [localError, setLocalError] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [recoveryReady, setRecoveryReady] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timeoutId: number | null = null;
+
+    const isRecoveryArtifactPresent = () => {
+      const query = new URLSearchParams(window.location.search);
+      const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+      return Boolean(
+        query.get("code") ||
+        hash.get("type") === "recovery" ||
+        hash.get("access_token")
+      );
+    };
+
+    const checkRecovery = async () => {
+      const artifactPresent = isRecoveryArtifactPresent();
+      const { data } = await supabase.auth.getSession();
+
+      if (cancelled) return;
+
+      if (data.session && artifactPresent) {
+        setRecoveryReady(true);
+        return;
+      }
+
+      // Supabase can finish the recovery exchange asynchronously.
+      timeoutId = window.setTimeout(async () => {
+        const result = await supabase.auth.getSession();
+        if (!cancelled) {
+          setRecoveryReady(Boolean(result.data.session));
+        }
+      }, 1500);
+    };
+
+    const { data: authSubscription } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY" && session && !cancelled) {
+        setRecoveryReady(true);
+      }
+    });
+
+    void checkRecovery();
+
+    return () => {
+      cancelled = true;
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      authSubscription.subscription.unsubscribe();
+    };
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setLocalError(null);
     setServerError(null);
+
+    if (recoveryReady !== true) {
+      setServerError("El enlace de recuperación no es válido o ya expiró. Solicita uno nuevo.");
+      return;
+    }
 
     if (password.length < MIN_PASSWORD_LENGTH) {
       setLocalError(`La contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres.`);
@@ -83,6 +139,11 @@ export function UpdatePasswordPage() {
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+              {recoveryReady === false && !serverError && (
+                <div className="rounded-vimdy-sm border border-vimdy-danger/25 bg-vimdy-danger-bg px-4 py-2 text-sm text-vimdy-danger">
+                  El enlace de recuperación no es válido o ya expiró. Solicita uno nuevo.
+                </div>
+              )}
               <PasswordField
                 id="password"
                 label="Nueva contraseña"
@@ -109,8 +170,8 @@ export function UpdatePasswordPage() {
                 </div>
               )}
 
-              <VimdyButton type="submit" disabled={isLoading} className="w-full mt-2">
-                {isLoading ? "Actualizando..." : "Actualizar contraseña"}
+              <VimdyButton type="submit" disabled={isLoading || recoveryReady !== true} className="w-full mt-2">
+                {recoveryReady === null ? "Comprobando enlace..." : isLoading ? "Actualizando..." : "Actualizar contraseña"}
               </VimdyButton>
 
               {serverError && (

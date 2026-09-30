@@ -28,19 +28,21 @@ export function ForgotPasswordPage() {
     e.preventDefault();
     setLocalError(null);
 
-    if (!email.trim()) {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) {
       setLocalError("Ingresa tu correo electrónico.");
       return;
     }
 
     try {
-      await requestPasswordReset(email.trim());
-    } catch {
-      // Si el correo no existe, Supabase igual responde éxito (no lo
-      // revela). Un error real acá es de red/config, pero mostramos el
-      // mismo mensaje de todas formas para no dar pistas de qué falló.
-    } finally {
+      await requestPasswordReset(normalizedEmail);
       setSent(true);
+    } catch (err) {
+      setLocalError(
+        err instanceof Error
+          ? err.message
+          : "No pudimos procesar la solicitud. Inténtalo de nuevo."
+      );
     }
   }
 

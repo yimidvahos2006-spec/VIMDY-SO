@@ -1,29 +1,17 @@
 import {
-  ONBOARDING_STEP_ORDER,
+  ONBOARDING_PROGRESS_STEPS,
   type OnboardingStepId
 } from "./onboardingSteps";
-
-const DATA_CAPTURE_STEPS: OnboardingStepId[] = [
-  "business_type",
-  "modules",
-  "tables",
-  "employees",
-  "categories",
-  "first_product",
-  "cash_opening"
-];
 
 interface OnboardingProgressProps {
   step: OnboardingStepId;
 }
 
 export function OnboardingProgress({ step }: OnboardingProgressProps) {
-  const currentIndex = DATA_CAPTURE_STEPS.indexOf(step);
-  const total = DATA_CAPTURE_STEPS.length;
+  const currentIndex = ONBOARDING_PROGRESS_STEPS.indexOf(step);
+  const total = ONBOARDING_PROGRESS_STEPS.length;
 
-  if (currentIndex === -1) {
-    return null;
-  }
+  if (currentIndex < 0) return null;
 
   const progress = ((currentIndex + 1) / total) * 100;
 
@@ -37,6 +25,7 @@ export function OnboardingProgress({ step }: OnboardingProgressProps) {
           {Math.round(progress)}%
         </span>
       </div>
+
       <div className="w-full h-1 bg-vimdy-surface rounded-full overflow-hidden">
         <div
           className="h-full bg-vimdy-accent transition-all duration-300 ease-out"

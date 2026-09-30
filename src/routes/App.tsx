@@ -45,7 +45,7 @@ function isAppSubdomain(): boolean {
 // app entera funcionaba en los dos dominios a la vez).
 function RedirectToApp() {
   if (typeof window !== "undefined") {
-    window.location.replace(`${APP_URL}${window.location.pathname}${window.location.search}`);
+    window.location.replace(`${APP_URL}${window.location.pathname}${window.location.search}${window.location.hash}`);
   }
   return null;
 }

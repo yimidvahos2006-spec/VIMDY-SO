@@ -41,7 +41,7 @@ const metrics = [
 ];
 
 export function RegisterPage() {
-  const { register, isAuthenticated, isReady, isLoading, error } = useAuth();
+  const { register, isAuthenticated, isReady, isLoading, error, businessCount, onboardingCompleted } = useAuth();
   const navigate = useNavigate();
   const { language } = useTranslation();
 
@@ -57,8 +57,17 @@ export function RegisterPage() {
   const selectedCountry = AVAILABLE_COUNTRIES.find((c) => c.code === country);
   const currency = selectedCountry ? getCountryName(selectedCountry.currency, language) : "";
 
-  if (isAuthenticated) {
-    return <Navigate to="/dashboard" replace />;
+  if (isReady && isAuthenticated) {
+    const destination =
+      businessCount > 1
+        ? "/business-selector"
+        : businessCount === 0
+          ? "/crear-negocio"
+          : onboardingCompleted
+            ? "/dashboard"
+            : "/onboarding";
+
+    return <Navigate to={destination} replace />;
   }
 
   function validateStep0(): boolean {

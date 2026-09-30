@@ -7,7 +7,6 @@ import { GlassCard } from "../components/ui/GlassCard";
 import { WelcomeStep } from "../components/onboarding/WelcomeStep";
 import { BusinessTypeStep } from "../components/onboarding/BusinessTypeStep";
 import { ModulesStep } from "../components/onboarding/ModulesStep";
-import { TablesStep } from "../components/onboarding/TablesStep";
 import { EmployeesStep } from "../components/onboarding/EmployeesStep";
 import { CategoriesStep } from "../components/onboarding/CategoriesStep";
 import { FirstProductStep } from "../components/onboarding/FirstProductStep";
@@ -21,123 +20,117 @@ import {
   resolveAfterModules,
   type OnboardingStepId
 } from "../components/onboarding/onboardingSteps";
+import {
+  onboardingDraftStore,
+  type OnboardingDraft
+} from "../components/onboarding/onboardingDraftStore";
 import type { BusinessTypeId } from "../../core/config/businessTypes";
 import type { ModuleId } from "../../core/config/modules";
 import type { Category } from "../../core/entities/Entities";
 
 /**
- * /onboarding — Asistente de configuración inicial (Fase 3).
+ * Asistente de configuración inicial.
  *
- * Los 11 pasos del documento de producto ya están construidos y
- * conectados de verdad a Supabase:
- *   PASO 1  — enrutamiento real (ver OnboardingGate.tsx / esta página).
- *   PASO 2  — bienvenida (WelcomeStep).
- *   PASO 3  — tipo de negocio, guarda business_type (BusinessTypeStep).
- *   PASO 4  — módulos según tipo de negocio, guarda enabled_modules y
- *             adapta el Sidebar en vivo (ModulesStep).
- *   PASO 5  — número de mesas, crea las mesas reales (TablesStep). Solo
- *             se muestra si el negocio usa el módulo "mesas".
- *   PASO 6  — empleados, opcional (EmployeesStep).
- *   PASO 7  — categorías automáticas según el tipo de negocio (CategoriesStep).
- *   PASO 8  — primer producto real (FirstProductStep).
- *   PASO 9  — apertura de caja real (CashOpeningStep).
- *   PASO 10 — animación de cierre (LoadingStep).
- *   PASO 11 — pantalla final, marca onboarding_completed = true (FinalStep).
+ * CRÍTICO:
+ * El borrador local está aislado por businessId. Nunca se utiliza una clave
+ * global como "vimdy_onboarding_step", porque esa clave podía hacer que una
+ * cuenta nueva heredara el paso de otra cuenta que usó el mismo navegador.
  *
- * Cada paso guarda su propio dato en Supabase apenas el usuario lo
- * completa — nada se simula ni se guarda "de una vez" al final.
+ * La verdad de negocio sigue estando en Supabase (business_type,
+ * enabled_modules, categorías, productos, caja y onboarding_completed). El
+ * almacenamiento local solo permite reanudar la interfaz sin confundir
+ * negocios.
  */
 export function OnboardingPage() {
-  const { user, businessId, onboardingCompleted, isReady } = useAuth();
-  const [step, setStep] = useState<OnboardingStepId>(() => {
-    try {
-      const saved = localStorage.getItem("vimdy_onboarding_step");
-      if (saved && ONBOARDING_STEPS_BUILT.includes(saved as OnboardingStepId)) {
-        return saved as OnboardingStepId;
-      }
-    } catch {
-      // localStorage no disponible (modo privado/incógnito).
-    }
-    return "welcome";
-  });
+  const {
+    user,
+    businessId,
+    onboardingCompleted,
+    isReady,
+    businessBootstrapError,
+    retryBusinessBootstrap
+  } = useAuth();
 
-  const [businessType, setBusinessType] = useState<BusinessTypeId | null>(() => {
-    try {
-      const saved = localStorage.getItem("vimdy_onboarding_business_type");
-      return saved ? (JSON.parse(saved) as BusinessTypeId) : null;
-    } catch {
-      return null;
-    }
-  });
-
-  const [enabledModules, setEnabledModules] = useState<ModuleId[]>(() => {
-    try {
-      const saved = localStorage.getItem("vimdy_onboarding_enabled_modules");
-      return saved ? (JSON.parse(saved) as ModuleId[]) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  const [categories, setCategories] = useState<Category[]>(() => {
-    try {
-      const saved = localStorage.getItem("vimdy_onboarding_categories");
-      return saved ? (JSON.parse(saved) as Category[]) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [draftLoaded, setDraftLoaded] = useState(false);
+  const [step, setStep] = useState<OnboardingStepId>("welcome");
+  const [businessType, setBusinessType] = useState<BusinessTypeId | null>(null);
+  const [enabledModules, setEnabledModules] = useState<ModuleId[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem("vimdy_onboarding_step", step);
-    } catch {
-      // ignore
-    }
-  }, [step]);
+    onboardingDraftStore.clearLegacy();
+  }, []);
 
   useEffect(() => {
-    try {
-      if (businessType) {
-        localStorage.setItem("vimdy_onboarding_business_type", JSON.stringify(businessType));
-      } else {
-        localStorage.removeItem("vimdy_onboarding_business_type");
-      }
-    } catch {
-      // ignore
+    if (!isReady || !businessId) {
+      setDraftLoaded(false);
+      return;
     }
-  }, [businessType]);
+
+    const draft: OnboardingDraft | null = onboardingDraftStore.get(businessId);
+
+    setStep(draft?.step && ONBOARDING_STEPS_BUILT.includes(draft.step) ? draft.step : "welcome");
+    setBusinessType(draft?.businessType ?? null);
+    setEnabledModules(draft?.enabledModules ?? []);
+    setCategories(draft?.categories ?? []);
+    setDraftLoaded(true);
+  }, [businessId, isReady]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem("vimdy_onboarding_enabled_modules", JSON.stringify(enabledModules));
-    } catch {
-      // ignore
-    }
-  }, [enabledModules]);
+    if (!draftLoaded || !businessId) return;
+
+    onboardingDraftStore.save(businessId, {
+      step,
+      businessType,
+      enabledModules,
+      categories
+    });
+  }, [businessId, draftLoaded, step, businessType, enabledModules, categories]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem("vimdy_onboarding_categories", JSON.stringify(categories));
-    } catch {
-      // ignore
+    if (onboardingCompleted) {
+      onboardingDraftStore.clear(businessId);
     }
-  }, [categories]);
+  }, [businessId, onboardingCompleted]);
 
   if (!isReady) return null;
 
-  // El negocio ya está listo: no hay razón para quedarse en /onboarding.
+  if (businessBootstrapError) {
+    return (
+      <VimdyBackground>
+        <div className="min-h-screen flex items-center justify-center px-4">
+          <GlassCard className="w-full max-w-md p-8 text-center">
+            <p className="text-vimdy-text font-semibold mb-2">
+              No pudimos cargar tu negocio
+            </p>
+            <p className="text-vimdy-text-secondary text-sm mb-6">
+              Tu sesión sigue activa. Vuelve a intentarlo cuando tengas
+              conexión con el servidor.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                void retryBusinessBootstrap();
+              }}
+              className="w-full rounded-vimdy-sm border border-vimdy-border bg-vimdy-surface px-4 py-3 text-vimdy-text hover:border-vimdy-accent transition-colors"
+            >
+              Reintentar
+            </button>
+          </GlassCard>
+        </div>
+      </VimdyBackground>
+    );
+  }
+
+  if (!businessId) {
+    return <Navigate to="/crear-negocio" replace />;
+  }
+
   if (onboardingCompleted) {
-    try {
-      localStorage.removeItem("vimdy_onboarding_step");
-      localStorage.removeItem("vimdy_onboarding_business_type");
-      localStorage.removeItem("vimdy_onboarding_enabled_modules");
-      localStorage.removeItem("vimdy_onboarding_categories");
-    } catch {
-      // ignore
-    }
     return <Navigate to="/dashboard" replace />;
   }
+
+  if (!draftLoaded) return null;
 
   const stepIsBuilt = ONBOARDING_STEPS_BUILT.includes(step);
 
@@ -153,7 +146,7 @@ export function OnboardingPage() {
           />
         )}
 
-        {stepIsBuilt && step === "business_type" && businessId && (
+        {stepIsBuilt && step === "business_type" && (
           <BusinessTypeStep
             businessId={businessId}
             onSaved={(type) => {
@@ -163,7 +156,7 @@ export function OnboardingPage() {
           />
         )}
 
-        {stepIsBuilt && step === "modules" && businessId && (
+        {stepIsBuilt && step === "modules" && (
           <ModulesStep
             businessId={businessId}
             businessType={businessType ?? undefined}
@@ -172,10 +165,6 @@ export function OnboardingPage() {
               setStep(resolveAfterModules());
             }}
           />
-        )}
-
-        {stepIsBuilt && step === "tables" && (
-          <TablesStep onSaved={() => setStep(nextOnboardingStep("tables"))} />
         )}
 
         {stepIsBuilt && step === "employees" && (
@@ -203,7 +192,9 @@ export function OnboardingPage() {
         )}
 
         {stepIsBuilt && step === "cash_opening" && (
-          <CashOpeningStep onSaved={() => setStep(nextOnboardingStep("cash_opening"))} />
+          <CashOpeningStep
+            onSaved={() => setStep(nextOnboardingStep("cash_opening"))}
+          />
         )}
 
         {stepIsBuilt && step === "loading" && (
