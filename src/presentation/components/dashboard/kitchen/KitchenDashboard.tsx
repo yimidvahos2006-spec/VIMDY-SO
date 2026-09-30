@@ -18,6 +18,7 @@ import {
   type DragEndEvent
 } from "@dnd-kit/core";
 
+import { useTranslation } from "../../../../core/i18n/useTranslation";
 import { useKitchenOrders, KitchenOrderView } from "../../../../hooks/useKitchenOrders";
 import { OrderPriority } from "../../../../core/entities/Entities";
 import { KitchenCard } from "./KitchenCard";
@@ -46,7 +47,7 @@ function sortByPriority(orders: KitchenOrderView[]): KitchenOrderView[] {
 }
 
 export function KitchenDashboard() {
-
+  const { t, money } = useTranslation();
   const { orders: allOrders, loading, updateStatus, cancelOrder, newOrderIds } = useKitchenOrders();
   const [orderToCancel, setOrderToCancel] = useState<KitchenOrderView | null>(null);
   const [orderToView, setOrderToView] = useState<KitchenOrderView | null>(null);
@@ -133,28 +134,28 @@ export function KitchenDashboard() {
       <div className="flex items-center justify-between gap-4">
         <div className="grid grid-cols-4 gap-6 flex-1">
           <StatCard
-            title="Pedidos activos"
+            title={t("kitchen.dashboard.stat.activeOrders")}
             value={orders.length}
             color="text-vimdy-accent"
             icon={<ClipboardList size={tvMode ? 40 : 28} />}
             tvMode={tvMode}
           />
           <StatCard
-            title="Pendientes"
+            title={t("kitchen.dashboard.stat.pending")}
             value={pending.length}
             color="text-vimdy-warning"
             icon={<Clock3 size={tvMode ? 40 : 28} />}
             tvMode={tvMode}
           />
           <StatCard
-            title="Preparando"
+            title={t("kitchen.dashboard.stat.preparing")}
             value={preparing.length}
             color="text-vimdy-accent"
             icon={<ChefHat size={tvMode ? 40 : 28} />}
             tvMode={tvMode}
           />
           <StatCard
-            title="Listos"
+            title={t("kitchen.dashboard.stat.ready")}
             value={ready.length}
             color="text-vimdy-success"
             icon={<CheckCircle2 size={tvMode ? 40 : 28} />}
@@ -173,18 +174,18 @@ export function KitchenDashboard() {
             }`}
           >
             {tvMode ? <Minimize2 size={20} /> : <Tv size={18} />}
-            {tvMode ? "Salir de Modo TV" : "Modo TV"}
+            {tvMode ? t("kitchen.dashboard.tvExit") : t("kitchen.dashboard.tvMode")}
           </button>
           {tvMode && <LiveClock />}
         </div>
       </div>
 
       {loading ? (
-        <p className="text-vimdy-text-tertiary text-center py-10">Cargando comandas...</p>
+        <p className="text-vimdy-text-tertiary text-center py-10">{t("kitchen.dashboard.loading")}</p>
       ) : (
         <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
           <div className={`grid xl:grid-cols-3 gap-6 ${tvMode ? "gap-8" : ""}`}>
-            <Column title="Pendientes" color="border-vimdy-warning" tvMode={tvMode} dropId="PENDIENTE">
+            <Column title={t("kitchen.dashboard.column.pending")} color="border-vimdy-warning" tvMode={tvMode} dropId="PENDIENTE">
               {pending.length === 0
                 ? <Empty tvMode={tvMode} />
                 : pending.map(order => (
@@ -200,7 +201,7 @@ export function KitchenDashboard() {
                   ))}
             </Column>
 
-            <Column title="Preparando" color="border-vimdy-accent" tvMode={tvMode} dropId="EN_PREPARACION">
+            <Column title={t("kitchen.dashboard.column.preparing")} color="border-vimdy-accent" tvMode={tvMode} dropId="EN_PREPARACION">
               {preparing.length === 0
                 ? <Empty tvMode={tvMode} />
                 : preparing.map(order => (
@@ -215,7 +216,7 @@ export function KitchenDashboard() {
                   ))}
             </Column>
 
-            <Column title="Listos" color="border-vimdy-success" tvMode={tvMode} dropId="LISTO">
+            <Column title={t("kitchen.dashboard.column.ready")} color="border-vimdy-success" tvMode={tvMode} dropId="LISTO">
               {ready.length === 0
                 ? <Empty tvMode={tvMode} />
                 : ready.map((order: KitchenOrderView) => (
@@ -323,9 +324,10 @@ function Column({ title, color, children, tvMode = false, dropId }: ColumnProps)
 }
 
 function Empty({ tvMode = false }: { tvMode?: boolean }) {
+  const { t } = useTranslation();
   return (
     <div className={`bg-vimdy-surface rounded-2xl border border-dashed border-vimdy-border text-center ${tvMode ? "p-14" : "p-10"}`}>
-      <p className={`text-vimdy-text-tertiary ${tvMode ? "text-xl" : ""}`}>Sin pedidos.</p>
+      <p className={`text-vimdy-text-tertiary ${tvMode ? "text-xl" : ""}`}>{t("kitchen.dashboard.empty")}</p>
     </div>
   );
 }

@@ -47,6 +47,7 @@ async function doSeed(
     { id: "tables.merge", module: "tables", description: "Unir mesas" },
     { id: "cash.view", module: "cash", description: "Ver movimientos de caja" },
     { id: "cash.registerMovement", module: "cash", description: "Registrar ingresos/egresos" },
+    { id: "cash.transfer", module: "cash", description: "Transferir efectivo entre cajas" },
     { id: "shift.view", module: "shift", description: "Ver turnos de caja" },
     { id: "shift.open", module: "shift", description: "Abrir turno de caja" },
     { id: "shift.close", module: "shift", description: "Cerrar turno de caja" },
@@ -75,7 +76,8 @@ async function doSeed(
     "inventory.view", "inventory.create", "inventory.edit", "inventory.adjust",
     "customers.view", "customers.create", "customers.edit",
     "kitchen.view", "tables.view", "tables.manage",
-    "cash.view", "shift.view",
+    "cash.view", "cash.registerMovement", "cash.transfer",
+    "shift.view", "shift.close",
     "reports.view", "reports.export",
     "users.view"
   ]);
@@ -83,7 +85,7 @@ async function doSeed(
     "sales.view", "sales.create",
     "customers.view", "customers.create",
     "cash.view", "cash.registerMovement",
-    "shift.view", "shift.open", "shift.close"
+    "shift.view", "shift.close"
   ]);
   await createIfMissing("MESERO", "Mesero", [
     "tables.view", "tables.manage", "tables.merge",

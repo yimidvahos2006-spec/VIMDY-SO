@@ -58,6 +58,9 @@ export interface QueuedSalePayment {
   readonly received?: number;
   readonly reference?: string;
   readonly mixed?: MixedPayment;
+  /** Contexto financiero exacto del cobro offline; servidor lo revalida al sincronizar. */
+  readonly shiftId?: string;
+  readonly cashRegisterId?: string;
 }
 
 export interface PendingSale {

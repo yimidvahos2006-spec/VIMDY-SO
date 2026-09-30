@@ -252,22 +252,11 @@ describe("Smoke: flujo OTP de VIMDY", () => {
         data: { user: { id: "u-1" } },
         error: null
       });
-      (supabase.auth.getSession as ReturnType<typeof vi.fn>).mockResolvedValue({
-        data: {
-          session: {
-            access_token: "test-access-token",
-            refresh_token: "test-refresh-token",
-            expires_in: 3600
-          }
-        },
-        error: null
-      });
       mockBusinessMemberships({
         business_id: "biz-1",
         role: "ADMIN",
         businesses: BUSINESS_ROW
       });
-      // Mock window.location for node environment
       vi.stubGlobal("location", { href: "" });
     });
 
@@ -275,18 +264,17 @@ describe("Smoke: flujo OTP de VIMDY", () => {
       vi.unstubAllGlobals();
     });
 
-    it("crea el negocio, limpia el registro pendiente y redirige al dominio app al tener éxito", async () => {
-      await completeRegistration();
+    it("crea el negocio, limpia el registro pendiente y resuelve la sesión", async () => {
+      const session = await completeRegistration();
 
       expect(getPendingRegistration()).toBeNull();
       expect(supabase.functions.invoke).toHaveBeenCalledWith("register-business", {
         body: { businessName: PENDING.businessName, ownerName: PENDING.ownerName, country: "CO", businessType: "restaurante" }
       });
       expect(supabase.auth.getUser).toHaveBeenCalled();
-      expect(supabase.auth.getSession).toHaveBeenCalled();
-      expect(location.href).toContain("https://app.vimdy.co/auth/callback");
-      expect(location.href).toContain("access_token=test-access-token");
-      expect(location.href).toContain("refresh_token=test-refresh-token");
+      expect(session.businessId).toBe("biz-1");
+      expect(session.businessName).toBe(BUSINESS_ROW.name);
+      expect(session.role).toBe("ADMIN");
     });
 
     it("NO borra el registro pendiente ni destruye la sesión si register-business falla (anti-bounce)", async () => {

@@ -62,10 +62,10 @@ describe("InvoiceFactory — DIAN provider", () => {
     ).toBe(false);
   });
 
-  it("DianProvider validateResponse acepta estados válidos", () => {
+  it("DianProvider validateResponse falla CLOSED para estados válidos (fail-closed)", () => {
     const provider = new DianProvider();
 
-    expect(provider.validateResponse({ status: "accepted" })).toBe(true);
-    expect(provider.validateResponse({ status: "pending" })).toBe(true);
+    expect(provider.validateResponse({ status: "accepted" })).toBe(false);
+    expect(provider.validateResponse({ status: "pending" })).toBe(false);
   });
 });

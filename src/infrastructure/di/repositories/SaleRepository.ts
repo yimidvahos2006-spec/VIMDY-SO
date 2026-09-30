@@ -27,7 +27,7 @@ export class SaleRepository extends SupabaseRepository<Sale> {
       .eq("business_id", getCurrentBusinessId())
       .eq("branch_id", getCurrentBranchId())
       .gte("sale_date", start.toISOString())
-      .lte("sale_date", end.toISOString())
+      .lt("sale_date", end.toISOString())
       .order("sale_date", { ascending: false });
 
     if (error) throw new Error(`SUPABASE_FIND_BY_DATE_RANGE_FAILED (sales): ${error.message}`);
@@ -48,7 +48,7 @@ export class SaleRepository extends SupabaseRepository<Sale> {
       .eq("business_id", getCurrentBusinessId())
       .eq("branch_id", getCurrentBranchId())
       .gte("sale_date", start.toISOString())
-      .lte("sale_date", end.toISOString());
+      .lt("sale_date", end.toISOString());
 
     if (error) throw new Error(`SUPABASE_GET_TOTAL_REVENUE_FAILED (sales): ${error.message}`);
 

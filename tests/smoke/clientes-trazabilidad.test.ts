@@ -48,6 +48,8 @@ import { PosCore } from "../../src/core/engines/PosCore";
 import { DashboardEngine } from "../../src/core/engines/DashboardEngine";
 import { AIEngine } from "../../src/core/engines/AIEngine";
 import { RecipeEngine } from "../../src/core/engines/RecipeEngine";
+import { PurchaseIntelligenceEngine } from "../../src/core/engines/PurchaseIntelligenceEngine";
+import { ForecastEngine } from "../../src/core/engines/ForecastEngine";
 
 import { InMemoryRepository } from "../fakes/InMemoryRepository";
 import { FakeProductRepository } from "../fakes/FakeProductRepository";
@@ -98,7 +100,9 @@ function buildContext(businessId = "biz-1", branchId = "branch-1") {
     new HealthEngine(),
     new AIEngine(),
     inventory,
-    new RecipeEngine(products)
+    new RecipeEngine(products),
+    cash,
+    new ForecastEngine(sales as any, inventory, new PurchaseIntelligenceEngine(inventory, sales as any))
   );
 
   return {

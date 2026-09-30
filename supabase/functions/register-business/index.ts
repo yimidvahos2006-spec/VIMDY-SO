@@ -12,7 +12,7 @@
 //   el Authorization: Bearer <token> automáticamente.
 //
 //   Body: { businessName, ownerName, country, businessType }
-//   Respuesta: { ok: true, businessId }
+//   Respuesta: { ok: true, businessId, branchId, role, business }
 //
 // SEGURIDAD:
 //   - El usuario se identifica siempre por el JWT (nunca por el body).
@@ -72,6 +72,73 @@ interface RequestPayload {
   ownerName?: string;
   country?: string;
   businessType?: string;
+  /** initial = alta de cuenta; additional = negocio adicional desde cuenta existente. */
+  registrationMode?: "initial" | "additional";
+}
+
+const BUSINESS_BOOTSTRAP_SELECT =
+  "id,name,country,currency,language,timezone,tax_rate,onboarding_completed,business_type,enabled_modules,salida_cocina";
+
+type BootstrapBusiness = {
+  id: string;
+  name: string;
+  country: string;
+  currency: string;
+  language: string;
+  timezone: string;
+  tax_rate: number;
+  onboarding_completed: boolean;
+  business_type: string | null;
+  enabled_modules: string[] | null;
+  salida_cocina: string | null;
+};
+
+async function resolveMainBranchId(admin: ReturnType<typeof createClient>, businessId: string): Promise<string | null> {
+  const { data: mainBranch } = await admin
+    .from("branches")
+    .select("id")
+    .eq("business_id", businessId)
+    .eq("is_main", true)
+    .maybeSingle();
+
+  if (mainBranch?.id) return String(mainBranch.id);
+
+  const { data: activeBranch } = await admin
+    .from("branches")
+    .select("id")
+    .eq("business_id", businessId)
+    .eq("active", true)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  return activeBranch?.id ? String(activeBranch.id) : null;
+}
+
+async function buildBootstrap(
+  admin: ReturnType<typeof createClient>,
+  businessId: string,
+  role: string
+) {
+  const { data: business, error: businessError } = await admin
+    .from("businesses")
+    .select(BUSINESS_BOOTSTRAP_SELECT)
+    .eq("id", businessId)
+    .single();
+
+  if (businessError || !business) {
+    throw new Error(`BUSINESS_BOOTSTRAP_LOOKUP_FAILED: ${businessError?.message ?? "business not found"}`);
+  }
+
+  const branchId = await resolveMainBranchId(admin, businessId);
+
+  return {
+    ok: true,
+    businessId,
+    branchId,
+    role,
+    business
+  };
 }
 
 // Espejo server-side de COUNTRIES en src/core/config/globalization.ts. Vive
@@ -189,10 +256,15 @@ Deno.serve(async (req: Request) => {
     const ownerName = payload.ownerName?.trim();
     const country = payload.country?.trim();
     const businessType = payload.businessType?.trim() ?? "restaurante";
+    const registrationMode = payload.registrationMode ?? "initial";
 
     if (!businessName || !ownerName || !country) {
       console.warn("[register-business] MISSING_FIELDS:", { businessName: !!businessName, ownerName: !!ownerName, country: !!country });
       return json({ error: "Faltan campos: businessName, ownerName y country son obligatorios." }, 400, corsHeaders);
+    }
+
+    if (registrationMode !== "initial" && registrationMode !== "additional") {
+      return json({ error: "REGISTRATION_MODE_INVALID" }, 400, corsHeaders);
     }
 
     const countryDefaults = COUNTRY_DEFAULTS[country];
@@ -209,9 +281,42 @@ Deno.serve(async (req: Request) => {
     const trialEndsAt = new Date(now);
     trialEndsAt.setDate(trialEndsAt.getDate() + TRIAL_PERIOD_DAYS);
 
-    // 3) Protección definitiva por persona: un usuario SOLO puede tener UN
-    //    trial de por vida, sin importar cuántos negocios cree, cuántas
-    //    veces cambie de dispositivo, navegador, IP o sesión.
+    // 3) En el alta inicial, primero recuperamos un negocio existente.
+    //    Esto es deliberado: si el primer request creó el negocio pero el cliente
+    //    perdió la respuesta, una repetición debe devolver el mismo negocio y NO
+    //    bloquearse por TRIAL_YA_USADO.
+    if (registrationMode === "initial") {
+      const { data: existingBusinesses, error: existingError } = await admin
+        .from("business_members")
+        .select("business_id, role")
+        .eq("user_id", authUser.id)
+        .limit(1);
+
+      if (existingError) {
+        console.error("[register-business] BUSINESS_LOOKUP_FAILED:", existingError.message);
+        return json({ error: "BUSINESS_LOOKUP_FAILED", detail: existingError.message }, 500, corsHeaders);
+      }
+
+      if (existingBusinesses && existingBusinesses.length > 0) {
+        const existing = existingBusinesses[0];
+        try {
+          const bootstrap = await buildBootstrap(
+            admin,
+            String(existing.business_id),
+            String(existing.role ?? "ADMIN")
+          );
+          console.log(`[register-business] Returning existing business ${existing.business_id} for user ${authUser.id} (idempotent recovery)`);
+          return json({ ...bootstrap, idempotent: true }, 200, corsHeaders);
+        } catch (error) {
+          console.error("[register-business] EXISTING_BUSINESS_BOOTSTRAP_FAILED:", String(error));
+          return json({ error: "EXISTING_BUSINESS_BOOTSTRAP_FAILED", detail: String(error) }, 500, corsHeaders);
+        }
+      }
+    }
+
+    // 4) Protección definitiva por persona: un usuario solo puede consumir el
+    //    trial una vez. La comprobación ocurre después del recovery inicial para
+    //    que un reintento seguro nunca convierta una operación ya creada en error.
     const { data: hasUsedTrial, error: hasUsedTrialError } = await admin
       .rpc("has_user_used_trial", { p_user_id: authUser.id });
 
@@ -225,42 +330,6 @@ Deno.serve(async (req: Request) => {
       return json({
         error: "TRIAL_YA_USADO: ya utilizaste tu prueba gratuita de 14 días. Puedes contratar un plan mensual o anual para continuar."
       }, 403, corsHeaders);
-    }
-
-    // 4) Idempotencia: si el usuario ya tiene un negocio, devolverlo en vez
-    //    de crear otro. Esto recupera el registro si el frontend falló después
-    //    de confirmar el email pero antes de completar el negocio.
-    const { data: existingBusinesses, error: existingError } = await admin
-      .from("business_members")
-      .select("business_id, role")
-      .eq("user_id", authUser.id);
-
-    if (existingError) {
-      console.error("[register-business] BUSINESS_LOOKUP_FAILED:", existingError.message);
-      return json({ error: "BUSINESS_LOOKUP_FAILED", detail: existingError.message }, 500, corsHeaders);
-    }
-
-    if (existingBusinesses && existingBusinesses.length > 0) {
-      const primaryMembership = existingBusinesses[0];
-      const { data: existingBiz, error: existingBizError } = await admin
-        .from("businesses")
-        .select("id")
-        .eq("id", primaryMembership.business_id)
-        .maybeSingle();
-
-      if (existingBizError) {
-        console.error("[register-business] EXISTING_BUSINESS_LOOKUP_FAILED:", existingBizError.message);
-        return json({ error: "EXISTING_BUSINESS_LOOKUP_FAILED", detail: existingBizError.message }, 500, corsHeaders);
-      }
-
-      if (existingBiz) {
-        console.log(`[register-business] Returning existing business ${existingBiz.id} for user ${authUser.id}`);
-        return json({
-          ok: true,
-          businessId: existingBiz.id,
-          idempotent: true
-        }, 200, corsHeaders);
-      }
     }
 
     try {
@@ -334,14 +403,18 @@ Deno.serve(async (req: Request) => {
         console.warn("[register-business] app_users no disponible:", String(appUserErr));
       }
 
-      const { error: branchInsertError } = await admin.from("branches").insert({
-        business_id: business.id,
-        name: "Sucursal principal",
-        is_main: true,
-        active: true
-      });
+      const { data: branch, error: branchInsertError } = await admin
+        .from("branches")
+        .insert({
+          business_id: business.id,
+          name: "Sucursal principal",
+          is_main: true,
+          active: true
+        })
+        .select("id")
+        .single();
 
-      if (branchInsertError) {
+      if (branchInsertError || !branch) {
         console.error("[register-business] BRANCH_INSERT_FAILED:", branchInsertError.message);
         await admin.from("business_members").delete().eq("user_id", authUser.id).eq("business_id", business.id);
         await admin.from("businesses").delete().eq("id", business.id);
@@ -363,8 +436,14 @@ Deno.serve(async (req: Request) => {
         console.warn("[register-business] record_trial_usage no disponible:", String(trialErr));
       }
 
+      const bootstrap = await buildBootstrap(admin, business.id, "ADMIN");
+      const response = {
+        ...bootstrap,
+        branchId: String(branch.id)
+      };
+
       console.log(`[register-business] Registration complete for user ${authUser.id}, business ${business.id}`);
-      return json({ ok: true, businessId: business.id }, 200, corsHeaders);
+      return json(response, 200, corsHeaders);
     } catch (error) {
       console.error("[register-business] UNEXPECTED_ERROR:", String(error));
       return json({ error: "REGISTER_BUSINESS_FAILED", detail: String(error) }, 500, corsHeaders);

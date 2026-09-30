@@ -21,7 +21,8 @@ import { Receipt } from "./ReceiptEngine";
 
 import { vimdyCore } from "../VimdyCore";
 import { logWarning } from "../../infrastructure/logging/opsLogger";
-import { kitchenOutputModeStore } from "../store/kitchenOutputModeStore";
+import { getEffectiveKitchenOutputMode } from "../services/effectiveKitchenOutputMode";
+import { enabledModulesStore } from "../store/enabledModulesStore";
 import { createKitchenOutput } from "../services/KitchenOutputFactory";
 import { getCurrentBusinessId, getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
 import { connectionStore } from "../store/connectionStore";
@@ -420,11 +421,20 @@ export class TableEngine {
     priority: OrderPriority = "NORMAL"
   ): Promise<KitchenOrder | null> {
     const table = await this.getTable(tableId);
+    const modules = enabledModulesStore.get();
+    if (modules && !modules.includes("cocina")) {
+      throw new Error("KITCHEN_MODULE_DISABLED: el módulo Cocina no está habilitado para este negocio.");
+    }
 
     if (NOT_OPEN_STATUSES.has(table.status)) {
       throw new Error(
         `TABLE_NOT_OPEN: la mesa "${table.name}" no tiene un pedido en curso. Ábrela primero con openTable().`
       );
+    }
+
+    const kitchenOutputMode = getEffectiveKitchenOutputMode();
+    if (kitchenOutputMode === "none") {
+      throw new Error("KITCHEN_OUTPUT_NOT_CONFIGURED: configura una pantalla KDS o impresora para enviar pedidos de esta mesa a cocina.");
     }
 
     const order = await this.sendPendingKitchenItems(tableId, priority);
@@ -489,7 +499,7 @@ export class TableEngine {
       orderId: table.orderId
     };
 
-    await createKitchenOutput(kitchenOutputModeStore.get(), this.kitchen).send(order);
+    await createKitchenOutput(getEffectiveKitchenOutputMode(), this.kitchen).send(order);
 
     return order;
   }
@@ -686,7 +696,8 @@ export class TableEngine {
             received: existingSale.total,
             change: 0,
             message: "Pago ya procesado (idempotente)",
-            date: existingSale.updatedAt
+            date: existingSale.updatedAt,
+            verificationStatus: "CONFIRMED",
           };
 
           return { sale: existingSale, payment, receipt };

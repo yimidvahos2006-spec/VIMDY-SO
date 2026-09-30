@@ -21,7 +21,7 @@ const OPTIONS = [
     id: "printer" as const,
     Icon: Printer,
     label: "Impresora",
-    description: "Próximamente"
+    description: "Ticket térmico de comanda"
   },
   {
     id: "ambos" as const,
@@ -47,7 +47,7 @@ export function KitchenConfigStep({ hasKitchen, value, onChange }: Props) {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {OPTIONS.map(option => {
           const isSelected = value === option.id;
-          const isDisabled = option.id === "printer";
+          const isDisabled = false;
           const Icon = option.Icon;
 
           return (

@@ -17,13 +17,11 @@ ALTER TABLE electronic_invoices
   ADD COLUMN IF NOT EXISTS dian_response_status text,
   ADD COLUMN IF NOT EXISTS dian_response_code text,
   ADD COLUMN IF NOT EXISTS transmitted_at timestamptz,
-  ADD COLUMN IF NOT EXISTS certificate_id text REFERENCES dian_certificates(id),
+  ADD COLUMN IF NOT EXISTS certificate_id text,
   ADD COLUMN IF NOT EXISTS dian_qr_code text;
-
 CREATE UNIQUE INDEX IF NOT EXISTS electronic_invoices_idempotency_key_idx
   ON electronic_invoices (idempotency_key)
   WHERE idempotency_key IS NOT NULL;
-
 -- ----------------------------------------------------------------------------
 -- 2. TABLA dian_certificates — certificado digital por empresa
 --    La clave privada NUNCA vive en Supabase. Este registro solo contiene
@@ -48,19 +46,15 @@ CREATE TABLE IF NOT EXISTS dian_certificates (
   updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (business_id, certificate_serial)
 );
-
 CREATE INDEX IF NOT EXISTS dian_certificates_business_id_idx
   ON dian_certificates (business_id);
-
 CREATE INDEX IF NOT EXISTS dian_certificates_active_idx
   ON dian_certificates (active) WHERE active = true;
-
 -- Trigger updated_at para dian_certificates
 DROP TRIGGER IF EXISTS dian_certificates_touch_updated ON dian_certificates;
 CREATE TRIGGER dian_certificates_touch_updated
   BEFORE UPDATE ON dian_certificates
   FOR EACH ROW EXECUTE FUNCTION public.touch_updated_at();
-
 -- ----------------------------------------------------------------------------
 -- 3. TABLA electronic_invoice_jobs — cola de reintentos DIAN
 --    Estado: pending, processing, transmitted, accepted, rejected, failed
@@ -78,22 +72,17 @@ CREATE TABLE IF NOT EXISTS electronic_invoice_jobs (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
-
 CREATE INDEX IF NOT EXISTS electronic_invoice_jobs_business_idx
   ON electronic_invoice_jobs (business_id);
-
 CREATE INDEX IF NOT EXISTS electronic_invoice_jobs_status_next_retry
   ON electronic_invoice_jobs (status, next_retry_at)
   WHERE status IN ('pending', 'processing');
-
 CREATE INDEX IF NOT EXISTS electronic_invoice_jobs_invoice_id
   ON electronic_invoice_jobs (invoice_id);
-
 DROP TRIGGER IF EXISTS electronic_invoice_jobs_touch_updated ON electronic_invoice_jobs;
 CREATE TRIGGER electronic_invoice_jobs_touch_updated
   BEFORE UPDATE ON electronic_invoice_jobs
-  FOR EACH ROW EXECUTE FUNCTION public.touch_updated_updated_at();
-
+  FOR EACH ROW EXECUTE FUNCTION public.touch_updated_at();
 -- ----------------------------------------------------------------------------
 -- 4. RPC get_next_invoice_consecutive — numeración atómica
 --    Usa SELECT ... FOR UPDATE para garantizar que ningún dos procesos
@@ -161,26 +150,21 @@ BEGIN
   RETURN formatted_num;
 END;
 $$;
-
 GRANT EXECUTE ON FUNCTION public.get_next_invoice_consecutive(uuid) TO authenticated, service_role;
-
 -- ----------------------------------------------------------------------------
 -- 5. RLS para dian_certificates y electronic_invoice_jobs
 -- ----------------------------------------------------------------------------
 ALTER TABLE dian_certificates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE electronic_invoice_jobs ENABLE ROW LEVEL SECURITY;
-
 DROP POLICY IF EXISTS dian_certificates_read ON dian_certificates;
 CREATE POLICY dian_certificates_read ON dian_certificates
   FOR SELECT USING (business_id IN (SELECT auth_business_ids()));
-
 DROP POLICY IF EXISTS dian_certificates_insert ON dian_certificates;
 CREATE POLICY dian_certificates_insert ON dian_certificates
   FOR INSERT WITH CHECK (
     business_id IN (SELECT auth_business_ids())
     AND is_business_subscription_active(business_id)
   );
-
 DROP POLICY IF EXISTS dian_certificates_update ON dian_certificates;
 CREATE POLICY dian_certificates_update ON dian_certificates
   FOR UPDATE USING (
@@ -191,25 +175,21 @@ CREATE POLICY dian_certificates_update ON dian_certificates
     business_id IN (SELECT auth_business_ids())
     AND has_business_role(business_id, ARRAY['ADMIN'])
   );
-
 DROP POLICY IF EXISTS dian_certificates_delete ON dian_certificates;
 CREATE POLICY dian_certificates_delete ON dian_certificates
   FOR DELETE USING (
     business_id IN (SELECT auth_business_ids())
     AND has_business_role(business_id, ARRAY['ADMIN'])
   );
-
 DROP POLICY IF EXISTS electronic_invoice_jobs_read ON electronic_invoice_jobs;
 CREATE POLICY electronic_invoice_jobs_read ON electronic_invoice_jobs
   FOR SELECT USING (business_id IN (SELECT auth_business_ids()));
-
 DROP POLICY IF EXISTS electronic_invoice_jobs_insert ON electronic_invoice_jobs;
 CREATE POLICY electronic_invoice_jobs_insert ON electronic_invoice_jobs
   FOR INSERT WITH CHECK (
     business_id IN (SELECT auth_business_ids())
     AND is_business_subscription_active(business_id)
   );
-
 DROP POLICY IF EXISTS electronic_invoice_jobs_update ON electronic_invoice_jobs;
 CREATE POLICY electronic_invoice_jobs_update ON electronic_invoice_jobs
   FOR UPDATE
@@ -217,21 +197,17 @@ CREATE POLICY electronic_invoice_jobs_update ON electronic_invoice_jobs
     business_id IN (SELECT auth_business_ids())
     AND has_business_role(business_id, ARRAY['ADMIN'])
   );
-
 DROP POLICY IF EXISTS electronic_invoice_jobs_delete ON electronic_invoice_jobs;
 CREATE POLICY electronic_invoice_jobs_delete ON electronic_invoice_jobs
   FOR DELETE USING (
     business_id IN (SELECT auth_business_ids())
     AND has_business_role(business_id, ARRAY['ADMIN'])
   );
-
 GRANT SELECT, INSERT, UPDATE, DELETE ON dian_certificates, electronic_invoice_jobs TO authenticated;
 GRANT ALL ON dian_certificates, electronic_invoice_jobs TO service_role;
-
 -- Revocar SELECT de columnas encriptadas de authenticated (solo service_role lee la clave privada)
 REVOKE SELECT (private_key_encrypted, cert_pem_encrypted) ON dian_certificates FROM authenticated;
 GRANT SELECT (private_key_encrypted, cert_pem_encrypted) ON dian_certificates TO service_role;
-
 -- ----------------------------------------------------------------------------
 -- 6. Revocar UPDATE de businesses para authenticated en columnas sensibles
 --    ya establecidas en migración anterior; reforzar column-level grants
@@ -246,7 +222,6 @@ REVOKE UPDATE (
   dian_qr_code,
   idempotency_key
 ) ON electronic_invoices FROM authenticated;
-
 -- authenticated puede leer todo (sujeto a RLS), insertar (sujeto a RLS),
 -- pero NO puede escribir columnas de respuesta/transmisión:
 -- esas solo las escribe la Edge Function (service_role).
@@ -258,10 +233,9 @@ GRANT INSERT (
   qr_code, customer_document_type, customer_document_number,
   customer_name, subtotal, tax, total, error_code, error_message
 ) ON electronic_invoices TO authenticated;
-
 -- ============================================================================
 -- VERIFICACIÓN:
 -- SELECT 'certs_exists' AS check, to_regclass('dian_certificates') AS result;
 -- SELECT 'jobs_exists' AS check, to_regclass('electronic_invoice_jobs') AS result;
 -- SELECT 'rpc_exists' AS check, routine_name FROM pg_proc WHERE routine_name = 'get_next_invoice_consecutive';
--- ============================================================================
+-- ============================================================================;

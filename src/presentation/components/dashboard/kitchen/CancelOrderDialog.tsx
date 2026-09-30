@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { X, TriangleAlert } from "lucide-react";
 
+import { useTranslation } from "../../../../core/i18n/useTranslation";
 import { KITCHEN_CANCEL_REASONS } from "../../../../core/engines/KitchenEngine";
 import { KitchenOrderView } from "../../../../hooks/useKitchenOrders";
 import { translateBusinessError } from "../../../../core/errors/translateBusinessError";
@@ -13,12 +14,13 @@ interface Props {
 }
 
 export function CancelOrderDialog({ order, onConfirm, onClose }: Props) {
+  const { t } = useTranslation();
   const [selected, setSelected] = useState<string | null>(null);
   const [customReason, setCustomReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isOtro = selected === "Otro";
+  const isOtro = selected === "kitchen.cancel.reason.other";
   const finalReason = isOtro ? customReason.trim() : selected;
   const canConfirm = !!finalReason && !busy;
 
@@ -30,7 +32,7 @@ export function CancelOrderDialog({ order, onConfirm, onClose }: Props) {
     try {
       await onConfirm(finalReason);
     } catch (err) {
-      setError(translateBusinessError(err, "No se pudo cancelar la comanda."));
+      setError(translateBusinessError(err, t("kitchen.cancel.errorFallback")));
       setBusy(false);
     }
   }
@@ -44,18 +46,18 @@ export function CancelOrderDialog({ order, onConfirm, onClose }: Props) {
               <TriangleAlert size={22} className="text-vimdy-danger" />
             </div>
             <div>
-              <h2 className="text-vimdy-text font-bold text-lg">Cancelar comanda</h2>
+              <h2 className="text-vimdy-text font-bold text-lg">{t("kitchen.cancel.title")}</h2>
               <p className="text-vimdy-text-secondary text-xs">
-                {order.origin ?? "Pedido"} · Pedido #{order.orderNumber ?? order.id.slice(0, 8)}
+                {order.origin ?? t("kitchen.defaultOrigin")} · {t("kitchen.cancel.orderRef", { number: order.orderNumber ?? order.id.slice(0, 8) })}
               </p>
             </div>
           </div>
-          <button onClick={onClose} aria-label="Cerrar" className="text-vimdy-text-tertiary hover:text-vimdy-text">
+          <button onClick={onClose} aria-label={t("kitchen.closeAria")} className="text-vimdy-text-tertiary hover:text-vimdy-text">
             <X size={20} />
           </button>
         </div>
 
-        <p className="text-vimdy-text-secondary text-sm mb-3">¿Cuál es el motivo?</p>
+        <p className="text-vimdy-text-secondary text-sm mb-3">{t("kitchen.cancel.reasonPrompt")}</p>
 
         <div className="grid grid-cols-2 gap-2 mb-4">
           {KITCHEN_CANCEL_REASONS.map(reason => (
@@ -69,7 +71,7 @@ export function CancelOrderDialog({ order, onConfirm, onClose }: Props) {
                   : "bg-vimdy-surface border-vimdy-border text-vimdy-text-secondary hover:border-vimdy-text-tertiary"
               }`}
             >
-              {reason}
+               {t(reason)}
             </button>
           ))}
         </div>
@@ -78,7 +80,7 @@ export function CancelOrderDialog({ order, onConfirm, onClose }: Props) {
           <textarea
             value={customReason}
             onChange={e => setCustomReason(e.target.value)}
-            placeholder="Describe el motivo..."
+             placeholder={t("kitchen.cancel.customReasonPlaceholder")}
             rows={2}
             className="w-full bg-vimdy-surface border border-vimdy-border rounded-xl p-3 text-vimdy-text text-sm mb-4 resize-none focus:outline-none focus:border-vimdy-danger"
           />
@@ -87,20 +89,20 @@ export function CancelOrderDialog({ order, onConfirm, onClose }: Props) {
         {error && <p className="text-vimdy-danger text-sm mb-4">{error}</p>}
 
         <div className="grid grid-cols-2 gap-3">
-          <VimdyButton
+            <VimdyButton
             onClick={onClose}
             disabled={busy}
             variant="secondary"
           >
-            Volver
+            {t("kitchen.cancel.backButton")}
           </VimdyButton>
-          <VimdyButton
+            <VimdyButton
             onClick={handleConfirm}
             disabled={!canConfirm}
             loading={busy}
             variant="danger"
           >
-            Confirmar cancelación
+            {t("kitchen.cancel.confirmButton")}
           </VimdyButton>
         </div>
       </div>

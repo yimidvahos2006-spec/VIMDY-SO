@@ -44,6 +44,7 @@ import {
 import { SubscriptionSettingsSection } from "../subscription/SubscriptionSettingsSection";
 import { SubscriptionCountdownBadge } from "../subscription/SubscriptionCountdownBadge";
 import { VimdyButton } from "../ui/VimdyButton";
+import { DailyReportSettingsCard } from "./DailyReportSettingsCard";
 
 function SectionCard({
   icon,
@@ -552,11 +553,6 @@ export function SettingsDashboard() {
               checked={configDraft.enableAI}
               onChange={(v) => setConfigDraft({ ...configDraft, enableAI: v })}
             />
-            <Toggle
-              label="Reportes por WhatsApp"
-              checked={configDraft.enableWhatsAppReports}
-              onChange={(v) => setConfigDraft({ ...configDraft, enableWhatsAppReports: v })}
-            />
           </div>
 
           <div className="flex items-center justify-between mt-4">
@@ -571,6 +567,8 @@ export function SettingsDashboard() {
             </VimdyButton>
           </div>
         </SectionCard>
+
+        <DailyReportSettingsCard />
 
         {config.country === "CO" && (
           <SectionCard

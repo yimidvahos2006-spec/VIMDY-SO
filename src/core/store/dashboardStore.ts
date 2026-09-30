@@ -1,36 +1,52 @@
 import { ObservableStore } from "./ObservableStore";
 
+export type DashboardCashStatus = "CLOSED" | "OPEN" | "NO_SHIFT";
+export type DashboardInventoryValuationStatus = "COMPLETE" | "INCOMPLETE" | "NO_STOCK_TRACKING";
+export type DashboardInventoryValueBasis = "RETAIL_PRICE" | "PURCHASE_COST" | "UNAVAILABLE";
+
 export interface DashboardData {
   sales: number;
   customers: number;
   orders: number;
+  /** Current inventory valuation. The UI must consult valuation metadata before presenting it as money. */
   inventory: number;
   todaySales: number;
+  /** Backward-compatible field. This is reconciled current cash/closing cash, not sale cash movement. */
   cashAmount: number;
   productsSold: number;
   averageTicket: number;
   pendingKitchen: number;
+  cashStatus: DashboardCashStatus;
+  cashExpectedAmount: number | null;
+  cashCountedAmount: number | null;
+  cashDifference: number | null;
+  cashClosedAt: string | null;
+  inventoryValuationStatus: DashboardInventoryValuationStatus;
+  inventoryValueBasis: DashboardInventoryValueBasis;
+  inventoryLowStockCount: number;
+  inventoryHistoricalValueAvailable: boolean;
+  /** Comparable elapsed-period references; optional for backward compatibility with existing callers. */
+  salesComparablePrevious?: number | null;
+  transactionsComparablePrevious?: number | null;
+  averageSaleComparablePrevious?: number | null;
+  comparisonGeneratedAt?: string | null;
 }
 
-/** Los 4 indicadores que muestran las tarjetas KPI del Dashboard. */
 export interface DashboardMetrics {
   sales: number;
   customers: number;
   orders: number;
-  inventory: number;
+  inventory: number | null;
 }
 
-/** Snapshot completo que consume la UI: datos actuales + ayer + historial reciente. */
 export interface DashboardSnapshot {
   data: DashboardData;
-  /** Valor real de cada métrica al cierre de ayer, para calcular el ↑/↓ % de cada tarjeta. */
   yesterday: DashboardMetrics;
-  /** Últimos 14 días reales de cada métrica, en orden cronológico, para las sparklines. */
   history: {
     sales: number[];
     customers: number[];
     orders: number[];
-    inventory: number[];
+    inventory: Array<number | null>;
   };
 }
 
@@ -43,75 +59,45 @@ const INITIAL_DATA: DashboardData = {
   cashAmount: 0,
   productsSold: 0,
   averageTicket: 0,
-  pendingKitchen: 0
+  pendingKitchen: 0,
+  cashStatus: "NO_SHIFT",
+  cashExpectedAmount: null,
+  cashCountedAmount: null,
+  cashDifference: null,
+  cashClosedAt: null,
+  inventoryValuationStatus: "NO_STOCK_TRACKING",
+  inventoryValueBasis: "UNAVAILABLE",
+  inventoryLowStockCount: 0,
+  inventoryHistoricalValueAvailable: false,
+  salesComparablePrevious: null,
+  transactionsComparablePrevious: null,
+  averageSaleComparablePrevious: null,
+  comparisonGeneratedAt: null,
 };
 
-const INITIAL_YESTERDAY: DashboardMetrics = {
-  sales: 0,
-  customers: 0,
-  orders: 0,
-  inventory: 0
-};
+const INITIAL_YESTERDAY: DashboardMetrics = { sales: 0, customers: 0, orders: 0, inventory: null };
+const INITIAL_HISTORY: DashboardSnapshot["history"] = { sales: [], customers: [], orders: [], inventory: [] };
 
-const INITIAL_HISTORY: DashboardSnapshot["history"] = {
-  sales: [],
-  customers: [],
-  orders: [],
-  inventory: []
-};
-
-/**
- * DashboardStore
- * ---------------------------------------------------------------------------
- * ANTES: persistía `data`, `yesterday` e `history` en localStorage
- * (STORAGE_KEY = "vimdy_dashboard_state_v1") y calculaba el cambio de día
- * comparando contra lo que EL MISMO navegador tenía guardado. Eso rompía
- * la sincronización entre dispositivos de dos formas: (1) dos computadores
- * del mismo negocio podían mostrar un % de tendencia distinto porque cada
- * uno detectaba el "cierre del día" en un momento distinto, con datos
- * potencialmente desactualizados; y (2) en un navegador compartido entre
- * negocios (kiosko, PC de pruebas), un negocio podía llegar a ver por un
- * instante las cifras que dejó guardadas el negocio anterior.
- *
- * AHORA: es un cache 100% en memoria, sin persistencia. La fuente de
- * verdad real vive en Supabase — useDashboardSync.ts la consulta
- * (SalesEngine / CustomerEngine / InventoryEngine / KitchenService) al
- * montar la app y cada vez que llega un evento "sale"/"customer"/
- * "inventory"/"kitchen" del bus interno (incluyendo los que dispara
- * realtimeSync.ts cuando OTRO dispositivo hizo el cambio), calcula
- * `yesterday` e `history` con datos reales y los escribe aquí con
- * applyReconciled(). Todos los dispositivos del mismo negocio terminan
- * viendo exactamente los mismos números, siempre.
- *
- * Los métodos addSale/reverseSale/addCustomer/updateInventory/
- * updateKitchenPending (llamados desde checkout.ts y SalesEngine.ts) solo
- * dan una respuesta optimista instantánea en ESTE dispositivo mientras
- * useDashboardSync termina de reconciliar con el dato real — nunca se
- * guardan en ningún lado, así que jamás quedan "pegados" entre sesiones.
- */
 class DashboardStore extends ObservableStore<DashboardSnapshot> {
   private data: DashboardData = { ...INITIAL_DATA };
   private yesterday: DashboardMetrics = { ...INITIAL_YESTERDAY };
   private history: DashboardSnapshot["history"] = { ...INITIAL_HISTORY };
+  private optimistic: Partial<DashboardData> = {};
 
   constructor() {
-    super({
-      data: { ...INITIAL_DATA },
-      yesterday: { ...INITIAL_YESTERDAY },
-      history: { ...INITIAL_HISTORY }
-    });
+    super({ data: { ...INITIAL_DATA }, yesterday: { ...INITIAL_YESTERDAY }, history: { ...INITIAL_HISTORY } });
   }
 
-  private publishSnapshot() {
+  private publishSnapshot(): void {
     this.publish({
-      data: { ...this.data },
+      data: { ...this.data, ...this.optimistic },
       yesterday: { ...this.yesterday },
       history: {
         sales: [...this.history.sales],
         customers: [...this.history.customers],
         orders: [...this.history.orders],
-        inventory: [...this.history.inventory]
-      }
+        inventory: [...this.history.inventory],
+      },
     });
   }
 
@@ -119,95 +105,98 @@ class DashboardStore extends ObservableStore<DashboardSnapshot> {
     return this.snapshot.data;
   }
 
-  /**
-   * Único punto de escritura para `yesterday` e `history`. Lo llama
-   * exclusivamente useDashboardSync.reconcile() con datos ya calculados
-   * a partir de ventas/clientes/inventario reales de Supabase.
-   */
   applyReconciled(
     data: DashboardData,
     yesterday: DashboardMetrics,
-    history: DashboardSnapshot["history"]
-  ) {
-    this.data = data;
-    this.yesterday = yesterday;
-    this.history = history;
+    history: DashboardSnapshot["history"],
+  ): void {
+    this.data = { ...data };
+    this.yesterday = { ...yesterday };
+    this.history = {
+      sales: [...history.sales],
+      customers: [...history.customers],
+      orders: [...history.orders],
+      inventory: [...history.inventory],
+    };
+    this.optimistic = {};
     this.publishSnapshot();
   }
 
-  update(data: Partial<DashboardData>) {
-    this.data = { ...this.data, ...data };
-    this.publishSnapshot();
-  }
-
-  addSale(amount: number, products: number = 1) {
-    this.data.sales += amount;
-    this.data.todaySales += amount;
-    this.data.orders++;
-    this.data.cashAmount += amount;
-    this.data.productsSold += products;
-
-    this.data.averageTicket =
-      this.data.orders > 0 ? this.data.sales / this.data.orders : 0;
-
-    this.publishSnapshot();
-  }
-
-  addCustomer() {
-    this.data.customers++;
+  update(patch: Partial<DashboardData>): void {
+    this.optimistic = { ...this.optimistic, ...patch };
     this.publishSnapshot();
   }
 
   /**
-   * Revierte el efecto de una venta cancelada o reembolsada. A diferencia
-   * de addSale() (que siempre representa una venta nueva y por eso suma 1
-   * a `orders`), aquí `orders` se resta, no se suma, y todo se recorta en 0
-   * para que una reversión nunca deje contadores negativos en pantalla.
+   * Optimistic compatibility hook used by existing checkout/SalesEngine code.
+   * Cash is deliberately NOT adjusted here: the authoritative cash state is
+   * the reconciliation/shift state, not a client-side increment.
    */
-  reverseSale(amount: number, products: number = 1) {
-    this.data.sales = Math.max(0, this.data.sales - amount);
-    this.data.todaySales = Math.max(0, this.data.todaySales - amount);
-    this.data.orders = Math.max(0, this.data.orders - 1);
-    this.data.cashAmount = Math.max(0, this.data.cashAmount - amount);
-    this.data.productsSold = Math.max(0, this.data.productsSold - products);
-
-    this.data.averageTicket =
-      this.data.orders > 0 ? this.data.sales / this.data.orders : 0;
-
+  addSale(amount: number, products: number = 1, _legacyCashPortion: number = 0): void {
+    const baseOrders = this.optimistic.orders ?? this.data.orders;
+    const baseSales = this.optimistic.sales ?? this.data.sales;
+    this.optimistic = {
+      ...this.optimistic,
+      sales: baseSales + amount,
+      todaySales: (this.optimistic.todaySales ?? this.data.todaySales) + amount,
+      orders: baseOrders + 1,
+      productsSold: (this.optimistic.productsSold ?? this.data.productsSold) + products,
+      averageTicket: baseSales + amount > 0 && baseOrders + 1 > 0 ? (baseSales + amount) / (baseOrders + 1) : 0,
+    };
     this.publishSnapshot();
   }
 
-  /**
-   * Igual que reverseSale(), pero para un reembolso PARCIAL: la venta
-   * sigue existiendo (solo se le devolvieron algunos productos, no
-   * todos), así que a diferencia de reverseSale() NO se resta 1 de
-   * `orders` — la orden como tal no desapareció, solo vale menos.
-   */
-  partialReverseSale(amount: number, products: number) {
-    this.data.sales = Math.max(0, this.data.sales - amount);
-    this.data.todaySales = Math.max(0, this.data.todaySales - amount);
-    this.data.cashAmount = Math.max(0, this.data.cashAmount - amount);
-    this.data.productsSold = Math.max(0, this.data.productsSold - products);
-
-    this.data.averageTicket =
-      this.data.orders > 0 ? this.data.sales / this.data.orders : 0;
-
+  addCustomer(): void {
+    this.optimistic = { customers: (this.optimistic.customers ?? this.data.customers) + 1 };
     this.publishSnapshot();
   }
 
-  updateInventory(total: number) {
-    this.data.inventory = total;
+  reverseSale(amount: number, products: number = 1, _legacyCashPortion: number = 0): void {
+    const baseSales = this.optimistic.sales ?? this.data.sales;
+    const baseToday = this.optimistic.todaySales ?? this.data.todaySales;
+    const baseProducts = this.optimistic.productsSold ?? this.data.productsSold;
+    const baseOrders = this.optimistic.orders ?? this.data.orders;
+    const nextSales = Math.max(0, baseSales - amount);
+    const nextOrders = Math.max(0, baseOrders - 1);
+    this.optimistic = {
+      ...this.optimistic,
+      sales: nextSales,
+      todaySales: Math.max(0, baseToday - amount),
+      orders: nextOrders,
+      productsSold: Math.max(0, baseProducts - products),
+      averageTicket: nextOrders > 0 ? nextSales / nextOrders : 0,
+    };
     this.publishSnapshot();
   }
 
-  // Compatibilidad con dashboardSync.ts
-  discountInventory(quantity: number) {
-    this.data.inventory = Math.max(0, this.data.inventory - quantity);
+  partialReverseSale(amount: number, products: number, _legacyCashPortion: number = 0): void {
+    const baseSales = this.optimistic.sales ?? this.data.sales;
+    const baseToday = this.optimistic.todaySales ?? this.data.todaySales;
+    const baseProducts = this.optimistic.productsSold ?? this.data.productsSold;
+    const baseOrders = this.optimistic.orders ?? this.data.orders;
+    const nextSales = Math.max(0, baseSales - amount);
+    this.optimistic = {
+      ...this.optimistic,
+      sales: nextSales,
+      todaySales: Math.max(0, baseToday - amount),
+      productsSold: Math.max(0, baseProducts - products),
+      averageTicket: baseOrders > 0 ? nextSales / baseOrders : 0,
+    };
     this.publishSnapshot();
   }
 
-  updateKitchenPending(total: number) {
-    this.data.pendingKitchen = total;
+  updateInventory(total: number): void {
+    this.optimistic = { inventory: total };
+    this.publishSnapshot();
+  }
+
+  discountInventory(quantity: number): void {
+    this.optimistic = { inventory: Math.max(0, (this.optimistic.inventory ?? this.data.inventory) - quantity) };
+    this.publishSnapshot();
+  }
+
+  updateKitchenPending(total: number): void {
+    this.optimistic = { pendingKitchen: total };
     this.publishSnapshot();
   }
 }

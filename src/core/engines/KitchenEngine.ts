@@ -6,10 +6,10 @@ import { getCurrentBusinessId, getCurrentBranchId } from '../../infrastructure/s
 
 /** Motivos de cancelación permitidos desde la pantalla de Cocina. */
 export const KITCHEN_CANCEL_REASONS = [
-  'Cliente canceló',
-  'Error',
-  'Producto agotado',
-  'Otro'
+  'kitchen.cancel.reason.clientCanceled',
+  'kitchen.cancel.reason.error',
+  'kitchen.cancel.reason.outOfStock',
+  'kitchen.cancel.reason.other'
 ] as const;
 
 export type KitchenCancelReason = (typeof KITCHEN_CANCEL_REASONS)[number];

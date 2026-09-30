@@ -23,7 +23,8 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     "inventory.view", "inventory.create", "inventory.edit", "inventory.adjust",
     "customers.view", "customers.create", "customers.edit",
     "kitchen.view", "tables.view", "tables.manage",
-    "cash.view", "shift.view",
+    "cash.view", "cash.registerMovement", "cash.transfer",
+    "shift.view", "shift.close",
     "reports.view", "reports.export",
     "users.view"
   ],
@@ -32,7 +33,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     "sales.view", "sales.create",
     "customers.view", "customers.create",
     "cash.view", "cash.registerMovement",
-    "shift.view", "shift.open", "shift.close"
+    "shift.view", "shift.close"
   ],
 
   MESERO: [

@@ -21,6 +21,7 @@ import { RequireCountry } from "../presentation/navigation/RequireCountry";
 
 import { LandingPage } from "../marketing/pages/LandingPage";
 import { PricingPage } from "../marketing/pages/PricingPage";
+import { DemoFondoPage } from "../marketing/pages/DemoFondoPage";
 import { FeaturesPage } from "../marketing/pages/FeaturesPage";
 import { ContactPage } from "../marketing/pages/ContactPage";
 import { PrivacyPage } from "../marketing/pages/PrivacyPage";
@@ -381,6 +382,7 @@ export function App() {
         <Route path="/privacidad" element={<PrivacyPage />} />
         <Route path="/terminos" element={<TermsPage />} />
         <Route path="/cookies" element={<CookiesPage />} />
+        <Route path="/demo-fondo" element={<DemoFondoPage />} />
       </Route>
 
       {/* Cualquier otra ruta desconocida en vimdy.co (por ejemplo, un

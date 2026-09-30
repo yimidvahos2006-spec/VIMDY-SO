@@ -95,7 +95,9 @@ export async function syncOne(pending: PendingSale): Promise<Sale> {
     await container.salesEngine.get().registerPayment(sale, pending.payment.method, {
       received: pending.payment.received,
       reference: pending.payment.reference,
-      mixed: pending.payment.mixed
+      mixed: pending.payment.mixed,
+      shiftId: pending.payment.shiftId,
+      cashRegisterId: pending.payment.cashRegisterId
     });
   }
 

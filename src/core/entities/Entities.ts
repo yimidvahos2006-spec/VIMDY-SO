@@ -14,6 +14,7 @@ export interface ProductSizeOption {
   readonly id: string;
   readonly name: string;
   readonly priceDelta: number;
+  readonly recipe?: readonly RecipeItem[];
 }
 
 /**
@@ -26,6 +27,7 @@ export interface ProductExtraOption {
   readonly id: string;
   readonly name: string;
   readonly priceDelta: number;
+  readonly recipe?: readonly RecipeItem[];
 }
 
 export interface Product {
@@ -253,11 +255,13 @@ export interface SaleItem {
    * Opcional: si no se usa variantes, se omite.
    */
   readonly selectedSizeId?: string;
+  readonly selectedSize?: ProductSizeOption;
   /**
    * Extras elegidos por el cliente (ej. queso, tocineta).
    * Opcional: si no se usa variantes, se omite.
    */
   readonly selectedExtraIds?: readonly string[];
+  readonly selectedExtras?: readonly ProductExtraOption[];
   /**
    * Unidad física del item vendido (ej. "kg", "litro", "unidad").
    * Se persiste para trazabilidad en recibos/reportes.
@@ -276,10 +280,21 @@ export interface SaleItem {
    * Tasa de impuesto específica de esta línea. Si se envía, se usa para
    * calcular el IVA del item; si falta, se usa la tasa global de la venta.
    */
-  readonly taxRate?: number;
-}
-
-/** Una línea reembolsada dentro de un SaleRefundRecord: qué producto y cuánto. */
+   readonly taxRate?: number;
+   /**
+    * Costo unitario atrapado al momento de la venta (snapshot).
+    * Usado por getHistoricalLineProfit para calcular la ganancia histórica
+    * sin substituir el costo actual del producto. Si falta, el cálculo
+    * marca costUnreliable=true.
+    */
+   readonly unitCostAtSale?: number;
+   /**
+    * Marca si el unitCostAtSale capturado era confiable al momento de la
+    * venta (todos los ingredientes de la receta tenían costo). Si es true,
+    * getHistoricalLineProfit devuelve $0 y costUnreliable=true.
+    */
+   readonly costUnreliableAtSale?: boolean;
+ }
 export interface SaleItemRefund {
   readonly productId: string;
   readonly quantity: number;
@@ -320,6 +335,8 @@ export interface Sale {
   readonly id: string;
   readonly businessId?: string;
   readonly branchId?: string;
+  /** Caja física a la que pertenece el movimiento. La asigna el servidor. */
+  readonly cashRegisterId?: string;
   /**
    * Bloqueo optimista (CRÍTICO #6 del checklist): número de versión
    * de este registro en la base de datos. Lo asigna/incrementa
@@ -361,6 +378,27 @@ export interface Sale {
   readonly notes?: string;
   /** Método de pago utilizado al cobrar la venta. */
   readonly paymentMethod?: string;
+  /**
+   * Parte de `total` que es efectivo físico (lo que debe estar en el cajón).
+   * Para CASH es igual a `total`; para CARD/TRANSFER/QR es 0; para MIXED es
+   * la porción en efectivo del pago. Se almacena al cobrar para que el
+   * DashboardEngine y el dashboardStore calculen cashAmount correctamente
+   * (solo efectivo físico, no total de ventas).
+   */
+  readonly cashAmount?: number;
+  /** Datos de auditoría del cobro confirmado server-side. */
+  readonly paymentReference?: string;
+  readonly paymentReceived?: number;
+  readonly changeGiven?: number;
+  /** Estado financiero del cobro: no implica que una referencia sea evidencia. */
+  readonly paymentStatus?: "NONE" | "PENDING_VERIFICATION" | "CONFIRMED";
+  /** Fuente de verificación cuando el pago queda confirmado. */
+  readonly paymentVerificationSource?: "CASH" | "EXTERNAL_TERMINAL" | "PROVIDER";
+  readonly paymentVerifiedAt?: Date;
+  readonly paidAt?: Date;
+  /** Estado de cumplimiento operativo de la venta. Permite cobrar primero y completar inventario/cocina después sin duplicar efectos. */
+  readonly fulfillmentStatus?: "PENDING" | "INVENTORY_CONFIRMED" | "FULFILLED";
+  readonly shiftId?: string;
   /**
    * Historial de reembolsos PARCIALES aplicados a esta venta (bloqueante
    * #3). Ausente o vacío = nunca se le hizo un reembolso parcial. El
@@ -557,6 +595,22 @@ export interface AuditLog {
   readonly date: Date;
 }
 
+export type CashRegisterStatus = "ACTIVE" | "INACTIVE";
+
+export interface CashRegister {
+  readonly id: string;
+  readonly businessId?: string;
+  readonly branchId?: string;
+  readonly version?: number;
+  readonly name: string;
+  readonly code: string;
+  readonly status: CashRegisterStatus;
+  readonly active: boolean;
+  readonly primary?: boolean;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
+}
+
 export interface CashMovement {
   readonly id: string;
   readonly businessId?: string;
@@ -592,6 +646,12 @@ export interface CashMovement {
    * turno para calcular lo "esperado en caja" — nunca `amount`.
    */
   readonly cashAmount?: number;
+  /** Caja física del movimiento. En producción debe coincidir con el turno. */
+  readonly cashRegisterId?: string;
+  /** Turno de caja al que pertenece el movimiento; lo resuelve el servidor. */
+  readonly shiftId?: string;
+  /** Evidencia/procedencia que permitió confirmar un ingreso no efectivo. */
+  readonly paymentVerificationSource?: "CASH" | "EXTERNAL_TERMINAL" | "PROVIDER";
 }
 
 /**
@@ -998,6 +1058,8 @@ export interface Shift {
   readonly id: string;
   readonly businessId?: string;
   readonly branchId?: string;
+  /** Caja física asignada al turno. Obligatoria en producción multi-caja. */
+  readonly cashRegisterId?: string;
   /**
    * Bloqueo optimista (CRÍTICO #6 del checklist): número de versión
    * de este registro en la base de datos. Lo asigna/incrementa

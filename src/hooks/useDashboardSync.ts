@@ -1,196 +1,145 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { container, productsReady } from "../infrastructure/di/CompositionRoot";
-import { dashboardStore, DashboardMetrics, DashboardSnapshot } from "../core/store/dashboardStore";
+import { SaleRepository } from "../infrastructure/di/repositories/SaleRepository";
+import { ShiftRepository } from "../infrastructure/di/repositories/ShiftRepository";
+import { dashboardStore } from "../core/store/dashboardStore";
 import { vimdyCore } from "../core/VimdyCore";
-import { Sale, Customer } from "../core/entities/Entities";
+import { Customer, KitchenOrder } from "../core/entities/Entities";
+import { companyConfigStore } from "../core/store/companyConfigStore";
+import { getBusinessDateKey, isBusinessToday, getYesterdayKey, getDayKeyForOffset } from "../core/utils/businessTime";
+import { getCurrentBusinessId, getCurrentBranchId } from "../infrastructure/supabase/supabaseClient";
+import { DashboardSalesMetricsService } from "../core/dashboard/metrics/DashboardSalesMetricsService";
+import { DashboardCashReconciliationService } from "../core/dashboard/metrics/DashboardCashReconciliationService";
+import { DashboardInventoryReconciliationService } from "../core/dashboard/metrics/DashboardInventoryReconciliationService";
+import { mapSalesReconciliationToDashboard } from "../core/dashboard/metrics/DashboardSalesStoreMapper";
 
-/* ===========================================================================
-   useDashboardSync
-   ---------------------------------------------------------------------------
-   BUG REAL ENCONTRADO (no es de sincronización remota, es de diseño):
-   dashboardStore acumulaba "ventas de hoy", "pedidos", "ticket promedio",
-   "ayer" e "historial" SOLO sumando/persistiendo en el localStorage de
-   ESTE MISMO navegador. Nunca leía el total real desde Supabase.
-   Resultado: si Computador A vendía $50.000, Computador B jamás enteraba
-   a su Dashboard de esos $50.000, así estuvieran los dos viendo la app al
-   mismo tiempo — y el % de tendencia (TrendBadge) y las sparklines podían
-   ser distintos en cada dispositivo, porque cada uno calculaba "ayer" y
-   el historial contra lo que tenía guardado localmente.
-
-   Esta es la pieza que lo soluciona de raíz: recalcula TODO — hoy, ayer
-   y los últimos 14 días — leyendo la fuente real (container.salesEngine.get() /
-   customerEngine / inventoryEngine / kitchenService) y lo escribe en
-   dashboardStore con .applyReconciled(), que es lo que ya leen todos los
-   bloques del Dashboard (DashboardIndicators, GerenteInteligente).
-   Se dispara:
-     - una vez al montar (para partir con el número real, nunca con un
-       residuo local de una sesión o un negocio anterior)
-     - cada vez que llega "sale", "customer", "inventory", "kitchen",
-       "shift" (apertura/cierre de caja), "payment" (ingreso/egreso de
-       caja manual) o "table" (cambio de estado de una mesa) del bus
-       interno — incluyendo los que dispara realtimeSync.ts cuando OTRO
-       dispositivo vendió o cambió algo.
-       Esto es lo que exige el Gerente Inteligente (FASE 5, PASO 1) para
-       refrescarse solo ante CUALQUIER evento del negocio: venta, cambio
-       de inventario, compra, caja, receta o producción — nunca hay que
-       recargar la app.
-
-   Nota sobre "inventario de ayer": VIMDY no guarda una foto diaria del
-   valor del inventario (solo el stock actual, en vivo), así que no hay
-   ningún dato real de "cuánto valía el inventario ayer" para comparar.
-   En vez de inventarlo, se repite el valor de HOY tanto en `yesterday`
-   como en cada punto del `history` de inventario: la tarjeta muestra el
-   valor real y una tendencia neutra, nunca una cifra fabricada.
-
-   Se monta UNA sola vez en VimdyAppLayout, igual que useAutoAlerts.
-=========================================================================== */
-
-/** Cuántos días reales de historial se calculan para las sparklines. */
 const HISTORY_DAYS = 14;
-
-function startOfDay(date: Date): Date {
-  const copy = new Date(date);
-  copy.setHours(0, 0, 0, 0);
-  return copy;
-}
-
-function isToday(date: Date): boolean {
-  const d = new Date(date);
-  const now = new Date();
-  return (
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate()
-  );
-}
-
-/** Mismo criterio que useCustomers.ts para "venta válida" (no cancelada/reembolsada). */
-function isValidSale(sale: Sale): boolean {
-  return sale.status === "PAID" || sale.status === "CLOSED" || !sale.status;
-}
+const dashboardSalesMetricsService = new DashboardSalesMetricsService(new SaleRepository());
+const dashboardCashReconciliationService = new DashboardCashReconciliationService(new ShiftRepository());
 
 export function useDashboardSync() {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
     let cancelled = false;
+    let reconcileVersion = 0;
 
     async function reconcile() {
-      await productsReady;
+      const version = ++reconcileVersion;
+      const isStale = () => cancelled || version !== reconcileVersion;
 
-      const [allSales, allCustomers, allProducts, kitchenOrders] = await Promise.all([
-        container.salesEngine.get().getAllSales(),
-        container.customerEngine.get().getAllCustomers(),
-        container.inventoryEngine.get().listAll(),
-        container.kitchenService.get().getOrders()
-      ]);
+      try {
+        await productsReady;
+        if (isStale()) return;
 
-      if (cancelled) return;
+        const tz = companyConfigStore.get().timezone || "America/Bogota";
+        const now = new Date();
+        const businessId = getCurrentBusinessId();
+        const branchId = getCurrentBranchId();
 
-      const validSales = (allSales as Sale[]).filter(isValidSale);
-      const todaySalesList = validSales.filter((s) => isToday(s.createdAt));
+        const inventorySource = container.inventoryEngine.get();
+        const dashboardInventoryReconciliationService =
+          new DashboardInventoryReconciliationService(inventorySource);
 
-      const totalSales = todaySalesList.reduce((sum, s) => sum + s.total, 0);
-      const productsSold = todaySalesList.reduce(
-        (sum, s) => sum + s.items.reduce((n, item) => n + item.quantity, 0),
-        0
-      );
-      const orders = todaySalesList.length;
-      const averageTicket = orders > 0 ? totalSales / orders : 0;
-      const inventoryTotal = allProducts.reduce((sum, p) => sum + p.price * p.stock, 0);
-      const pendingKitchen = kitchenOrders.filter(
-        (o) => o.status === "PENDIENTE" || o.status === "EN_PREPARACION"
-      ).length;
+        const [
+          salesReconciliation,
+          cashReconciliation,
+          inventoryReconciliation,
+          allCustomers,
+          kitchenOrders,
+        ] = await Promise.all([
+          dashboardSalesMetricsService.buildReconciliation(now, tz),
+          dashboardCashReconciliationService.buildReconciliation({ now, timezone: tz, businessId, branchId }),
+          dashboardInventoryReconciliationService.buildReconciliation(now),
+          container.customerEngine.get().getAllCustomers(),
+          container.kitchenService.get().getOrders(),
+        ]);
 
-      // "Ayer": mismo cálculo para cualquier dispositivo porque sale de las
-      // mismas ventas/clientes reales de Supabase, no de un localStorage
-      // por navegador.
-      const todayStart = startOfDay(new Date());
-      const yesterdayStart = new Date(todayStart);
-      yesterdayStart.setDate(todayStart.getDate() - 1);
+        if (isStale()) return;
 
-      const yesterdaySalesList = validSales.filter((s) => {
-        const day = startOfDay(new Date(s.createdAt)).getTime();
-        return day === yesterdayStart.getTime();
-      });
+        const customers = allCustomers as Customer[];
+        const kitchen = kitchenOrders as KitchenOrder[];
 
-      const yesterday: DashboardMetrics = {
-        sales: yesterdaySalesList.reduce((sum, s) => sum + s.total, 0),
-        orders: yesterdaySalesList.length,
-        customers: (allCustomers as Customer[]).filter(
-          (c) => c.createdAt && new Date(c.createdAt).getTime() < todayStart.getTime()
-        ).length,
-        // Sin historial diario real de inventario: se repite el valor de hoy.
-        inventory: inventoryTotal
-      };
+        const customersToday = customers.filter(
+          (customer) =>
+            customer.createdAt &&
+            isBusinessToday(new Date(customer.createdAt), now, tz),
+        ).length;
 
-      // Historial real de los últimos 14 días, para las sparklines.
-      const history: DashboardSnapshot["history"] = {
-        sales: [],
-        customers: [],
-        orders: [],
-        inventory: []
-      };
+        const pendingKitchen = kitchen.filter(
+          (order) => order.status === "PENDIENTE" || order.status === "EN_PREPARACION",
+        ).length;
 
-      for (let i = HISTORY_DAYS - 1; i >= 0; i--) {
-        const dayStart = new Date(todayStart);
-        dayStart.setDate(todayStart.getDate() - i);
-        const dayEnd = new Date(dayStart);
-        dayEnd.setDate(dayStart.getDate() + 1);
+        const yesterdayKey = getYesterdayKey(now, tz);
+        const customersYesterday = customers.filter(
+          (customer) =>
+            customer.createdAt &&
+            getBusinessDateKey(new Date(customer.createdAt), tz) === yesterdayKey,
+        ).length;
 
-        const daySales = validSales.filter((s) => {
-          const time = new Date(s.createdAt).getTime();
-          return time >= dayStart.getTime() && time < dayEnd.getTime();
-        });
+        const historyCustomers: number[] = [];
+        for (let i = HISTORY_DAYS - 1; i >= 0; i -= 1) {
+          const dayKey = getDayKeyForOffset(now, tz, i);
+          historyCustomers.push(
+            customers.filter(
+              (customer) =>
+                customer.createdAt &&
+                getBusinessDateKey(new Date(customer.createdAt), tz) === dayKey,
+            ).length,
+          );
+        }
 
-        history.sales.push(daySales.reduce((sum, s) => sum + s.total, 0));
-        history.orders.push(daySales.length);
-        history.customers.push(
-          (allCustomers as Customer[]).filter(
-            (c) => c.createdAt && new Date(c.createdAt).getTime() < dayEnd.getTime()
-          ).length
+        const mapped = mapSalesReconciliationToDashboard(
+          salesReconciliation,
+          cashReconciliation,
+          customersToday,
+          customersYesterday,
+          historyCustomers,
+          0,
+          inventoryReconciliation,
+          pendingKitchen,
         );
-        // Sin historial diario real de inventario: línea plana con el valor de hoy.
-        history.inventory.push(inventoryTotal);
-      }
 
-      dashboardStore.applyReconciled(
-        {
-          sales: totalSales,
-          todaySales: totalSales,
-          orders,
-          productsSold,
-          averageTicket,
-          cashAmount: totalSales,
-          customers: allCustomers.length,
-          inventory: inventoryTotal,
-          pendingKitchen
-        },
-        yesterday,
-        history
-      );
+        if (isStale()) return;
+
+        dashboardStore.applyReconciled(
+          mapped.data,
+          mapped.yesterday,
+          mapped.history,
+        );
+
+        if (isStale()) return;
+        setLoading(false);
+        setError(null);
+      } catch (err) {
+        if (isStale()) return;
+        setError(err instanceof Error ? err.message : "Error al sincronizar el dashboard");
+        setLoading(false);
+      }
     }
 
-    reconcile();
+    void reconcile();
 
-    const offSale = vimdyCore.on("sale", () => reconcile());
-    const offCustomer = vimdyCore.on("customer", () => reconcile());
-    const offInventory = vimdyCore.on("inventory", () => reconcile());
-    const offKitchen = vimdyCore.on("kitchen", () => reconcile());
-    const offShift = vimdyCore.on("shift", () => reconcile());
-    const offTable = vimdyCore.on("table", () => reconcile());
-    // FASE 5, PASO 1 (cierre): un ingreso/egreso de caja manual (no ligado a
-    // una venta) también debe refrescar el Gerente Inteligente sin recargar.
-    const offPayment = vimdyCore.on("payment", () => reconcile());
+    const offSale = vimdyCore.on("sale", () => void reconcile());
+    const offCustomer = vimdyCore.on("customer", () => void reconcile());
+    const offInventory = vimdyCore.on("inventory", () => void reconcile());
+    const offKitchen = vimdyCore.on("kitchen", () => void reconcile());
+    const offPayment = vimdyCore.on("payment", () => void reconcile());
+    const offShift = vimdyCore.on("shift", () => void reconcile());
 
     return () => {
       cancelled = true;
+      reconcileVersion += 1;
       offSale();
       offCustomer();
       offInventory();
       offKitchen();
-      offShift();
-      offTable();
       offPayment();
+      offShift();
     };
   }, []);
+
+  return { loading, error };
 }

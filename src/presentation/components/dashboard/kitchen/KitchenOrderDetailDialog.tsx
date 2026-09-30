@@ -1,6 +1,7 @@
 import React from "react";
 import { X, ChefHat, User, Clock3, MessageSquareText, AlertTriangle, ArrowUpCircle } from "lucide-react";
 
+import { useTranslation } from "../../../../core/i18n/useTranslation";
 import { KitchenOrderView } from "../../../../hooks/useKitchenOrders";
 import { OrderPriority } from "../../../../core/entities/Entities";
 import { KitchenOrderTimer } from "./KitchenOrderTimer";
@@ -39,6 +40,7 @@ const PRIORITY_LABEL: Record<OrderPriority, { text: string; className: string; i
  * vienen de Sale.notes.
  */
 export function KitchenOrderDetailDialog({ order, onClose }: Props) {
+  const { t, money } = useTranslation();
   const priority = PRIORITY_LABEL[order.priority ?? "NORMAL"];
 
   return (
@@ -53,7 +55,7 @@ export function KitchenOrderDetailDialog({ order, onClose }: Props) {
             </div>
             <div>
               <div className="flex items-center gap-3 flex-wrap">
-                <h2 className="text-3xl font-bold text-vimdy-text">{order.origin ?? "Pedido"}</h2>
+                <h2 className="text-3xl font-bold text-vimdy-text">{order.origin ?? t("kitchen.detail.defaultOrigin")}</h2>
                 <span
                   className={`flex items-center gap-1 rounded-lg border font-bold uppercase tracking-wide text-xs px-3 py-1.5 ${priority.className}`}
                 >
@@ -62,11 +64,11 @@ export function KitchenOrderDetailDialog({ order, onClose }: Props) {
                 </span>
               </div>
               <p className="text-vimdy-text-secondary mt-1">
-                Pedido #{order.orderNumber ?? order.id.slice(0, 8)}
+                 {t("kitchen.detail.orderNumber", { number: order.orderNumber ?? order.id.slice(0, 8) })}
               </p>
             </div>
           </div>
-          <button onClick={onClose} aria-label="Cerrar" className="text-vimdy-text-tertiary hover:text-vimdy-text">
+          <button onClick={onClose} aria-label={t("kitchen.closeAria")} className="text-vimdy-text-tertiary hover:text-vimdy-text">
             <X size={28} />
           </button>
         </div>
@@ -80,7 +82,7 @@ export function KitchenOrderDetailDialog({ order, onClose }: Props) {
               <div className="flex items-center gap-3 bg-vimdy-surface-hover rounded-2xl px-5 py-4">
                 <User size={22} className="text-vimdy-accent" />
                 <div>
-                  <p className="text-vimdy-text-secondary text-xs">Mesero</p>
+                  <p className="text-vimdy-text-secondary text-xs">{t("kitchen.detail.waiterLabel")}</p>
                   <p className="text-vimdy-text font-bold text-lg">{order.waiterName}</p>
                 </div>
               </div>
@@ -88,7 +90,7 @@ export function KitchenOrderDetailDialog({ order, onClose }: Props) {
             <div className="flex items-center gap-3 bg-vimdy-surface-hover rounded-2xl px-5 py-4">
               <Clock3 size={22} className="text-vimdy-accent" />
               <div>
-                <p className="text-vimdy-text-secondary text-xs">Tiempo transcurrido</p>
+                <p className="text-vimdy-text-secondary text-xs">{t("kitchen.detail.elapsedTime")}</p>
                 <KitchenOrderTimer createdAt={order.createdAt} tvMode />
               </div>
             </div>
@@ -99,7 +101,7 @@ export function KitchenOrderDetailDialog({ order, onClose }: Props) {
             <div className="flex items-start gap-3 bg-vimdy-warning/10 border border-vimdy-warning/30 rounded-2xl px-5 py-4">
               <MessageSquareText size={22} className="text-vimdy-warning mt-0.5 shrink-0" />
               <div>
-                <p className="text-vimdy-warning/80 text-xs font-semibold mb-1">Notas del pedido</p>
+                <p className="text-vimdy-warning/80 text-xs font-semibold mb-1">{t("kitchen.detail.orderNotes")}</p>
                 <p className="text-vimdy-warning text-lg">{order.notes}</p>
               </div>
             </div>
@@ -107,9 +109,11 @@ export function KitchenOrderDetailDialog({ order, onClose }: Props) {
 
           {/* Productos */}
           <div>
-            <p className="text-vimdy-text-secondary text-sm font-semibold mb-3">
-              {order.items.length} producto{order.items.length !== 1 ? "s" : ""}
-            </p>
+          <p className="text-vimdy-text-secondary text-sm font-semibold mb-3">
+            {order.items.length === 1
+              ? t("kitchen.detail.productCount_one", { count: order.items.length })
+              : t("kitchen.detail.productCount_other", { count: order.items.length })}
+          </p>
             <div className="space-y-3">
               {order.items.map((item, index) => (
                 <div
@@ -133,9 +137,9 @@ export function KitchenOrderDetailDialog({ order, onClose }: Props) {
 
           {/* Total */}
           <div className="flex justify-between items-center border-t border-vimdy-border pt-5">
-            <span className="text-vimdy-text-secondary font-semibold">Total</span>
+            <span className="text-vimdy-text-secondary font-semibold">{t("kitchen.detail.total")}</span>
             <span className="text-vimdy-accent font-black text-2xl">
-              ${order.total.toLocaleString("es-CO")}
+              {money(order.total)}
             </span>
           </div>
         </div>
@@ -148,7 +152,7 @@ export function KitchenOrderDetailDialog({ order, onClose }: Props) {
             size="lg"
             fullWidth
           >
-            Cerrar
+            {t("kitchen.detail.closeButton")}
           </VimdyButton>
         </div>
       </div>

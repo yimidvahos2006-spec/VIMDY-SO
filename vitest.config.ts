@@ -17,6 +17,7 @@ export default defineConfig({
       VITE_SUPABASE_URL: "https://test.supabase.co",
       VITE_SUPABASE_ANON_KEY: "test-anon-key",
       VITE_APP_URL: "https://app.vimdy.co"
-    }
+    },
+    setupFiles: ["tests/setup/cashContext.ts"]
   }
 });

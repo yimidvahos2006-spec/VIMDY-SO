@@ -1,0 +1,12 @@
+-- VIMDY — Contrato del template de WhatsApp para Cierre Inteligente
+-- No cambia tablas: documenta el modo recomendado del worker.
+--
+-- Configuración de Supabase Edge Function:
+--   WHATSAPP_DAILY_REPORT_TEMPLATE_MODE=FULL_REPORT
+--   WHATSAPP_DAILY_REPORT_TEMPLATE=<nombre_del_template_aprobado>
+--   WHATSAPP_DAILY_REPORT_LANGUAGE=es_CO
+--
+-- El template debe tener un único parámetro de body {{1}}.
+-- VIMDY enviará el reporte completo, ya redactado por VIMDY IA, como ese parámetro.
+-- El cierre crea el job dentro de la transacción de close_shift_atomic();
+-- el worker lo procesa de inmediato cuando hay conexión y pg_cron lo respalda.

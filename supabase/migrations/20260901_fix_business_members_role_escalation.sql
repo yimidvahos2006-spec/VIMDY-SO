@@ -1,5 +1,4 @@
 drop policy if exists business_members_self_insert on business_members;
-
 create policy business_members_self_insert on business_members
   for insert
   with check (

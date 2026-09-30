@@ -7,17 +7,14 @@ import type { KitchenOutputMode } from "../services/kitchenOutput";
  * TableEngine, SalesEngine) leen esto en vivo con .get() en el momento de
  * enviar — mismo patrón que companyConfigStore.get().tax en SalesEngine.
  *
- * Default "pantalla" (a diferencia de enabledModulesStore, que arranca en
- * null): todo negocio nuevo trae salida_cocina = 'pantalla' en la base de
- * datos (ver schema.sql), y los tests de humo, que corren sin pasar por
- * AuthContext.hydrateBusinessConfig, deben comportarse igual que un
- * negocio real recién creado.
- *
- * Se hidrata real desde Supabase en AuthContext (hydrateBusinessConfig).
+ * Default "none": durante el arranque todavía no conocemos la configuración
+ * operativa del negocio. Así nunca enviamos accidentalmente una comanda a
+ * una pantalla inexistente mientras el perfil real se está hidratando.
+ * La configuración persistida se aplica desde businessOperatingProfileBootstrap.
  */
 class KitchenOutputModeStore extends ObservableStore<KitchenOutputMode> {
   constructor() {
-    super("pantalla");
+    super("none");
   }
 
   get(): KitchenOutputMode {
@@ -29,7 +26,7 @@ class KitchenOutputModeStore extends ObservableStore<KitchenOutputMode> {
   }
 
   clear() {
-    this.publish("pantalla");
+    this.publish("none");
   }
 }
 

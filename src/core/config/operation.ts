@@ -68,11 +68,35 @@ export const PRODUCTION_MODE_OPTIONS: ReadonlyArray<{ value: ProductionMode; lab
   { value: 'ambos', label: 'Ambos', description: 'Combina producción bajo pedido y por lotes' },
 ];
 
+export type ServiceMode = 'counter' | 'table_service' | 'both';
+export type KitchenOutputModeConfig = 'none' | 'kds' | 'printer' | 'both';
+
+export interface PrepStation {
+  id: string;
+  name: string;
+  type: 'kitchen' | 'bar' | 'coffee' | 'dessert' | 'pickup' | 'other';
+  enabled: boolean;
+}
+
 /**
  * Configuración completa de operación del negocio.
  * Se guarda en Supabase y se sincroniza con stores locales.
  */
 export interface OperationConfig {
+  /** Modo de servicio */
+  serviceMode?: ServiceMode;
+  /** Mesas habilitadas */
+  tablesEnabled?: boolean;
+  /** Modo meseros habilitado (independiente de mesas) */
+  waiterModeEnabled?: boolean;
+  /** Mostrar fotos de meseros en selección */
+  waiterPhotosEnabled?: boolean;
+  /** Cocina habilitada */
+  kitchenEnabled?: boolean;
+  /** Modo de salida de cocina */
+  kitchenOutputMode?: KitchenOutputModeConfig;
+  /** Estaciones de preparación */
+  prepStations?: PrepStation[];
   /** Canales de venta activos */
   salesChannels: SalesChannel[];
   /** Tipo de inventario (null = pendiente) */
@@ -90,6 +114,13 @@ export interface OperationConfig {
  * Todo en estado "pendiente" para que el onboarding pregunte.
  */
 export const DEFAULT_OPERATION_CONFIG: OperationConfig = {
+  serviceMode: 'both',
+  tablesEnabled: false,
+  waiterModeEnabled: false,
+  waiterPhotosEnabled: true,
+  kitchenEnabled: false,
+  kitchenOutputMode: 'none',
+  prepStations: [],
   salesChannels: [],
   inventoryType: null,
   productionMode: null,
@@ -103,7 +134,8 @@ export const DEFAULT_OPERATION_CONFIG: OperationConfig = {
 export interface OnboardingAnswers {
   salesChannels: SalesChannel[];
   hasTables: boolean | null;      // null = "configurar después"
-  hasStaff: boolean | null;       // null = "configurar después"
+  hasStaff: boolean | null;       // personal general (cajeros/cocina/etc.)
+  hasWaiters?: boolean | null;      // meseros que atienden pedidos; independiente de las mesas
   hasKitchen: boolean | null;     // null = "configurar después"
   hasInventory: boolean | null;   // null = "configurar después"
   useCustomers: boolean | null;   // null = "configurar después"
@@ -131,11 +163,28 @@ export function calculateModulesFromAnswers(answers: OnboardingAnswers): string[
  * Calcula la configuración de operación basándose en las respuestas.
  */
 export function calculateOperationConfigFromAnswers(answers: OnboardingAnswers): OperationConfig {
+  const tablesEnabled = answers.hasTables === true;
+  const kitchenEnabled = answers.hasKitchen === true;
+  const waiterModeEnabled = answers.hasWaiters === true;
+  const kdsEnabled = kitchenEnabled && (answers.kitchenOutput === 'kds' || answers.kitchenOutput === 'ambos');
+  const printerEnabled = kitchenEnabled && (answers.kitchenOutput === 'printer' || answers.kitchenOutput === 'ambos');
+  const kitchenOutputMode: KitchenOutputModeConfig = !kitchenEnabled ? 'none'
+    : (kdsEnabled && printerEnabled) ? 'both'
+    : printerEnabled ? 'printer'
+    : kdsEnabled ? 'kds' : 'none';
+
   return {
+    serviceMode: tablesEnabled ? 'both' : 'counter',
+    tablesEnabled,
+    waiterModeEnabled,
+    waiterPhotosEnabled: true,
+    kitchenEnabled,
+    kitchenOutputMode,
+    prepStations: [],
     salesChannels: answers.salesChannels,
     inventoryType: answers.hasInventory === true ? (answers.inventoryType ?? null) : null,
     productionMode: answers.hasInventory === true ? (answers.productionMode ?? null) : null,
-    kdsEnabled: answers.hasKitchen === true && (answers.kitchenOutput === 'kds' || answers.kitchenOutput === 'ambos'),
-    printerEnabled: answers.hasKitchen === true && (answers.kitchenOutput === 'printer' || answers.kitchenOutput === 'ambos'),
+    kdsEnabled,
+    printerEnabled,
   };
 }

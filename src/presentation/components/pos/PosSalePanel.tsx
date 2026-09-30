@@ -10,6 +10,7 @@ import { useAuth } from "../../context/AuthContext";
 import { toast } from "../../../core/store/toastStore";
 import { PosCart } from "./PosCart";
 import { PosCheckoutPanel } from "./PosCheckoutPanel";
+import { useEnabledModules } from "../../../core/store/useEnabledModules";
 import { useTranslation } from "../../../core/i18n/useTranslation";
 import { formatMoney } from "../../../core/utils/formatMoney";
 import { companyConfigStore } from "../../../core/store/companyConfigStore";
@@ -49,7 +50,7 @@ export function PosSalePanel() {
   const { user } = useAuth();
 
   const [processing, setProcessing] = useState(false);
-  const [saleConfirmation, setSaleConfirmation] = useState<{ total: number; method: string; change: number; customerName: string; saleId: string } | null>(null);
+  const [saleConfirmation, setSaleConfirmation] = useState<{ total: number; method: string; change: number; customerName: string; saleId: string; pendingVerification?: boolean } | null>(null);
 
   // IDEMPOTENCIA (checklist crítico #4): id del intento de cobro actual,
   // generado UNA sola vez (con el primer click de "Cobrar") y reutilizado
@@ -76,8 +77,12 @@ export function PosSalePanel() {
     let cancelled = false;
 
     async function checkShift() {
-      const current = await container.shiftEngine.get().getCurrentShift();
-      if (!cancelled) setShiftOpen(current !== null);
+      try {
+        const current = await container.shiftEngine.get().getCurrentShift();
+        if (!cancelled) setShiftOpen(current !== null);
+      } catch {
+        if (!cancelled) setShiftOpen(false);
+      }
     }
 
     checkShift();
@@ -137,13 +142,18 @@ export function PosSalePanel() {
       });
 
       if (result.success) {
-        toast.success(t("pos.sale.saleSuccessToast"));
+        if (result.pendingVerification) {
+          toast.warning("Venta registrada. El pago digital quedó pendiente de verificación.");
+        } else {
+          toast.success(t("pos.sale.saleSuccessToast"));
+        }
         setSaleConfirmation({
           total: paymentBeforeCharge.total,
           method: paymentBeforeCharge.method,
           change: paymentBeforeCharge.change,
           customerName: paymentBeforeCharge.customerName,
-          saleId: attemptId
+          saleId: attemptId,
+          pendingVerification: result.pendingVerification
         });
         setSaleAttemptId(null);
 
@@ -170,7 +180,9 @@ export function PosSalePanel() {
   //   - si NINGÚN producto del carrito es de cocina -> "Cobrar"
   // Factura sigue mandando sobre esto (un cobro con factura siempre avisa
   // que factura, aunque también mande a cocina por dentro).
-  const hasKitchenItems = items.some((item) => item.requiresKitchen === true);
+  const enabledModules = useEnabledModules();
+  const hasKitchenModule = (enabledModules ?? []).includes("cocina");
+  const hasKitchenItems = hasKitchenModule && items.some((item) => item.requiresKitchen === true);
   const chargeLabel = requiresInvoice
     ? t("pos.sale.chargeAndInvoice")
     : hasKitchenItems
@@ -262,11 +274,11 @@ export function PosSalePanel() {
           onClick={() => setSaleConfirmation(null)}
         >
           <div
-            className="w-full max-w-sm rounded-vimdy-xl bg-vimdy-surface border border-vimdy-success/40 p-6 text-center shadow-vimdy-lg"
+            className={`w-full max-w-sm rounded-vimdy-xl bg-vimdy-surface border p-6 text-center shadow-vimdy-lg ${saleConfirmation.pendingVerification ? "border-vimdy-warning/40" : "border-vimdy-success/40"}`}
             onClick={(event) => event.stopPropagation()}
           >
-            <CheckCircle2 size={48} className="mx-auto mb-3 text-vimdy-success" />
-            <h3 className="text-vimdy-text font-bold text-lg mb-1">Venta realizada</h3>
+            <CheckCircle2 size={48} className={`mx-auto mb-3 ${saleConfirmation.pendingVerification ? "text-vimdy-warning" : "text-vimdy-success"}`} />
+            <h3 className="text-vimdy-text font-bold text-lg mb-1">{saleConfirmation.pendingVerification ? "Pago pendiente de verificación" : "Venta realizada"}</h3>
             <p className="text-vimdy-text-secondary text-vimdy-small mb-4">
               {formatMoney(saleConfirmation.total, companyConfigStore.get().currency, language)}
             </p>

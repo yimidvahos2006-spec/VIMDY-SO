@@ -20,9 +20,52 @@ import { getPendingRegistration } from "./authBusinessContext";
    register-business, que exige justo esa condición.
 =========================================================================== */
 
-const RESEND_COOLDOWN_MS = 30_000;
+const RESEND_COOLDOWN_MS = 60_000;
+const RESEND_COOLDOWN_STORAGE_PREFIX = "vimdy:auth:signup-resend-at:";
 
 let lastResendAt = 0;
+
+function resendStorageKey(email: string): string {
+  return `${RESEND_COOLDOWN_STORAGE_PREFIX}${encodeURIComponent(email.trim().toLowerCase())}`;
+}
+
+function readStoredResendAt(email: string): number {
+  try {
+    const raw = window.localStorage.getItem(resendStorageKey(email));
+    const parsed = raw ? Number(raw) : 0;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeStoredResendAt(email: string, timestamp: number): void {
+  try {
+    window.localStorage.setItem(resendStorageKey(email), String(timestamp));
+  } catch {
+    // El navegador puede bloquear localStorage; el cooldown en memoria sigue activo.
+  }
+}
+
+function clearStoredResendAt(email: string): void {
+  try {
+    window.localStorage.removeItem(resendStorageKey(email));
+  } catch {
+    // No-op.
+  }
+}
+
+/** Marca el momento en que Supabase aceptó un OTP de registro. */
+export function markRegistrationOtpSent(email: string, timestamp = Date.now()): void {
+  lastResendAt = timestamp;
+  writeStoredResendAt(email, timestamp);
+}
+
+/** Limpia el cooldown después de completar la verificación. */
+export function clearRegistrationOtpCooldown(email: string): void {
+  lastResendAt = 0;
+  clearStoredResendAt(email);
+}
 
 /** Lee el correo del registro en curso o lanza un error claro si no hay ninguno. */
 function requirePendingEmail(): string {
@@ -70,8 +113,8 @@ export function translateOtpError(rawMessage: string | undefined): string {
 function translateResendError(rawMessage: string | undefined): string {
   const message = (rawMessage ?? "").toLowerCase();
 
-  if (message.includes("rate limit") || message.includes("too many") || message.includes("after 60 seconds") || message.includes("for security reasons")) {
-    return "Espera un momento antes de pedir otro código.";
+  if (message.includes("rate limit") || message.includes("too many") || message.includes("after 60 seconds") || message.includes("for security reasons") || message.includes("email rate limit exceeded")) {
+    return "Por seguridad, debes esperar antes de solicitar otro código. VIMDY conserva tu registro; inténtalo de nuevo cuando termine el contador.";
   }
   if (message.includes("already confirmed") || message.includes("already been confirmed")) {
     return "Este correo ya fue verificado. Puedes continuar.";
@@ -117,11 +160,13 @@ export async function verifyRegistrationOtp(code: string): Promise<void> {
   if (!data.session) {
     throw new Error("No se pudo confirmar tu correo. Inténtalo de nuevo.");
   }
+
+  clearRegistrationOtpCooldown(email);
 }
 
 /**
  * Reenvía el código OTP de 6 dígitos al correo del registro en curso.
- * Aplica un enfriamiento de 30s en el propio cliente para evitar que un
+ * Aplica un enfriamiento de 60s en el propio cliente para evitar que un
  * doble clic dispare dos correos y para darle al usuario un mensaje claro
  * en vez de esperar a que Supabase responda con "rate limit".
  *
@@ -134,6 +179,8 @@ export async function resendRegistrationOtp(): Promise<void> {
   console.log("[VIMDY-AUTH] resendRegistrationOtp called for email:", email.replace(/(.).*?(.)@/, "$1***$2@"));
 
   const now = Date.now();
+  const storedResendAt = readStoredResendAt(email);
+  lastResendAt = Math.max(lastResendAt, storedResendAt);
   const elapsed = now - lastResendAt;
   if (lastResendAt !== 0 && elapsed < RESEND_COOLDOWN_MS) {
     const secondsLeft = Math.ceil((RESEND_COOLDOWN_MS - elapsed) / 1000);
@@ -152,10 +199,14 @@ export async function resendRegistrationOtp(): Promise<void> {
   });
 
   if (error) {
+    console.warn("[VIMDY-AUTH] signup OTP resend rejected:", {
+      status: error.status,
+      message: error.message
+    });
     throw new Error(translateResendError(error.message));
   }
 
-  lastResendAt = now;
+  markRegistrationOtpSent(email, now);
 }
 
 /**
@@ -164,8 +215,19 @@ export async function resendRegistrationOtp(): Promise<void> {
  * aquí. Devuelve 0 si ya se puede reenviar.
  */
 export function getResendCooldownSeconds(): number {
-  if (lastResendAt === 0) return 0;
-  const elapsed = Date.now() - lastResendAt;
-  const remaining = RESEND_COOLDOWN_MS - elapsed;
-  return remaining > 0 ? Math.ceil(remaining / 1000) : 0;
+  const pending = getPendingRegistration();
+  if (!pending?.email) return 0;
+
+  const storedResendAt = readStoredResendAt(pending.email);
+  const effectiveLastResendAt = Math.max(lastResendAt, storedResendAt);
+  if (effectiveLastResendAt === 0) return 0;
+
+  const remaining = RESEND_COOLDOWN_MS - (Date.now() - effectiveLastResendAt);
+  if (remaining <= 0) {
+    lastResendAt = 0;
+    clearStoredResendAt(pending.email);
+    return 0;
+  }
+
+  return Math.ceil(remaining / 1000);
 }

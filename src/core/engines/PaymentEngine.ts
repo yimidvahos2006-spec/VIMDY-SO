@@ -27,6 +27,8 @@ export interface PaymentResult {
 
   invoiceError?: string;
 
+  verificationStatus: "CONFIRMED" | "PENDING_VERIFICATION" | "EXTERNAL_TERMINAL";
+
 }
 
 export interface MixedPayment {
@@ -110,7 +112,8 @@ export class PaymentEngine {
 
       message: "Pago en efectivo aprobado.",
 
-      date: new Date()
+      date: new Date(),
+      verificationStatus: "CONFIRMED"
 
     };
 
@@ -145,9 +148,10 @@ export class PaymentEngine {
 
       reference,
 
-      message: "Pago con tarjeta aprobado.",
+      message: "Pago con tarjeta registrado con confirmación externa de terminal.",
 
-      date: new Date()
+      date: new Date(),
+      verificationStatus: "EXTERNAL_TERMINAL"
 
     };
 
@@ -170,7 +174,7 @@ export class PaymentEngine {
 
     return {
 
-      success: true,
+      success: false,
 
       method: "TRANSFER",
 
@@ -182,9 +186,10 @@ export class PaymentEngine {
 
       reference,
 
-      message: "Transferencia confirmada.",
+      message: "Transferencia registrada; queda pendiente de verificación del proveedor.",
 
-      date: new Date()
+      date: new Date(),
+      verificationStatus: "PENDING_VERIFICATION"
 
     };
 
@@ -207,7 +212,7 @@ export class PaymentEngine {
 
     return {
 
-      success: true,
+      success: false,
 
       method: "QR",
 
@@ -219,9 +224,10 @@ export class PaymentEngine {
 
       reference,
 
-      message: "Pago QR recibido.",
+      message: "Pago QR registrado; queda pendiente de verificación del proveedor.",
 
-      date: new Date()
+      date: new Date(),
+      verificationStatus: "PENDING_VERIFICATION"
 
     };
 
@@ -265,9 +271,16 @@ export class PaymentEngine {
       throw new Error("PAYMENT_REFERENCE_REQUIRED");
     }
 
+    const requiresProviderVerification = (payments.transfer ?? 0) > 0 || (payments.qr ?? 0) > 0;
+    const verificationStatus = requiresProviderVerification
+      ? "PENDING_VERIFICATION" as const
+      : (payments.card ?? 0) > 0
+        ? "EXTERNAL_TERMINAL" as const
+        : "CONFIRMED" as const;
+
     return {
 
-      success: true,
+      success: !requiresProviderVerification,
 
       method: "MIXED",
 
@@ -279,9 +292,12 @@ export class PaymentEngine {
 
       reference,
 
-      message: "Pago mixto aprobado.",
+      message: requiresProviderVerification
+        ? "Pago mixto registrado; la parte digital queda pendiente de verificación."
+        : "Pago mixto registrado.",
 
-      date: new Date()
+      date: new Date(),
+      verificationStatus
 
     };
 
@@ -312,7 +328,8 @@ export class PaymentEngine {
 
       message: "Reembolso realizado correctamente.",
 
-      date: new Date()
+      date: new Date(),
+      verificationStatus: "CONFIRMED"
 
     };
 
@@ -344,7 +361,8 @@ export class PaymentEngine {
 
       message: "Reembolso parcial realizado correctamente.",
 
-      date: new Date()
+      date: new Date(),
+      verificationStatus: "CONFIRMED"
 
     };
 

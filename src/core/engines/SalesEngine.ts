@@ -7,7 +7,9 @@ import {
   Alert,
   CashMovement,
   KitchenOrder,
-  OrderPriority
+   OrderPriority,
+   ProductSizeOption,
+   ProductExtraOption
 } from "../entities/Entities";
 
 import { IRepository } from "../../infrastructure/di/repositories/IRepository";
@@ -25,7 +27,7 @@ import {
 } from "./PaymentEngine";
 import { ReceiptEngine, Receipt } from "./ReceiptEngine";
 import { KitchenEngine } from "./KitchenEngine";
-import { CashEngine } from "./CashEngine";
+import { CashEngine, SalePaymentResult } from "./CashEngine";
 import { CustomerEngine } from "./CustomerEngine";
 import { AlertEngine } from "./AlertEngine";
 import { HealthEngine } from "./HealthEngine";
@@ -40,7 +42,9 @@ import { InvoiceFactory } from "../invoicing/InvoiceFactory";
 import type { InvoiceRequest, InvoiceCustomer } from "../invoicing/models/InvoiceModels";
 import { roundMoney } from "../config/globalization";
 import { dashboardStore } from "../store/dashboardStore";
-import { kitchenOutputModeStore } from "../store/kitchenOutputModeStore";
+import { operationConfigStore } from "../store/operationConfigStore";
+import { getEffectiveKitchenOutputMode } from "../services/effectiveKitchenOutputMode";
+import { enabledModulesStore } from "../store/enabledModulesStore";
 import { createKitchenOutput } from "../services/KitchenOutputFactory";
 import { getSaleNetTotal, getSaleNetItems } from "../utils/saleRefunds";
 
@@ -83,8 +87,11 @@ export interface CreateSaleItemInput {
   readonly quantity: number;
   /** Si se omite, se toma el precio vigente del catálogo de inventario. */
   readonly price?: number;
+  readonly name?: string;
   readonly note?: string;
   readonly requiresKitchen?: boolean;
+  readonly selectedSize?: ProductSizeOption;
+  readonly selectedExtras?: readonly ProductExtraOption[];
 }
 
 export interface DiscountInput {
@@ -140,6 +147,8 @@ export interface CreateSaleInput {
    * desde TableEngine.sendToKitchen(), para no duplicar la comanda.
    */
   readonly skipKitchen?: boolean;
+  /** Para Caja de pago inmediato: prepara la venta como PENDING y difiere inventario/cocina hasta confirmar el pago. */
+  readonly deferFulfillment?: boolean;
 }
 
 export type SaleSource = PosCore | CartEngine | CreateSaleItemInput[];
@@ -153,6 +162,9 @@ export interface PaymentOptions {
   readonly received?: number;
   readonly reference?: string;
   readonly mixed?: MixedPayment;
+  /** Turno/caja física de origen. El servidor vuelve a validar ambos. */
+  readonly shiftId?: string;
+  readonly cashRegisterId?: string;
 }
 
 export interface ProductSalesRanking {
@@ -311,25 +323,30 @@ export class SalesEngine {
       notes: input.notes,
       priority: input.priority ?? "NORMAL",
       businessId: getCurrentBusinessId() ?? undefined,
-      branchId: getCurrentBranchId() ?? undefined
+      branchId: getCurrentBranchId() ?? undefined,
+      fulfillmentStatus: input.deferFulfillment ? "PENDING" : "FULFILLED"
     };
 
-    await this.updateInventory(
-      resolvedItems,
-      `Venta ${code}`,
-      "DECREASE"
-    );
-
     let kitchenOrderCreated = false;
+    let inventoryDecreased = false;
 
     try {
+      if (!input.deferFulfillment) {
+        await this.updateInventory(
+          resolvedItems,
+          `Venta ${code}`,
+          "DECREASE"
+        );
+        inventoryDecreased = true;
+      }
+
       await this.saveSale(sale);
-      if (!input.skipKitchen) {
+      if (!input.deferFulfillment && !input.skipKitchen) {
         const kitchenOrder = await this.sendToKitchen(sale);
         kitchenOrderCreated = kitchenOrder !== null;
       }
     } catch (error) {
-      await this.rollbackFailedSaleCreation(sale, kitchenOrderCreated);
+      await this.rollbackFailedSaleCreation(sale, kitchenOrderCreated, inventoryDecreased);
       throw error;
     }
 
@@ -351,7 +368,11 @@ export class SalesEngine {
     return sale;
   }
 
-  private async rollbackFailedSaleCreation(sale: Sale, kitchenOrderCreated: boolean): Promise<void> {
+  private async rollbackFailedSaleCreation(
+    sale: Sale,
+    kitchenOrderCreated: boolean,
+    inventoryDecreased: boolean,
+  ): Promise<void> {
     const rollbackReason = `Reversión automática: falló la creación de la venta ${sale.code ?? sale.id}`;
     const rollbackErrors: unknown[] = [];
 
@@ -369,10 +390,12 @@ export class SalesEngine {
       rollbackErrors.push(rollbackError);
     }
 
-    try {
-      await this.updateInventory(sale.items, rollbackReason, "INCREASE");
-    } catch (rollbackError) {
-      rollbackErrors.push(rollbackError);
+    if (inventoryDecreased) {
+      try {
+        await this.updateInventory(sale.items, rollbackReason, "INCREASE");
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError);
+      }
     }
 
     if (rollbackErrors.length > 0) {
@@ -396,12 +419,15 @@ export class SalesEngine {
     source?: SaleSource;
     customerId?: string;
     cashierId?: string;
+    /** Mesero que originó la venta, incluso cuando no existe una mesa. */
+    waiterId?: string;
     discount?: DiscountInput;
     /** BLOQUEANTE (auditoría Fase 2 — rama Bar): ver Sale.tip. */
     tip?: TipInput;
     taxRate?: number;
     notes?: string;
     priority?: OrderPriority;
+    deferFulfillment?: boolean;
   } = {}): Promise<Sale> {
     const source = params.source ?? this.cart;
     const items = this.extractItems(source);
@@ -412,11 +438,13 @@ export class SalesEngine {
       items,
       customerId: params.customerId,
       cashierId: params.cashierId,
+      waiterId: params.waiterId,
       discount: params.discount,
       tip: params.tip,
       taxRate: params.taxRate,
       notes: params.notes,
-      priority: params.priority
+      priority: params.priority,
+      deferFulfillment: params.deferFulfillment
     });
 
     this.clearSource(source);
@@ -1005,9 +1033,12 @@ export class SalesEngine {
     await this.verifyInventoryTrail(sale);
 
     // 🔒 FIX DE SEGURIDAD: Usar ID determinístico para el reembolso
-    // Si el proceso falla a mitad de camino, podemos detectar y compensar
-    const refundRecordId = crypto.randomUUID();
-    const cashExpenseId = `sale-refund-${sale.id}-${refundRecordId}`;
+    // basado en el índice de reembolsos existentes. Si el reintento se
+    // dispara con el mismo estado de la venta (mismo número de reembolsos),
+    // el ID coincide → saveAtomic hace upsert → no duplica movimientos de caja.
+    const refundIndex = (sale.refunds ?? []).length;
+    const refundRecordId = `refund-${sale.id}-${refundIndex}`;
+    const cashExpenseId = `sale-refund-${sale.id}-${refundIndex}`;
 
     // Primero registrar el movimiento de caja (con ID determinístico)
     // Si esto falla, NO restauramos el inventario - no queda inconsistente
@@ -1168,16 +1199,19 @@ export class SalesEngine {
     await this.verifyInventoryTrail(sale);
 
     // 🔒 FIX DE SEGURIDAD: Usar ID determinístico para el reembolso parcial
-    // Esto previene duplicados si el proceso se reintenta
+    // basado en el índice de reembolsos existentes. Si el reintento se
+    // dispara con el mismo estado de la venta, el ID coincide → saveAtomic
+    // hace upsert → no duplica movimientos de caja.
+    const refundIndex = (sale.refunds ?? []).length;
     const refundRecord: SaleRefundRecord = {
-      id: crypto.randomUUID(),
+      id: `refund-${sale.id}-${refundIndex}`,
       items: cleanItems,
       amount: refundAmount,
       reason,
       actorId,
       createdAt: new Date()
     };
-    const cashExpenseId = `sale-refund-${sale.id}-${refundRecord.id}`;
+    const cashExpenseId = `sale-refund-${sale.id}-${refundIndex}`;
 
     // Solo se repone al inventario lo que efectivamente se está
     // devolviendo en ESTE reembolso, no la venta entera.
@@ -1239,7 +1273,9 @@ export class SalesEngine {
       const remainingToReverse = sale.total - previouslyRefunded;
       this.reverseDashboardForSale(sale, remainingToReverse);
     } else {
-      dashboardStore.partialReverseSale(refundAmount, refundedUnits);
+      const saleCashAmount = sale.cashAmount ?? (sale.paymentMethod === "CASH" ? sale.total : 0);
+      const cashPortion = sale.total > 0 ? (saleCashAmount * refundAmount) / sale.total : 0;
+      dashboardStore.partialReverseSale(refundAmount, refundedUnits, cashPortion);
     }
 
     await this.updateDashboard();
@@ -1381,14 +1417,6 @@ export class SalesEngine {
     method: PaymentMethod,
     options: PaymentOptions = {}
   ): Promise<{ sale: Sale; payment: PaymentResult }> {
-    // IDEMPOTENCIA (checklist crítico #4): no confiar en el `sale` en
-    // memoria que trae el llamador — puede venir de un intento anterior
-    // (ej. el datáfono se cayó, la respuesta nunca llegó al navegador, y
-    // el cajero le vuelve a dar a "Cobrar" con la misma venta ya cobrada
-    // de verdad en el servidor). Se relee el estado real desde la base de
-    // datos: si ya está PAID/CLOSED, se devuelve tal cual SIN volver a
-    // ingresar el dinero a caja, sin duplicar puntos de fidelización y sin
-    // duplicar el log de auditoría.
     const current = await this.getSale(sale.id);
 
     if (!current) {
@@ -1396,162 +1424,265 @@ export class SalesEngine {
     }
 
     if (current.status === "PAID" || current.status === "CLOSED") {
+      const fulfillmentStatus = current.fulfillmentStatus ?? "FULFILLED";
+      const repaired = fulfillmentStatus !== "FULFILLED"
+        ? await this.completeDeferredFulfillment(current)
+        : current;
+      const verificationStatus =
+        current.paymentStatus === "PENDING_VERIFICATION"
+          ? "PENDING_VERIFICATION" as const
+          : current.paymentVerificationSource === "EXTERNAL_TERMINAL"
+            ? "EXTERNAL_TERMINAL" as const
+            : "CONFIRMED" as const;
+
       return {
-        sale: current,
-        payment: this.processPayment(current, method, options)
+        sale: repaired,
+        payment: {
+          success: verificationStatus !== "PENDING_VERIFICATION",
+          method: (current.paymentMethod as PaymentMethod) ?? method,
+          total: current.total,
+          received: current.paymentReceived ?? current.total,
+          change: current.changeGiven ?? 0,
+          reference: current.paymentReference,
+          message: verificationStatus === "PENDING_VERIFICATION"
+            ? "Pago pendiente de verificación."
+            : "Pago ya confirmado para esta venta.",
+          date: repaired.paymentVerifiedAt ?? repaired.paidAt ?? repaired.updatedAt,
+          verificationStatus
+        }
       };
     }
 
     const paymentResult = this.processPayment(current, method, options);
 
-    const changeExpense = paymentResult.change > 0
-      ? this.cash.registerExpense(
-          paymentResult.change,
-          `Cambio venta ${current.code ?? current.id}`,
-          `sale-change-${current.id}`
-        )
-      : Promise.resolve(null);
-
-    try {
-      await changeExpense;
-      await this.cash.registerIncome(
-        current.total,
-        `Venta ${current.code ?? current.id} (${method})`,
-        method,
-        method === "MIXED" ? options.mixed?.cash ?? 0 : undefined,
-        `sale-payment-${current.id}`
-      );
-
-      const [updatedSale] = await Promise.all([
-        this.updateSale({
-          ...current,
-          status: "PAID",
-          paymentMethod: method
-        }),
-        this.updateCustomer(current.customerId, current),
-        this.audit.log(
-          current.cashierId ?? "system",
-          "SALE_PAID",
-          "sales",
-          `Venta ${current.code ?? current.id} cobrada (${method}) por $${current.total}.`,
-          current.id
-        ),
-        this.ensureReceiptForPaidSale(current, method, options)
-      ]);
-
-      let finalSale = updatedSale;
-      const electronicInvoicing = companyConfigStore.get().electronicInvoicing;
-
-      if (electronicInvoicing.enabled) {
-        try {
-          const provider = InvoiceFactory.resolve(
-            {
-              enabled: electronicInvoicing.enabled,
-              provider: electronicInvoicing.provider
-            },
-            companyConfigStore.get().country
-          );
-
-          if (provider) {
-            let customer: InvoiceCustomer | undefined;
-            if (current.customerId && current.customerId !== this.config.defaultCustomerId) {
-              try {
-                const profile = await this.customer.getCustomerProfile(current.customerId);
-                customer = {
-                  documentType: "CC",
-                  documentNumber: profile.customer.id,
-                  fullName: profile.customer.name,
-                  email: profile.customer.email,
-                  phone: profile.customer.phone
-                };
-              } catch {
-                // No se pudo obtener el perfil del cliente, continuar sin datos de cliente
-              }
-            }
-
-            const request: InvoiceRequest = {
-              saleId: current.id,
-              businessId: current.businessId ?? "",
-              provider: electronicInvoicing.provider,
-              country: companyConfigStore.get().country,
-              documentType: "INVOICE",
-              customer: customer ?? {
-                documentType: "CC",
-                documentNumber: "000000000",
-                fullName: "Consumidor Final"
-              },
-              items: current.items,
-              subtotal: current.subtotal ?? current.total,
-              tax: current.tax ?? 0,
-              discount: current.discount,
-              total: current.total,
-              currency: companyConfigStore.get().currency
-            };
-
-            const result = await provider.createInvoice(request);
-            finalSale = await this.updateSale({
-              ...updatedSale,
-              invoiceId: result.id,
-              invoiceCufe: result.trackingCode
-            });
-          }
-        } catch (error) {
-          const message = String(error);
-          logWarning("No se pudo generar la factura electrónica", {
-            category: "sales",
-            context: { saleId: current.id, error: message }
-          });
-          paymentResult.invoiceError = `No se pudo generar la factura electrónica: ${message}`;
-        }
+    if (!paymentResult.success && paymentResult.verificationStatus === "PENDING_VERIFICATION") {
+      const pendingSale: Sale = {
+        ...current,
+        paymentMethod: method,
+        paymentReference: options.reference,
+        paymentReceived: paymentResult.received,
+        changeGiven: paymentResult.change,
+        paymentStatus: "PENDING_VERIFICATION"
+      };
+      if (!this.cash.isPaymentAtomicRepository()) {
+        await this.updateSale(pendingSale);
+      } else {
+        await this.updateSale(pendingSale);
       }
+      return { sale: pendingSale, payment: paymentResult };
+    }
 
-      return { sale: finalSale, payment: paymentResult };
-    } catch (err) {
-      // ROLLBACK DE INVENTARIO: si el pago falla después de que el stock
-      // ya se descontó (createSale -> updateInventory), hay que reponer
-      // el inventario para que el producto vuelva a estar disponible.
-      // Sin esto, el stock quedaría inconsistente: producto descontado
-      // pero venta no pagada.
-      if (!isOptimisticLockError(err)) {
+    if (!paymentResult.success) {
+      throw new Error(`PAYMENT_REJECTED: ${paymentResult.message}`);
+    }
+
+    const cashPortion =
+      method === "MIXED" ? options.mixed?.cash ?? 0 :
+      method === "CASH" ? current.total : 0;
+
+    const currentFulfillmentStatus = current.fulfillmentStatus ?? "FULFILLED";
+    const needsDeferredInventory = currentFulfillmentStatus === "PENDING";
+    let deferredInventoryReserved = false;
+
+    // Para ventas de Caja de cobro inmediato, el inventario se reserva justo
+    // antes de intentar el cobro. Si PostgreSQL rechaza el cobro, se revierte
+    // aquí mismo; así no queda stock descontado por una venta impaga.
+    if (needsDeferredInventory) {
+      await this.updateInventory(current.items, `Venta ${current.code ?? current.id}`, "DECREASE");
+      deferredInventoryReserved = true;
+      try {
+        await this.updateSale({ ...current, fulfillmentStatus: "INVENTORY_CONFIRMED" });
+      } catch (error) {
         try {
-          await this.updateInventory(
-            current.items,
-            `Reversión automática: falló el cobro de la venta ${current.code ?? current.id}`,
-            "INCREASE"
-          );
+          await this.updateInventory(current.items, `Reserva de inventario no persistida: ${String(error)}`, "INCREASE");
+          deferredInventoryReserved = false;
         } catch (rollbackError) {
-          logWarning(
-            `No se pudo revertir el inventario de la venta ${current.id} después de un cobro fallido`,
-            {
-              category: "sales",
-              context: { saleId: current.id, rollbackError: String(rollbackError) }
-            }
-          );
+          logWarning("No se pudo revertir una reserva de inventario que no se pudo persistir", {
+            category: "sales",
+            context: { saleId: current.id, error: String(rollbackError) }
+          });
         }
+        throw error;
       }
+    }
 
-      // CIERRE DE LA VENTANA DE CARRERA: el chequeo de idempotencia de arriba
-      // (current.status === "PAID"/"CLOSED") solo protege contra reintentos
-      // SECUENCIALES. Si dos llamadas a registerPayment para la MISMA venta
-      // arrancan casi a la vez (dos pestañas del cajero, doble click antes
-      // de que el primer round-trip termine), ambas pueden pasar ese
-      // chequeo viendo "PENDING_PAYMENT" y llegar aquí juntas. Solo una
-      // gana el updateSale (bloqueo optimista por version); la otra recibe
-      // OptimisticLockError. En vez de mostrarle un error de "choque de
-      // edición" al cajero por algo que en realidad es su propio cobro ya
-      // procesado por la otra pestaña, se relee la venta: si en efecto ya
-      // quedó PAID/CLOSED, se devuelve esa venta real sin volver a tocar
-      // caja, fidelización ni auditoría (evita el doble ingreso de dinero
-      // que el id determinístico de cash.registerIncome ya mitigaba, pero
-      // ahora sin siquiera intentar la escritura perdedora).
-      if (isOptimisticLockError(err)) {
-        const settled = await this.getSale(current.id);
-        if (settled && (settled.status === "PAID" || settled.status === "CLOSED")) {
-          return { sale: settled, payment: this.processPayment(settled, method, options) };
+    // ÚNICO PUNTO DE VERDAD FINANCIERO: dinero + cambio + PAID se confirman
+    // en PostgreSQL como una sola transacción. No hacemos tres escrituras
+    // independientes ni intentamos compensarlas desde el navegador.
+    let atomic: SalePaymentResult;
+    const isAtomicRepo = this.cash.isPaymentAtomicRepository();
+    try {
+      atomic = await this.cash.registerSalePaymentAtomic({
+        sale: current,
+        paymentMethod: method,
+        total: current.total,
+        cashAmount: cashPortion,
+        received: paymentResult.received,
+        change: paymentResult.change,
+        reference: options.reference,
+        shiftId: options.shiftId,
+        cashRegisterId: options.cashRegisterId,
+        verificationSource:
+          paymentResult.verificationStatus === "CONFIRMED"
+            ? "CASH"
+            : paymentResult.verificationStatus === "EXTERNAL_TERMINAL"
+              ? "EXTERNAL_TERMINAL"
+              : "PROVIDER",
+      });
+    } catch (err: unknown) {
+      if (!isAtomicRepo || deferredInventoryReserved) {
+        try {
+          if (deferredInventoryReserved) {
+            await this.updateInventory(current.items, `Pago fallido: ${String(err)}`, "INCREASE");
+            await this.updateSale({ ...current, fulfillmentStatus: "PENDING" });
+          } else if (!isAtomicRepo) {
+            await this.updateInventory(current.items, `Pago fallido: ${String(err)}`, "INCREASE");
+          }
+        } catch {
+          logWarning("No se pudo restaurar inventario tras pago fallido", {
+            category: "sales",
+            context: { saleId: current.id, error: String(err) }
+          });
         }
       }
       throw err;
     }
+
+    const updatedSale: Sale = {
+      ...current,
+      status: "PAID",
+      paymentMethod: method,
+      paymentReference: options.reference,
+      paymentReceived: paymentResult.received,
+      changeGiven: paymentResult.change,
+      paymentStatus: "CONFIRMED",
+      paymentVerificationSource: method === "CASH" ? "CASH" : method === "CARD" ? "EXTERNAL_TERMINAL" : "PROVIDER",
+      paymentVerifiedAt: new Date(),
+      paidAt: new Date(),
+      fulfillmentStatus: deferredInventoryReserved ? "INVENTORY_CONFIRMED" : "FULFILLED"
+    };
+
+    // En el path atómico (RPC real), el RPC ya actualizó la venta a PAID
+    // dentro de la misma transacción de PostgreSQL. Solo persistimos PAID
+    // en el repositorio para el path no-atómico (InMemory / tests).
+    if (!atomic.isAtomic) {
+      try {
+        await this.updateSale(updatedSale);
+      } catch (error) {
+        logWarning("Venta cobrada pero no se pudo persistir status PAID", {
+          category: "sales",
+          context: { saleId: current.id, error: String(error) }
+        });
+      }
+    }
+
+    let finalSale = updatedSale;
+    if (deferredInventoryReserved) {
+      finalSale = await this.completeDeferredFulfillment(updatedSale);
+    }
+
+    // Todo lo que NO es la verdad financiera queda fuera de la transacción
+    // de Caja. Si recibo, fidelización o auditoría fallan, no se revierte
+    // dinero ni inventario ya confirmado. Cada side-effect es reintentable.
+    try {
+      await this.updateCustomer(current.customerId, finalSale);
+    } catch (error) {
+      logWarning("Venta cobrada pero no se pudo actualizar fidelización del cliente", {
+        category: "sales",
+        context: { saleId: current.id, error: String(error) }
+      });
+    }
+
+    try {
+      await this.audit.log(
+        current.cashierId ?? "system",
+        "SALE_PAID",
+        "sales",
+        `Venta ${current.code ?? current.id} cobrada (${method}) por $${current.total}.`,
+        current.id
+      );
+    } catch (error) {
+      logWarning("Venta cobrada pero no se pudo registrar auditoría", {
+        category: "sales",
+        context: { saleId: current.id, error: String(error) }
+      });
+    }
+
+    try {
+      await this.ensureReceiptForPaidSale(finalSale, method, options);
+    } catch (error) {
+      logWarning("Venta cobrada pero no se pudo generar el recibo", {
+        category: "sales",
+        context: { saleId: current.id, error: String(error) }
+      });
+    }
+
+    const electronicInvoicing = companyConfigStore.get().electronicInvoicing;
+
+    if (electronicInvoicing.enabled) {
+      try {
+        const provider = InvoiceFactory.resolve(
+          {
+            enabled: electronicInvoicing.enabled,
+            provider: electronicInvoicing.provider
+          },
+          companyConfigStore.get().country
+        );
+
+        if (provider) {
+          let customer: InvoiceCustomer | undefined;
+          if (current.customerId && current.customerId !== this.config.defaultCustomerId) {
+            try {
+              const profile = await this.customer.getCustomerProfile(current.customerId);
+              customer = {
+                documentType: "CC",
+                documentNumber: profile.customer.id,
+                fullName: profile.customer.name,
+                email: profile.customer.email,
+                phone: profile.customer.phone
+              };
+            } catch {
+              // Facturación electrónica no puede deshacer un cobro confirmado.
+            }
+          }
+
+          const request: InvoiceRequest = {
+            saleId: current.id,
+            businessId: current.businessId ?? "",
+            provider: electronicInvoicing.provider,
+            country: companyConfigStore.get().country,
+            documentType: "INVOICE",
+            customer: customer ?? {
+              documentType: "CC",
+              documentNumber: "000000000",
+              fullName: "Consumidor Final"
+            },
+            items: current.items,
+            subtotal: current.subtotal ?? current.total,
+            tax: current.tax ?? 0,
+            discount: current.discount,
+            total: current.total,
+            currency: companyConfigStore.get().currency
+          };
+
+          const result = await provider.createInvoice(request);
+          finalSale = await this.updateSale({
+            ...finalSale,
+            invoiceId: result.id,
+            invoiceCufe: result.trackingCode
+          });
+        }
+      } catch (error) {
+        const message = String(error);
+        logWarning("No se pudo generar la factura electrónica", {
+          category: "sales",
+          context: { saleId: current.id, error: message }
+        });
+        paymentResult.invoiceError = `No se pudo generar la factura electrónica: ${message}`;
+      }
+    }
+
+    return { sale: finalSale, payment: paymentResult };
   }
 
   /**
@@ -1589,6 +1720,36 @@ export class SalesEngine {
   }
 
   /**
+   * Completa la parte operativa de una venta de Caja cuyo pago ya fue
+   * confirmado. Es idempotente: las ventas antiguas sin fulfillmentStatus
+   * se consideran ya completadas y no vuelven a descontar inventario.
+   */
+  private async completeDeferredFulfillment(sale: Sale): Promise<Sale> {
+    const status = sale.fulfillmentStatus ?? "FULFILLED";
+    if (status === "FULFILLED") return sale;
+
+    if (status === "PENDING") {
+      await this.updateInventory(sale.items, `Venta ${sale.code ?? sale.id}`, "DECREASE");
+      const reserved = await this.updateSale({ ...sale, fulfillmentStatus: "INVENTORY_CONFIRMED" });
+      return this.completeDeferredFulfillment(reserved);
+    }
+
+    try {
+      const existingKitchenOrder = await this.kitchen.getById(sale.id);
+      if (!existingKitchenOrder) {
+        await this.sendToKitchen(sale);
+      }
+      return await this.updateSale({ ...sale, fulfillmentStatus: "FULFILLED" });
+    } catch (error) {
+      logWarning("La venta quedó pagada con preparación pendiente; se podrá reintentar sin volver a descontar inventario.", {
+        category: "sales",
+        context: { saleId: sale.id, error: String(error) }
+      });
+      return sale;
+    }
+  }
+
+  /**
    * Envía la comanda de una venta a cocina. El ID de la comanda coincide
    * con el ID de la venta para permitir correlación directa entre ambas.
    *
@@ -1606,6 +1767,20 @@ export class SalesEngine {
    * lo normal en una tienda sin cocina, no un error: por eso no lanza.
    */
   public async sendToKitchen(sale: Sale): Promise<KitchenOrder | null> {
+    const modules = enabledModulesStore.get();
+    if (modules && !modules.includes("cocina")) {
+      return null;
+    }
+
+    const operationConfig = operationConfigStore.get();
+    if (operationConfig && operationConfig.kitchenEnabled !== true) {
+      return null;
+    }
+
+    const kitchenOutputMode = getEffectiveKitchenOutputMode();
+    if (kitchenOutputMode === "none") {
+      return null;
+    }
     const products = await this.inventory.getMany(
       sale.items.map(item => item.productId)
     );
@@ -1639,7 +1814,7 @@ export class SalesEngine {
     // Antes: await this.kitchen.save(order) directo. Ver mismo comentario
     // en OrderEngine.sendToKitchen — esta es la ruta de venta directa en
     // Caja/mostrador/domicilio (createSale la dispara automático).
-    await createKitchenOutput(kitchenOutputModeStore.get(), this.kitchen).send(order);
+    await createKitchenOutput(kitchenOutputMode, this.kitchen).send(order);
 
     return order;
   }
@@ -1757,8 +1932,15 @@ export class SalesEngine {
         ? `sale-payment-${sale.id}`
         : `sale-refund-${sale.id}`);
 
+    const VALID_PAYMENT_METHODS: ReadonlySet<string> =
+      new Set(["CASH", "CARD", "TRANSFER", "QR", "MIXED"]);
+
+    const paymentMethod = sale.paymentMethod && VALID_PAYMENT_METHODS.has(sale.paymentMethod)
+      ? sale.paymentMethod as CashMovement["paymentMethod"]
+      : "CASH";
+
     return direction === "IN"
-      ? await this.cash.registerIncome(amount, description, sale.paymentMethod as CashMovement["paymentMethod"], undefined, id)
+      ? await this.cash.registerIncome(amount, description, paymentMethod, undefined, id)
       : await this.cash.registerExpense(amount, description, id);
   }
 
@@ -1840,7 +2022,8 @@ export class SalesEngine {
     const totalProducts =
       quantity ??
       sale.items.reduce((sum, item) => sum + item.quantity, 0);
-    dashboardStore.reverseSale(amount, totalProducts);
+    const cashPortion = sale.cashAmount ?? (sale.paymentMethod === "CASH" ? sale.total : 0);
+    dashboardStore.reverseSale(amount, totalProducts, cashPortion);
   }
 
   /**

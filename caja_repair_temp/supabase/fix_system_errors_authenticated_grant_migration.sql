@@ -1,0 +1,33 @@
+-- ============================================================================
+-- VIMDY — Fix: otorgar INSERT en system_errors al rol authenticated
+-- ============================================================================
+-- PROBLEMA:
+--
+--   opsLogger intenta insertar errores en `system_errors` desde el frontend,
+--   pero la migración original (error_logging_migration.sql) creó la tabla
+--   y la política RLS sin otorgar el privilegio base INSERT al rol
+--   `authenticated`. Postgres devolvía:
+--
+--     permission denied for table system_errors
+--     Grant the required privileges to the current role with: GRANT INSERT ON public.system_errors TO authenticated;
+--
+--   RLS y GRANT son DOS capas distintas:
+--     - GRANT da el permiso base para tocar la tabla.
+--     - RLS filtra QUÉ FILAS puede ver/tocar cada rol.
+--
+-- SOLUCIÓN:
+--
+--   Otorgar INSERT sobre `system_errors` a `authenticated`. La política
+--   RLS existente (`system_errors_insert_own_business`) sigue siendo la
+--   única barrera real: solo permite filas cuyo `business_id` sea null o
+--   pertenezca al negocio del usuario.
+--
+-- SEGURIDAD:
+--
+--   - No se modifica ninguna política.
+--   - No se concede SELECT/UPDATE/DELETE.
+--   - No se concede acceso a anon.
+--   - El aislamiento por business_id sigue funcionando.
+-- ============================================================================
+
+GRANT INSERT ON public.system_errors TO authenticated;

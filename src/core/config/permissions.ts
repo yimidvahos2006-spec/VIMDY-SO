@@ -1,81 +1,62 @@
-/**
- * permissions.ts
- * ---------------------------------------------------------------------------
- * Centraliza TODOS los permisos de VIMDY como constantes type-safe.
- *
- * Antes los permisos eran strings sueltos esparcidos por el código
- * ("tables.view", "cash.view", etc.) sin validación centralizada.
- * Esto causó errores como usar "tables.view" para Meseros.
- *
- * Ahora:
- *   - Un único origen de verdad
- *   - Type safety: PermissionId solo permite valores válidos
- *   - Fácil refactor: cambiar un permiso = cambiar UNA constante
- */
+/* ===========================================================================
+   rolePermissions
+   ---------------------------------------------------------------------------
+   Con el login migrado a Supabase Auth, el rol de cada usuario ya no vive
+   en el RoleEngine local (IndexedDB) sino en `business_members.role`
+   (ver authBusinessContext.ts y supabase/schema.sql) — un simple string:
+   'ADMIN' | 'GERENTE' | 'CAJERO' | 'MESERO' | 'COCINA' | ...
 
-export const Permissions = {
-  // Caja
-  CASH_VIEW: 'cash.view',
-  CASH_REGISTER_MOVEMENT: 'cash.registerMovement',
+   AuthContext necesita saber qué puede hacer cada rol para que `can()`
+   siga funcionando en toda la UI (ProtectedRoute, SettingsDashboard, etc)
+   sin tener que ir a preguntarle a la base de datos en cada click.
 
-  // Turnos
-  SHIFT_VIEW: 'shift.view',
+   Este mapa es el mismo catálogo que ya existía en seedIdentity.ts (el
+   que sembraba roles en el sistema viejo de IndexedDB) — se mantiene
+   aquí como la versión "cliente" de esa misma tabla de permisos.
+=========================================================================== */
 
-  // Mesas (operación de mesas)
-  TABLES_VIEW: 'tables.view',
-  TABLES_MANAGE: 'tables.manage',
-  TABLES_MERGE: 'tables.merge',
+export const ROLE_PERMISSIONS: Record<string, string[]> = {
+  ADMIN: ["*"],
 
-  // Personal/Staff (INDEPENDIENTE de mesas)
-  // Un negocio puede tener personal sin mesas (mostrador, domicilios, etc.)
-  STAFF_VIEW: 'staff.view',
-  STAFF_MANAGE: 'staff.manage',
+  GERENTE: [
+    "sales.view", "sales.create", "sales.edit", "sales.refund",
+    "inventory.view", "inventory.create", "inventory.edit", "inventory.adjust",
+    "customers.view", "customers.create", "customers.edit",
+    "kitchen.view", "tables.view", "tables.manage",
+    "cash.view", "cash.registerMovement", "cash.transfer",
+    "shift.view", "shift.close",
+    "reports.view", "reports.export",
+    "users.view"
+  ],
 
-  // Cocina
-  KITCHEN_VIEW: 'kitchen.view',
+  CAJERO: [
+    "sales.view", "sales.create",
+    "customers.view", "customers.create",
+    "cash.view", "cash.registerMovement",
+    "shift.view", "shift.close"
+  ],
 
-  // Inventario
-  INVENTORY_VIEW: 'inventory.view',
-  INVENTORY_CREATE: 'inventory.create',
-  INVENTORY_EDIT: 'inventory.edit',
-  INVENTORY_ADJUST: 'inventory.adjust',
+  MESERO: [
+    "tables.view", "tables.manage", "tables.merge",
+    "kitchen.view",
+    "customers.view", "customers.create"
+  ],
 
-  // Clientes
-  CUSTOMERS_VIEW: 'customers.view',
-  CUSTOMERS_CREATE: 'customers.create',
-  CUSTOMERS_EDIT: 'customers.edit',
+  COCINA: ["kitchen.view", "kitchen.manage"],
 
-  // Reportes
-  REPORTS_VIEW: 'reports.view',
-  REPORTS_EXPORT: 'reports.export',
+  INVENTARIO: [
+    "inventory.view", "inventory.create", "inventory.edit", "inventory.adjust",
+    "reports.view"
+  ],
 
-  // Usuarios (cuentas con login)
-  USERS_VIEW: 'users.view',
+  CONTADOR: [
+    "sales.view", "cash.view", "shift.view",
+    "reports.view", "reports.export"
+  ],
 
-  // Configuración
-  COMPANY_SETTINGS: 'company.settings',
-} as const;
-
-export type PermissionId = typeof Permissions[keyof typeof Permissions];
-
-/**
- * Mapeo de módulo → permiso de acceso.
- * Define qué permiso se necesita para acceder a cada módulo.
- */
-export const MODULE_PERMISSION_MAP: Record<string, PermissionId> = {
-  caja: Permissions.CASH_VIEW,
-  mesas: Permissions.TABLES_VIEW,
-  meseros: Permissions.STAFF_VIEW,  // Personal usa permiso STAFF, no TABLES
-  cocina: Permissions.KITCHEN_VIEW,
-  inventario: Permissions.INVENTORY_VIEW,
-  clientes: Permissions.CUSTOMERS_VIEW,
-  reportes: Permissions.REPORTS_VIEW,
-  company: Permissions.COMPANY_SETTINGS,
+  SOPORTE: ["users.view", "reports.view"]
 };
 
-/**
- * Helper: obtener el permiso requerido para un módulo.
- */
-export function getPermissionForModule(moduleId: string): PermissionId | undefined {
-  return MODULE_PERMISSION_MAP[moduleId];
+export function permissionsForRole(role: string): string[] {
+  return ROLE_PERMISSIONS[role] ?? [];
 }

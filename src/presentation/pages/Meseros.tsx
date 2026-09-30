@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 
+import { useTranslation } from "../../core/i18n/useTranslation";
 import { Table, Product, Waiter } from "../../core/entities/Entities";
 import {
   container,
@@ -18,6 +19,7 @@ import { usePendingTableOperationsQueue } from "../../core/offline/usePendingTab
 import { RequirePermission } from "../navigation/RequirePermission";
 
 function MeserosContent() {
+  const { t } = useTranslation();
   const [ready, setReady] = useState(false);
   const [tables, setTables] = useState<Table[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -134,17 +136,17 @@ function MeserosContent() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-5xl font-black text-white">Meseros</h1>
+            <h1 className="text-5xl font-black text-white">{t("waiter.page.title")}</h1>
             <OfflineStatusBadge
               pendingCount={pendingTableOperationsCount}
-              pendingLabelSingular="1 operación de mesa pendiente"
-              pendingLabelPlural="{count} operaciones de mesa pendientes"
+              pendingLabelSingular={t("waiter.offline.pendingSingular")}
+              pendingLabelPlural={t("waiter.offline.pendingPlural", { count: pendingTableOperationsCount })}
             />
           </div>
           <p className="text-slate-400 mt-3 text-xl">
             {activeWaiter
-              ? `${activeWaiter.name} — elige una mesa.`
-              : "Administración de meseros y mesas."}
+              ? t("waiter.page.subtitleWaiter", { name: activeWaiter.name })
+              : t("waiter.page.subtitleAdmin")}
           </p>
         </div>
 

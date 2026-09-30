@@ -157,7 +157,9 @@ export class RoleEngine {
       { id: "tables.view", module: "tables", description: "Ver mesas" },
       { id: "tables.edit", module: "tables", description: "Editar mesas" },
       { id: "cash.view", module: "cash", description: "Ver movimientos de caja" },
-      { id: "cash.close", module: "cash", description: "Cerrar turno de caja" }
+      { id: "cash.close", module: "cash", description: "Cerrar turno de caja (compatibilidad legado)" },
+      { id: "cash.transfer", module: "cash", description: "Transferir efectivo entre cajas" },
+      { id: "shift.close", module: "shift", description: "Cerrar turno de caja" }
     ]);
   }
 

@@ -1,6 +1,6 @@
 export function CookiesPage() {
   return (
-    <div className="min-h-screen bg-[#050505]">
+    <div className="min-h-screen bg-transparent">
       <main>
         <section className="pt-32 pb-20">
           <div className="max-w-3xl mx-auto px-6">

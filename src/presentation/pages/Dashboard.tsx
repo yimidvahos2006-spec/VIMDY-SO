@@ -1,67 +1,54 @@
-import { Gauge, Zap, Activity } from "lucide-react";
+import { Activity } from "lucide-react";
 
-import { useTranslation } from "../../core/i18n/useTranslation";
 import { VimdyCenter } from "../components/ui/VimdyCenter";
-import { DashboardWelcome } from "../components/dashboard/DashboardWelcome";
-import { DashboardIndicators } from "../components/dashboard/DashboardIndicators";
-import { GerenteInteligente } from "../components/dashboard/GerenteInteligente";
-import { DashboardQuickActions } from "../components/dashboard/DashboardQuickActions";
-import { DailyReportButton } from "../components/dashboard/DailyReportButton";
-import { DashboardActivity } from "../components/dashboard/DashboardActivity";
 import { DashboardSection } from "../components/dashboard/DashboardSection";
+import { DashboardActivity } from "../components/dashboard/DashboardActivity";
+import { DashboardCommandHeader } from "../components/dashboard/DashboardCommandHeader";
+import { DashboardExecutiveOverview } from "../components/dashboard/DashboardExecutiveOverview";
+import { DashboardAttentionCenter } from "../components/dashboard/DashboardAttentionCenter";
+import { DashboardOperationsPulse } from "../components/dashboard/DashboardOperationsPulse";
+import { DashboardSalesTrend } from "../components/dashboard/DashboardSalesTrend";
+import { DashboardCloseStatus } from "../components/dashboard/DashboardCloseStatus";
+import { DashboardAdaptiveQuickActions } from "../components/dashboard/DashboardAdaptiveQuickActions";
+import { useDashboardExecutive } from "../../hooks/useDashboardExecutive";
+import { DailyReportDeliveryStatus } from "../components/dashboard/DailyReportDeliveryStatus";
 
 /**
- * Dashboard — VIMDY Experience 1.0, Dashboard V3, Paso 1.1
- * ---------------------------------------------------------------------------
- * Estructura fija de 5 bloques, en este orden, y nada más:
- *   1. Bienvenida Inteligente (DashboardWelcome)      — ancho completo
- *   2. Indicadores principales (DashboardIndicators)  — Ventas, Ganancia,
- *      Caja, Pedidos, Salud del negocio
- *   3. Gerente Inteligente (GerenteInteligente)        — recomendaciones
- *      accionables (título + explicación + botón)
- *   4. Acciones rápidas (DashboardQuickActions)         — 4 acciones
- *   5. Actividad reciente (DashboardActivity)           — ventas, pedidos
- *      y movimientos recientes
+ * Dashboard ejecutivo VIMDY.
  *
- * Ya no hay sistema de widgets reordenables/ocultables ni panel de
- * personalización: los 5 bloques son fijos, así que ese layout dejó de
- * tener sentido. El antiguo DashboardHeader (buscador, campana y
- * engranaje sin funcionalidad, más un badge de usuario falso que se
- * pisaba con el UserSessionBadge real) tampoco pertenece a ninguno de
- * los 5 bloques y se eliminó por completo.
+ * Regla de arquitectura: este componente consume un único modelo ejecutivo
+ * construido a partir del perfil operativo y del snapshot reconciliado. Los
+ * hijos reciben ese modelo por props para no disparar snapshots adicionales.
  */
 export function Dashboard() {
-  const { t } = useTranslation();
+  const model = useDashboardExecutive();
 
   return (
     <div className="w-full min-h-screen flex flex-col">
       <div className="flex justify-end px-8 py-4">
         <VimdyCenter />
       </div>
-      <main className="flex-1 w-full px-8 pb-10">
-        <div className="max-w-[1800px] mx-auto grid grid-cols-12 gap-8">
 
-          {/* Bloque 1 — Bienvenida Inteligente */}
-          <DashboardWelcome />
+      <main className="flex-1 w-full px-4 sm:px-6 lg:px-8 pb-10">
+        <div className="max-w-[1800px] mx-auto space-y-8">
+          <DashboardCommandHeader model={model} />
 
-          {/* Bloque 2 — Indicadores principales */}
-          <DashboardSection title={t("dashboard.section.indicators")} icon={Gauge} accent="indicators">
-            <DashboardIndicators />
-          </DashboardSection>
+          <DashboardExecutiveOverview model={model} />
 
-          {/* Bloque 3 — Gerente Inteligente */}
-          <GerenteInteligente />
+          <DashboardAttentionCenter model={model} />
 
-          {/* Bloque 4 — Acciones rápidas */}
-          <DashboardSection title={t("dashboard.section.quickActions")} icon={Zap} accent="actions">
-            <DashboardQuickActions />
-          </DashboardSection>
+          <DashboardOperationsPulse model={model} />
 
-          {/* Bloque 4.1 — Reporte diario por WhatsApp */}
-          <DailyReportButton />
+          <div className="grid grid-cols-1 2xl:grid-cols-2 gap-8">
+            <DashboardSalesTrend model={model} />
+            <DashboardCloseStatus model={model} />
+          </div>
 
-          {/* Bloque 5 — Actividad reciente */}
-          <DashboardSection title={t("dashboard.section.activity")} icon={Activity} accent="activity">
+          <DailyReportDeliveryStatus />
+
+          <DashboardAdaptiveQuickActions model={model} />
+
+          <DashboardSection title="Actividad reciente" icon={Activity} accent="activity">
             <DashboardActivity />
           </DashboardSection>
 

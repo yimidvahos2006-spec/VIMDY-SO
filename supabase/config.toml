@@ -422,3 +422,11 @@ enabled = true
 # declarative_schema_path = "./database"
 # JSON string passed through to pg-delta SQL formatting.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":80,\"commaStyle\":\"trailing\"}"
+
+# Automatic daily report worker and WhatsApp webhook validate their own credentials
+# (worker secret / Meta HMAC), so Supabase Edge Runtime must not require a JWT.
+[functions.process-daily-report]
+verify_jwt = false
+
+[functions.whatsapp-webhook]
+verify_jwt = false

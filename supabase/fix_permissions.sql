@@ -220,3 +220,9 @@ end $$;
 -- ============================================================================
 -- FIN
 -- ============================================================================
+
+-- VIMDY: cash_movements and shifts are server-write-only for authenticated.
+REVOKE INSERT, UPDATE, DELETE ON cash_movements FROM authenticated;
+GRANT SELECT ON cash_movements TO authenticated;
+REVOKE INSERT, UPDATE, DELETE ON shifts FROM authenticated;
+GRANT SELECT ON shifts TO authenticated;

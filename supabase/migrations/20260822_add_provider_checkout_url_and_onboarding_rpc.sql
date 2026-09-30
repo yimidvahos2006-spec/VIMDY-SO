@@ -8,7 +8,6 @@
 --    sin reconstruir la URL de memoria.
 alter table subscription_payments
   add column if not exists provider_checkout_url text;
-
 -- 2) RPC para marcar onboarding como completado desde el cliente,
 --    validando membresía del usuario. Reemplaza el UPDATE directo
 --    que antes estaba permitido por GRANT.
@@ -37,6 +36,5 @@ begin
   return found;
 end;
 $$;
-
 revoke all on function public.mark_onboarding_completed_server_side(uuid) from public, anon;
 grant execute on function public.mark_onboarding_completed_server_side(uuid) to authenticated, service_role;

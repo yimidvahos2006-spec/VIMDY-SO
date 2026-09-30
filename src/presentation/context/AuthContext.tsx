@@ -49,6 +49,9 @@ import { companyConfigStore } from "../../core/store/companyConfigStore";
 import { enabledModulesStore } from "../../core/store/enabledModulesStore";
 import { kitchenOutputModeStore } from "../../core/store/kitchenOutputModeStore";
 import { subscriptionStore } from "../../core/store/subscriptionStore";
+import { businessOperatingProfileStore } from "../../core/store/businessOperatingProfileStore";
+import { operationConfigStore } from "../../core/store/operationConfigStore";
+import { hydrateBusinessOperatingProfile } from "../../core/bootstrap/businessOperatingProfileBootstrap";
 import { CountryCode, CurrencyCode, LanguageCode } from "../../core/config/globalization";
 import type { ModuleId } from "../../core/config/modules";
 
@@ -167,10 +170,9 @@ function hydrateBusinessConfig(session: BusinessSession) {
   // para mostrar/ocultar Mesas, Cocina, etc. según lo que el negocio
   // guardó realmente en Supabase (enabled_modules).
   enabledModulesStore.set(session.enabledModules as ModuleId[]);
-  // Punto 5.5/5.7: OrderEngine/TableEngine/SalesEngine leen esto en vivo
-  // al enviar una comanda, para decidir entre KitchenScreenOutput y
-  // KitchenPrinterOutput (ver KitchenOutputFactory.ts).
-  kitchenOutputModeStore.set(session.salidaCocina);
+  // La salida de cocina ya no se hidrata desde el campo legacy de la sesión.
+  // `hydrateBusinessOperatingProfile()` carga la configuración operativa nueva
+  // y sincroniza el store de salida sin arrastrar valores de otro negocio.
 }
 
 /**
@@ -233,6 +235,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (businesses.length === 1) {
         const session = businesses[0];
         setCurrentBusinessId(session.businessId);
+        void hydrateBusinessOperatingProfile(session.businessId);
 
         try {
           const [resolvedBranchId] = await Promise.all([
@@ -292,6 +295,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         enabledModulesStore.clear();
         subscriptionStore.clear();
         kitchenOutputModeStore.clear();
+        businessOperatingProfileStore.clear();
+        operationConfigStore.clear();
       }
     });
 
@@ -321,6 +326,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const businessSession = result;
       setCurrentBusinessId(businessSession.businessId);
+      void hydrateBusinessOperatingProfile(businessSession.businessId);
       hydrateBusinessConfig(businessSession);
       hydrateSubscription(businessSession.businessId);
       void ensureIdentity(container.permissionEngine.get(), container.roleEngine.get());
@@ -349,6 +355,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const switchBusiness = useCallback(async (businessSession: BusinessSession) => {
     setCurrentBusinessId(businessSession.businessId);
+    void hydrateBusinessOperatingProfile(businessSession.businessId);
     const resolvedBranchId = await resolveDefaultBranchId(businessSession.businessId);
     setCurrentBranchId(resolvedBranchId);
     hydrateBusinessConfig(businessSession);
@@ -457,6 +464,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     enabledModulesStore.clear();
     subscriptionStore.clear();
     kitchenOutputModeStore.clear();
+    businessOperatingProfileStore.clear();
+    operationConfigStore.clear();
     setUser(null);
     setRole(null);
     setSessionId(null);
@@ -532,6 +541,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const businessSession = result;
       setCurrentBusinessId(businessSession.businessId);
+      void hydrateBusinessOperatingProfile(businessSession.businessId);
       hydrateBusinessConfig(businessSession);
       hydrateSubscription(businessSession.businessId);
       void ensureIdentity(container.permissionEngine.get(), container.roleEngine.get());

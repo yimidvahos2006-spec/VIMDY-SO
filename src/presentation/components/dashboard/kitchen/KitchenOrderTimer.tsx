@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { Clock3 } from "lucide-react";
 
+import { useTranslation } from "../../../../core/i18n/useTranslation";
+
 interface Props {
 
   createdAt: Date;
@@ -21,7 +23,7 @@ export function KitchenOrderTimer({
   tvMode = false
 
 }: Props) {
-
+  const { t } = useTranslation();
   const [seconds, setSeconds] = useState(0);
 
   useEffect(() => {
@@ -74,7 +76,7 @@ export function KitchenOrderTimer({
 
       <span className={`font-bold ${color} ${tvMode ? "text-2xl" : ""}`}>
 
-        {minutes}m {remaining}s
+        {t("kitchen.timer.format", { minutes, seconds: remaining })}
 
       </span>
 

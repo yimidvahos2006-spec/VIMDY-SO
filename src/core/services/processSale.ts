@@ -19,6 +19,8 @@ import {
   reconstructCreateSaleInputFromSale
 } from "./offlineSale";
 import { logError } from "../../infrastructure/logging/opsLogger";
+import { activeShiftStore } from "../store/activeShiftStore";
+import { getCurrentBusinessId, getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
 
 const PAYMENT_METHOD_MAP: Record<string, PaymentMethod> = {
   cash: "CASH",
@@ -189,6 +191,40 @@ export async function sendOrderToKitchen(params: ProcessSaleParams): Promise<Sal
   }
 }
 
+async function resolveActiveShiftContext(cashierId: string): Promise<{ shiftId: string; cashRegisterId: string } | null> {
+  const businessId = getCurrentBusinessId();
+  const branchId = getCurrentBranchId();
+  if (!businessId || !branchId) return null;
+
+  const cached = activeShiftStore.getFor(businessId, branchId, cashierId);
+  if (cached.shiftId && cached.cashRegisterId) {
+    return { shiftId: cached.shiftId, cashRegisterId: cached.cashRegisterId };
+  }
+
+  if (!connectionStore.isOnline()) return null;
+
+  try {
+    const shift = await container.shiftEngine.get().getCurrentShift(cashierId, cached.cashRegisterId ?? undefined);
+    if (!shift?.id || !shift.cashRegisterId) return null;
+
+    activeShiftStore.set({
+      businessId,
+      branchId,
+      cashierId,
+      shiftId: shift.id,
+      cashRegisterId: shift.cashRegisterId,
+    });
+
+    return { shiftId: shift.id, cashRegisterId: shift.cashRegisterId };
+  } catch (error) {
+    logError("No se pudo resolver el turno activo del cajero", {
+      category: "payment",
+      context: { cashierId, businessId, branchId, error: String(error) },
+    });
+    return null;
+  }
+}
+
 /**
  * Cobra una venta que quedó en la cola local (offline) en vez de en
  * Supabase: actualiza el mismo registro de pendingSalesStore con los
@@ -202,7 +238,7 @@ async function chargeSaleOffline(
   method: PaymentMethod,
   mixed: MixedPayment | undefined,
   itemNames: Map<string, string>
-): Promise<{ success: boolean; invoiceError?: string }> {
+): Promise<{ success: boolean; invoiceError?: string; pendingVerification?: boolean }> {
   const payment = paymentStore.get();
 
   if (method === "CASH") {
@@ -227,6 +263,12 @@ async function chargeSaleOffline(
   const createSaleInput =
     alreadyQueued?.createSaleInput ?? reconstructCreateSaleInputFromSale(sale, params.cashierId);
 
+  const activeShift = await resolveActiveShiftContext(params.cashierId);
+  if (!activeShift) {
+    toast.error("Sin conexión, VIMDY no puede confirmar este cobro porque no tiene un turno de caja activo conocido para este cajero.");
+    return { success: false };
+  }
+
   await pendingSalesStore.enqueue({
     createSaleInput,
     cashierName: params.cashierName,
@@ -234,7 +276,9 @@ async function chargeSaleOffline(
       method,
       received: method === "CASH" ? payment.received || sale.total : sale.total,
       reference: payment.reference || undefined,
-      mixed
+      mixed,
+      shiftId: activeShift.shiftId,
+      cashRegisterId: activeShift.cashRegisterId
     }
   });
 
@@ -242,7 +286,10 @@ async function chargeSaleOffline(
     sale,
     customerName: payment.customerName,
     cashierName: params.cashierName,
-    paymentMethodLabel: PAYMENT_METHOD_LABEL[payment.method] ?? payment.method,
+    paymentMethodLabel:
+      method === "CASH"
+        ? (PAYMENT_METHOD_LABEL[payment.method] ?? payment.method)
+        : `${PAYMENT_METHOD_LABEL[payment.method] ?? payment.method} — pendiente de verificación`,
     received:
       method === "MIXED"
         ? payment.mixedCash + payment.mixedCard + payment.mixedTransfer
@@ -268,7 +315,10 @@ async function chargeSaleOffline(
   cartStore.clear();
   paymentStore.reset();
 
-  return { success: true };
+  return {
+    success: true,
+    pendingVerification: method !== "CASH"
+  };
 }
 
 /**
@@ -286,7 +336,7 @@ export async function chargeSale(
   sale: Sale,
   params: ProcessSaleParams,
   precomputedItemNames?: Map<string, string>
-): Promise<{ success: boolean; invoiceError?: string }> {
+): Promise<{ success: boolean; invoiceError?: string; pendingVerification?: boolean }> {
   // Los nombres de producto no viven en Sale/SaleItem (solo productId+price+
   // quantity), así que normalmente se toman del carrito real. BUG que se
   // arregla acá: si esta venta ya se armó/encoló offline en el paso
@@ -342,12 +392,27 @@ export async function chargeSale(
     return chargeSaleOffline(sale, params, method, mixed, itemNames);
   }
 
+  const activeShift = await resolveActiveShiftContext(params.cashierId);
+  if (!activeShift) {
+    toast.error("No se pudo identificar la caja física y el turno activo de este cajero.");
+    return { success: false };
+  }
+
   try {
     const { sale: paidSale, payment: paymentResult } = await container.salesEngine.get().registerPayment(sale, method, {
       received: method === "CASH" ? payment.received || sale.total : sale.total,
       reference: payment.reference || undefined,
-      mixed
+      mixed,
+      shiftId: activeShift.shiftId,
+      cashRegisterId: activeShift.cashRegisterId
     });
+
+    if (paymentResult.verificationStatus === "PENDING_VERIFICATION") {
+      toast.warning(paymentResult.message);
+      cartStore.clear();
+      paymentStore.reset();
+      return { success: true, pendingVerification: true };
+    }
 
     const receipt = await container.salesEngine.get().generateReceipt(
       paidSale,
@@ -423,7 +488,7 @@ export async function chargeSale(
  * offline: si no hay conexión, ambos pasos internos caen a la cola local
  * sin que el cajero note más que el aviso de "sin conexión".
  */
-export async function processSale(params: ProcessSaleParams): Promise<{ success: boolean; invoiceError?: string }> {
+export async function processSale(params: ProcessSaleParams): Promise<{ success: boolean; invoiceError?: string; pendingVerification?: boolean }> {
   // Se capturan los nombres ANTES de sendOrderToKitchen (ver comentario en
   // chargeSale de arriba): si no hay conexión, sendOrderToKitchen vacía el
   // carrito internamente antes de que lleguemos a chargeSale.

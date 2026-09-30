@@ -32,14 +32,11 @@ create table if not exists app_users (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-
 create index if not exists app_users_business_id_idx on app_users (business_id);
-
 -- ----------------------------------------------------------------------------
 -- 2. RLS + Policies (multi-tenant: el usuario solo ve/empleados de SU negocio)
 -- ----------------------------------------------------------------------------
 alter table app_users enable row level security;
-
 drop policy if exists app_users_tenant_read on app_users;
 create policy app_users_tenant_read on app_users
   for select
@@ -50,7 +47,6 @@ create policy app_users_tenant_read on app_users
       or branch_id in (select auth_branch_ids())
     )
   );
-
 drop policy if exists app_users_tenant_insert on app_users;
 create policy app_users_tenant_insert on app_users
   for insert
@@ -62,7 +58,6 @@ create policy app_users_tenant_insert on app_users
     )
     and public.is_business_subscription_active(business_id)
   );
-
 drop policy if exists app_users_tenant_update on app_users;
 create policy app_users_tenant_update on app_users
   for update
@@ -81,7 +76,6 @@ create policy app_users_tenant_update on app_users
     )
     and public.is_business_subscription_active(business_id)
   );
-
 drop policy if exists app_users_tenant_delete on app_users;
 create policy app_users_tenant_delete on app_users
   for delete
@@ -93,7 +87,6 @@ create policy app_users_tenant_delete on app_users
     )
     and public.is_business_subscription_active(business_id)
   );
-
 -- ----------------------------------------------------------------------------
 -- 3. GRANTS
 --    - service_role: acceso completo (usado por register-business,
@@ -102,7 +95,6 @@ create policy app_users_tenant_delete on app_users
 -- ----------------------------------------------------------------------------
 grant all on app_users to service_role;
 grant select, insert, update, delete on app_users to authenticated;
-
 -- ----------------------------------------------------------------------------
 -- 4. GRANTS para funciones auxiliares (ya definidas en migrations previas,
 --    pero se reiteran aquí por si la migration se aplica en un entorno
@@ -116,8 +108,6 @@ grant execute on function public.auth_business_ids() to authenticated, service_r
 grant execute on function public.auth_branch_ids() to authenticated, service_role;
 grant execute on function public.is_business_subscription_active(uuid) to authenticated, service_role;
 grant execute on function public.has_user_used_trial(uuid) to authenticated, service_role;
-grant execute on function public.record_trial_usage(uuid, uuid) to service_role;
-
 -- ============================================================================
 -- FIN DE MIGRACIÓN
--- ============================================================================
+-- ============================================================================;

@@ -1,12 +1,14 @@
 import React, { useState } from "react";
 import { ClipboardList, History } from "lucide-react";
 
+import { useTranslation } from "../../core/i18n/useTranslation";
 import { KitchenDashboard } from "../components/dashboard/kitchen/KitchenDashboard";
 import { KitchenHistoryPanel } from "../components/dashboard/kitchen/KitchenHistoryPanel";
 
 type KitchenTab = "activos" | "historial";
 
 export const KitchenPage: React.FC = () => {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<KitchenTab>("activos");
 
   return (
@@ -16,13 +18,13 @@ export const KitchenPage: React.FC = () => {
           active={tab === "activos"}
           onClick={() => setTab("activos")}
           icon={ClipboardList}
-          label="Comandas activas"
+          label={t("kitchen.tabs.active")}
         />
         <TabButton
           active={tab === "historial"}
           onClick={() => setTab("historial")}
           icon={History}
-          label="Historial de entregados"
+          label={t("kitchen.tabs.history")}
         />
       </div>
 

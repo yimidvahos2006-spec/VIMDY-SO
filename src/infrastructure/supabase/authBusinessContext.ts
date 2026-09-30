@@ -1,6 +1,6 @@
 import { supabase, setCurrentBusinessId, setCurrentBranchId } from "./supabaseClient";
 import { APP_URL } from "../../core/config/appUrl";
-import { resendRegistrationOtp, translateOtpError } from "./authOtp";
+import { markRegistrationOtpSent, resendRegistrationOtp, translateOtpError } from "./authOtp";
 import type { BusinessTypeId } from "../../core/config/businessTypes";
 import type { ModuleId } from "../../core/config/modules";
 import type { KitchenOutputMode } from "../../core/services/kitchenOutput";
@@ -77,6 +77,65 @@ interface PendingRegistration {
   businessType?: string;
 }
 
+/** Respuesta server-side estable del alta inicial. Evita el read-after-write
+ *  inmediato que podía producir “El negocio se creó pero no se pudo cargar”.
+ *  El Edge Function construye este snapshot con service_role. */
+interface RegisteredBusinessBootstrap {
+  businessId: string;
+  branchId: string | null;
+  role: string;
+  business: BusinessRow & { id?: string };
+}
+
+function isRegisteredBusinessBootstrap(value: unknown): value is RegisteredBusinessBootstrap {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  const business = candidate.business as Record<string, unknown> | undefined;
+  return (
+    typeof candidate.businessId === "string" &&
+    typeof candidate.role === "string" &&
+    !!business &&
+    typeof business.name === "string" &&
+    typeof business.country === "string" &&
+    typeof business.currency === "string" &&
+    typeof business.language === "string" &&
+    typeof business.timezone === "string"
+  );
+}
+
+function businessSessionFromBootstrap(
+  bootstrap: RegisteredBusinessBootstrap,
+  ownerName: string,
+  userId: string
+): BusinessSession {
+  return toBusinessSession(
+    userId,
+    bootstrap.businessId,
+    bootstrap.role,
+    ownerName,
+    bootstrap.business
+  );
+}
+
+async function resolveBusinessSessionWithRetry(
+  userId: string,
+  ownerName: string,
+  maxAttempts = 4
+): Promise<BusinessSession | null> {
+  const delays = [150, 350, 750, 1500];
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const session = await resolveBusinessSession(userId, ownerName);
+    if (session) return session;
+
+    if (attempt < maxAttempts - 1) {
+      await new Promise((resolve) => setTimeout(resolve, delays[attempt] ?? 1500));
+    }
+  }
+
+  return null;
+}
+
 const PENDING_REGISTRATION_KEY = "vimdy_pending_registration";
 
 /**
@@ -147,13 +206,11 @@ interface BusinessRow {
 /**
  * Calcula los módulos activos del negocio.
  *
- * Prioridad (NUNCA sobrescribe configuración válida):
+ * Prioridad:
  *  1. Si enabled_modules tiene valores válidos → usar esos valores.
- *  2. Si enabled_modules es null/[] y existe business_type → calcular defaults.
- *  3. Si ninguno → [].
- *
- * Esto protege contra negocios creados antes del sistema de módulos
- * o con enabled_modules corrupto a [].
+ *  2. Solo durante onboarding incompleto, business_type puede sugerir defaults.
+ *  3. Un negocio ya terminado con [] queda realmente sin módulos; no se
+ *     inventan capacidades desde business_type.
  */
 function resolveEnabledModules(businessRow: BusinessRow | undefined): ModuleId[] {
   const existing = businessRow?.enabled_modules as ModuleId[] | null | undefined;
@@ -163,7 +220,7 @@ function resolveEnabledModules(businessRow: BusinessRow | undefined): ModuleId[]
   }
 
   const businessType = businessRow?.business_type as BusinessTypeId | null | undefined;
-  if (businessType) {
+  if (businessRow?.onboarding_completed !== true && businessType) {
     return getDefaultModulesForBusinessType(businessType);
   }
 
@@ -371,6 +428,10 @@ export async function beginRegistration(input: RegisterBusinessInput): Promise<v
   }
 
   console.log("[VIMDY-AUTH] signUp succeeded for new user — email should have been sent by Supabase");
+  // El servidor limita nuevas solicitudes de confirmación a un intervalo
+  // mínimo; VIMDY inicia el contador desde el primer OTP y lo conserva
+  // aunque la página se recargue.
+  markRegistrationOtpSent(input.email);
   savePendingRegistration({
     businessName: input.businessName,
     ownerName: input.ownerName,
@@ -392,39 +453,61 @@ export async function completeRegistration(): Promise<BusinessSession> {
     throw new Error("No hay un registro en curso. Vuelve a empezar desde 'Crear cuenta'.");
   }
 
-  const { data: fnData, error: fnError } = await supabase.functions.invoke("register-business", {
-    body: {
-      businessName: pending.businessName,
-      ownerName: pending.ownerName,
-      country: pending.country,
-      businessType: pending.businessType ?? "restaurante"
-    }
-  });
-
-  if (fnError) {
-    // supabase-js solo da un mensaje genérico ("Edge Function returned a
-    // non-2xx status code") en fnError.message. El mensaje real que SÍ
-    // escribimos nosotros (ej. "EMAIL_NOT_VERIFIED", "Faltan campos...")
-    // viene en el body de la respuesta, accesible vía fnError.context.
-    let detailedMessage: string | null = null;
-    const context = (fnError as { context?: Response }).context;
-    if (context && typeof context.json === "function") {
-      try {
-        const body = await context.json();
-        detailedMessage = body?.error ?? null;
-      } catch {
-        // El body no era JSON válido; nos quedamos con el mensaje genérico.
+  const invokeRegistration = async () => {
+    const { data, error } = await supabase.functions.invoke("register-business", {
+      body: {
+        businessName: pending.businessName,
+        ownerName: pending.ownerName,
+        country: pending.country,
+        businessType: pending.businessType ?? "restaurante",
+        registrationMode: "initial"
       }
+    });
+
+    if (error) {
+      let detailedMessage: string | null = null;
+      const context = (error as { context?: Response }).context;
+      if (context && typeof context.json === "function") {
+        try {
+          const body = await context.json();
+          detailedMessage = body?.error ?? null;
+        } catch {
+          // El body no era JSON válido; usar el mensaje genérico.
+        }
+      }
+      const errorMessage = error instanceof Error ? error.message : "No se pudo completar el registro.";
+      throw new Error(detailedMessage ?? errorMessage);
     }
-    const errorMessage = fnError instanceof Error ? fnError.message : (
-      typeof fnError === "object" && fnError !== null && "message" in fnError
-        ? String((fnError as { message: unknown }).message)
-        : null
-    );
-    throw new Error(detailedMessage ?? errorMessage ?? "No se pudo crear el negocio.");
-  }
-  if (fnData && typeof fnData === "object" && "error" in fnData) {
-    throw new Error((fnData as { error: string }).error);
+
+    if (data && typeof data === "object" && "error" in data) {
+      throw new Error(String((data as { error: unknown }).error));
+    }
+
+    return data as unknown;
+  };
+
+  // La Edge Function devuelve el snapshot del negocio creado con service_role.
+  // Esto elimina la dependencia de que la consulta RLS recién hecha sea visible
+  // inmediatamente después del INSERT.
+  let bootstrap: RegisteredBusinessBootstrap | null = null;
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await invokeRegistration();
+      if (isRegisteredBusinessBootstrap(response)) {
+        bootstrap = response;
+        break;
+      }
+
+      // Compatibilidad durante un despliegue parcial: si aún responde el contrato
+      // antiguo { businessId }, hacemos fallback al resolver con reintentos.
+      lastError = new Error("REGISTER_BUSINESS_BOOTSTRAP_MISSING");
+    } catch (error) {
+      lastError = error;
+      if (attempt === 1) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
   }
 
   const { data: userData, error: userError } = await supabase.auth.getUser();
@@ -432,16 +515,36 @@ export async function completeRegistration(): Promise<BusinessSession> {
     throw new Error("Tu sesión no es válida. Vuelve a iniciar sesión.");
   }
 
-  const businessSession = await resolveBusinessSession(userData.user.id, pending.ownerName);
-  if (!businessSession) {
-    throw new Error("El negocio se creó pero no se pudo cargar. Intenta iniciar sesión de nuevo.");
+  let businessSession: BusinessSession | null = null;
+
+  if (bootstrap) {
+    businessSession = businessSessionFromBootstrap(bootstrap, pending.ownerName, userData.user.id);
   }
 
-   clearPendingRegistration();
-   setCurrentBusinessId(businessSession.businessId);
-   setCurrentBranchId(await resolveDefaultBranchId(businessSession.businessId));
+  if (!businessSession) {
+    // Recuperación automática si el primer despliegue todavía no devuelve el
+    // bootstrap o hubo un read-after-write transitorio. Nunca obliga al usuario
+    // a comenzar el registro de cero.
+    businessSession = await resolveBusinessSessionWithRetry(
+      userData.user.id,
+      pending.ownerName
+    );
+  }
 
-   return businessSession;
+  if (!businessSession) {
+    const fallbackMessage = lastError instanceof Error ? lastError.message : null;
+    throw new Error(
+      fallbackMessage && fallbackMessage !== "REGISTER_BUSINESS_BOOTSTRAP_MISSING"
+        ? fallbackMessage
+        : "No pudimos cargar tu espacio de VIMDY todavía. Tu cuenta quedó confirmada; vuelve a intentarlo en unos segundos."
+    );
+  }
+
+  clearPendingRegistration();
+  setCurrentBusinessId(businessSession.businessId);
+  setCurrentBranchId(bootstrap?.branchId ?? await resolveDefaultBranchId(businessSession.businessId));
+
+  return businessSession;
 }
 
 /**
@@ -745,20 +848,74 @@ export async function setEnabledModules(businessId: string, modules: ModuleId[])
  * Requiere la policy `businesses_update_own` (ver supabase/schema.sql).
  */
 export async function setKitchenOutputMode(businessId: string, mode: KitchenOutputMode): Promise<void> {
+  const kitchenOutputMode = mode === "impresora" ? "printer"
+    : mode === "ambos" ? "both"
+    : mode === "pantalla" ? "kds"
+    : "none";
+
+  const legacyMode = mode === "impresora" ? "impresora"
+    : mode === "ambos" ? "ambos"
+    : "pantalla";
+
   const { error } = await supabase
     .from("businesses")
-    .update({ salida_cocina: mode })
+    .update({
+      salida_cocina: legacyMode,
+      kitchen_output_mode: kitchenOutputMode,
+    })
     .eq("id", businessId);
 
   if (error) {
     throw new Error(error.message ?? "No se pudo guardar la salida de cocina.");
   }
+
+  kitchenOutputModeStore.set(mode);
 }
 
 /**
- * Guarda la configuración de operación del negocio en Supabase.
- * Se usa en Configuración > Operación. Requiere la policy `businesses_update_own`.
+ * Guarda el perfil operativo completo en UNA sola escritura.
+ *
+ * Esta es la ruta recomendada para Configuración > Operación: enabled_modules
+ * y las columnas de operación deben cambiar juntas para evitar que Caja,
+ * Meseros o Cocina queden temporalmente con una combinación inconsistente.
  */
+export async function setBusinessOperatingProfile(
+  businessId: string,
+  modules: ModuleId[],
+  config: OperationConfig,
+): Promise<void> {
+  const { error } = await supabase
+    .from("businesses")
+    .update({
+      enabled_modules: modules,
+      sales_channels: config.salesChannels,
+      inventory_type: config.inventoryType,
+      production_mode: config.productionMode,
+      kds_enabled: config.kdsEnabled,
+      printer_enabled: config.printerEnabled,
+      service_mode: config.serviceMode ?? (config.tablesEnabled ? "both" : "counter"),
+      tables_enabled: config.tablesEnabled ?? false,
+      waiter_mode_enabled: config.waiterModeEnabled ?? false,
+      waiter_photos_enabled: config.waiterPhotosEnabled ?? true,
+      kitchen_enabled: config.kitchenEnabled ?? false,
+      kitchen_output_mode: config.kitchenOutputMode ?? "none",
+      prep_stations: config.prepStations ?? [],
+      // La columna legacy no soporta "none". Cuando la nueva configuración
+      // dice "none", conservamos un valor válido para clientes antiguos.
+      salida_cocina:
+        config.kitchenOutputMode === "printer" ? "impresora"
+        : config.kitchenOutputMode === "both" ? "ambos"
+        : "pantalla"
+    })
+    .eq("id", businessId)
+    .select("id")
+    .single();
+
+  if (error) {
+    throw new Error(error.message ?? "No se pudo guardar la configuración del negocio.");
+  }
+}
+
 export async function setOperationConfig(businessId: string, config: OperationConfig): Promise<void> {
   const { error } = await supabase
     .from("businesses")
@@ -767,7 +924,19 @@ export async function setOperationConfig(businessId: string, config: OperationCo
       inventory_type: config.inventoryType,
       production_mode: config.productionMode,
       kds_enabled: config.kdsEnabled,
-      printer_enabled: config.printerEnabled
+      printer_enabled: config.printerEnabled,
+      service_mode: config.serviceMode ?? (config.tablesEnabled ? "both" : "counter"),
+      tables_enabled: config.tablesEnabled ?? false,
+      waiter_mode_enabled: config.waiterModeEnabled ?? false,
+      waiter_photos_enabled: config.waiterPhotosEnabled ?? true,
+      kitchen_enabled: config.kitchenEnabled ?? false,
+      kitchen_output_mode: config.kitchenOutputMode ?? "none",
+      prep_stations: config.prepStations ?? [],
+      salida_cocina:
+        config.kitchenOutputMode === "printer" ? "impresora"
+        : config.kitchenOutputMode === "both" ? "ambos"
+        : config.kitchenOutputMode === "kds" ? "pantalla"
+        : "pantalla"
     })
     .eq("id", businessId);
 
@@ -804,7 +973,8 @@ export async function createAdditionalBusiness(
     body: {
       businessName: input.businessName.trim(),
       ownerName: input.ownerName,
-      country: input.country
+      country: input.country,
+      registrationMode: "additional"
     }
   });
 

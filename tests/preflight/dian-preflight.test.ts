@@ -30,6 +30,7 @@ import {
 import {
   DianSoapClient,
   type DianSoapConfig,
+  type DianEnvironment,
 } from "../../supabase/functions/dian-invoice/DianSoapClient";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -461,7 +462,7 @@ describe("PRE-FLIGHT 3: XAdES-EPES Signature Verification", () => {
 
     const signedPropsMatch = sigXml.match(/<xades:SignedProperties[\s\S]*?<\/xades:SignedProperties>/);
     expect(signedPropsMatch).toBeTruthy();
-    const signedPropsXml = signedPropsMatch[0];
+    const signedPropsXml = signedPropsMatch![0];
 
     const signedPropsId = signedPropsXml.match(/<xades:SignedProperties Id="([^"]*)"/)?.[1];
 
@@ -531,7 +532,7 @@ describe("PRE-FLIGHT 4: WS-Security Signature", () => {
     capturedEnvelope = callArgs[1].body;
     capturedHeaders = callArgs[1].headers;
     fetchMock.mockRestore();
-    return capturedEnvelope;
+    return capturedEnvelope!;
   }
 
   it("SOAP endpoint is the DIAN sandbox (vpfe-hab)", async () => {
@@ -739,10 +740,10 @@ describe("PRE-FLIGHT 5: Certificate Information", () => {
    ────────────────────────────────────────────────────────── */
 describe("PRE-FLIGHT 6: Business Rules", () => {
   it("PRODUCTION_BLOCKED prevents production transmission", () => {
-    const env = "development" as const;
+    const env = "development" as string;
     const PRODUCTION_BLOCKED = env !== "production";
 
-    const prodBusiness = { ...BUSINESS, environment: "production" as const };
+    const prodBusiness = { ...BUSINESS, environment: "production" as DianEnvironment };
 
     if (PRODUCTION_BLOCKED && prodBusiness.environment === "production") {
       expect(() => {
@@ -754,10 +755,10 @@ describe("PRE-FLIGHT 6: Business Rules", () => {
   });
 
   it("SANDBOX environment is allowed when PRODUCTION_BLOCKED", () => {
-    const env = "development" as const;
+    const env = "development" as string;
     const PRODUCTION_BLOCKED = env !== "production";
 
-    const sandboxBusiness = { ...BUSINESS, environment: "sandbox" as const };
+    const sandboxBusiness = { ...BUSINESS, environment: "habilantation" };
 
     const wouldBlock = PRODUCTION_BLOCKED && sandboxBusiness.environment === "production";
     expect(wouldBlock).toBe(false);

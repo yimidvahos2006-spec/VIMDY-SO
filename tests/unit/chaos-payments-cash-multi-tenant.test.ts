@@ -460,7 +460,7 @@ describe("P3 — Caos: pagos, caja, multi-tenant", () => {
       expect(sale.status).toBe("PENDING_PAYMENT");
       expect((await products.findById("prod-pay-fail"))?.stock).toBe(3);
 
-      (cash.registerIncome as any) = vi.fn(async () => {
+      (cash.registerSalePaymentAtomic as any) = vi.fn(async () => {
         throw new Error("CASH_RPC_FAILED");
       });
 

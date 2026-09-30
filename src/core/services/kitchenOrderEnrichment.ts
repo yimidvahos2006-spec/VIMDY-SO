@@ -1,4 +1,5 @@
 import { KitchenOrder, Product, Table, User, Waiter, Category } from "../entities/Entities";
+import { buildVariantDisplayName } from "../utils/variantDisplayName";
 
 /* ===========================================================================
    kitchenOrderEnrichment
@@ -101,7 +102,11 @@ export function enrichKitchenOrders(
 
       return {
         productId: item.productId,
-        productName: product?.name ?? "Producto",
+        productName: buildVariantDisplayName(
+          product?.name ?? "Producto",
+          item.selectedSize,
+          item.selectedExtras
+        ),
         quantity: item.quantity,
         price: item.price,
         estimatedPrepMinutes: product?.estimatedPrepMinutes,

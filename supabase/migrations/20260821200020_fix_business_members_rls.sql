@@ -7,7 +7,6 @@
 -- ============================================================================
 
 alter table business_members enable row level security;
-
 drop policy if exists business_members_self_read on business_members;
 create policy business_members_self_read on business_members
   for select

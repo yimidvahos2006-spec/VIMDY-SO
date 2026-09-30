@@ -2,6 +2,7 @@ import React from "react";
 import { CircleDot, ArrowUpCircle, AlertTriangle, Receipt } from "lucide-react";
 
 import { usePayment } from "../../../core/store/usePayment";
+import { useEnabledModules } from "../../../core/store/useEnabledModules";
 import { PosPayment } from "./PosPayment";
 import { OrderPriority } from "../../../core/entities/Entities";
 import { useTranslation } from "../../../core/i18n/useTranslation";
@@ -33,33 +34,37 @@ export function PosCheckoutPanel() {
 
   const { priority, setPriority, requiresInvoice, setRequiresInvoice } = usePayment();
   const { t } = useTranslation();
+  const enabledModules = useEnabledModules();
+  const hasKitchenModule = (enabledModules ?? []).includes("cocina");
 
   return (
 
     <div className="px-4 py-4 space-y-4">
 
-      <div>
-        <h3 className="text-vimdy-h3 text-vimdy-text mb-2">{t("pos.checkout.priorityTitle")}</h3>
-        <div className="grid grid-cols-3 gap-2">
-          {PRIORITY_OPTIONS.map((option) => {
-            const active = option.value === priority;
-            return (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => setPriority(option.value)}
-                aria-pressed={active}
-                className={`flex items-center justify-center gap-1.5 h-10 rounded-vimdy-md text-vimdy-small font-bold transition ${
-                  active ? option.activeClass : "bg-vimdy-surface text-vimdy-text-secondary hover:bg-vimdy-surface-hover"
-                }`}
-              >
-                {option.icon}
-                {t(option.labelKey)}
-              </button>
-            );
-          })}
+      {hasKitchenModule && (
+        <div>
+          <h3 className="text-vimdy-h3 text-vimdy-text mb-2">{t("pos.checkout.priorityTitle")}</h3>
+          <div className="grid grid-cols-3 gap-2">
+            {PRIORITY_OPTIONS.map((option) => {
+              const active = option.value === priority;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setPriority(option.value)}
+                  aria-pressed={active}
+                  className={`flex items-center justify-center gap-1.5 h-10 rounded-vimdy-md text-vimdy-small font-bold transition ${
+                    active ? option.activeClass : "bg-vimdy-surface text-vimdy-text-secondary hover:bg-vimdy-surface-hover"
+                  }`}
+                >
+                  {option.icon}
+                  {t(option.labelKey)}
+                </button>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Paso 7 — botón Cobrar inteligente: si esta venta necesita factura,
           el botón final de PosSalePanel cambia de "Cobrar" a

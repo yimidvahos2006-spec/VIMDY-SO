@@ -52,6 +52,22 @@ create table if not exists businesses (
   -- (VimdySidebar.tsx) lee esto para mostrar/ocultar Mesas, Cocina, etc.
   -- Vacío hasta que el negocio pasa por el PASO 4.
   enabled_modules text[] not null default '{}',
+  -- Operación de ventas y cocina. Estos campos son compatibles con la
+  -- migración 20260826000002_operation_config.sql y con el perfil operativo
+  -- avanzado que permite adaptar VIMDY sin duplicar el POS.
+  sales_channels text[] not null default '{}',
+  inventory_type text,
+  production_mode text,
+  kds_enabled boolean not null default false,
+  printer_enabled boolean not null default false,
+  -- Perfil operativo explícito: no se deduce solo del tipo de negocio.
+  service_mode text not null default 'counter',
+  tables_enabled boolean not null default false,
+  waiter_mode_enabled boolean not null default false,
+  waiter_photos_enabled boolean not null default true,
+  kitchen_enabled boolean not null default false,
+  kitchen_output_mode text not null default 'none',
+  prep_stations jsonb not null default '[]'::jsonb,
   -- Punto 5.5: qué usa este negocio para recibir comandas en Cocina.
   -- 'pantalla' (KDS) o 'impresora' (tiquetera, todavía no implementada
   -- del lado de la app — ver KitchenPrinterOutput). Todo negocio nuevo
@@ -70,7 +86,36 @@ alter table businesses add column if not exists tax_rate numeric not null defaul
 alter table businesses add column if not exists onboarding_completed boolean not null default false;
 alter table businesses add column if not exists business_type text;
 alter table businesses add column if not exists enabled_modules text[] not null default '{}';
+alter table businesses add column if not exists sales_channels text[] not null default '{}';
+alter table businesses add column if not exists inventory_type text;
+alter table businesses add column if not exists production_mode text;
+alter table businesses add column if not exists kds_enabled boolean not null default false;
+alter table businesses add column if not exists printer_enabled boolean not null default false;
+alter table businesses add column if not exists service_mode text not null default 'counter';
+alter table businesses add column if not exists tables_enabled boolean not null default false;
+alter table businesses add column if not exists waiter_mode_enabled boolean not null default false;
+alter table businesses add column if not exists waiter_photos_enabled boolean not null default true;
+alter table businesses add column if not exists kitchen_enabled boolean not null default false;
+alter table businesses add column if not exists kitchen_output_mode text not null default 'none';
+alter table businesses add column if not exists prep_stations jsonb not null default '[]'::jsonb;
 alter table businesses add column if not exists salida_cocina text not null default 'pantalla';
+
+-- Restricciones del perfil operativo. Se crean solo si no existen para que
+-- este archivo siga siendo seguro al ejecutarse más de una vez.
+do $$ begin
+  alter table businesses add constraint businesses_service_mode_check
+    check (service_mode in ('counter', 'table_service', 'both'));
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  alter table businesses add constraint businesses_kitchen_output_mode_check
+    check (kitchen_output_mode in ('none', 'kds', 'printer', 'both'));
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  alter table businesses add constraint businesses_prep_stations_array_check
+    check (jsonb_typeof(prep_stations) = 'array');
+exception when duplicate_object then null; end $$;
 
 -- ----------------------------------------------------------------------------
 -- 2. USUARIOS DE CADA NEGOCIO — conecta el login real (Supabase Auth)
@@ -332,6 +377,54 @@ stable
 as $$
   select id from branches where business_id in (select auth_business_ids());
 $$;
+
+-- ----------------------------------------------------------------------------
+-- 4.1 VERIFICACIONES DE PAGOS DIGITALES
+-- Evidencia confirmada por un proveedor/proceso de servidor. El cliente
+-- autenticado solo puede leer verificaciones de su propio negocio.
+-- ----------------------------------------------------------------------------
+create table if not exists public.payment_verifications (
+  id uuid primary key default gen_random_uuid(),
+  business_id uuid not null references public.businesses(id) on delete cascade,
+  branch_id uuid not null references public.branches(id) on delete restrict,
+  sale_id text not null,
+  payment_id text not null,
+  method text not null check (method in ('TRANSFER','QR')),
+  amount numeric not null check (amount > 0),
+  provider text not null,
+  provider_reference text,
+  status text not null default 'PENDING' check (status in ('PENDING','CONFIRMED','REJECTED','EXPIRED')),
+  verified_at timestamptz,
+  created_at timestamptz not null default now(),
+  metadata jsonb not null default '{}'::jsonb
+);
+
+create unique index if not exists payment_verifications_business_branch_payment_idx
+  on public.payment_verifications (business_id, branch_id, payment_id);
+
+create index if not exists payment_verifications_sale_status_idx
+  on public.payment_verifications (business_id, branch_id, sale_id, status);
+
+create unique index if not exists payment_verifications_provider_reference_unique_idx
+  on public.payment_verifications (business_id, branch_id, provider, provider_reference)
+  where provider_reference is not null;
+
+alter table public.payment_verifications enable row level security;
+grant select on public.payment_verifications to authenticated;
+revoke insert, update, delete on public.payment_verifications from authenticated;
+
+drop policy if exists payment_verifications_select_member on public.payment_verifications;
+create policy payment_verifications_select_member
+on public.payment_verifications
+for select to authenticated
+using (
+  exists (
+    select 1
+    from public.business_members bm
+    where bm.business_id = payment_verifications.business_id
+      and bm.user_id = (select auth.uid())
+  )
+);
 
 -- ----------------------------------------------------------------------------
 -- 5. Tabla genérica reutilizada para cada "store" que ya tienes en
@@ -776,7 +869,20 @@ grant update (
   tax_rate,
   onboarding_completed,
   business_type,
-  enabled_modules
+  enabled_modules,
+  sales_channels,
+  inventory_type,
+  production_mode,
+  kds_enabled,
+  printer_enabled,
+  service_mode,
+  tables_enabled,
+  waiter_mode_enabled,
+  waiter_photos_enabled,
+  kitchen_enabled,
+  kitchen_output_mode,
+  prep_stations,
+  salida_cocina
 ) on businesses to authenticated;
 
 -- Estas columnas quedan SIN permiso de update desde el cliente — solo se
@@ -1586,3 +1692,9 @@ create trigger sync_subscription_status_trigger
   before insert or update of plan, trial_ends_at, payment_status on businesses
   for each row
   execute function public.sync_subscription_status();
+
+-- VIMDY: cash_movements and shifts are server-write-only for authenticated.
+REVOKE INSERT, UPDATE, DELETE ON cash_movements FROM authenticated;
+GRANT SELECT ON cash_movements TO authenticated;
+REVOKE INSERT, UPDATE, DELETE ON shifts FROM authenticated;
+GRANT SELECT ON shifts TO authenticated;

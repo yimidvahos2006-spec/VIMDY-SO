@@ -12,8 +12,9 @@ interface CocinaConfigStepProps {
 }
 
 const OPTIONS: { id: KitchenOutputMode; label: string; description: string; Icon: React.ElementType }[] = [
-  { id: "pantalla", label: "Pantalla / TV", description: "Kitchen Display System", Icon: Monitor },
-  { id: "impresora", label: "Impresora", description: "Ticket térmico", Icon: Printer }
+  { id: "pantalla", label: "Pantalla / TV", description: "Kitchen Display System (KDS)", Icon: Monitor },
+  { id: "impresora", label: "Impresora", description: "Ticket térmico de comanda", Icon: Printer },
+  { id: "ambos", label: "Ambos", description: "Pantalla KDS + Ticket impreso", Icon: Monitor }
 ];
 
 export function CocinaConfigStep({ businessId, onSaved }: CocinaConfigStepProps) {
@@ -48,7 +49,7 @@ export function CocinaConfigStep({ businessId, onSaved }: CocinaConfigStepProps)
         </p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {OPTIONS.map(option => {
           const isSelected = selected === option.id;
           const Icon = option.Icon;

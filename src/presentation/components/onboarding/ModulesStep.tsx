@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   ShoppingCart,
   Users,
@@ -8,13 +8,17 @@ import {
   Settings,
   UtensilsCrossed,
   CheckCircle2,
-  Loader2
+  Loader2,
+  Monitor,
+  Printer
 } from "lucide-react";
 
 import { VimdyCard } from "../ui/VimdyCard";
 import { VimdyButton } from "../ui/VimdyButton";
-import { setEnabledModules } from "../../../infrastructure/supabase/authBusinessContext";
+import { setEnabledModules, setKitchenOutputMode } from "../../../infrastructure/supabase/authBusinessContext";
 import { enabledModulesStore } from "../../../core/store/enabledModulesStore";
+import { kitchenOutputModeStore } from "../../../core/store/kitchenOutputModeStore";
+import type { KitchenOutputMode } from "../../../core/services/kitchenOutput";
 import { MODULE_CATALOG, getDefaultModulesForBusinessType } from "../../../core/config/modules";
 import type { ModuleId } from "../../../core/config/modules";
 import type { BusinessTypeId } from "../../../core/config/businessTypes";
@@ -41,6 +45,7 @@ const MODULE_ICONS: Record<ModuleId, React.ElementType> = {
 export function ModulesStep({ businessId, businessType, onSaved }: ModulesStepProps) {
   const [selectedModules, setSelectedModules] = useState<Set<ModuleId>>(new Set());
   const [tableCount, setTableCount] = useState<string>("");
+  const [kitchenOutput, setKitchenOutput] = useState<KitchenOutputMode>("pantalla");
   const [saving, setSaving] = useState(false);
   const [creatingTables, setCreatingTables] = useState(false);
   const [createdTables, setCreatedTables] = useState(0);

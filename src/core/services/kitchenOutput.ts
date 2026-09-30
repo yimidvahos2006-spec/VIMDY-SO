@@ -37,4 +37,4 @@ export interface KitchenOutput {
  * como opción desde ya para no tener que migrar el tipo después, aunque
  * KitchenPrinterOutput todavía no esté implementada de verdad (ver 5.4).
  */
-export type KitchenOutputMode = "pantalla" | "impresora";
+export type KitchenOutputMode = "none" | "pantalla" | "impresora" | "ambos";

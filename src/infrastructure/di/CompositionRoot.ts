@@ -6,6 +6,7 @@ import { KitchenOrderRepository } from './repositories/KitchenOrderRepository';
 import { AlertRepository } from './repositories/AlertRepository';
 import { MovementRepository } from './repositories/MovementRepository';
 import { CashMovementRepository } from './repositories/CashMovementRepository';
+import { CashRegisterRepository } from './repositories/CashRegisterRepository';
 import { TableRepository } from './repositories/TableRepository';
 import { OrderRepository } from './repositories/OrderRepository';
 import { ShiftRepository } from './repositories/ShiftRepository';
@@ -39,6 +40,7 @@ import { CartEngine } from '../../core/engines/CartEngine';
 import { PaymentEngine } from '../../core/engines/PaymentEngine';
 import { ReceiptEngine } from '../../core/engines/ReceiptEngine';
 import { CashEngine } from '../../core/engines/CashEngine';
+import { CashRegisterEngine } from '../../core/engines/CashRegisterEngine';
 import { AlertEngine } from '../../core/engines/AlertEngine';
 import { PosCore } from '../../core/engines/PosCore';
 import { SalesEngine } from '../../core/engines/SalesEngine';
@@ -55,7 +57,6 @@ import { seedIdentity } from "./seedIdentity";
 import { companyConfigStore } from '../../core/store/companyConfigStore';
 import { vimdyCore } from '../../core/VimdyCore';
 
-import { DashboardService } from '../../application/services/DashboardService';
 import { InventoryService } from '../../application/services/InventoryService';
 import { CustomerService } from '../../application/services/CustomerService';
 import { KitchenService } from '../../application/services/KitchenService';
@@ -78,6 +79,7 @@ const kitchenRepo = new KitchenOrderRepository();
 const alertRepo = new AlertRepository();
 const movementRepo = new MovementRepository();
 const cashMovementRepo = new CashMovementRepository();
+const cashRegisterRepo = new CashRegisterRepository();
 const tableRepo = new TableRepository();
 const orderRepo = new OrderRepository();
 const shiftRepo = new ShiftRepository();
@@ -122,6 +124,7 @@ let cartEngine: CartEngine | null = null;
 let paymentEngine: PaymentEngine | null = null;
 let receiptEngine: ReceiptEngine | null = null;
 let cashEngine: CashEngine | null = null;
+let cashRegisterEngine: CashRegisterEngine | null = null;
 let shiftEngine: ShiftEngine | null = null;
 let alertEngine: AlertEngine | null = null;
 let posCore: PosCore | null = null;
@@ -136,7 +139,6 @@ let copilotEngine: CopilotEngine | null = null;
 let commandEngine: CommandEngine | null = null;
 let questionRouter: QuestionRouter | null = null;
 
-let dashboardService: DashboardService | null = null;
 let copilotService: CopilotService | null = null;
 let inventoryService: InventoryService | null = null;
 let customerService: CustomerService | null = null;
@@ -243,7 +245,9 @@ function ensureDashboardEngine(): DashboardEngine {
       ensureHealthEngine(),
       ensureAiEngine(),
       ensureInventoryEngine(),
-      ensureRecipeEngine()
+      ensureRecipeEngine(),
+      ensureCashEngine(),
+      ensureForecastEngine()
     );
   }
   return dashboardEngine;
@@ -264,13 +268,18 @@ function ensureReceiptEngine(): ReceiptEngine {
   return receiptEngine;
 }
 
+function ensureCashRegisterEngine(): CashRegisterEngine {
+  if (!cashRegisterEngine) cashRegisterEngine = new CashRegisterEngine(cashRegisterRepo);
+  return cashRegisterEngine;
+}
+
 function ensureCashEngine(): CashEngine {
   if (!cashEngine) cashEngine = new CashEngine(cashMovementRepo);
   return cashEngine;
 }
 
 function ensureShiftEngine(): ShiftEngine {
-  if (!shiftEngine) shiftEngine = new ShiftEngine(shiftRepo, ensureCashEngine());
+  if (!shiftEngine) shiftEngine = new ShiftEngine(shiftRepo, ensureCashEngine(), ensureCashRegisterEngine());
   return shiftEngine;
 }
 
@@ -360,11 +369,6 @@ function ensureQuestionRouter(): QuestionRouter {
   return questionRouter;
 }
 
-function ensureDashboardService(): DashboardService {
-  if (!dashboardService) dashboardService = new DashboardService(ensureDashboardEngine());
-  return dashboardService;
-}
-
 function ensureCopilotService(): CopilotService {
   if (!copilotService) copilotService = new CopilotService(ensureCopilotEngine(), new CopilotApiClient());
   return copilotService;
@@ -417,7 +421,6 @@ vimdyCore.on("shift", (payload) => {
 // SERVICES — también lazy, misma API pública
 // --------------------
 export const container = {
-  dashboardService: { get() { return ensureDashboardService(); } },
   copilotService: { get() { return ensureCopilotService(); } },
   commandEngine: { get() { return ensureCommandEngine(); } },
   questionRouter: { get() { return ensureQuestionRouter(); } },
@@ -441,6 +444,7 @@ export const container = {
   tableEngine: { get() { return ensureTableEngine(); } },
   orderEngine: { get() { return ensureOrderEngine(); } },
   shiftEngine: { get() { return ensureShiftEngine(); } },
+  cashRegisterEngine: { get() { return ensureCashRegisterEngine(); } },
   cashEngine: { get() { return ensureCashEngine(); } },
   permissionEngine: { get() { return ensurePermissionEngine(); } },
   roleEngine: { get() { return ensureRoleEngine(); } },

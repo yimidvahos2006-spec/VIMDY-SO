@@ -169,7 +169,7 @@ describe("Smoke: caja, pagos, turnos y conciliacion (FASE 4)", () => {
       expect(summary.incomeByMethod.CARD).toBe(80000);
     });
 
-    it("venta por transferencia registra ingreso pero no suma al efectivo", async () => {
+    it("venta por transferencia queda pendiente y no entra a caja hasta verificación del proveedor", async () => {
       await ctx.shiftEngine.openShift(CASHIER_ID, 50000);
 
       const sale = await ctx.salesEngine.quickSale({
@@ -178,17 +178,21 @@ describe("Smoke: caja, pagos, turnos y conciliacion (FASE 4)", () => {
         taxRate: 0
       });
 
-      const { payment } = await ctx.salesEngine.registerPayment(sale, "TRANSFER", {
+      const { payment, sale: pendingSale } = await ctx.salesEngine.registerPayment(sale, "TRANSFER", {
         reference: "TRANS-456"
       });
 
       expect(payment.method).toBe("TRANSFER");
+      expect(payment.success).toBe(false);
+      expect(payment.verificationStatus).toBe("PENDING_VERIFICATION");
+      expect(pendingSale.status).toBe("PENDING_PAYMENT");
+      expect(pendingSale.paymentStatus).toBe("PENDING_VERIFICATION");
 
       const summary = await ctx.shiftEngine.getShiftSummary(
         (await ctx.shiftEngine.getCurrentShift())!.id
       );
       expect(summary.totalCashIncome).toBe(0);
-      expect(summary.incomeByMethod.TRANSFER).toBe(60000);
+      expect(summary.incomeByMethod.TRANSFER).toBeUndefined();
     });
 
     it("pago mixto registra la porcion en efectivo correctamente", async () => {

@@ -17,6 +17,7 @@ import {
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 
+import { useTranslation } from "../../../../core/i18n/useTranslation";
 import { KitchenOrderView } from "../../../../hooks/useKitchenOrders";
 import { OrderPriority } from "../../../../core/entities/Entities";
 import { KitchenOrderTimer } from "./KitchenOrderTimer";
@@ -91,6 +92,7 @@ export function KitchenCard({
   tvMode = false,
   draggable = true
 }: Props) {
+  const { t, money } = useTranslation();
   const priority: OrderPriority = order.priority ?? "NORMAL";
   const priorityStyle = PRIORITY_STYLES[priority];
 
@@ -156,7 +158,7 @@ export function KitchenCard({
         <div>
           <div className="flex items-center gap-2 flex-wrap">
             <h2 className={`font-bold text-vimdy-text ${tvMode ? "text-4xl" : "text-2xl"}`}>
-              {order.origin ?? "Pedido"}
+               {order.origin ?? t("kitchen.card.defaultOrigin")}
             </h2>
             {priority !== "NORMAL" && (
               <span
@@ -173,9 +175,9 @@ export function KitchenCard({
               </span>
             )}
           </div>
-          <p className={`text-vimdy-text-secondary ${tvMode ? "text-base" : "text-xs"}`}>
-            Pedido #{order.orderNumber ?? order.id.slice(0, 8)}
-          </p>
+           <p className={`text-vimdy-text-secondary ${tvMode ? "text-base" : "text-xs"}`}>
+             {t("kitchen.card.orderNumber", { number: order.orderNumber ?? order.id.slice(0, 8) })}
+           </p>
         </div>
 
         <div className="flex items-center gap-1">
@@ -184,7 +186,7 @@ export function KitchenCard({
               {...attributes}
               {...listeners}
               type="button"
-              aria-label="Arrastrar para cambiar de estado"
+               aria-label={t("kitchen.card.dragAria")}
               className={`text-vimdy-text-tertiary hover:text-vimdy-text-secondary touch-none ${
                 isDragging ? "cursor-grabbing" : "cursor-grab"
               }`}
@@ -204,19 +206,19 @@ export function KitchenCard({
               tvMode ? "text-base" : "text-xs"
             }`}
           >
-            <Eye size={tvMode ? 18 : 14} />
-            Ver detalle
+             <Eye size={tvMode ? 18 : 14} />
+             {t("kitchen.card.viewDetail")}
           </button>
         )}
         <button
           onClick={handlePrintTicket}
-          title="Imprime un ticket por cada estación (Barra, Cocina, Pastelería...) sin separar nada a mano."
+             title={t("kitchen.card.printTitle")}
           className={`mt-3 flex items-center gap-2 text-vimdy-text-secondary hover:text-vimdy-accent font-semibold ${
             tvMode ? "text-base" : "text-xs"
           }`}
         >
-          <Printer size={tvMode ? 18 : 14} />
-          Imprimir
+           <Printer size={tvMode ? 18 : 14} />
+           {t("kitchen.card.print")}
         </button>
       </div>
 
@@ -268,13 +270,13 @@ export function KitchenCard({
           >
             <div className="flex-1 min-w-0">
               <p className={`text-vimdy-text font-semibold ${tvMode ? "text-2xl" : ""}`}>
-                {item.productName}
-                {!!item.estimatedPrepMinutes && (
-                  <span className={`ml-2 text-vimdy-accent font-normal ${tvMode ? "text-base" : "text-xs"}`}>
-                    ~{item.estimatedPrepMinutes} min
-                  </span>
-                )}
-              </p>
+                 {item.productName}
+                 {!!item.estimatedPrepMinutes && (
+                   <span className={`ml-2 text-vimdy-accent font-normal ${tvMode ? "text-base" : "text-xs"}`}>
+                     {t("kitchen.card.estimatedTime", { minutes: item.estimatedPrepMinutes })}
+                   </span>
+                 )}
+               </p>
               {item.note && (
                 <div className={`mt-2 flex items-start gap-2 ${tvMode ? "text-base" : "text-xs"}`}>
                   <MessageSquareText size={tvMode ? 18 : 14} className="text-vimdy-warning mt-0.5 shrink-0" />
@@ -291,10 +293,12 @@ export function KitchenCard({
 
       <div className={`mt-6 flex justify-between ${tvMode ? "text-lg" : "text-sm"}`}>
         <span className="text-vimdy-text-secondary">
-          {order.items.length} producto{order.items.length !== 1 ? "s" : ""}
+          {order.items.length === 1
+            ? t("kitchen.card.productCount_one", { count: order.items.length })
+            : t("kitchen.card.productCount_other", { count: order.items.length })}
         </span>
         <span className="text-vimdy-accent font-bold">
-          ${order.total.toLocaleString("es-CO")}
+          {money(order.total)}
         </span>
       </div>
 
@@ -304,10 +308,10 @@ export function KitchenCard({
             onClick={onPreparing}
             variant="primary"
             size={tvMode ? "xl" : "lg"}
-            icon={<UtensilsCrossed size={tvMode ? 26 : 18} />}
-          >
-            Preparar
-          </VimdyButton>
+             icon={<UtensilsCrossed size={tvMode ? 26 : 18} />}
+           >
+             {t("kitchen.card.action.prepare")}
+           </VimdyButton>
         )}
         {onReady && (
           // "Listo" se queda con su verde de estado (vimdy-success) a
@@ -322,8 +326,8 @@ export function KitchenCard({
             }`}
           >
             <CheckCircle2 size={tvMode ? 26 : 18} />
-            Listo
-          </button>
+             {t("kitchen.card.action.ready")}
+           </button>
         )}
         {onDeliver && (
           <VimdyButton
@@ -331,9 +335,8 @@ export function KitchenCard({
             variant="primary"
             size={tvMode ? "xl" : "lg"}
             icon={<CheckCircle2 size={tvMode ? 26 : 18} />}
-            className="col-span-2"
           >
-            Entregar
+            {t("kitchen.card.action.deliver")}
           </VimdyButton>
         )}
         {onCancel && (
@@ -344,7 +347,7 @@ export function KitchenCard({
             icon={<Ban size={tvMode ? 20 : 16} />}
             className="col-span-2 border border-vimdy-danger/40"
           >
-            Cancelar
+            {t("kitchen.card.action.cancel")}
           </VimdyButton>
         )}
       </div>

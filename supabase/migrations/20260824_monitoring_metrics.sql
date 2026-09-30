@@ -17,10 +17,8 @@ SET search_path = public
 AS $$
   SELECT pg_database_size(current_database());
 $$;
-
 REVOKE ALL ON FUNCTION get_db_size_bytes() FROM public, anon;
 GRANT EXECUTE ON FUNCTION get_db_size_bytes() TO service_role, authenticated;
-
 -- ----------------------------------------------------------------------------
 -- 2. Ratio de cache hit (porcentaje de lecturas servidas desde cache)
 -- ----------------------------------------------------------------------------
@@ -39,10 +37,8 @@ AS $$
   FROM pg_stat_database
   WHERE datname = current_database();
 $$;
-
 REVOKE ALL ON FUNCTION get_cache_hit_ratio() FROM public, anon;
 GRANT EXECUTE ON FUNCTION get_cache_hit_ratio() TO service_role, authenticated;
-
 -- ----------------------------------------------------------------------------
 -- 3. Métricas completas de base de datos (JSON)
 -- ----------------------------------------------------------------------------
@@ -62,10 +58,8 @@ AS $$
     'database_name', current_database()
   );
 $$;
-
 REVOKE ALL ON FUNCTION get_db_metrics() FROM public, anon;
 GRANT EXECUTE ON FUNCTION get_db_metrics() TO service_role, authenticated;
-
 -- ============================================================================
 -- FIN DE MIGRACIÓN
--- ============================================================================
+-- ============================================================================;

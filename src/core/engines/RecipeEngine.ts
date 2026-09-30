@@ -1,5 +1,5 @@
 // src/core/engines/RecipeEngine.ts
-import { Product } from '../entities/Entities';
+import { Product, ProductSizeOption, ProductExtraOption, RecipeItem } from '../entities/Entities';
 import { IRepository } from '../../infrastructure/di/repositories/IRepository';
 
 /** Desglose del costo de un ingrediente dentro de la receta de un producto. */
@@ -114,6 +114,59 @@ export interface ProductionStatus {
 export class RecipeEngine {
   constructor(private readonly productRepository: IRepository<Product>) {}
 
+  private resolveEffectiveRecipe(
+    product: Product,
+    selectedSize?: ProductSizeOption,
+    selectedExtras?: readonly ProductExtraOption[]
+  ): readonly RecipeItem[] | null {
+    let base: readonly RecipeItem[] | undefined;
+
+    if (selectedSize?.recipe && selectedSize.recipe.length > 0) {
+      base = selectedSize.recipe;
+    } else {
+      base = product.recipe;
+    }
+
+    if (!base || base.length === 0) {
+      const extrasRecipe = this.collectExtrasRecipe(selectedExtras);
+      if (extrasRecipe.length === 0) {
+        return null;
+      }
+      return extrasRecipe;
+    }
+
+    const extrasRecipe = this.collectExtrasRecipe(selectedExtras);
+    if (extrasRecipe.length === 0) {
+      return base;
+    }
+
+    const merged = new Map<string, RecipeItem>();
+    for (const item of base) {
+      const existing = merged.get(item.productId);
+      merged.set(item.productId, {
+        productId: item.productId,
+        quantity: (existing?.quantity ?? 0) + item.quantity,
+        optional: item.optional
+      });
+    }
+    for (const item of extrasRecipe) {
+      const existing = merged.get(item.productId);
+      merged.set(item.productId, {
+        productId: item.productId,
+        quantity: (existing?.quantity ?? 0) + item.quantity,
+        optional: item.optional
+      });
+    }
+    return Array.from(merged.values());
+  }
+
+  private collectExtrasRecipe(extras?: readonly ProductExtraOption[]): readonly RecipeItem[] {
+    if (!extras) return [];
+    return extras
+      .filter((extra) => extra.recipe && extra.recipe.length > 0)
+      .flatMap((extra) => extra.recipe!);
+  }
+
   /** Trae todos los productos y arma el mapa id -> Product que usan el resto de los métodos. */
   private async loadProductMap(): Promise<Map<string, Product>> {
     const products = await this.productRepository.findAll();
@@ -127,8 +180,14 @@ export class RecipeEngine {
    * BusinessAnalyzer, que ya tiene el mapa cargado), se reutiliza para no
    * repetir la consulta.
    */
-  public getRecipeCost(product: Product, allProducts: Map<string, Product>): RecipeCost | null {
-    if (!product.recipe || product.recipe.length === 0) {
+   public getRecipeCost(
+    product: Product,
+    allProducts: Map<string, Product>,
+    selectedSize?: ProductSizeOption,
+    selectedExtras?: readonly ProductExtraOption[]
+  ): RecipeCost | null {
+    const effectiveRecipe = this.resolveEffectiveRecipe(product, selectedSize, selectedExtras);
+    if (!effectiveRecipe || effectiveRecipe.length === 0) {
       return null;
     }
 
@@ -136,7 +195,7 @@ export class RecipeEngine {
     const missingCostIngredients: string[] = [];
     let totalCost = 0;
 
-    for (const item of product.recipe) {
+    for (const item of effectiveRecipe) {
       const ingredient = allProducts.get(item.productId);
       const name = ingredient?.name ?? 'Ingrediente eliminado';
 
@@ -183,8 +242,13 @@ export class RecipeEngine {
    * de su propio purchasePrice (0 si tampoco lo tiene, dejando constancia
    * en costUnreliable en vez de fingir que el costo es exacto).
    */
-  public getProfitability(product: Product, allProducts: Map<string, Product>): Profitability {
-    const recipeCost = this.getRecipeCost(product, allProducts);
+   public getProfitability(
+    product: Product,
+    allProducts: Map<string, Product>,
+    selectedSize?: ProductSizeOption,
+    selectedExtras?: readonly ProductExtraOption[]
+  ): Profitability {
+    const recipeCost = this.getRecipeCost(product, allProducts, selectedSize, selectedExtras);
 
     const cost = recipeCost ? recipeCost.totalCost : product.purchasePrice ?? 0;
     const costUnreliable = recipeCost
@@ -211,12 +275,18 @@ export class RecipeEngine {
    * Devuelve null si el producto no tiene receta (un producto simple
    * "produce" lo que indique su propio stock, eso ya lo maneja InventoryEngine).
    */
-  public getProductionCapacity(product: Product, allProducts: Map<string, Product>): ProductionCapacity | null {
-    if (!product.recipe || product.recipe.length === 0) {
+   public getProductionCapacity(
+    product: Product,
+    allProducts: Map<string, Product>,
+    selectedSize?: ProductSizeOption,
+    selectedExtras?: readonly ProductExtraOption[]
+  ): ProductionCapacity | null {
+    const effectiveRecipe = this.resolveEffectiveRecipe(product, selectedSize, selectedExtras);
+    if (!effectiveRecipe || effectiveRecipe.length === 0) {
       return null;
     }
 
-    const breakdown: ProductionCapacityIngredient[] = product.recipe.map((item) => {
+    const breakdown: ProductionCapacityIngredient[] = effectiveRecipe.map((item) => {
       const ingredient = allProducts.get(item.productId);
       const stockAvailable = ingredient?.stock ?? 0;
       const neededPerUnit = item.quantity;
@@ -259,13 +329,18 @@ export class RecipeEngine {
    * ("Solo puedes preparar 12 hamburguesas", "Compra pan").
    * Devuelve null si el producto no tiene receta (no es un producto elaborado).
    */
-  public getProductionStatus(product: Product, allProducts: Map<string, Product>): ProductionStatus | null {
-    const capacity = this.getProductionCapacity(product, allProducts);
+   public getProductionStatus(
+    product: Product,
+    allProducts: Map<string, Product>,
+    selectedSize?: ProductSizeOption,
+    selectedExtras?: readonly ProductExtraOption[]
+  ): ProductionStatus | null {
+    const capacity = this.getProductionCapacity(product, allProducts, selectedSize, selectedExtras);
     if (!capacity) {
       return null;
     }
 
-    const profitability = this.getProfitability(product, allProducts);
+    const profitability = this.getProfitability(product, allProducts, selectedSize, selectedExtras);
 
     let level: ProductionLevel;
     if (capacity.maxUnits <= 0) {

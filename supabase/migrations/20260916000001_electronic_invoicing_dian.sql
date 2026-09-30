@@ -44,7 +44,6 @@ ALTER TABLE businesses
   ADD COLUMN IF NOT EXISTS invoice_consecutive_from numeric,
   ADD COLUMN IF NOT EXISTS invoice_consecutive_to numeric,
   ADD COLUMN IF NOT EXISTS invoice_consecutive_current numeric;
-
 -- Reforzar column-level grants para que authenticated solo edite columnas seguras
 REVOKE UPDATE ON businesses FROM authenticated;
 GRANT UPDATE (
@@ -81,7 +80,6 @@ GRANT UPDATE (
   invoice_consecutive_to,
   invoice_consecutive_current
 ) ON businesses TO authenticated;
-
 -- Las columnas sensibles (cert, ClTec, environment, software_id, software_code)
 -- solo editables vía service_role (Edge Functions / admin).
 REVOKE UPDATE ON businesses FROM authenticated;
@@ -129,34 +127,26 @@ CREATE TABLE IF NOT EXISTS electronic_invoices (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
-
 -- ----------------------------------------------------------------------------
 -- 3. CONSTRAINTS E ÍNDICES (Fase 2 + Fase 17)
 --    UNIQUE(business_id, sale_id) — NUNCA dos facturas para la misma venta.
 -- ----------------------------------------------------------------------------
 CREATE UNIQUE INDEX IF NOT EXISTS electronic_invoices_business_sale_unique
   ON electronic_invoices (business_id, sale_id);
-
 CREATE INDEX IF NOT EXISTS electronic_invoices_business_id_idx
   ON electronic_invoices (business_id);
-
 CREATE INDEX IF NOT EXISTS electronic_invoices_sale_id_idx
   ON electronic_invoices (sale_id);
-
 CREATE INDEX IF NOT EXISTS electronic_invoices_status_idx
   ON electronic_invoices (status);
-
 CREATE INDEX IF NOT EXISTS electronic_invoices_cufe_idx
   ON electronic_invoices (cufe)
   WHERE cufe IS NOT NULL;
-
 CREATE INDEX IF NOT EXISTS electronic_invoices_invoice_number_idx
   ON electronic_invoices (business_id, invoice_number)
   WHERE invoice_number IS NOT NULL;
-
 CREATE INDEX IF NOT EXISTS electronic_invoices_created_at_idx
   ON electronic_invoices (business_id, created_at DESC);
-
 -- Trigger updated_at automático
 CREATE OR REPLACE FUNCTION public.touch_updated_at()
 RETURNS TRIGGER AS $$
@@ -165,23 +155,19 @@ BEGIN
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
-
 DROP TRIGGER IF EXISTS electronic_invoices_touch_updated ON electronic_invoices;
 CREATE TRIGGER electronic_invoices_touch_updated
   BEFORE UPDATE ON electronic_invoices
   FOR EACH ROW EXECUTE FUNCTION public.touch_updated_at();
-
 -- ----------------------------------------------------------------------------
 -- 4. RLS — multi-tenant estricto (Fase 2)
 --    Un negocio NO puede leer/escribir/borrar facturas de otro negocio.
 -- ----------------------------------------------------------------------------
 ALTER TABLE electronic_invoices ENABLE ROW LEVEL SECURITY;
-
 DROP POLICY IF EXISTS electronic_invoices_tenant_read ON electronic_invoices;
 CREATE POLICY electronic_invoices_tenant_read ON electronic_invoices
   FOR SELECT
   USING (business_id IN (SELECT auth_business_ids()));
-
 DROP POLICY IF EXISTS electronic_invoices_tenant_insert ON electronic_invoices;
 CREATE POLICY electronic_invoices_tenant_insert ON electronic_invoices
   FOR INSERT
@@ -189,7 +175,6 @@ CREATE POLICY electronic_invoices_tenant_insert ON electronic_invoices
     business_id IN (SELECT auth_business_ids())
     AND public.is_business_subscription_active(business_id)
   );
-
 DROP POLICY IF EXISTS electronic_invoices_tenant_update ON electronic_invoices;
 CREATE POLICY electronic_invoices_tenant_update ON electronic_invoices
   FOR UPDATE
@@ -201,7 +186,6 @@ CREATE POLICY electronic_invoices_tenant_update ON electronic_invoices
     business_id IN (SELECT auth_business_ids())
     AND public.has_business_role(business_id, ARRAY['ADMIN'])
   );
-
 DROP POLICY IF EXISTS electronic_invoices_tenant_delete ON electronic_invoices;
 CREATE POLICY electronic_invoices_tenant_delete ON electronic_invoices
   FOR DELETE
@@ -209,7 +193,6 @@ CREATE POLICY electronic_invoices_tenant_delete ON electronic_invoices
     business_id IN (SELECT auth_business_ids())
     AND public.has_business_role(business_id, ARRAY['ADMIN'])
   );
-
 -- ----------------------------------------------------------------------------
 -- 5. GRANTS
 --    service_role: acceso completo (Edge Functions).
@@ -217,14 +200,12 @@ CREATE POLICY electronic_invoices_tenant_delete ON electronic_invoices
 -- ----------------------------------------------------------------------------
 GRANT ALL ON electronic_invoices TO service_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON electronic_invoices TO authenticated;
-
 GRANT EXECUTE ON FUNCTION public.auth_business_ids() TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.has_business_role(uuid, text[]) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.is_business_subscription_active(uuid) TO authenticated, service_role;
-
 -- ============================================================================
 -- VERIFICACIÓN:
 -- SELECT 'ei_exists' AS check, to_regclass('electronic_invoices') AS result;
 -- SELECT 'uk_exists' AS check, conname FROM pg_constraint WHERE conname = 'electronic_invoices_business_sale_unique';
 -- SELECT 'has_fiscal' AS check, column_name FROM information_schema.columns WHERE table_name = 'businesses' AND column_name IN ('tax_identification_number', 'electronic_invoicing_enabled');
--- ============================================================================
+-- ============================================================================;

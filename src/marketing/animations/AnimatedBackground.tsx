@@ -1,8 +1,10 @@
 import { useEffect, useRef } from "react";
 
 const PARTICLE_COUNT = 80;
+const MOBILE_PARTICLE_COUNT = 30;
 const LINE_DISTANCE = 150;
 const MOUSE_INFLUENCE = 100;
+const MAX_DPR = 2;
 
 interface Particle {
   x: number;
@@ -13,137 +15,238 @@ interface Particle {
   opacity: number;
 }
 
+interface PointerPosition {
+  x: number;
+  y: number;
+}
+
 export function AnimatedBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const particlesRef = useRef<Particle[]>([]);
-  const mouseRef = useRef({ x: -1000, y: -1000 });
-  const animationRef = useRef<number>(0);
+  const mouseRef = useRef<PointerPosition>({ x: -1000, y: -1000 });
+  const animationRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const canvas = canvasRef.current!;
-    const ctx = canvas.getContext("2d")!;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
-    const isMobile = window.matchMedia("(max-width: 768px)").matches;
-    const count = isMobile ? 30 : PARTICLE_COUNT;
+    const ctx = canvas.getContext("2d", {
+      alpha: true,
+      desynchronized: true,
+    });
+    if (!ctx) return;
 
-    function resize() {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-    }
+    const reducedMotionQuery = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    );
+    const mobileQuery = window.matchMedia("(max-width: 768px)");
 
-    function initParticles() {
+    let reducedMotion = reducedMotionQuery.matches;
+    let isMobile = mobileQuery.matches;
+    let visible = !document.hidden;
+    let width = 1;
+    let height = 1;
+    let cssWidth = 1;
+    let cssHeight = 1;
+
+    const clamp = (value: number, min: number, max: number) =>
+      Math.min(max, Math.max(min, value));
+
+    const stopAnimation = () => {
+      if (animationRef.current !== null) {
+        cancelAnimationFrame(animationRef.current);
+        animationRef.current = null;
+      }
+    };
+
+    const resize = () => {
+      cssWidth = Math.max(1, window.innerWidth);
+      cssHeight = Math.max(1, window.innerHeight);
+
+      const dpr = clamp(window.devicePixelRatio || 1, 1, MAX_DPR);
+
+      width = Math.max(1, Math.round(cssWidth * dpr));
+      height = Math.max(1, Math.round(cssHeight * dpr));
+
+      canvas.width = width;
+      canvas.height = height;
+      canvas.style.width = `${cssWidth}px`;
+      canvas.style.height = `${cssHeight}px`;
+
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+
+    const initParticles = () => {
+      const count = isMobile ? MOBILE_PARTICLE_COUNT : PARTICLE_COUNT;
       particlesRef.current = Array.from({ length: count }, () => ({
-        x: Math.random() * canvas.width,
-        y: Math.random() * canvas.height,
-        vx: (Math.random() - 0.5) * 0.3,
-        vy: (Math.random() - 0.5) * 0.3,
+        x: Math.random() * cssWidth,
+        y: Math.random() * cssHeight,
+        vx: (Math.random() - 0.5) * (reducedMotion ? 0 : 0.3),
+        vy: (Math.random() - 0.5) * (reducedMotion ? 0 : 0.3),
         size: Math.random() * 1.5 + 0.5,
-        opacity: Math.random() * 0.3 + 0.1
+        opacity: Math.random() * 0.3 + 0.1,
       }));
-    }
+    };
 
-    function animate() {
-      if (!ctx || !canvas) return;
-
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const drawFrame = () => {
+      ctx.clearRect(0, 0, cssWidth, cssHeight);
 
       const particles = particlesRef.current;
       const mouse = mouseRef.current;
 
-      for (let i = 0; i < particles.length; i++) {
-        const p = particles[i];
+      for (let i = 0; i < particles.length; i += 1) {
+        const particle = particles[i];
 
-        p.x += p.vx;
-        p.y += p.vy;
+        if (!reducedMotion) {
+          particle.x += particle.vx;
+          particle.y += particle.vy;
 
-        if (p.x < 0) p.x = canvas.width;
-        if (p.x > canvas.width) p.x = 0;
-        if (p.y < 0) p.y = canvas.height;
-        if (p.y > canvas.height) p.y = 0;
+          if (particle.x < 0) particle.x = cssWidth;
+          if (particle.x > cssWidth) particle.x = 0;
+          if (particle.y < 0) particle.y = cssHeight;
+          if (particle.y > cssHeight) particle.y = 0;
 
-        const dx = mouse.x - p.x;
-        const dy = mouse.y - p.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
+          const dx = mouse.x - particle.x;
+          const dy = mouse.y - particle.y;
+          const distanceSquared = dx * dx + dy * dy;
 
-        if (dist < MOUSE_INFLUENCE) {
-          const force = (MOUSE_INFLUENCE - dist) / MOUSE_INFLUENCE;
-          p.x -= dx * force * 0.02;
-          p.y -= dy * force * 0.02;
+          if (distanceSquared < MOUSE_INFLUENCE * MOUSE_INFLUENCE) {
+            const distance = Math.sqrt(distanceSquared);
+
+            if (distance > 0.001) {
+              const force = (MOUSE_INFLUENCE - distance) / MOUSE_INFLUENCE;
+              particle.x -= dx * force * 0.02;
+              particle.y -= dy * force * 0.02;
+            }
+          }
         }
 
         ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(37, 99, 235, ${p.opacity})`;
+        ctx.arc(
+          particle.x,
+          particle.y,
+          particle.size,
+          0,
+          Math.PI * 2,
+        );
+        ctx.fillStyle = `rgba(37, 99, 235, ${particle.opacity})`;
         ctx.fill();
 
-        for (let j = i + 1; j < particles.length; j++) {
-          const p2 = particles[j];
-          const distance = Math.sqrt((p.x - p2.x) ** 2 + (p.y - p2.y) ** 2);
+        if (reducedMotion) continue;
 
-          if (distance < LINE_DISTANCE) {
-            const alpha = (1 - distance / LINE_DISTANCE) * 0.08;
-            ctx.beginPath();
-            ctx.moveTo(p.x, p.y);
-            ctx.lineTo(p2.x, p2.y);
-            ctx.strokeStyle = `rgba(37, 99, 235, ${alpha})`;
-            ctx.lineWidth = 0.5;
-            ctx.stroke();
-          }
+        for (let j = i + 1; j < particles.length; j += 1) {
+          const other = particles[j];
+          const dx = particle.x - other.x;
+          const dy = particle.y - other.y;
+          const distanceSquared = dx * dx + dy * dy;
+
+          if (distanceSquared >= LINE_DISTANCE * LINE_DISTANCE) continue;
+
+          const distance = Math.sqrt(distanceSquared);
+          const alpha = (1 - distance / LINE_DISTANCE) * 0.08;
+
+          ctx.beginPath();
+          ctx.moveTo(particle.x, particle.y);
+          ctx.lineTo(other.x, other.y);
+          ctx.strokeStyle = `rgba(37, 99, 235, ${alpha})`;
+          ctx.lineWidth = 0.5;
+          ctx.stroke();
         }
       }
+    };
 
+    const animate = () => {
+      if (!visible) {
+        animationRef.current = null;
+        return;
+      }
+
+      drawFrame();
       animationRef.current = requestAnimationFrame(animate);
-    }
+    };
 
-    resize();
-    initParticles();
-    animate();
+    const startAnimation = () => {
+      stopAnimation();
+      drawFrame();
+
+      if (!reducedMotion && visible) {
+        animationRef.current = requestAnimationFrame(animate);
+      }
+    };
 
     const handleResize = () => {
       resize();
       initParticles();
+      drawFrame();
     };
 
-    const handleMouseMove = (e: MouseEvent) => {
-      mouseRef.current = { x: e.clientX, y: e.clientY };
+    const handleMouseMove = (event: MouseEvent) => {
+      mouseRef.current = { x: event.clientX, y: event.clientY };
     };
 
-    const handleTouchMove = (e: TouchEvent) => {
-      if (e.touches[0]) {
-        mouseRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    const handlePointerLeave = () => {
+      mouseRef.current = { x: -1000, y: -1000 };
+    };
+
+    const handleTouchMove = (event: TouchEvent) => {
+      const touch = event.touches[0];
+      if (!touch) return;
+
+      mouseRef.current = { x: touch.clientX, y: touch.clientY };
+    };
+
+    const handleVisibility = () => {
+      visible = !document.hidden;
+
+      if (visible) {
+        startAnimation();
+      } else {
+        stopAnimation();
       }
     };
 
-    window.addEventListener("resize", handleResize);
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("touchmove", handleTouchMove, { passive: true });
+    const handleMotionPreference = () => {
+      reducedMotion = reducedMotionQuery.matches;
+      initParticles();
+      startAnimation();
+    };
 
-    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-    if (prefersReducedMotion.matches) {
-      cancelAnimationFrame(animationRef.current);
-    }
+    const handleMobilePreference = () => {
+      isMobile = mobileQuery.matches;
+      initParticles();
+      startAnimation();
+    };
+
+    resize();
+    initParticles();
+    startAnimation();
+
+    window.addEventListener("resize", handleResize);
+    window.addEventListener("mousemove", handleMouseMove, { passive: true });
+    window.addEventListener("mouseleave", handlePointerLeave);
+    window.addEventListener("touchmove", handleTouchMove, { passive: true });
+    document.addEventListener("visibilitychange", handleVisibility);
+    reducedMotionQuery.addEventListener("change", handleMotionPreference);
+    mobileQuery.addEventListener("change", handleMobilePreference);
 
     return () => {
+      stopAnimation();
       window.removeEventListener("resize", handleResize);
       window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseleave", handlePointerLeave);
       window.removeEventListener("touchmove", handleTouchMove);
-      cancelAnimationFrame(animationRef.current);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      reducedMotionQuery.removeEventListener("change", handleMotionPreference);
+      mobileQuery.removeEventListener("change", handleMobilePreference);
     };
   }, []);
 
   return (
     <canvas
       ref={canvasRef}
-      style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        width: "100%",
-        height: "100%",
-        pointerEvents: "none",
-        zIndex: 0,
-        opacity: 0.6
-      }}
+      aria-hidden="true"
+      className="pointer-events-none fixed inset-0 z-0 h-full w-full"
+      style={{ opacity: 0.6 }}
     />
   );
 }

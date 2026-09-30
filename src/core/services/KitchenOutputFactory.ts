@@ -1,4 +1,5 @@
 import { KitchenEngine } from "../engines/KitchenEngine";
+import type { KitchenOrder } from "../entities/Entities";
 import { KitchenOutput, KitchenOutputMode } from "./kitchenOutput";
 import { KitchenScreenOutput } from "./KitchenScreenOutput";
 import { KitchenPrinterOutput } from "./KitchenPrinterOutput";
@@ -16,12 +17,44 @@ import { KitchenPrinterOutput } from "./KitchenPrinterOutput";
    exista un negocio real que necesite impresora.
 =========================================================================== */
 
+class NoopKitchenOutput implements KitchenOutput {
+  public async send(_order: KitchenOrder): Promise<void> {
+    // "none" es una configuración válida: el negocio tiene cocina manual
+    // o no desea salida automática. No se persiste una comanda ficticia.
+  }
+}
+
+export class KitchenCompositeOutput implements KitchenOutput {
+  constructor(
+    private readonly screen: KitchenScreenOutput,
+    private readonly printer: KitchenPrinterOutput
+  ) {}
+
+  public async send(order: KitchenOrder): Promise<void> {
+    // 1. Envía a pantalla KDS (persiste y emite evento en vivo a KDS)
+    await this.screen.send(order);
+    // 2. Dispara la impresión térmica de comanda física
+    await this.printer.send(order, true);
+  }
+}
+
 export function createKitchenOutput(
   salidaCocina: KitchenOutputMode,
   kitchen: KitchenEngine
 ): KitchenOutput {
+  if (salidaCocina === "none") {
+    return new NoopKitchenOutput();
+  }
+
   if (salidaCocina === "impresora") {
     return new KitchenPrinterOutput(kitchen);
+  }
+
+  if (salidaCocina === "ambos") {
+    return new KitchenCompositeOutput(
+      new KitchenScreenOutput(kitchen),
+      new KitchenPrinterOutput(kitchen)
+    );
   }
 
   return new KitchenScreenOutput(kitchen);

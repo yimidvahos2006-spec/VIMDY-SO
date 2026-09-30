@@ -1,5 +1,5 @@
-import React, { useEffect, useState, FormEvent } from "react";
-import { useNavigate, Navigate, Link } from "react-router-dom";
+import { useEffect, useState, type FormEvent } from "react";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext";
 import { VimdyBackground } from "../components/ui/VimdyBackground";
@@ -8,23 +8,14 @@ import { GlassCard } from "../components/ui/GlassCard";
 import { VimdyButton } from "../components/ui/VimdyButton";
 
 /**
- * Pantalla de verificación del código OTP ("Verifica tu correo").
- * ---------------------------------------------------------------------------
- * Segundo paso del registro seguro (ver RegisterPage.tsx -> register(),
- * que ya dejó el usuario creado sin confirmar y disparó el correo con el
- * código de 6 dígitos):
+ * Pantalla de verificación del código OTP (registro).
  *
- *   1. El usuario escribe el código -> verifyOtp(code) en AuthContext.
- *   2. Si es correcto: AuthContext confirma la sesión, crea el negocio +
-     *      membresía ADMIN + trial de 14 días (Edge Function register-business)
- *      y deja la sesión activa. Esta pantalla solo espera y navega.
- *   3. Si el usuario no recibió el código, "Reenviar código" (con
- *      enfriamiento de 30s manejado en authOtp.ts) dispara uno nuevo.
- *
- * Si el usuario llega aquí sin haber pasado por RegisterPage (no hay
- * registro pendiente en sessionStorage), lo mandamos de vuelta a
- * /registro — no tiene sentido pedir un código para un correo que no se
- * conoce.
+ * Flujo:
+ *  1. El usuario llega aquí después de iniciar el registro.
+ *  2. Escribe el código de 6 dígitos recibido por correo.
+ *  3. AuthContext verifica el OTP y completa el registro del negocio.
+ *  4. Si no llegó el correo, puede solicitar un nuevo código cuando termine
+ *     el cooldown administrado por authOtp.ts.
  */
 export function OtpPage() {
   const {
@@ -44,61 +35,66 @@ export function OtpPage() {
   const [resendMessage, setResendMessage] = useState<string | null>(null);
   const [isResending, setIsResending] = useState(false);
   const [cooldown, setCooldown] = useState(0);
+  const [showDeliveryHelp, setShowDeliveryHelp] = useState(false);
 
   const email = pendingRegistrationEmail();
 
-  // Refresca el contador de "Reenviar código (Ns)" cada segundo, sin
-  // duplicar el temporizador real (ese vive en authOtp.ts).
+  // Refresca el contador visual sin duplicar el temporizador real de authOtp.ts.
   useEffect(() => {
-    setCooldown(resendCooldownSeconds());
-    const interval = setInterval(() => {
+    const refreshCooldown = () => {
       setCooldown(resendCooldownSeconds());
-    }, 1000);
-    return () => clearInterval(interval);
+    };
+
+    refreshCooldown();
+    const intervalId = window.setInterval(refreshCooldown, 1000);
+    return () => window.clearInterval(intervalId);
   }, [resendCooldownSeconds]);
 
-  // Si ya hay sesión activa, no tiene sentido mostrar esta pantalla.
+  // Una sesión ya autenticada no necesita esta pantalla.
   if (isAuthenticated) {
     return <Navigate to="/dashboard" replace />;
   }
 
-  // No hay registro en curso (llegó aquí directo por URL, recargó la
-  // página y sessionStorage se perdió, etc.) -> vuelve a empezar.
+  // Si se perdió el contexto del registro pendiente, vuelve a registro.
   if (!email) {
     return <Navigate to="/registro" replace />;
   }
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     setLocalError(null);
     setResendMessage(null);
+    setShowDeliveryHelp(false);
 
-    if (!/^\d{6}$/.test(code.trim())) {
+    const trimmedCode = code.trim();
+    if (!/^\d{6}$/.test(trimmedCode)) {
       setLocalError("El código debe tener 6 dígitos.");
       return;
     }
 
     try {
-      await verifyOtp(code.trim());
+      await verifyOtp(trimmedCode);
       navigate("/dashboard", { replace: true });
     } catch {
-      // El AuthContext ya guarda el mensaje de error en `error`,
-      // no hace falta hacer nada más aquí.
+      // AuthContext ya coloca el mensaje en `error`.
     }
   }
 
   async function handleResend() {
     setLocalError(null);
     setResendMessage(null);
+    setShowDeliveryHelp(false);
     setIsResending(true);
+
     try {
       await resendOtp();
-      setResendMessage("Te enviamos un nuevo código.");
+      setResendMessage(
+        "Solicitamos un nuevo código. Revisa también Spam, Promociones o Correo no deseado."
+      );
       setCooldown(resendCooldownSeconds());
+      setShowDeliveryHelp(true);
     } catch (err) {
-      // El AuthContext ya guarda el mensaje de error en `error`, pero si
-      // el error no se propagó correctamente, mostramos un mensaje local
-      // para asegurar que el usuario siempre vea feedback.
+      // Si AuthContext no propagó un mensaje, mostramos el error local.
       if (!error) {
         setLocalError(
           err instanceof Error
@@ -125,7 +121,8 @@ export function OtpPage() {
             Verifica tu correo
           </h1>
           <p className="text-sm text-slate-400 text-center max-w-xs">
-            Enviamos un código de 6 dígitos a <span className="text-slate-200">{email}</span>
+            Enviamos un código de 6 dígitos a{" "}
+            <span className="text-slate-200">{email}</span>
           </p>
         </div>
 
@@ -142,22 +139,39 @@ export function OtpPage() {
                 autoComplete="one-time-code"
                 maxLength={6}
                 value={code}
-                onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                onChange={(event) =>
+                  setCode(event.target.value.replace(/\D/g, "").slice(0, 6))
+                }
                 disabled={isLoading}
                 className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-3 text-center text-2xl tracking-[0.5em] text-white placeholder-slate-500 outline-none transition-colors focus:border-cyan-400 disabled:opacity-50"
                 placeholder="000000"
+                aria-label="Código de verificación de 6 dígitos"
               />
             </div>
 
             {(localError || error) && (
-              <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-300">
+              <div
+                role="alert"
+                className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-300"
+              >
                 {localError || error}
               </div>
             )}
 
             {resendMessage && !localError && !error && (
-              <div className="rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-2 text-sm text-green-300">
+              <div
+                role="status"
+                className="rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-2 text-sm text-green-300"
+              >
                 {resendMessage}
+              </div>
+            )}
+
+            {showDeliveryHelp && !localError && !error && (
+              <div className="rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-xs leading-relaxed text-slate-400">
+                El sistema aceptó la solicitud. Si no aparece en 1–2 minutos,
+                revisa Spam/Promociones y confirma que el correo mostrado arriba
+                sea correcto.
               </div>
             )}
 
@@ -172,14 +186,14 @@ export function OtpPage() {
             <button
               type="button"
               onClick={handleResend}
-              disabled={isResending || cooldown > 0}
+              disabled={isResending || cooldown > 0 || isLoading}
               className="text-center text-sm text-slate-400 hover:text-cyan-400 transition-colors disabled:opacity-50 disabled:hover:text-slate-400"
             >
               {cooldown > 0
                 ? `Reenviar código (${cooldown}s)`
                 : isResending
-                ? "Enviando..."
-                : "Reenviar código"}
+                  ? "Enviando..."
+                  : "Reenviar código"}
             </button>
 
             <button

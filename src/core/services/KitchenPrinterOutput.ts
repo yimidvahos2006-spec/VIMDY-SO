@@ -2,6 +2,8 @@ import { KitchenOrder } from "../entities/Entities";
 import { KitchenEngine } from "../engines/KitchenEngine";
 import { KitchenOutput } from "./kitchenOutput";
 import { productCatalogStore } from "../store/productCatalogStore";
+import { companyConfigStore } from "../store/companyConfigStore";
+import { getBusinessHour, getBusinessMonthKey, getBusinessDateKey } from "../utils/businessTime";
 
 /* ===========================================================================
    KitchenPrinterOutput
@@ -15,14 +17,28 @@ import { productCatalogStore } from "../store/productCatalogStore";
 export class KitchenPrinterOutput implements KitchenOutput {
   constructor(private readonly kitchen: KitchenEngine) {}
 
-  public async send(order: KitchenOrder): Promise<void> {
+  public async send(order: KitchenOrder, alreadySaved: boolean = false): Promise<void> {
+    if (!alreadySaved) {
+      await this.kitchen.save(order);
+    }
+
     if (typeof window === "undefined" || typeof document === "undefined") {
       return;
     }
 
+    const tz = companyConfigStore.get().timezone || "America/Bogota";
     const date = new Date(order.createdAt);
-    const dateStr = `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}/${date.getFullYear()}`;
-    const timeStr = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+    const dateParts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: tz,
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    }).formatToParts(date);
+    const dateStr = `${dateParts.find(p => p.type === "day")?.value ?? "01"}/${dateParts.find(p => p.type === "month")?.value ?? "01"}/${dateParts.find(p => p.type === "year")?.value ?? "1970"}`;
+    const timeStr = `${dateParts.find(p => p.type === "hour")?.value ?? "00"}:${dateParts.find(p => p.type === "minute")?.value ?? "00"}`;
     const orderNumber = order.orderNumber ?? 0;
     const origin = order.origin ?? "Sin origen";
 
