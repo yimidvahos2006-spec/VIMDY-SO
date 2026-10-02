@@ -91,6 +91,7 @@ export function buildOfflineSaleInput(params: {
   saleId: string;
   items: CartItem[];
   cashierId?: string;
+  waiterId?: string;
 }): CreateSaleInput {
   const payment = paymentStore.get();
 
@@ -117,6 +118,7 @@ export function buildOfflineSaleInput(params: {
     })),
     customerId: payment.customerId ?? undefined,
     cashierId: params.cashierId,
+    waiterId: params.waiterId,
     discount,
     tip,
     notes: payment.notes || undefined,

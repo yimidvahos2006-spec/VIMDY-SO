@@ -17,7 +17,7 @@
    misma mesa se pisarían el pedido el uno al otro.
 =========================================================================== */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
 import { Product, Sale, Table, CashMovement, KitchenOrder, Order } from "../../src/core/entities/Entities";
 
@@ -39,6 +39,9 @@ import { PosCore } from "../../src/core/engines/PosCore";
 
 import { InMemoryRepository } from "../fakes/InMemoryRepository";
 import { FakeProductRepository } from "../fakes/FakeProductRepository";
+import { DEFAULT_OPERATION_CONFIG } from "../../src/core/config/operation";
+import { operationConfigStore } from "../../src/core/store/operationConfigStore";
+import { kitchenOutputModeStore } from "../../src/core/store/kitchenOutputModeStore";
 
 const BURGER: Product = {
   id: "prod-burger",
@@ -115,6 +118,14 @@ describe("Smoke: la cuenta de mesa es la misma para cualquier dispositivo", () =
 
   beforeEach(async () => {
     ctx = buildContext();
+    operationConfigStore.set({
+      ...DEFAULT_OPERATION_CONFIG,
+      kitchenEnabled: true,
+      kitchenOutputMode: "kds",
+      kdsEnabled: true,
+      salesChannels: ["presencial"]
+    });
+    kitchenOutputModeStore.set("pantalla");
     await ctx.products.save(BURGER);
     await ctx.products.save(SODA);
     await ctx.tables.save({
@@ -130,6 +141,11 @@ describe("Smoke: la cuenta de mesa es la misma para cualquier dispositivo", () =
       total: 0,
       updatedAt: new Date()
     } as Table);
+  });
+
+  afterEach(() => {
+    operationConfigStore.clear();
+    kitchenOutputModeStore.clear();
   });
 
   it("el mesero abre y toma el pedido en su dispositivo; la caja lo ve y lo cobra en el suyo, sin haber abierto la mesa ella misma", async () => {

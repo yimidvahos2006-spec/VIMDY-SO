@@ -45,6 +45,7 @@ const OFFLINE_CHARGE_MESSAGE =
 export interface ProcessSaleParams {
   cashierId: string;
   cashierName: string;
+  waiterId?: string;
   /**
    * IDEMPOTENCIA (checklist crítico #4): id generado por la UI UNA sola vez
    * por intento de cobro (ver PosSalePanel.tsx), reutilizado en cada
@@ -73,7 +74,8 @@ async function queueOrderOffline(
   const createSaleInput = buildOfflineSaleInput({
     saleId,
     items,
-    cashierId: params.cashierId
+    cashierId: params.cashierId,
+    waiterId: params.waiterId
   });
 
   const sale = buildOfflineSale(createSaleInput);
@@ -174,6 +176,7 @@ export async function sendOrderToKitchen(params: ProcessSaleParams): Promise<Sal
       })),
       customerId: payment.customerId ?? undefined,
       cashierId: params.cashierId,
+      waiterId: params.waiterId,
       discount,
       tip,
       notes: payment.notes || undefined,

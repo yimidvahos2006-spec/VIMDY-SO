@@ -195,7 +195,8 @@ class PaymentStore extends ObservableStore<PaymentState> {
 
   isPaid() {
     if (this.state.method === "mixed") {
-      return this.getMixedReceived() >= this.state.total;
+      const received = this.getMixedReceived();
+      return received >= this.state.total - 0.005;
     }
     return this.state.paid;
   }

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { SubscriptionEngine } from "../../src/core/engines/SubscriptionEngine";
 import type { Subscription } from "../../src/core/entities/SubscriptionTypes";
+import { TRIAL_PERIOD_DAYS } from "../../src/core/config/trial";
 
 describe("SubscriptionEngine — especificación de suscripciones", () => {
   let engine: SubscriptionEngine;
@@ -22,10 +23,13 @@ describe("SubscriptionEngine — especificación de suscripciones", () => {
   }
 
   describe("Prueba 1 — Crear negocio nuevo", () => {
-    it("trial recién creado tiene 14 días restantes", () => {
+    it("trial recién creado tiene exactamente 14 días restantes", () => {
       const now = new Date("2026-08-20T00:00:00Z");
-      const trialEndsAt = new Date("2026-09-03T00:00:00Z");
+      const trialEndsAt = new Date(now);
+      trialEndsAt.setUTCDate(trialEndsAt.getUTCDate() + TRIAL_PERIOD_DAYS);
       const sub = makeSubscription(trialEndsAt.toISOString());
+
+      expect(TRIAL_PERIOD_DAYS).toBe(14);
       expect(engine.daysRemaining(sub.trialEndsAt, now)).toBe(14);
       expect(engine.effectiveStatus(sub, now)).toBe("trial");
       expect(engine.isBlocked(sub, now)).toBe(false);
@@ -34,71 +38,91 @@ describe("SubscriptionEngine — especificación de suscripciones", () => {
 
   describe("Prueba 2 — Día 1", () => {
     it("funciona sin alertas ni bloqueos", () => {
+      const trialStart = new Date("2026-08-20T00:00:00Z");
       const now = new Date("2026-08-21T00:00:00Z");
-      const trialEndsAt = new Date("2026-09-19T00:00:00Z");
-      const sub = makeSubscription(trialEndsAt.toISOString());
-      expect(engine.daysRemaining(sub.trialEndsAt, now)).toBeGreaterThanOrEqual(27);
-      expect(engine.warningThreshold(engine.daysRemaining(sub.trialEndsAt, now))).toBeNull();
-      expect(engine.isBlocked(sub, now)).toBe(false);
-    });
-  });
-
-  describe("Prueba 3 — Día 27", () => {
-    it("funciona sin alerta", () => {
-      const now = new Date("2026-09-15T00:00:00Z");
-      const trialEndsAt = new Date("2026-09-19T00:00:00Z");
+      const trialEndsAt = new Date(trialStart);
+      trialEndsAt.setUTCDate(trialEndsAt.getUTCDate() + TRIAL_PERIOD_DAYS);
       const sub = makeSubscription(trialEndsAt.toISOString());
       const days = engine.daysRemaining(sub.trialEndsAt, now);
-      expect(days).toBeGreaterThanOrEqual(4);
+
+      expect(days).toBe(13);
       expect(engine.warningThreshold(days)).toBeNull();
       expect(engine.isBlocked(sub, now)).toBe(false);
     });
   });
 
-  describe("Prueba 4 — Día 28 (faltan 3 días)", () => {
-    it("devuelve umbral 3 y no está bloqueado", () => {
-      const now = new Date("2026-09-16T00:00:00Z");
-      const trialEndsAt = new Date("2026-09-19T00:00:00Z");
+  describe("Prueba 3 — Faltan 3 días", () => {
+    it("día 11 devuelve umbral 3 y no está bloqueado", () => {
+      const trialStart = new Date("2026-08-20T00:00:00Z");
+      const now = new Date("2026-08-31T00:00:00Z");
+      const trialEndsAt = new Date(trialStart);
+      trialEndsAt.setUTCDate(trialEndsAt.getUTCDate() + TRIAL_PERIOD_DAYS);
       const sub = makeSubscription(trialEndsAt.toISOString());
       const days = engine.daysRemaining(sub.trialEndsAt, now);
+
       expect(days).toBe(3);
       expect(engine.warningThreshold(days)).toBe(3);
       expect(engine.isBlocked(sub, now)).toBe(false);
     });
   });
 
-  describe("Prueba 5 — Día 29 (faltan 2 días)", () => {
-    it("devuelve umbral 2 y no está bloqueado", () => {
-      const now = new Date("2026-09-17T00:00:00Z");
-      const trialEndsAt = new Date("2026-09-19T00:00:00Z");
+  describe("Prueba 4 — Faltan 2 días", () => {
+    it("día 12 devuelve umbral 2 y no está bloqueado", () => {
+      const trialStart = new Date("2026-08-20T00:00:00Z");
+      const now = new Date("2026-09-01T00:00:00Z");
+      const trialEndsAt = new Date(trialStart);
+      trialEndsAt.setUTCDate(trialEndsAt.getUTCDate() + TRIAL_PERIOD_DAYS);
       const sub = makeSubscription(trialEndsAt.toISOString());
       const days = engine.daysRemaining(sub.trialEndsAt, now);
+
       expect(days).toBe(2);
       expect(engine.warningThreshold(days)).toBe(2);
       expect(engine.isBlocked(sub, now)).toBe(false);
     });
   });
 
-  describe("Prueba 6 — Día 30 (falta 1 día)", () => {
-    it("devuelve umbral 1 y no está bloqueado", () => {
-      const now = new Date("2026-09-18T00:00:00Z");
-      const trialEndsAt = new Date("2026-09-19T00:00:00Z");
+  describe("Prueba 5 — Faltan 1 día", () => {
+    it("día 13 devuelve umbral 1 y no está bloqueado", () => {
+      const trialStart = new Date("2026-08-20T00:00:00Z");
+      const now = new Date("2026-09-02T00:00:00Z");
+      const trialEndsAt = new Date(trialStart);
+      trialEndsAt.setUTCDate(trialEndsAt.getUTCDate() + TRIAL_PERIOD_DAYS);
       const sub = makeSubscription(trialEndsAt.toISOString());
       const days = engine.daysRemaining(sub.trialEndsAt, now);
+
       expect(days).toBe(1);
       expect(engine.warningThreshold(days)).toBe(1);
       expect(engine.isBlocked(sub, now)).toBe(false);
     });
   });
 
-  describe("Prueba 7 — Vencimiento", () => {
-    it("bloquea el negocio y cambia estado a expired", () => {
-      const now = new Date("2026-09-20T00:00:00Z");
-      const trialEndsAt = new Date("2026-09-19T00:00:00Z");
+  describe("Prueba 6 — Vencimiento", () => {
+    it("día 14 queda expired y bloqueado", () => {
+      const trialStart = new Date("2026-08-20T00:00:00Z");
+      const now = new Date("2026-09-03T00:00:00Z");
+      const trialEndsAt = new Date(trialStart);
+      trialEndsAt.setUTCDate(trialEndsAt.getUTCDate() + TRIAL_PERIOD_DAYS);
       const sub = makeSubscription(trialEndsAt.toISOString());
+
+      expect(engine.daysRemaining(sub.trialEndsAt, now)).toBe(0);
+      expect(engine.warningThreshold(0)).toBeNull();
+      expect(engine.effectiveStatus(sub, now)).toBe("expired");
+      expect(engine.isBlocked(sub, now)).toBe(true);
+    });
+  });
+
+  describe("Prueba 7 — Después del vencimiento", () => {
+    it("mantiene expired/bloqueado sin borrar la suscripción", () => {
+      const trialStart = new Date("2026-08-20T00:00:00Z");
+      const now = new Date("2026-09-05T00:00:00Z");
+      const trialEndsAt = new Date(trialStart);
+      trialEndsAt.setUTCDate(trialEndsAt.getUTCDate() + TRIAL_PERIOD_DAYS);
+      const sub = makeSubscription(trialEndsAt.toISOString());
+
       expect(engine.daysRemaining(sub.trialEndsAt, now)).toBe(0);
       expect(engine.effectiveStatus(sub, now)).toBe("expired");
       expect(engine.isBlocked(sub, now)).toBe(true);
+      expect(sub.trialEndsAt?.toISOString()).toBe("2026-09-03T00:00:00.000Z");
     });
   });
 

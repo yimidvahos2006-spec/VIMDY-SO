@@ -136,7 +136,7 @@ export class PaymentEngine {
 
     return {
 
-      success: true,
+      success: false,
 
       method: "CARD",
 
@@ -148,10 +148,10 @@ export class PaymentEngine {
 
       reference,
 
-      message: "Pago con tarjeta registrado con confirmación externa de terminal.",
+      message: "Pago con tarjeta pendiente de verificación del proveedor o datáfono.",
 
       date: new Date(),
-      verificationStatus: "EXTERNAL_TERMINAL"
+      verificationStatus: "PENDING_VERIFICATION"
 
     };
 
@@ -256,7 +256,9 @@ export class PaymentEngine {
 
       (payments.qr ?? 0);
 
-    if (received < total) {
+    const epsilon = 0.005;
+
+    if (received < total - epsilon) {
 
       throw new Error("INSUFFICIENT_PAYMENT");
 
@@ -271,16 +273,14 @@ export class PaymentEngine {
       throw new Error("PAYMENT_REFERENCE_REQUIRED");
     }
 
-    const requiresProviderVerification = (payments.transfer ?? 0) > 0 || (payments.qr ?? 0) > 0;
-    const verificationStatus = requiresProviderVerification
-      ? "PENDING_VERIFICATION" as const
-      : (payments.card ?? 0) > 0
-        ? "EXTERNAL_TERMINAL" as const
-        : "CONFIRMED" as const;
+    const hasUnverifiedTender =
+      (payments.card ?? 0) > 0 ||
+      (payments.transfer ?? 0) > 0 ||
+      (payments.qr ?? 0) > 0;
 
     return {
 
-      success: !requiresProviderVerification,
+      success: false,
 
       method: "MIXED",
 
@@ -292,12 +292,12 @@ export class PaymentEngine {
 
       reference,
 
-      message: requiresProviderVerification
-        ? "Pago mixto registrado; la parte digital queda pendiente de verificación."
-        : "Pago mixto registrado.",
+      message: hasUnverifiedTender
+        ? "Pago mixto pendiente de verificación server-side de la parte no en efectivo."
+        : "El pago mixto requiere integración de verificación; usa efectivo o un método conectado.",
 
       date: new Date(),
-      verificationStatus
+      verificationStatus: "PENDING_VERIFICATION"
 
     };
 
@@ -316,7 +316,7 @@ export class PaymentEngine {
 
     return {
 
-      success: true,
+      success: false,
 
       method: "CASH",
 
@@ -326,10 +326,10 @@ export class PaymentEngine {
 
       change: amount,
 
-      message: "Reembolso realizado correctamente.",
+      message: "Reembolso no ejecutado: debe registrarse y confirmarse mediante el flujo persistente de caja.",
 
       date: new Date(),
-      verificationStatus: "CONFIRMED"
+      verificationStatus: "PENDING_VERIFICATION"
 
     };
 
@@ -349,7 +349,7 @@ export class PaymentEngine {
 
     return {
 
-      success: true,
+      success: false,
 
       method: "CASH",
 
@@ -359,10 +359,10 @@ export class PaymentEngine {
 
       change: amount,
 
-      message: "Reembolso parcial realizado correctamente.",
+      message: "Reembolso parcial no ejecutado: debe registrarse y confirmarse mediante el flujo persistente de caja.",
 
       date: new Date(),
-      verificationStatus: "CONFIRMED"
+      verificationStatus: "PENDING_VERIFICATION"
 
     };
 

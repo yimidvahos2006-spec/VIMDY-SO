@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React from "react";
 import {
   LayoutDashboard,
   ShoppingCart,
@@ -22,10 +22,10 @@ import { NavLink } from "react-router-dom";
 import { VimdyLogo } from "./VimdyLogo";
 import { useSidebar } from "../../../core/store/useSidebar";
 import { useMobileSidebar } from "../../../core/store/useMobileSidebar";
-import { useEnabledModules } from "../../../core/store/useEnabledModules";
 import { useCashierShiftStatus } from "../../../hooks/useCashierShiftStatus";
+import { useCanUse } from "../../../hooks/useCanUse";
 import { useAuth } from "../../../presentation/context/AuthContext";
-import { MODULE_CATALOG } from "../../../core/config/modules";
+import type { BusinessCapabilityId } from "../../../core/config/businessOperatingProfile";
 import { LogOut } from "lucide-react";
 
 const menu = [
@@ -67,29 +67,32 @@ const menu = [
 export function VimdySidebar() {
   const { expanded, toggle } = useSidebar();
   const { open: mobileOpen, close: closeMobile } = useMobileSidebar();
-  const enabledModules = useEnabledModules();
   const shiftOpen = useCashierShiftStatus();
   const { logout } = useAuth();
-
-   const visibleMenu = useMemo(() => {
-     if (!enabledModules || enabledModules.length === 0) return menu;
-
-    const enabledSet = new Set(enabledModules);
-
-    const hiddenPaths = new Set(
-      MODULE_CATALOG
-        .filter(
-          module =>
-            module.sidebarPath &&
-            !enabledSet.has(module.id)
-        )
-        .map(module => module.sidebarPath as string)
-    );
-
-    return menu.filter(
-      item => !hiddenPaths.has(item.path)
-    );
-  }, [enabledModules]);
+  const capabilities: Partial<Record<string, BusinessCapabilityId>> = {
+    "/caja": "cash",
+    "/cocina": "kitchen",
+    "/inventario": "inventory",
+    "/clientes": "customers",
+    "/compras-inteligentes": "inventory",
+    "/ganancias": "inventory",
+    "/perdidas": "inventory",
+    "/ia": "ai",
+  };
+  const availability: Partial<Record<BusinessCapabilityId, boolean>> = {
+    cash: useCanUse("cash"),
+    kitchen: useCanUse("kitchen"),
+    tables: useCanUse("tables"),
+    waiters: useCanUse("waiters"),
+    inventory: useCanUse("inventory"),
+    customers: useCanUse("customers"),
+    ai: useCanUse("ai"),
+  };
+  const visibleMenu = menu.filter((item) => {
+    if (item.path === "/meseros") return availability.tables || availability.waiters;
+    const capability = capabilities[item.path];
+    return !capability || availability[capability];
+  });
 
   // Clase compartida: visible siempre en móvil (sin prefijo), y en
   // escritorio solo si el sidebar está expandido (md:hidden si no).

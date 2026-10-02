@@ -39,6 +39,16 @@ export type BusinessMetricId =
   | "production"
   | "ai";
 
+export const BUSINESS_MODULE_CAPABILITY: Readonly<Record<ModuleId, BusinessCapabilityId>> = {
+  mesas: "tables",
+  cocina: "kitchen",
+  pedidos: "orders",
+  caja: "cash",
+  inventario: "inventory",
+  clientes: "customers",
+  ia: "ai",
+};
+
 export interface BusinessCapabilities {
   readonly sales: boolean;
   readonly orders: boolean;
@@ -127,9 +137,9 @@ export function buildBusinessOperatingProfile(
     cash: hasModule(modules, "caja"),
     inventory: hasModule(modules, "inventario"),
     customers: hasModule(modules, "clientes"),
-    tables: tablesEnabled && hasModule(modules, "mesas"),
+    tables: tablesEnabled,
     waiters: waiterModeEnabled,
-    kitchen: kitchenEnabled && hasModule(modules, "cocina"),
+    kitchen: kitchenEnabled,
     kds: kitchenEnabled && (kitchenOutputMode === "kds" || kitchenOutputMode === "both"),
     kitchenPrinter: kitchenEnabled && (kitchenOutputMode === "printer" || kitchenOutputMode === "both"),
     production:
@@ -166,6 +176,13 @@ export function hasBusinessCapability(
   capability: BusinessCapabilityId
 ): boolean {
   return profile.capabilities[capability];
+}
+
+export function hasBusinessModuleCapability(
+  profile: BusinessOperatingProfile,
+  module: ModuleId
+): boolean {
+  return hasBusinessCapability(profile, BUSINESS_MODULE_CAPABILITY[module]);
 }
 
 export function hasBusinessMetric(

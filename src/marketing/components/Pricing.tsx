@@ -4,7 +4,7 @@ const plans = [
   {
     id: "monthly",
     name: "Mensual",
-    price: "$59.900",
+    price: "$79.000",
     period: "/ mes",
     cta: "Comenzar",
     highlighted: false,
@@ -13,11 +13,11 @@ const plans = [
   {
     id: "yearly",
     name: "Anual",
-    price: "$599.000",
+    price: "$799.000",
     period: "/ año",
     cta: "Comenzar",
     highlighted: true,
-    savings: "Ahorras $119.800",
+    savings: "Ahorras $149.000",
     description: "Un año de VIMDY con un precio más conveniente.",
   },
 ];

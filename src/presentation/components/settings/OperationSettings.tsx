@@ -4,9 +4,8 @@ import { Check, Loader2 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { useOperationConfig } from "../../../core/store/useOperationConfig";
 import { useEnabledModules } from "../../../core/store/useEnabledModules";
-import { enabledModulesStore } from "../../../core/store/enabledModulesStore";
-import { operationConfigStore } from "../../../core/store/operationConfigStore";
-import { kitchenOutputModeStore } from "../../../core/store/kitchenOutputModeStore";
+import { businessOperatingProfileStore } from "../../../core/store/businessOperatingProfileStore";
+import { hydrateBusinessOperatingProfile } from "../../../core/bootstrap/businessOperatingProfileBootstrap";
 import { setBusinessOperatingProfile } from "../../../infrastructure/supabase/authBusinessContext";
 import {
   SALES_CHANNEL_OPTIONS,
@@ -106,16 +105,11 @@ export function OperationSettings() {
       };
 
       await setBusinessOperatingProfile(businessId, modules, config);
-
-      enabledModulesStore.set(modules);
-      operationConfigStore.set(config);
-
-      kitchenOutputModeStore.set(
-        kitchenOutputMode === "printer" ? "impresora" :
-        kitchenOutputMode === "both" ? "ambos" :
-        kitchenOutputMode === "kds" ? "pantalla" :
-        "none"
-      );
+      await hydrateBusinessOperatingProfile(businessId);
+      const profileSnapshot = businessOperatingProfileStore.get();
+      if (profileSnapshot.status !== "ready" || profileSnapshot.businessId !== businessId) {
+        throw new Error(profileSnapshot.error ?? "No se confirmó la configuración operativa guardada.");
+      }
 
       setSaved(true);
       window.setTimeout(() => setSaved(false), 2500);

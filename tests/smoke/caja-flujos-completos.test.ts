@@ -147,7 +147,7 @@ describe("Smoke: caja, pagos, turnos y conciliacion (FASE 4)", () => {
       expect(movements[0].cashAmount).toBe(70000);
     });
 
-    it("venta con tarjeta registra ingreso pero no suma al efectivo del cajon", async () => {
+    it("referencia de tarjeta no verificada no registra ingreso ni se cuenta como cobro", async () => {
       await ctx.shiftEngine.openShift(CASHIER_ID, 50000);
 
       const sale = await ctx.salesEngine.quickSale({
@@ -156,17 +156,20 @@ describe("Smoke: caja, pagos, turnos y conciliacion (FASE 4)", () => {
         taxRate: 0
       });
 
-      const { payment } = await ctx.salesEngine.registerPayment(sale, "CARD", {
+      const { payment, sale: pendingSale } = await ctx.salesEngine.registerPayment(sale, "CARD", {
         reference: "TARJ-123"
       });
 
       expect(payment.method).toBe("CARD");
+      expect(payment.success).toBe(false);
+      expect(payment.verificationStatus).toBe("PENDING_VERIFICATION");
+      expect(pendingSale.status).toBe("PENDING_PAYMENT");
 
       const summary = await ctx.shiftEngine.getShiftSummary(
         (await ctx.shiftEngine.getCurrentShift())!.id
       );
       expect(summary.totalCashIncome).toBe(0);
-      expect(summary.incomeByMethod.CARD).toBe(80000);
+      expect(summary.incomeByMethod.CARD).toBeUndefined();
     });
 
     it("venta por transferencia queda pendiente y no entra a caja hasta verificación del proveedor", async () => {
@@ -195,7 +198,7 @@ describe("Smoke: caja, pagos, turnos y conciliacion (FASE 4)", () => {
       expect(summary.incomeByMethod.TRANSFER).toBeUndefined();
     });
 
-    it("pago mixto registra la porcion en efectivo correctamente", async () => {
+    it("pago mixto no registra efectivo antes de verificar la parte no monetaria", async () => {
       await ctx.shiftEngine.openShift(CASHIER_ID, 50000);
 
       const sale = await ctx.salesEngine.quickSale({
@@ -211,12 +214,14 @@ describe("Smoke: caja, pagos, turnos y conciliacion (FASE 4)", () => {
       });
 
       expect(payment.method).toBe("MIXED");
+      expect(payment.success).toBe(false);
+      expect(payment.verificationStatus).toBe("PENDING_VERIFICATION");
 
       const summary = await ctx.shiftEngine.getShiftSummary(
         (await ctx.shiftEngine.getCurrentShift())!.id
       );
-      expect(summary.totalCashIncome).toBe(40000);
-      expect(summary.incomeByMethod.MIXED).toBe(100000);
+      expect(summary.totalCashIncome).toBe(0);
+      expect(summary.incomeByMethod.MIXED).toBeUndefined();
     });
 
     it("el cambio en efectivo se registra como egreso de caja", async () => {
@@ -242,7 +247,7 @@ describe("Smoke: caja, pagos, turnos y conciliacion (FASE 4)", () => {
       expect(expenses[0].description).toContain("Cambio");
     });
 
-    it("el cambio en pago mixto tambien se registra como egreso", async () => {
+    it("el cambio mixto no se registra antes de verificar el tender no monetario", async () => {
       const sale = await ctx.salesEngine.quickSale({
         source: [{ productId: PRODUCT_ID, quantity: 1, price: 80000 }],
         cashierId: CASHIER_ID,
@@ -258,9 +263,7 @@ describe("Smoke: caja, pagos, turnos y conciliacion (FASE 4)", () => {
       expect(payment.change).toBe(20000);
 
       const movements = await ctx.cashMovements.findAll();
-      const expenses = movements.filter(m => m.type === "OUT");
-      expect(expenses).toHaveLength(1);
-      expect(expenses[0].amount).toBe(20000);
+      expect(movements).toHaveLength(0);
     });
   });
 
@@ -588,9 +591,9 @@ describe("Smoke: caja, pagos, turnos y conciliacion (FASE 4)", () => {
       });
 
       const receipt = await ctx.salesEngine.getReceiptBySaleId(sale.id);
-      expect(receipt).not.toBeNull();
-      expect(receipt!.paymentMethod).toBe("CARD");
-      expect(receipt!.total).toBe(80000);
+      expect(payment.success).toBe(false);
+      expect(payment.verificationStatus).toBe("PENDING_VERIFICATION");
+      expect(receipt).toBeNull();
     });
   });
 

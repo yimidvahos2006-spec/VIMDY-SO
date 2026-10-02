@@ -20,6 +20,14 @@ export class KitchenEngine {
     private readonly audit: AuditEngine
   ) {}
 
+  private readonly validTransitions: Record<string, readonly string[]> = {
+    PENDIENTE: ["EN_PREPARACION", "CANCELADO"],
+    EN_PREPARACION: ["LISTO", "CANCELADO"],
+    LISTO: ["ENTREGADO", "CANCELADO"],
+    ENTREGADO: [],
+    CANCELADO: []
+  };
+
   public async getActiveOrders(): Promise<KitchenOrder[]> {
     const orders = await this.repository.findAll();
     const currentBusinessId = getCurrentBusinessId();
@@ -28,7 +36,7 @@ export class KitchenEngine {
     return orders.filter(order => {
       if (currentBusinessId && order.businessId && order.businessId !== currentBusinessId) return false;
       if (currentBranchId && order.branchId && order.branchId !== currentBranchId) return false;
-      return order.status !== 'ENTREGADO';
+      return order.status !== "ENTREGADO" && order.status !== "CANCELADO";
     });
   }
 
@@ -99,12 +107,22 @@ export class KitchenEngine {
       throw new Error('ORDER_NOT_FOUND');
     }
 
+    if (order.status === 'ENTREGADO' || order.status === 'CANCELADO') {
+      throw new Error(
+        `ORDER_LOCKED: la comanda ya está en estado "${order.status}" y no se puede modificar.`
+      );
+    }
+
+    const allowed = this.validTransitions[order.status] ?? [];
+    if (!allowed.includes(status)) {
+      throw new Error(
+        `INVALID_STATUS_TRANSITION: no se puede cambiar de "${order.status}" a "${status}".`
+      );
+    }
+
     const updated: KitchenOrder = {
       ...order,
       status,
-      // Se fija una sola vez, al momento real en que se marca ENTREGADO
-      // (no se recalcula si por algún motivo updateStatus se vuelve a
-      // llamar con ENTREGADO sobre una comanda que ya lo tenía).
       deliveredAt:
         status === 'ENTREGADO'
           ? order.deliveredAt ?? new Date()

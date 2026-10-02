@@ -52,6 +52,7 @@ import { FakeProductRepository } from "../fakes/FakeProductRepository";
 import { FakeSaleRepository } from "../fakes/FakeSaleRepository";
 import { setCurrentBusinessId, setCurrentBranchId } from "../../src/infrastructure/supabase/supabaseClient";
 import { PendingSale } from "../../src/core/offline/PendingSale";
+import { buildOfflineSaleInput } from "../../src/core/services/offlineSale";
 
 function buildContext(businessId = "biz-1", branchId = "branch-1") {
   const products = new FakeProductRepository();
@@ -140,6 +141,17 @@ describe("FASE 8 — Offline + Sincronización", () => {
   beforeEach(() => {
     setCurrentBusinessId(null);
     setCurrentBranchId(null);
+  });
+
+  it("preserva el mesero responsable en una venta offline para sincronización", () => {
+    const input = buildOfflineSaleInput({
+      saleId: "sale-offline-waiter",
+      cashierId: "cashier-1",
+      waiterId: "waiter-7",
+      items: [{ id: BURGER.id, name: BURGER.name, price: BURGER.price, quantity: 1 }]
+    });
+
+    expect(input.waiterId).toBe("waiter-7");
   });
 
   // ========================================================================

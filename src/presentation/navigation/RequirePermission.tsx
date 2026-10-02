@@ -28,7 +28,13 @@ interface Props {
 export function RequirePermission({ children, requires }: Props) {
   const { can, isReady } = useAuth();
 
-  if (!isReady) return null;
+  if (!isReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#050505]">
+        <div className="w-8 h-8 rounded-full border-2 border-cyan-500/30 border-t-cyan-400 animate-spin" />
+      </div>
+    );
+  }
 
   if (!can(requires)) {
     return (

@@ -59,6 +59,43 @@ describe("BusinessOperatingProfile", () => {
     expect(profile.metrics.production).toBe(true);
   });
 
+  it("usa la configuración operativa explícita aunque enabled_modules esté desactualizado", () => {
+    const profile = buildBusinessOperatingProfile(
+      makeSource({
+        enabledModules: ["caja", "pedidos"],
+        operationConfig: {
+          ...DEFAULT_OPERATION_CONFIG,
+          tablesEnabled: true,
+          waiterModeEnabled: true,
+          kitchenEnabled: true,
+          kitchenOutputMode: "printer",
+          printerEnabled: true,
+        },
+      })
+    );
+
+    expect(profile.capabilities.tables).toBe(true);
+    expect(profile.capabilities.waiters).toBe(true);
+    expect(profile.capabilities.kitchen).toBe(true);
+    expect(profile.capabilities.kitchenPrinter).toBe(true);
+  });
+
+  it("permite meseros sin habilitar mesas", () => {
+    const profile = buildBusinessOperatingProfile(
+      makeSource({
+        enabledModules: ["caja", "pedidos"],
+        operationConfig: {
+          ...DEFAULT_OPERATION_CONFIG,
+          waiterModeEnabled: true,
+          tablesEnabled: false,
+        },
+      })
+    );
+
+    expect(profile.capabilities.waiters).toBe(true);
+    expect(profile.capabilities.tables).toBe(false);
+  });
+
   it("no crea métricas de mesas o cocina para un negocio que no las tiene habilitadas", () => {
     const profile = buildBusinessOperatingProfile(
       makeSource({

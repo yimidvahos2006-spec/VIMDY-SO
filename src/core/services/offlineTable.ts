@@ -34,10 +34,10 @@ export async function queueOpenTableOffline(params: {
   const optimistic: Table = {
     ...table,
     status: "BUSY",
-    peopleCount: input.peopleCount,
-    waiterId: input.waiterId,
-    customerId: input.customerId,
-    notes: input.notes,
+    peopleCount: input.peopleCount ?? table.peopleCount ?? 0,
+    waiterId: input.waiterId ?? table.waiterId,
+    customerId: input.customerId ?? table.customerId,
+    notes: input.notes ?? table.notes,
     openedAt: new Date(),
     updatedAt: new Date()
   };

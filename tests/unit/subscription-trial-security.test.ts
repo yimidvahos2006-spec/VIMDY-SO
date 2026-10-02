@@ -6,10 +6,38 @@ const MIGRATIONS_DIR = join(process.cwd(), "supabase", "migrations");
 const FNS_DIR = join(process.cwd(), "supabase", "functions");
 
 describe("FASE 4-BIS: Seguridad del trial — migrations consolidadas", () => {
-  describe("Migrations nuevas existen", () => {
-    it("20260829_consolidate_subscription_functions.sql existe", () => {
+  describe("Contrato empresarial — trial VIMDY de 14 días", () => {
+    it("la configuración central del cliente mantiene exactamente 14 días", () => {
       const content = readFileSync(
-        join(MIGRATIONS_DIR, "20260829_consolidate_subscription_functions.sql"),
+        join(process.cwd(), "src", "core", "config", "trial.ts"),
+        "utf-8"
+      );
+      expect(content).toMatch(/export\s+const\s+TRIAL_PERIOD_DAYS\s*=\s*14\s*;/);
+    });
+
+    it("register-business calcula el vencimiento con una constante de 14 días server-side", () => {
+      const content = readFileSync(
+        join(FNS_DIR, "register-business", "index.ts"),
+        "utf-8"
+      );
+      expect(content).toMatch(/const\s+TRIAL_PERIOD_DAYS\s*=\s*14\s*;/);
+      expect(content).toMatch(/trialEndsAt\.setDate\(trialEndsAt\.getDate\(\)\s*\+\s*TRIAL_PERIOD_DAYS\)/);
+    });
+
+    it("el mensaje de negocio nuevo comunica 14 días y no 30", () => {
+      const content = readFileSync(
+        join(FNS_DIR, "register-business", "index.ts"),
+        "utf-8"
+      );
+      expect(content).toMatch(/prueba gratuita de 14 días/);
+      expect(content).not.toMatch(/prueba gratuita de 30 días/);
+    });
+  });
+
+  describe("Migrations nuevas existen", () => {
+    it("20260829000001_consolidate_subscription_functions.sql existe", () => {
+      const content = readFileSync(
+        join(MIGRATIONS_DIR, "20260829000001_consolidate_subscription_functions.sql"),
         "utf-8"
       );
       expect(content).toMatch(/CREATE OR REPLACE FUNCTION public\.is_business_subscription_active/);
@@ -17,9 +45,9 @@ describe("FASE 4-BIS: Seguridad del trial — migrations consolidadas", () => {
       expect(content).toMatch(/CREATE OR REPLACE FUNCTION public\.record_trial_usage/);
     });
 
-    it("20260829_fix_businesses_insert_policies.sql existe", () => {
+    it("20260829000002_fix_businesses_insert_policies.sql existe", () => {
       const content = readFileSync(
-        join(MIGRATIONS_DIR, "20260829_fix_businesses_insert_policies.sql"),
+        join(MIGRATIONS_DIR, "20260829000002_fix_businesses_insert_policies.sql"),
         "utf-8"
       );
       expect(content).toMatch(/DROP POLICY IF EXISTS businesses_insert_owner/);
@@ -27,9 +55,9 @@ describe("FASE 4-BIS: Seguridad del trial — migrations consolidadas", () => {
       expect(content).toMatch(/NOT public.has_user_used_trial/);
     });
 
-    it("20260829_revoke_trial_usage_grants.sql existe", () => {
+    it("20260829000003_revoke_trial_usage_grants.sql existe", () => {
       const content = readFileSync(
-        join(MIGRATIONS_DIR, "20260829_revoke_trial_usage_grants.sql"),
+        join(MIGRATIONS_DIR, "20260829000003_revoke_trial_usage_grants.sql"),
         "utf-8"
       );
       expect(content).toMatch(/REVOKE ALL ON FUNCTION public\.record_trial_usage/u);
@@ -43,7 +71,7 @@ describe("FASE 4-BIS: Seguridad del trial — migrations consolidadas", () => {
     let content: string;
     beforeAll(() => {
       content = readFileSync(
-        join(MIGRATIONS_DIR, "20260829_consolidate_subscription_functions.sql"),
+        join(MIGRATIONS_DIR, "20260829000001_consolidate_subscription_functions.sql"),
         "utf-8"
       );
     });
@@ -68,7 +96,7 @@ describe("FASE 4-BIS: Seguridad del trial — migrations consolidadas", () => {
   describe("record_trial_usage usa DO NOTHING", () => {
     it("migration usa ON CONFLICT DO NOTHING", () => {
       const content = readFileSync(
-        join(MIGRATIONS_DIR, "20260829_consolidate_subscription_functions.sql"),
+        join(MIGRATIONS_DIR, "20260829000001_consolidate_subscription_functions.sql"),
         "utf-8"
       );
       expect(content).toMatch(/ON CONFLICT \(user_id\) DO NOTHING/);

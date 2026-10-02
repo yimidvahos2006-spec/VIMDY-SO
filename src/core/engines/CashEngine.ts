@@ -7,6 +7,7 @@ import { companyConfigStore } from "../store/companyConfigStore";
 import { isBusinessToday } from "../utils/businessTime";
 import { logError } from "../../infrastructure/logging/opsLogger";
 import { cashRegisterStore } from "../store/cashRegisterStore";
+import { roundMoney } from "../config/globalization";
 
 /**
  * CashEngine
@@ -432,25 +433,33 @@ export class CashEngine {
    */
   public async getBalance(): Promise<number> {
     const movements = await this.getAllMovements();
+    const currency = companyConfigStore.get().currency;
 
-    return movements.reduce((balance, movement) => {
-      return movement.type === "IN"
-        ? balance + movement.amount
-        : balance - movement.amount;
-    }, 0);
+    return roundMoney(
+      movements.reduce((balance, movement) => {
+        return movement.type === "IN"
+          ? balance + movement.amount
+          : balance - movement.amount;
+      }, 0),
+      currency
+    );
   }
 
   /**
-   * Saldo generado durante el día actual.
-   */
+    * Saldo generado durante el día actual.
+    */
   public async getTodayBalance(): Promise<number> {
     const movements = await this.getTodayMovements();
+    const currency = companyConfigStore.get().currency;
 
-    return movements.reduce((balance, movement) => {
-      return movement.type === "IN"
-        ? balance + movement.amount
-        : balance - movement.amount;
-    }, 0);
+    return roundMoney(
+      movements.reduce((balance, movement) => {
+        return movement.type === "IN"
+          ? balance + movement.amount
+          : balance - movement.amount;
+      }, 0),
+      currency
+    );
   }
 
   /**

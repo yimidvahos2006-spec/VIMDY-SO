@@ -19,25 +19,25 @@ import {
   X
 } from "lucide-react";
 
-import { useEnabledModules } from "../../../core/store/useEnabledModules";
-import { MODULE_CATALOG } from "../../../core/config/modules";
+import { useCanUse } from "../../../hooks/useCanUse";
+import type { BusinessCapabilityId } from "../../../core/config/businessOperatingProfile";
 
 const MAIN_ITEMS = [
   { icon: LayoutDashboard, label: "Inicio", path: "/dashboard" },
-  { icon: ShoppingCart, label: "Vender", path: "/caja", state: { tab: "venta" as const } },
-  { icon: Package, label: "Productos", path: "/inventario" },
-  { icon: Wallet, label: "Caja", path: "/caja", state: { tab: "turno" as const } }
+  { icon: ShoppingCart, label: "Vender", path: "/caja", state: { tab: "venta" as const }, capability: "cash" as const },
+  { icon: Package, label: "Productos", path: "/inventario", capability: "inventory" as const },
+  { icon: Wallet, label: "Caja", path: "/caja", state: { tab: "turno" as const }, capability: "cash" as const }
 ];
 
 const MORE_ITEMS = [
-  { icon: ChefHat, label: "Cocina", path: "/cocina", moduleId: "cocina" as const },
-  { icon: UserRound, label: "Meseros", path: "/meseros", moduleId: "mesas" as const },
-  { icon: Users, label: "Clientes", path: "/clientes", moduleId: "clientes" as const },
+  { icon: ChefHat, label: "Cocina", path: "/cocina", capability: "kitchen" as const },
+  { icon: UserRound, label: "Meseros", path: "/meseros", capability: "tables" as const },
+  { icon: Users, label: "Clientes", path: "/clientes", capability: "customers" as const },
   { icon: BarChart3, label: "Reportes", path: "/reportes" },
-  { icon: DollarSign, label: "Ganancias", path: "/ganancias" },
-  { icon: ShieldAlert, label: "Pérdidas", path: "/perdidas" },
-  { icon: Truck, label: "Compras", path: "/compras-inteligentes" },
-  { icon: Sparkles, label: "VIMDY IA", path: "/ia", moduleId: "ia" as const },
+  { icon: DollarSign, label: "Ganancias", path: "/ganancias", capability: "inventory" as const },
+  { icon: ShieldAlert, label: "Pérdidas", path: "/perdidas", capability: "inventory" as const },
+  { icon: Truck, label: "Compras", path: "/compras-inteligentes", capability: "inventory" as const },
+  { icon: Sparkles, label: "VIMDY IA", path: "/ia", capability: "ai" as const },
   { icon: Bell, label: "Notificaciones", path: "/notificaciones" },
   { icon: Settings, label: "Configuración", path: "/configuracion" }
 ];
@@ -45,14 +45,25 @@ const MORE_ITEMS = [
 export function MobileBottomNav() {
   const navigate = useNavigate();
   const location = useLocation();
-  const enabledModules = useEnabledModules();
   const [moreOpen, setMoreOpen] = useState(false);
-
-  const enabledSet = new Set(enabledModules ?? []);
-
+  const availability: Record<BusinessCapabilityId, boolean> = {
+    sales: useCanUse("sales"),
+    orders: useCanUse("orders"),
+    cash: useCanUse("cash"),
+    inventory: useCanUse("inventory"),
+    customers: useCanUse("customers"),
+    tables: useCanUse("tables"),
+    waiters: useCanUse("waiters"),
+    kitchen: useCanUse("kitchen"),
+    kds: useCanUse("kds"),
+    kitchenPrinter: useCanUse("kitchenPrinter"),
+    production: useCanUse("production"),
+    ai: useCanUse("ai"),
+  };
+  const visibleMainItems = MAIN_ITEMS.filter((item) => !item.capability || availability[item.capability]);
   const visibleMoreItems = MORE_ITEMS.filter((item) => {
-    if (!item.moduleId) return true;
-    return enabledSet.has(item.moduleId);
+    if (item.path === "/meseros") return availability.tables || availability.waiters;
+    return !item.capability || availability[item.capability];
   });
 
   const isActive = (path: string, state?: Record<string, unknown>) => {
@@ -121,7 +132,7 @@ export function MobileBottomNav() {
       {/* Barra inferior */}
       <nav className="fixed bottom-0 left-0 right-0 z-40 md:hidden bg-vimdy-background border-t border-vimdy-border">
         <div className="flex items-center justify-around h-16 px-2">
-          {MAIN_ITEMS.map((item) => {
+          {visibleMainItems.map((item) => {
             const Icon = item.icon;
             const active = isActive(item.path, item.state);
 

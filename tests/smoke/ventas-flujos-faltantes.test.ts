@@ -125,29 +125,29 @@ describe("Smoke: flujos de venta faltantes", () => {
     expect(persisted?.customerId).toBe(customerId);
   });
 
-  it("FASE 3: pago con tarjeta registra la venta en PAID y el movimiento de caja", async () => {
+  it("FASE 3: referencia de tarjeta sin verificación deja la venta pendiente", async () => {
     ctx.cart.addItem(BURGER, 1);
     const sale = await ctx.salesEngine.quickSale({ cashierId: "cashier-1" });
 
-    const { sale: paidSale } = await ctx.salesEngine.registerPayment(
+    const { sale: pendingSale, payment } = await ctx.salesEngine.registerPayment(
       sale,
       "CARD",
       { reference: "TAR-12345" }
     );
 
-    expect(paidSale.status).toBe("PAID");
-    expect(paidSale.paymentMethod).toBe("CARD");
+    expect(payment.success).toBe(false);
+    expect(payment.verificationStatus).toBe("PENDING_VERIFICATION");
+    expect(pendingSale.status).toBe("PENDING_PAYMENT");
 
     const movements = await ctx.cashMovements.findAll();
-    expect(movements).toHaveLength(1);
-    expect(movements[0].amount).toBe(paidSale.total);
+    expect(movements).toHaveLength(0);
   });
 
-  it("FASE 3: pago mixto (efectivo + tarjeta) cubre el total y registra el movimiento correcto", async () => {
+  it("FASE 3: pago mixto (efectivo + tarjeta) queda pendiente de verificación", async () => {
     ctx.cart.addItem(BURGER, 1);
     const sale = await ctx.salesEngine.quickSale({ cashierId: "cashier-1" });
 
-    const { sale: paidSale } = await ctx.salesEngine.registerPayment(
+    const { sale: pendingSale, payment } = await ctx.salesEngine.registerPayment(
       sale,
       "MIXED",
       {
@@ -157,13 +157,12 @@ describe("Smoke: flujos de venta faltantes", () => {
       }
     );
 
-    expect(paidSale.status).toBe("PAID");
-    expect(paidSale.paymentMethod).toBe("MIXED");
+    expect(payment.success).toBe(false);
+    expect(payment.verificationStatus).toBe("PENDING_VERIFICATION");
+    expect(pendingSale.status).toBe("PENDING_PAYMENT");
 
     const movements = await ctx.cashMovements.findAll();
-    expect(movements).toHaveLength(1);
-    expect(movements[0].amount).toBe(paidSale.total);
-    expect(movements[0].paymentMethod).toBe("MIXED");
+    expect(movements).toHaveLength(0);
   });
 
   it("FASE 3: el cambio se calcula correctamente en pago en efectivo", async () => {

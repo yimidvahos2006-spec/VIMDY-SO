@@ -2,7 +2,7 @@ import React from "react";
 import { CircleDot, ArrowUpCircle, AlertTriangle, Receipt } from "lucide-react";
 
 import { usePayment } from "../../../core/store/usePayment";
-import { useEnabledModules } from "../../../core/store/useEnabledModules";
+import { useCanUse } from "../../../hooks/useCanUse";
 import { PosPayment } from "./PosPayment";
 import { OrderPriority } from "../../../core/entities/Entities";
 import { useTranslation } from "../../../core/i18n/useTranslation";
@@ -34,8 +34,7 @@ export function PosCheckoutPanel() {
 
   const { priority, setPriority, requiresInvoice, setRequiresInvoice } = usePayment();
   const { t } = useTranslation();
-  const enabledModules = useEnabledModules();
-  const hasKitchenModule = (enabledModules ?? []).includes("cocina");
+  const hasKitchenModule = useCanUse("kitchen");
 
   return (
 

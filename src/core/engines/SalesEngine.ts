@@ -12,7 +12,6 @@ import {
    ProductExtraOption
 } from "../entities/Entities";
 
-import { IRepository } from "../../infrastructure/di/repositories/IRepository";
 import { SaleRepository } from "../../infrastructure/di/repositories/SaleRepository";
 import { logWarning } from "../../infrastructure/logging/opsLogger";
 import { getCurrentBusinessId, getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
@@ -44,7 +43,6 @@ import { roundMoney } from "../config/globalization";
 import { dashboardStore } from "../store/dashboardStore";
 import { operationConfigStore } from "../store/operationConfigStore";
 import { getEffectiveKitchenOutputMode } from "../services/effectiveKitchenOutputMode";
-import { enabledModulesStore } from "../store/enabledModulesStore";
 import { createKitchenOutput } from "../services/KitchenOutputFactory";
 import { getSaleNetTotal, getSaleNetItems } from "../utils/saleRefunds";
 
@@ -249,6 +247,59 @@ export class SalesEngine {
    * quickSale(), tableSale() y deliverySale().
    */
   public async createSale(input: CreateSaleInput): Promise<Sale> {
+    const atomicRepository =
+      typeof this.saleRepository.createSaleFulfillmentAtomic === "function"
+        ? this.saleRepository
+        : null;
+    const createSaleFulfillmentAtomic = atomicRepository?.createSaleFulfillmentAtomic;
+
+    if (createSaleFulfillmentAtomic) {
+      if (input.deferFulfillment) {
+        throw new Error("SALE_DEFERRED_FULFILLMENT_UNSUPPORTED: la venta segura requiere fulfillment atómico.");
+      }
+
+      const businessId = getCurrentBusinessId();
+      const branchId = getCurrentBranchId();
+      if (!businessId || !branchId) {
+        throw new Error("NO_BUSINESS_BRANCH_CONTEXT: se requiere negocio y sucursal para crear una venta segura.");
+      }
+
+      const saleId = input.id ?? crypto.randomUUID();
+      const result = await createSaleFulfillmentAtomic.call(atomicRepository, {
+        businessId,
+        branchId,
+        idempotencyKey: saleId,
+        input: {
+          id: saleId,
+          type: input.type,
+          items: input.items.map((item) => ({
+            productId: item.productId,
+            quantity: item.quantity,
+            note: item.note,
+            selectedSizeId: item.selectedSize?.id,
+            selectedExtraIds: item.selectedExtras?.map((extra) => extra.id)
+          })),
+          customerId: input.customerId,
+          tableId: input.tableId,
+          deliveryAddress: input.deliveryAddress,
+          deliveryFee: input.deliveryFee,
+          notes: input.notes,
+          waiterId: input.waiterId,
+          priority: input.priority,
+          discount: input.discount,
+          tip: input.tip
+        }
+      });
+
+      void this.generateEvents().catch((error: unknown) => {
+        logWarning("No se pudieron actualizar alertas después de la venta confirmada.", {
+          category: "sales",
+          context: { saleId, error: String(error) }
+        });
+      });
+      return result.sale;
+    }
+
     // IDEMPOTENCIA (checklist crítico #4): si quien llama ya trae un id
     // (ver CreateSaleInput.id) y esa venta ya existe en la base de datos,
     // esto es un reintento del mismo intento de cobro — no un pedido
@@ -256,7 +307,7 @@ export class SalesEngine {
     // descontar inventario ni volver a mandar comanda a cocina (eso
     // duplicaría stock descontado y comandas). Solo aplica cuando el
     // llamador pide explícitamente idempotencia pasando un id.
-    if (input.id && input.id.trim() !== "") {
+    if (!createSaleFulfillmentAtomic && input.id && input.id.trim() !== "") {
       const existing = await this.saleRepository.findById(input.id);
       if (existing) {
         return existing;
@@ -335,7 +386,8 @@ export class SalesEngine {
         await this.updateInventory(
           resolvedItems,
           `Venta ${code}`,
-          "DECREASE"
+          "DECREASE",
+          sale.id
         );
         inventoryDecreased = true;
       }
@@ -392,7 +444,7 @@ export class SalesEngine {
 
     if (inventoryDecreased) {
       try {
-        await this.updateInventory(sale.items, rollbackReason, "INCREASE");
+        await this.updateInventory(sale.items, rollbackReason, "INCREASE", `${sale.id}:create-rollback`);
       } catch (rollbackError) {
         rollbackErrors.push(rollbackError);
       }
@@ -997,6 +1049,8 @@ export class SalesEngine {
       throw new Error("SALE_NOT_PAID: solo se pueden reembolsar ventas pagadas.");
     }
 
+    this.assertCashRefundSupported(sale);
+
     if (sale.invoiceId) {
       throw new Error(
         "SALE_HAS_INVOICE: esta venta ya tiene factura electrónica. " +
@@ -1027,8 +1081,6 @@ export class SalesEngine {
     // Usamos el total de la venta menos lo ya reembolsado
     const alreadyRefundedTotal = (sale.refunds ?? []).reduce((sum, r) => sum + r.amount, 0);
     const remainingAmount = roundMoney(Math.max((sale.total ?? 0) - alreadyRefundedTotal, 0), companyConfigStore.get().currency);
-
-    const paymentResult = this.payment.refund(sale, remainingAmount);
 
     await this.verifyInventoryTrail(sale);
 
@@ -1082,7 +1134,34 @@ export class SalesEngine {
       sale.id
     );
 
-    return { sale: refunded, payment: paymentResult };
+    return { sale: refunded, payment: this.confirmedCashRefund(remainingAmount) };
+  }
+
+  private assertCashRefundSupported(sale: Sale): void {
+    if (sale.paymentStatus !== "CONFIRMED") {
+      throw new Error("REFUND_PAYMENT_NOT_CONFIRMED");
+    }
+
+    if (sale.paymentMethod !== "CASH") {
+      throw new Error(
+        sale.paymentMethod
+          ? "EXTERNAL_REFUND_REQUIRES_PROVIDER_CONFIRMATION"
+          : "REFUND_PAYMENT_METHOD_UNKNOWN"
+      );
+    }
+  }
+
+  private confirmedCashRefund(amount: number): PaymentResult {
+    return {
+      success: true,
+      method: "CASH",
+      total: amount,
+      received: 0,
+      change: amount,
+      message: "Reembolso en efectivo registrado en caja.",
+      date: new Date(),
+      verificationStatus: "CONFIRMED"
+    };
   }
 
   /**
@@ -1150,6 +1229,15 @@ export class SalesEngine {
 
     if (sale.status !== "PAID" && sale.status !== "CLOSED") {
       throw new Error("SALE_NOT_PAID: solo se pueden reembolsar ventas pagadas.");
+    }
+
+    this.assertCashRefundSupported(sale);
+
+    if (sale.invoiceId) {
+      throw new Error(
+        "SALE_HAS_INVOICE: esta venta ya tiene factura electrónica. " +
+          "Para devolverla hace falta generar una nota crédito primero."
+      );
     }
 
     const cleanItems = itemsToRefund.filter(line => line.quantity > 0);
@@ -1235,8 +1323,6 @@ export class SalesEngine {
       "INCREASE"
     );
 
-    const paymentResult = this.payment.refundAmount(refundAmount);
-
     // ¿Con este reembolso ya no queda NADA reembolsable? Entonces es,
     // en la práctica, un reembolso total hecho ítem por ítem — se marca
     // la venta como REFUNDED igual que refundSale().
@@ -1289,7 +1375,11 @@ export class SalesEngine {
       sale.id
     );
 
-    return { sale: savedSale, payment: paymentResult, amount: refundAmount };
+    return {
+      sale: savedSale,
+      payment: this.confirmedCashRefund(refundAmount),
+      amount: refundAmount
+    };
   }
 
   /**
@@ -1767,11 +1857,6 @@ export class SalesEngine {
    * lo normal en una tienda sin cocina, no un error: por eso no lanza.
    */
   public async sendToKitchen(sale: Sale): Promise<KitchenOrder | null> {
-    const modules = enabledModulesStore.get();
-    if (modules && !modules.includes("cocina")) {
-      return null;
-    }
-
     const operationConfig = operationConfigStore.get();
     if (operationConfig && operationConfig.kitchenEnabled !== true) {
       return null;
@@ -1867,17 +1952,23 @@ export class SalesEngine {
   public async updateInventory(
     items: SaleItem[],
     reason: string,
-    direction: "DECREASE" | "INCREASE" = "DECREASE"
+    direction: "DECREASE" | "INCREASE" = "DECREASE",
+    operationId?: string
   ): Promise<void> {
-    const stockItems = items.map((item) => ({ productId: item.productId, quantity: item.quantity }));
+    const stockItems = items.map((item) => ({
+      productId: item.productId,
+      quantity: item.quantity,
+      selectedSize: item.selectedSize,
+      selectedExtras: item.selectedExtras
+    }));
 
     // consumeForSale/restoreForSale ya saben distinguir productos simples de
     // productos con receta (BOM): un producto elaborado (ej. Hamburguesa)
     // descuenta/repone sus ingredientes en vez de su propio stock.
     if (direction === "DECREASE") {
-      await this.inventory.consumeForSale(stockItems, reason);
+      await this.inventory.consumeForSale(stockItems, reason, operationId);
     } else {
-      await this.inventory.restoreForSale(stockItems, reason);
+      await this.inventory.restoreForSale(stockItems, reason, operationId);
     }
   }
 
@@ -2127,7 +2218,11 @@ export class SalesEngine {
         quantity: item.quantity,
         price: item.price ?? lookup?.price ?? 0,
         note: item.note,
-        requiresKitchen: item.requiresKitchen
+        requiresKitchen: item.requiresKitchen,
+        selectedSizeId: item.selectedSize?.id,
+        selectedSize: item.selectedSize,
+        selectedExtraIds: item.selectedExtras?.map((extra) => extra.id),
+        selectedExtras: item.selectedExtras
       };
     });
   }

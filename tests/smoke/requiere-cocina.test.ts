@@ -20,7 +20,7 @@
    no necesitan prepararse — ruido que hace más lento al cocinero real.
 =========================================================================== */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
 import { Product, Sale, Table, CashMovement, KitchenOrder, Order } from "../../src/core/entities/Entities";
 
@@ -42,6 +42,10 @@ import { PosCore } from "../../src/core/engines/PosCore";
 
 import { InMemoryRepository } from "../fakes/InMemoryRepository";
 import { FakeProductRepository } from "../fakes/FakeProductRepository";
+import { DEFAULT_OPERATION_CONFIG } from "../../src/core/config/operation";
+import { enabledModulesStore } from "../../src/core/store/enabledModulesStore";
+import { operationConfigStore } from "../../src/core/store/operationConfigStore";
+import { kitchenOutputModeStore } from "../../src/core/store/kitchenOutputModeStore";
 
 const BURGER: Product = {
   id: "prod-burger",
@@ -110,9 +114,24 @@ describe("Smoke: requiresKitchen filtra qué llega a Cocina", () => {
   let ctx: ReturnType<typeof buildContext>;
 
   beforeEach(async () => {
+    enabledModulesStore.set(["caja", "pedidos"]);
+    operationConfigStore.set({
+      ...DEFAULT_OPERATION_CONFIG,
+      kitchenEnabled: true,
+      kitchenOutputMode: "kds",
+      kdsEnabled: true,
+      salesChannels: ["presencial"]
+    });
+    kitchenOutputModeStore.set("pantalla");
     ctx = buildContext();
     await ctx.products.save(BURGER);
     await ctx.products.save(SODA);
+  });
+
+  afterEach(() => {
+    enabledModulesStore.clear();
+    operationConfigStore.clear();
+    kitchenOutputModeStore.clear();
   });
 
   it("SalesEngine: en una venta mixta, la comanda solo trae el item que requiere cocina", async () => {

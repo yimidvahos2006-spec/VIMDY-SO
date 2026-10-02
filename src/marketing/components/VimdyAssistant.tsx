@@ -7,7 +7,7 @@ const responses: Record<string, string> = {
   que_es_vimdy:
     "VIMDY es una plataforma todo en uno para negocios de alimentos y bebidas. Integra ventas, caja, inventario, cocina y reportes.",
   cuanto_cuesta:
-    "Plan mensual: $59.900 COP/mes. Plan anual: $599.000 COP/año (ahorras $119.800).",
+    "Plan mensual: $79.000 COP/mes. Plan anual: $799.000 COP/año (ahorras $149.000).",
   para_que_negocios:
     "Restaurantes, cafeterías, bares, panaderías, pizzerías, food trucks y cualquier negocio de alimentos y bebidas.",
   como_funciona:

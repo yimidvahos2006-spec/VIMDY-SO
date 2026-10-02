@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { ShoppingCart, CreditCard, Receipt, Lock, ChefHat, CheckCircle2 } from "lucide-react";
 
 import { useCart } from "../../../core/store/useCart";
@@ -7,10 +8,11 @@ import { paymentStore } from "../../../core/store/paymentStore";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { processSale } from "../../../core/services/processSale";
 import { useAuth } from "../../context/AuthContext";
+import type { Waiter } from "../../../core/entities/Entities";
 import { toast } from "../../../core/store/toastStore";
 import { PosCart } from "./PosCart";
 import { PosCheckoutPanel } from "./PosCheckoutPanel";
-import { useEnabledModules } from "../../../core/store/useEnabledModules";
+import { useCanUse } from "../../../hooks/useCanUse";
 import { useTranslation } from "../../../core/i18n/useTranslation";
 import { formatMoney } from "../../../core/utils/formatMoney";
 import { companyConfigStore } from "../../../core/store/companyConfigStore";
@@ -44,12 +46,19 @@ import { VimdyButton } from "../ui/VimdyButton";
 export function PosSalePanel() {
 
   const { t, language } = useTranslation();
+  const location = useLocation();
+  const initialWaiterId = (location.state as { waiterId?: string } | null)?.waiterId ?? "";
 
   const { items } = useCart();
   const { total, method, received, mixedReceived, change, requiresInvoice, reference, mixedCard, mixedTransfer, customerName } = usePayment();
   const { user } = useAuth();
+  const waiterModeEnabled = useCanUse("waiters");
 
   const [processing, setProcessing] = useState(false);
+  const [waiters, setWaiters] = useState<Waiter[]>([]);
+  const [selectedWaiterId, setSelectedWaiterId] = useState(initialWaiterId);
+  const [waitersLoading, setWaitersLoading] = useState(false);
+  const [waitersLoadError, setWaitersLoadError] = useState<string | null>(null);
   const [saleConfirmation, setSaleConfirmation] = useState<{ total: number; method: string; change: number; customerName: string; saleId: string; pendingVerification?: boolean } | null>(null);
 
   // IDEMPOTENCIA (checklist crítico #4): id del intento de cobro actual,
@@ -62,6 +71,39 @@ export function PosSalePanel() {
   // Si el carrito cambia sin que el intento anterior haya terminado, ese
   // id ya no corresponde a lo que se va a cobrar y se descarta.
   const [saleAttemptId, setSaleAttemptId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!waiterModeEnabled) {
+      setWaiters([]);
+      setSelectedWaiterId("");
+      setWaitersLoadError(null);
+      setWaitersLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setWaitersLoading(true);
+    setWaitersLoadError(null);
+
+    void container.waiterEngine.get().listActive()
+      .then((activeWaiters) => {
+        if (cancelled) return;
+        setWaiters(activeWaiters);
+        setSelectedWaiterId((currentId) =>
+          activeWaiters.some((waiter) => waiter.id === currentId) ? currentId : ""
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setWaitersLoadError("No se pudieron cargar los meseros activos.");
+      })
+      .finally(() => {
+        if (!cancelled) setWaitersLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [waiterModeEnabled]);
 
   useEffect(() => {
     setSaleAttemptId(null);
@@ -107,6 +149,7 @@ export function PosSalePanel() {
   const canCharge =
     shiftOpen &&
     items.length > 0 &&
+    (!waiterModeEnabled || Boolean(selectedWaiterId)) &&
     (method !== "cash" || received >= total) &&
     (method !== "mixed" || mixedReceived >= total) &&
     (!needsReference || reference.trim().length > 0);
@@ -120,6 +163,11 @@ export function PosSalePanel() {
 
     if (items.length === 0) {
       toast.warning(t("pos.sale.addProductsBeforeChargeToast"));
+      return;
+    }
+
+    if (waiterModeEnabled && !selectedWaiterId) {
+      toast.warning("Selecciona un mesero activo antes de cobrar.");
       return;
     }
 
@@ -138,7 +186,8 @@ export function PosSalePanel() {
       const result = await processSale({
         cashierId: user.id,
         cashierName: user.name,
-        saleId: attemptId
+        saleId: attemptId,
+        waiterId: selectedWaiterId || undefined
       });
 
       if (result.success) {
@@ -180,8 +229,7 @@ export function PosSalePanel() {
   //   - si NINGÚN producto del carrito es de cocina -> "Cobrar"
   // Factura sigue mandando sobre esto (un cobro con factura siempre avisa
   // que factura, aunque también mande a cocina por dentro).
-  const enabledModules = useEnabledModules();
-  const hasKitchenModule = (enabledModules ?? []).includes("cocina");
+  const hasKitchenModule = useCanUse("kitchen");
   const hasKitchenItems = hasKitchenModule && items.some((item) => item.requiresKitchen === true);
   const chargeLabel = requiresInvoice
     ? t("pos.sale.chargeAndInvoice")
@@ -204,6 +252,30 @@ export function PosSalePanel() {
           </div>
         </div>
       </div>
+
+      {waiterModeEnabled && (
+        <div className="border-b border-vimdy-border px-4 py-3 flex-shrink-0">
+          <label htmlFor="pos-waiter-select" className="mb-1 block text-xs font-semibold text-vimdy-text-secondary">
+            Mesero responsable
+          </label>
+          <select
+            id="pos-waiter-select"
+            value={selectedWaiterId}
+            onChange={(event) => setSelectedWaiterId(event.target.value)}
+            disabled={waitersLoading || waiters.length === 0}
+            aria-describedby="pos-waiter-status"
+            className="h-10 w-full rounded-vimdy-sm border border-vimdy-border bg-vimdy-background px-3 text-sm text-vimdy-text disabled:opacity-60"
+          >
+            <option value="">Selecciona un mesero</option>
+            {waiters.map((waiter) => (
+              <option key={waiter.id} value={waiter.id}>{waiter.name}</option>
+            ))}
+          </select>
+          <p id="pos-waiter-status" className="mt-1 text-xs text-vimdy-text-secondary" role={waitersLoadError ? "alert" : undefined}>
+            {waitersLoading ? "Cargando meseros…" : waitersLoadError ?? (waiters.length === 0 ? "No hay meseros activos. Configura el equipo antes de cobrar." : "La venta quedará asociada al mesero seleccionado.")}
+          </p>
+        </div>
+      )}
 
       {/* Un solo flujo: Productos -> Cliente -> Descuento -> Prioridad -> Método */}
       <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-vimdy-border">

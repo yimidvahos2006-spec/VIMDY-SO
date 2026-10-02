@@ -1,10 +1,102 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { InventoryEngine } from "../../src/core/engines/InventoryEngine";
 import { KardexEngine } from "../../src/core/engines/KardexEngine";
 import { FakeProductRepository } from "../fakes/FakeProductRepository";
 import { InMemoryRepository } from "../fakes/InMemoryRepository";
+import { setCurrentBranchId } from "../../src/infrastructure/supabase/supabaseClient";
 
 describe("InventoryEngine", () => {
+  it("routes validated branch transfers through the atomic repository operation", async () => {
+    const repository = new FakeProductRepository();
+    const transferStock = vi.fn(async () => []);
+    repository.transferStock = transferStock;
+    const engine = new InventoryEngine(repository);
+
+    await engine.transferStock("product-1", "branch-a", "branch-b", 2, "transfer-op", "actor");
+
+    expect(transferStock).toHaveBeenCalledWith({
+      operationId: "transfer-op",
+      productId: "product-1",
+      fromBranchId: "branch-a",
+      toBranchId: "branch-b",
+      quantity: 2,
+      performedBy: "actor"
+    });
+    await expect(engine.transferStock("product-1", "branch-a", "branch-a", 2)).rejects.toThrow(
+      "INVALID_BRANCH_STOCK_TRANSFER"
+    );
+    await expect(engine.transferStock("product-1", "branch-a", "branch-b", 0)).rejects.toThrow(
+      "INVALID_STOCK_QUANTITY"
+    );
+  });
+
+  it("routes batch production through the atomic repository operation", async () => {
+    const repository = new FakeProductRepository();
+    const produceBatch = vi.fn(async () => []);
+    repository.produceBatch = produceBatch;
+    const engine = new InventoryEngine(repository);
+    setCurrentBranchId("branch-a");
+
+    try {
+      await engine.produceBatch("product-1", 4, "actor", "production-op");
+      expect(produceBatch).toHaveBeenCalledWith({
+        operationId: "production-op",
+        productId: "product-1",
+        branchId: "branch-a",
+        quantity: 4,
+        performedBy: "actor"
+      });
+      await expect(engine.produceBatch("product-1", 0)).rejects.toThrow("INVALID_PRODUCTION_QUANTITY");
+    } finally {
+      setCurrentBranchId(null);
+    }
+  });
+
+  it("applies recipe, size, and extra consumption through one atomic repository batch", async () => {
+    const repository = new FakeProductRepository();
+    const kardex = new KardexEngine(new InMemoryRepository("inventory_movements"));
+    const adjustStockBatchWithKardex = vi.fn(async () => []);
+    repository.adjustStockBatchWithKardex = adjustStockBatchWithKardex;
+    const engine = new InventoryEngine(repository, kardex);
+
+    const flour = await engine.createProduct({ name: "Harina", stock: 20, trackStock: true });
+    const cheese = await engine.createProduct({ name: "Queso", stock: 20, trackStock: true });
+    const sauce = await engine.createProduct({ name: "Salsa", stock: 20, trackStock: true });
+    const pizza = await engine.createProduct({
+      name: "Pizza",
+      stock: 0,
+      trackStock: false,
+      recipe: [{ productId: flour.id, quantity: 0.25 }]
+    });
+
+    await engine.consumeForSale([{
+      productId: pizza.id,
+      quantity: 2,
+      selectedSize: {
+        id: "large",
+        name: "Grande",
+        priceDelta: 0,
+        recipe: [
+          { productId: flour.id, quantity: 0.25 },
+          { productId: cheese.id, quantity: 0.5 }
+        ]
+      },
+      selectedExtras: [{
+        id: "extra-sauce",
+        name: "Salsa extra",
+        priceDelta: 0,
+        recipe: [{ productId: sauce.id, quantity: 0.1 }]
+      }]
+    }], "Venta test", "sale-operation-1");
+
+    expect(adjustStockBatchWithKardex).toHaveBeenCalledTimes(1);
+    expect(adjustStockBatchWithKardex).toHaveBeenCalledWith("sale-operation-1", expect.arrayContaining([
+      expect.objectContaining({ productId: flour.id, delta: -0.5 }),
+      expect.objectContaining({ productId: cheese.id, delta: -1 }),
+      expect.objectContaining({ productId: sauce.id, delta: -0.2 })
+    ]));
+  });
+
   it("prevents deleting an ingredient that is still used by a recipe", async () => {
     const repository = new FakeProductRepository();
     const kardex = new KardexEngine(new InMemoryRepository("inventory_movements"));

@@ -37,7 +37,9 @@ export function PaymentCredentialsSettingsSection() {
           setEventsSecret(creds.eventsSecret);
         }
       })
-      .catch(() => {})
+      .catch((err) => {
+        console.error("[PaymentCredentials] No se pudieron cargar las credenciales:", err);
+      })
       .finally(() => setLoading(false));
   }, [enabled, businessId, provider]);
 

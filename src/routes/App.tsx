@@ -19,15 +19,6 @@ import { CreateBusinessPage } from "../presentation/pages/CreateBusinessPage";
 import { AuthCallbackPage } from "../presentation/pages/AuthCallbackPage";
 import { RequireCountry } from "../presentation/navigation/RequireCountry";
 
-import { LandingPage } from "../marketing/pages/LandingPage";
-import { PricingPage } from "../marketing/pages/PricingPage";
-import { DemoFondoPage } from "../marketing/pages/DemoFondoPage";
-import { FeaturesPage } from "../marketing/pages/FeaturesPage";
-import { ContactPage } from "../marketing/pages/ContactPage";
-import { PrivacyPage } from "../marketing/pages/PrivacyPage";
-import { TermsPage } from "../marketing/pages/TermsPage";
-import { CookiesPage } from "../marketing/pages/CookiesPage";
-import { MarketingLayout } from "../marketing/components/MarketingLayout";
 import { APP_URL } from "../core/config/appUrl";
 
 function isAppSubdomain(): boolean {
@@ -95,6 +86,33 @@ const NotificationsPage = lazy(() =>
 );
 const CopilotPage = lazy(() =>
   import("../presentation/pages/CopilotPage").then((m) => ({ default: m.CopilotPage }))
+);
+const LandingPage = lazy(() =>
+  import("../marketing/pages/LandingPage").then((m) => ({ default: m.LandingPage }))
+);
+const PricingPage = lazy(() =>
+  import("../marketing/pages/PricingPage").then((m) => ({ default: m.PricingPage }))
+);
+const DemoFondoPage = lazy(() =>
+  import("../marketing/pages/DemoFondoPage").then((m) => ({ default: m.DemoFondoPage }))
+);
+const FeaturesPage = lazy(() =>
+  import("../marketing/pages/FeaturesPage").then((m) => ({ default: m.FeaturesPage }))
+);
+const ContactPage = lazy(() =>
+  import("../marketing/pages/ContactPage").then((m) => ({ default: m.ContactPage }))
+);
+const PrivacyPage = lazy(() =>
+  import("../marketing/pages/PrivacyPage").then((m) => ({ default: m.PrivacyPage }))
+);
+const TermsPage = lazy(() =>
+  import("../marketing/pages/TermsPage").then((m) => ({ default: m.TermsPage }))
+);
+const CookiesPage = lazy(() =>
+  import("../marketing/pages/CookiesPage").then((m) => ({ default: m.CookiesPage }))
+);
+const MarketingLayout = lazy(() =>
+  import("../marketing/components/MarketingLayout").then((m) => ({ default: m.MarketingLayout }))
 );
 
 function NotFoundPage() {
@@ -164,7 +182,7 @@ function AuthenticatedApp() {
                 path="/meseros"
                 element={
                   <ProtectedRoute requires="staff.view">
-                    <RequireModule module="mesas">
+                    <RequireModule module="mesas" alsoCapability="waiters">
                       <Meseros />
                     </RequireModule>
                   </ProtectedRoute>
@@ -374,7 +392,13 @@ export function App() {
       <Route path="/crear-negocio" element={<RedirectToApp />} />
 
       {/* Marketing público — sin autenticación, sin MainLayout */}
-      <Route element={<MarketingLayout />}>
+      <Route
+        element={
+          <Suspense fallback={<RouteFallback />}>
+            <MarketingLayout />
+          </Suspense>
+        }
+      >
         <Route path="/" element={<LandingPage />} />
         <Route path="/precios" element={<PricingPage />} />
         <Route path="/funciones" element={<FeaturesPage />} />

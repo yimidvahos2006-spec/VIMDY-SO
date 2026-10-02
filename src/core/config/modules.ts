@@ -43,41 +43,17 @@ export const MODULE_CATALOG: ModuleDefinition[] = [
 ];
 
 /**
- * Módulos activos por defecto según el tipo de negocio.
+ * Módulos por defecto neutrales.
  *
- * Los únicos dos casos que vinieron especificados en el documento de
- * producto son "restaurante" (todo activo) y "tienda" (sin Mesas, Cocina
- * ni Pedidos). El resto se completó con un criterio razonable según cómo
- * opera cada tipo de negocio:
- *   - Restaurante / Pizzería / Asadero / Cafetería / Bar / Hotel: atienden
- *     en mesas y cocinan, así que llevan el set completo.
- *   - Food Truck: cocina pero no tiene mesas (se atiende por ventanilla).
- *   - Panadería / Heladería / Tienda: venta de mostrador, sin mesas ni
- *     cocina ni flujo de pedidos.
+ * El tipo de negocio es una clasificación descriptiva, no la autoridad que
+ * habilita módulos. La configuración operativa explícita del negocio (wizard,
+ * operationConfig, enabledModules) debe decidir qué módulos están activos.
  *
- * Esto es 100% ajustable: cambiar el negocio de lista aquí es lo único
- * que hace falta, el wizard y el Sidebar se actualizan solos.
+ * Para evitar que un negocio "restaurante" o "panadería" active módulos por
+ * defecto sin que el usuario los confirme, se usa una base mínima y segura.
  */
-export const DEFAULT_MODULES_BY_BUSINESS_TYPE: Record<BusinessTypeId, ModuleId[]> = {
-  restaurante: ["mesas", "cocina", "pedidos", "caja", "inventario", "clientes", "ia"],
-  cafeteria: ["mesas", "cocina", "pedidos", "caja", "inventario", "clientes", "ia"],
-  pizzeria: ["mesas", "cocina", "pedidos", "caja", "inventario", "clientes", "ia"],
-  asadero: ["mesas", "cocina", "pedidos", "caja", "inventario", "clientes", "ia"],
-  bar: ["mesas", "cocina", "pedidos", "caja", "inventario", "clientes", "ia"],
-  hotel: ["mesas", "cocina", "pedidos", "caja", "inventario", "clientes", "ia"],
-  food_truck: ["cocina", "pedidos", "caja", "inventario", "clientes", "ia"],
-  panaderia: ["caja", "inventario", "clientes", "ia"],
-  heladeria: ["caja", "inventario", "clientes", "ia"],
-  tienda: ["caja", "inventario", "clientes", "ia"],
-  comida_rapida: ["cocina", "pedidos", "caja", "inventario", "clientes", "ia"],
-  minimercado: ["caja", "inventario", "clientes", "ia"],
-  pequeno_supermercado: ["caja", "inventario", "clientes", "ia"],
-  negocio_bebidas: ["caja", "inventario", "clientes", "ia"],
-  negocio_productos: ["caja", "inventario", "clientes", "ia"],
-  negocio_servicios: ["caja", "clientes", "ia"],
-  otro: ["caja", "inventario", "clientes", "ia"]
-};
+export const DEFAULT_BASE_MODULES: ModuleId[] = ["caja", "pedidos"];
 
-export function getDefaultModulesForBusinessType(businessType: BusinessTypeId): ModuleId[] {
-  return DEFAULT_MODULES_BY_BUSINESS_TYPE[businessType] ?? MODULE_CATALOG.map((m) => m.id);
+export function getDefaultModulesForBusinessType(_businessType: BusinessTypeId): ModuleId[] {
+  return [...DEFAULT_BASE_MODULES];
 }
