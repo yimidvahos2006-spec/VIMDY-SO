@@ -14,6 +14,82 @@
 			],
 			"isBackground": false,
 			"problemMatcher": []
+		},
+		{
+			"label": "Validar Gate 1 Venta Caja",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": [
+				"test",
+				"--",
+				"tests/integration/saleFulfillment.concurrent.test.ts"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "Instalar dependencias reproducibles",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": [
+				"ci"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "Probar smoke Venta y Caja",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": [
+				"test",
+				"--",
+				"tests/smoke/caja-flujos-completos.test.ts",
+				"tests/smoke/venta-offline.test.ts"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "Validar pago digital pendiente",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": [
+				"test",
+				"--",
+				"tests/smoke/caja-flujos-completos.test.ts",
+				"-t",
+				"recibo con pagos correctos"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "Typecheck Paso 2",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": [
+				"exec",
+				"--",
+				"tsc",
+				"--noEmit"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "Ejecutar suite completa Paso 2",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": [
+				"test"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "Build Paso 2",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": [
+				"run",
+				"build"
+			],
+			"isBackground": false
 		}
 	]
 }

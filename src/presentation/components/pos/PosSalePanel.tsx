@@ -190,12 +190,11 @@ export function PosSalePanel() {
         waiterId: selectedWaiterId || undefined
       });
 
-      if (result.success) {
-        if (result.pendingVerification) {
-          toast.warning("Venta registrada. El pago digital quedó pendiente de verificación.");
-        } else {
-          toast.success(t("pos.sale.saleSuccessToast"));
-        }
+      if (result.pendingSync) {
+        toast.warning("Cobro guardado en este dispositivo; queda pendiente de sincronización y aún no está confirmado.");
+        setSaleAttemptId(null);
+      } else if (result.pendingVerification) {
+        toast.warning("Venta registrada. El pago digital quedó pendiente de verificación.");
         setSaleConfirmation({
           total: paymentBeforeCharge.total,
           method: paymentBeforeCharge.method,
@@ -205,7 +204,19 @@ export function PosSalePanel() {
           pendingVerification: result.pendingVerification
         });
         setSaleAttemptId(null);
-
+        if (result.invoiceError) {
+          toast.warning(result.invoiceError);
+        }
+      } else if (result.success) {
+        toast.success(t("pos.sale.saleSuccessToast"));
+        setSaleConfirmation({
+          total: paymentBeforeCharge.total,
+          method: paymentBeforeCharge.method,
+          change: paymentBeforeCharge.change,
+          customerName: paymentBeforeCharge.customerName,
+          saleId: attemptId
+        });
+        setSaleAttemptId(null);
         if (result.invoiceError) {
           toast.warning(result.invoiceError);
         }

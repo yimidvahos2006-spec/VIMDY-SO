@@ -16,6 +16,7 @@ DECLARE
   v_foreign_business_id uuid;
   v_foreign_branch_id uuid;
   v_product_id uuid := gen_random_uuid();
+  v_cashier_inventory_product_id uuid := gen_random_uuid();
   v_ingredient_id uuid := gen_random_uuid();
   v_recipe_product_id uuid := gen_random_uuid();
   v_kitchen_product_id uuid := gen_random_uuid();
@@ -26,8 +27,13 @@ DECLARE
   v_sale_data jsonb;
   v_stock numeric;
   v_count integer;
+  v_inventory_movement_count integer;
   v_rejected boolean;
   v_role text;
+  v_cash_register_id uuid;
+  v_shift_id uuid := gen_random_uuid();
+  v_payment_id text;
+  v_paid_data jsonb;
 BEGIN
   IF NOT has_function_privilege(
        'authenticated',
@@ -65,7 +71,7 @@ BEGIN
   RETURNING id INTO v_branch_id;
 
   INSERT INTO public.business_members (business_id, user_id, role)
-  VALUES (v_business_id, v_user_id, 'CAJERO');
+  VALUES (v_business_id, v_user_id, 'GERENTE');
 
   INSERT INTO public.products (id, business_id, branch_id, version, data)
   VALUES (v_product_id, v_business_id, v_branch_id, 1,
@@ -74,6 +80,21 @@ BEGIN
       'taxRate', 0, 'stock', 0, 'trackStock', false, 'active', true,
       'isIngredient', false, 'requiresKitchen', false
     ));
+
+  INSERT INTO public.products (id, business_id, branch_id, version, data)
+  VALUES (v_cashier_inventory_product_id, v_business_id, v_branch_id, 1,
+    jsonb_build_object(
+      'id', v_cashier_inventory_product_id, 'name', 'GATE1 Cashier inventory guard item',
+      'price', 1500, 'stock', 10, 'trackStock', true, 'active', true,
+      'isIngredient', false, 'requiresKitchen', false
+    ));
+
+  INSERT INTO public.cash_registers (id, business_id, branch_id, code, name, active, status, data)
+  VALUES (gen_random_uuid(), v_business_id, v_branch_id, 'GATE1', 'Gate 1 Cash Register', true, 'ACTIVE', '{}'::jsonb)
+  RETURNING id INTO v_cash_register_id;
+  PERFORM public.open_shift_atomic(
+    v_shift_id, v_business_id, v_branch_id, v_cash_register_id, v_user_id, 100, 'Gate 1 opening float'
+  );
 
   -- Server price is authoritative; forged price/total/cashier/business fields
   -- are ignored. Product has trackStock=false, so no stock or Kardex mutation.
@@ -115,12 +136,200 @@ BEGIN
     RAISE EXCEPTION 'FAIL client supplied business/branch was trusted';
   END IF;
 
+  -- Failure after inserting the cash movement must roll back movement and sale state.
+  v_payment_id := 'gate1-payment-rollback-' || v_sale_id::text;
+  EXECUTE $fn$
+    CREATE OR REPLACE FUNCTION public.vimdy_gate1_fail_sale_payment()
+    RETURNS trigger LANGUAGE plpgsql AS $body$
+    BEGIN
+      IF current_setting('vimdy.gate1_failure', true) = 'payment'
+         AND NEW.data->>'status' = 'PAID' THEN
+        RAISE EXCEPTION 'GATE1_TEST_PAYMENT_FAILURE';
+      END IF;
+      RETURN NEW;
+    END
+    $body$
+  $fn$;
+  EXECUTE 'CREATE TRIGGER vimdy_gate1_fail_sale_payment BEFORE UPDATE OF data ON public.sales
+    FOR EACH ROW EXECUTE FUNCTION public.vimdy_gate1_fail_sale_payment()';
+  PERFORM set_config('vimdy.gate1_failure', 'payment', true);
+  v_rejected := false;
+  BEGIN
+    PERFORM * FROM public.register_sale_payment_atomic(
+      v_sale_id::text, v_business_id, v_branch_id, v_payment_id, NULL,
+      'CASH', 1000, 1000, 1000, 0, NULL, v_cash_register_id, 'CASH', v_shift_id
+    );
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM = 'GATE1_TEST_PAYMENT_FAILURE' THEN
+      v_rejected := true;
+    ELSE
+      RAISE;
+    END IF;
+  END;
+  PERFORM set_config('vimdy.gate1_failure', '', true);
+  DROP TRIGGER vimdy_gate1_fail_sale_payment ON public.sales;
+  DROP FUNCTION public.vimdy_gate1_fail_sale_payment();
+  IF NOT v_rejected
+     OR EXISTS (SELECT 1 FROM public.cash_movements WHERE idempotency_key = v_payment_id)
+     OR (SELECT data->>'status' FROM public.sales WHERE id = v_sale_id) <> 'PENDING_PAYMENT' THEN
+    RAISE EXCEPTION 'FAIL payment rollback left financial state partially persisted';
+  END IF;
+
+  -- GERENTE may open the shift and sell, but MESERO must not collect payment.
+  UPDATE public.business_members SET role = 'MESERO'
+  WHERE business_id = v_business_id AND user_id = v_user_id;
+  v_rejected := false;
+  BEGIN
+    PERFORM public.register_sale_payment_atomic(
+      v_sale_id::text, v_business_id, v_branch_id, 'gate1-mesero-payment-' || v_sale_id::text, NULL,
+      'CASH', 1000, 1000, 1000, 0, NULL, v_cash_register_id, 'CASH', v_shift_id
+    );
+  EXCEPTION WHEN OTHERS THEN
+    IF strpos(SQLERRM, 'CAJA_FORBIDDEN') > 0 THEN
+      v_rejected := true;
+    ELSE
+      RAISE;
+    END IF;
+  END;
+  IF NOT v_rejected THEN RAISE EXCEPTION 'FAIL MESERO was allowed to collect a sale'; END IF;
+  UPDATE public.business_members SET role = 'GERENTE'
+  WHERE business_id = v_business_id AND user_id = v_user_id;
+
+  -- Same movement key with a different amount is a conflict, never a silent success.
+  v_payment_id := 'gate1-cash-key-reuse-' || v_sale_id::text;
+  PERFORM public.register_movement_atomic(
+    v_payment_id, v_business_id, v_branch_id, 'IN', 10, 'Gate 1 fixed payload',
+    'CASH', 10, NULL, now(), v_cash_register_id, 'CASH'
+  );
+  v_rejected := false;
+  BEGIN
+    PERFORM public.register_movement_atomic(
+      v_payment_id, v_business_id, v_branch_id, 'IN', 11, 'Gate 1 changed payload',
+      'CASH', 11, NULL, now(), v_cash_register_id, 'CASH'
+    );
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM = 'CAJA_IDEMPOTENCY_KEY_REUSED' THEN
+      v_rejected := true;
+    ELSE
+      RAISE;
+    END IF;
+  END;
+  IF NOT v_rejected OR (
+    SELECT count(*) FROM public.cash_movements WHERE idempotency_key = v_payment_id
+  ) <> 1 THEN
+    RAISE EXCEPTION 'FAIL conflicting cash idempotency key was accepted';
+  END IF;
+
+  -- A successful payment and physical close persist sale, movement, count and audit together.
+  v_payment_id := 'gate1-payment-success-' || v_sale_id::text;
+  SELECT payment.sale_data INTO v_paid_data
+  FROM public.register_sale_payment_atomic(
+    v_sale_id::text, v_business_id, v_branch_id, v_payment_id, NULL,
+    'CASH', 1000, 1000, 1000, 0, NULL, v_cash_register_id, 'CASH', v_shift_id
+  ) AS payment;
+  IF v_paid_data->>'status' <> 'PAID'
+     OR NOT EXISTS (SELECT 1 FROM public.cash_movements WHERE idempotency_key = v_payment_id)
+     OR NOT EXISTS (SELECT 1 FROM public.audit_logs
+       WHERE business_id = v_business_id AND data->>'idempotencyKey' = v_payment_id) THEN
+    RAISE EXCEPTION 'FAIL successful sale payment or its audit was not persisted';
+  END IF;
+
+  PERFORM public.register_cash_movement_enterprise(
+    'gate1-manager-cash-in-' || v_sale_id::text, v_business_id, v_branch_id,
+    v_cash_register_id, v_shift_id, 'IN', 10, 'OTHER_IN', 'Gate 1 manager cash movement'
+  );
+
+  SELECT closed.shift_data INTO v_paid_data
+  FROM public.close_shift_with_cash_count_atomic(
+    v_shift_id, v_business_id, v_branch_id, v_cash_register_id, 1120,
+    '{"1000":1,"100":1,"10":2}'::jsonb, 'COP', 'Gate 1 close count'
+  ) AS closed;
+  IF v_paid_data->>'status' <> 'CLOSED'
+     OR (v_paid_data->>'expectedAmount')::numeric <> 1120
+     OR (v_paid_data->>'difference')::numeric <> 0
+     OR NOT EXISTS (SELECT 1 FROM public.cash_drawer_counts
+       WHERE shift_id = v_shift_id AND counted_amount = 1120 AND difference = 0)
+     OR NOT EXISTS (SELECT 1 FROM public.audit_logs
+       WHERE business_id = v_business_id AND data->>'action' = 'SHIFT_CLOSED'
+         AND data->>'entityId' = v_shift_id::text) THEN
+    RAISE EXCEPTION 'FAIL shift close did not persist expected/counted balance and audit';
+  END IF;
+
+  INSERT INTO public.branches (business_id, name, active)
+  VALUES (v_business_id, 'GATE1 Other Cash Branch', true)
+  RETURNING id INTO v_foreign_branch_id;
+  v_rejected := false;
+  BEGIN
+    PERFORM public.register_cash_movement_enterprise(
+      'gate1-cash-branch-denied-' || v_sale_id::text, v_business_id, v_foreign_branch_id,
+      v_cash_register_id, v_shift_id, 'IN', 1, 'OTHER_IN', 'Wrong branch cash movement'
+    );
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM = 'CAJA_REGISTER_CONTEXT_INVALID' THEN
+      v_rejected := true;
+    ELSE
+      RAISE;
+    END IF;
+  END;
+  IF NOT v_rejected THEN RAISE EXCEPTION 'FAIL cash movement crossed branch boundary'; END IF;
+
+  INSERT INTO public.businesses (name, plan, trial_ends_at, timezone, subscription_status, currency, tax_rate)
+  VALUES ('GATE1 Foreign Cash Tenant', 'trial', now() + interval '30 days', 'America/Bogota', 'trial', 'COP', 0)
+  RETURNING id INTO v_foreign_business_id;
+  INSERT INTO public.branches (business_id, name, active)
+  VALUES (v_foreign_business_id, 'Foreign Cash Branch', true)
+  RETURNING id INTO v_foreign_branch_id;
+  v_rejected := false;
+  BEGIN
+    PERFORM public.register_cash_movement_enterprise(
+      'gate1-cash-tenant-denied-' || v_sale_id::text, v_foreign_business_id, v_foreign_branch_id,
+      v_cash_register_id, v_shift_id, 'IN', 1, 'OTHER_IN', 'Foreign tenant cash movement'
+    );
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM = 'CAJA_FORBIDDEN' THEN
+      v_rejected := true;
+    ELSE
+      RAISE;
+    END IF;
+  END;
+  IF NOT v_rejected THEN RAISE EXCEPTION 'FAIL cash movement crossed tenant boundary'; END IF;
+
+  -- Manual movement RPC denies a role with no cash permissions.
+  UPDATE public.business_members SET role = 'MESERO'
+  WHERE business_id = v_business_id AND user_id = v_user_id;
+  v_rejected := false;
+  BEGIN
+    PERFORM public.register_cash_movement_enterprise(
+      'gate1-cash-role-denied-' || v_sale_id::text, v_business_id, v_branch_id,
+      v_cash_register_id, v_shift_id, 'IN', 1, 'OTHER_IN', 'Unauthorized cash movement'
+    );
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM = 'CAJA_FORBIDDEN' THEN
+      v_rejected := true;
+    ELSE
+      RAISE;
+    END IF;
+  END;
+  IF NOT v_rejected THEN RAISE EXCEPTION 'FAIL MESERO was allowed to write a cash movement'; END IF;
+  UPDATE public.business_members SET role = 'GERENTE'
+  WHERE business_id = v_business_id AND user_id = v_user_id;
+
+  -- Use a separate, stocked product so the cashier permission check is isolated.
+  SELECT count(*) INTO v_inventory_movement_count
+  FROM public.inventory_movements
+  WHERE business_id = v_business_id
+    AND data->>'productId' = v_cashier_inventory_product_id::text;
+  SELECT (data->>'stock')::numeric INTO v_stock
+  FROM public.products WHERE id = v_cashier_inventory_product_id;
+
+  UPDATE public.business_members SET role = 'CAJERO'
+  WHERE business_id = v_business_id AND user_id = v_user_id;
   v_rejected := false;
   BEGIN
     PERFORM public.adjust_stock_batch_with_kardex(
       'gate1-cashier-must-not-adjust-' || v_sale_id::text,
       jsonb_build_array(jsonb_build_object(
-        'productId', v_product_id, 'delta', -1, 'type', 'DECREASE',
+        'productId', v_cashier_inventory_product_id, 'delta', -1, 'type', 'DECREASE',
         'reason', 'GATE1_ROLE_SEPARATION', 'branchId', v_branch_id
       ))
     );
@@ -133,6 +342,16 @@ BEGIN
   END;
   IF NOT v_rejected THEN
     RAISE EXCEPTION 'FAIL cashier received general inventory adjustment authority';
+  END IF;
+  UPDATE public.business_members SET role = 'GERENTE'
+  WHERE business_id = v_business_id AND user_id = v_user_id;
+  IF (SELECT (data->>'stock')::numeric FROM public.products WHERE id = v_cashier_inventory_product_id)
+       IS DISTINCT FROM v_stock
+     OR (SELECT count(*) FROM public.inventory_movements
+         WHERE business_id = v_business_id
+           AND data->>'productId' = v_cashier_inventory_product_id::text)
+       IS DISTINCT FROM v_inventory_movement_count THEN
+    RAISE EXCEPTION 'FAIL denied cashier inventory adjustment left stock or Kardex changes';
   END IF;
 
   -- Same key+payload returns prior result and creates no second side effect.
@@ -416,12 +635,6 @@ BEGIN
   v_branch_id := (SELECT id FROM public.branches
     WHERE business_id = v_business_id AND name = 'GATE1 Branch');
 
-  INSERT INTO public.businesses (name, plan, trial_ends_at, timezone, subscription_status, currency, tax_rate)
-  VALUES ('GATE1 Foreign Tenant', 'trial', now() + interval '30 days', 'America/Bogota', 'trial', 'COP', 0)
-  RETURNING id INTO v_foreign_business_id;
-  INSERT INTO public.branches (business_id, name, active)
-  VALUES (v_foreign_business_id, 'Foreign Branch', true)
-  RETURNING id INTO v_foreign_branch_id;
   v_sale_id := gen_random_uuid();
   v_result := public.create_sale_fulfillment_atomic(
     v_foreign_business_id, v_foreign_branch_id, 'gate1-foreign-' || v_sale_id::text,

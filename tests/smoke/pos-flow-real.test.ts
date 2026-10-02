@@ -82,16 +82,16 @@ describe("Smoke: flujo real de POS", () => {
     expect(sale.total).toBe(20000);
     expect((await products.findById(product.id))?.stock).toBe(8);
 
-    const { sale: paidSale, payment } = await salesEngine.registerPayment(sale, "MIXED", {
-      received: 20000,
-      mixed: { cash: 10000, card: 10000 },
-      reference: "ref-pos-flow"
+    const { sale: paidSale, payment } = await salesEngine.registerPayment(sale, "CASH", {
+      received: 20000
     });
 
-    expect(payment.method).toBe("MIXED");
+    expect(payment.method).toBe("CASH");
     expect(payment.total).toBe(20000);
     expect(payment.received).toBe(20000);
     expect(payment.change).toBe(0);
+    expect(payment.success).toBe(true);
+    expect(payment.verificationStatus).toBe("CONFIRMED");
     expect(paidSale.status).toBe("PAID");
 
     const receipt = await salesEngine.getReceiptBySaleId(paidSale.id);

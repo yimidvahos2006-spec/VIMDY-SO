@@ -41,7 +41,8 @@ DECLARE
   b_id       uuid;
   br_id      uuid;
   shift_id   uuid;
-  sale_id    text := 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
+  cash_register_id uuid;
+  sale_id    uuid := 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
   cnt        int;
 BEGIN
   INSERT INTO businesses (name, timezone) VALUES ('TEST Payment Idempotent', 'America/Bogota') RETURNING id INTO b_id;
@@ -51,10 +52,15 @@ BEGIN
   INSERT INTO business_members (business_id, user_id, role)
   VALUES (b_id, current_setting('vimdy.caja_test_user_id')::uuid, 'CAJERO');
 
-  INSERT INTO shifts (business_id, branch_id, version, data)
-  VALUES (b_id, br_id, 1,
-    jsonb_build_object('status','OPEN','openedAt',now(),'openingAmount',0,'cashierId','cashier-1')
-  ) RETURNING id INTO shift_id;
+  INSERT INTO cash_registers (business_id, branch_id, code, name, active, status, data)
+  VALUES (b_id, br_id, 'PAY-IDEMPOTENT', 'Test payment register', true, 'ACTIVE', '{}'::jsonb)
+  RETURNING id INTO cash_register_id;
+
+  shift_id := gen_random_uuid();
+  PERFORM open_shift_atomic(
+    shift_id, b_id, br_id, cash_register_id,
+    current_setting('vimdy.caja_test_user_id')::uuid, 0, 'Test payment idempotency shift'
+  );
 
   INSERT INTO sales (id, business_id, branch_id, version, data, created_at, updated_at)
   VALUES (sale_id, b_id, br_id, 1,
@@ -65,20 +71,20 @@ BEGIN
 
   -- Primer pago: OK
   PERFORM register_sale_payment_atomic(
-    sale_id, b_id, br_id, 'sale-payment-' || sale_id, NULL,
-    'CASH', 10000::numeric, 10000::numeric, 10000::numeric, 0::numeric, 'Test pago'
+    sale_id::text, b_id, br_id, 'sale-payment-' || sale_id::text, NULL,
+    'CASH', 10000::numeric, 10000::numeric, 10000::numeric, 0::numeric, 'Test pago', NULL, 'CASH'
   );
 
   -- Retry con MISMA clave: debe devolver el mismo resultado sin duplicar
   PERFORM register_sale_payment_atomic(
-    sale_id, b_id, br_id, 'sale-payment-' || sale_id, NULL,
-    'CASH', 10000::numeric, 10000::numeric, 10000::numeric, 0::numeric, 'Test pago'
+    sale_id::text, b_id, br_id, 'sale-payment-' || sale_id::text, NULL,
+    'CASH', 10000::numeric, 10000::numeric, 10000::numeric, 0::numeric, 'Test pago', NULL, 'CASH'
   );
 
   -- Verificar: exactamente 1 movimiento de ingreso
   SELECT count(*) INTO cnt
   FROM cash_movements
-  WHERE idempotency_key = 'sale-payment-' || sale_id
+  WHERE idempotency_key = 'sale-payment-' || sale_id::text
     AND business_id = b_id
     AND branch_id = br_id;
 
@@ -96,6 +102,7 @@ BEGIN
   DELETE FROM cash_movements WHERE business_id = b_id AND branch_id = br_id;
   DELETE FROM sales WHERE business_id = b_id AND branch_id = br_id;
   DELETE FROM shifts WHERE business_id = b_id AND branch_id = br_id;
+  DELETE FROM cash_registers WHERE id = cash_register_id;
   DELETE FROM business_members WHERE business_id = b_id;
   DELETE FROM branches WHERE business_id = b_id;
   DELETE FROM businesses WHERE id = b_id;
@@ -108,8 +115,9 @@ DECLARE
   b_id       uuid;
   br_id      uuid;
   shift_id   uuid;
-  sale1      text := 'sale-idempotent-1';
-  sale2      text := 'sale-idempotent-2';
+  cash_register_id uuid;
+  sale1      uuid := gen_random_uuid();
+  sale2      uuid := gen_random_uuid();
   raised     boolean := false;
 BEGIN
   INSERT INTO businesses (name, timezone) VALUES ('TEST Key Reused', 'America/Bogota') RETURNING id INTO b_id;
@@ -119,10 +127,14 @@ BEGIN
   INSERT INTO business_members (business_id, user_id, role)
   VALUES (b_id, current_setting('vimdy.caja_test_user_id')::uuid, 'CAJERO');
 
-  INSERT INTO shifts (business_id, branch_id, version, data)
-  VALUES (b_id, br_id, 1,
-    jsonb_build_object('status','OPEN','openedAt',now(),'openingAmount',0,'cashierId','cashier-1')
-  ) RETURNING id INTO shift_id;
+  INSERT INTO cash_registers (business_id, branch_id, code, name, active, status, data)
+  VALUES (b_id, br_id, 'KEY-REUSE', 'Test key reuse register', true, 'ACTIVE', '{}'::jsonb)
+  RETURNING id INTO cash_register_id;
+  shift_id := gen_random_uuid();
+  PERFORM open_shift_atomic(
+    shift_id, b_id, br_id, cash_register_id,
+    current_setting('vimdy.caja_test_user_id')::uuid, 0, 'Test key reuse shift'
+  );
 
   INSERT INTO sales (id, business_id, branch_id, version, data, created_at, updated_at)
   VALUES (sale1, b_id, br_id, 1,
@@ -133,15 +145,15 @@ BEGIN
 
   -- Pago sale1 con key K
   PERFORM register_sale_payment_atomic(
-    sale1, b_id, br_id, 'shared-payment-key', NULL,
-    'CASH', 10000::numeric, 10000::numeric, 10000::numeric, 0::numeric, NULL
+    sale1::text, b_id, br_id, 'shared-payment-key', NULL,
+    'CASH', 10000::numeric, 10000::numeric, 10000::numeric, 0::numeric, NULL, NULL, 'CASH'
   );
 
   -- Intento pagar sale2 con la MISMA key K → debe fallar
   BEGIN
     PERFORM register_sale_payment_atomic(
-      sale2, b_id, br_id, 'shared-payment-key', NULL,
-      'CASH', 10000::numeric, 10000::numeric, 10000::numeric, 0::numeric, NULL
+      sale2::text, b_id, br_id, 'shared-payment-key', NULL,
+      'CASH', 10000::numeric, 10000::numeric, 10000::numeric, 0::numeric, NULL, NULL, 'CASH'
     );
   EXCEPTION
     WHEN OTHERS THEN
@@ -159,6 +171,7 @@ BEGIN
   DELETE FROM cash_movements WHERE idempotency_key = 'shared-payment-key';
   DELETE FROM sales WHERE business_id = b_id AND branch_id = br_id;
   DELETE FROM shifts WHERE business_id = b_id AND branch_id = br_id;
+  DELETE FROM cash_registers WHERE id = cash_register_id;
   DELETE FROM business_members WHERE business_id = b_id;
   DELETE FROM branches WHERE business_id = b_id;
   DELETE FROM businesses WHERE id = b_id;
@@ -173,7 +186,8 @@ DECLARE
   b_id    uuid;
   br_id   uuid;
   shift_id uuid;
-  sale_id text := 'sale-double-pay';
+  cash_register_id uuid;
+  sale_id uuid := gen_random_uuid();
   cnt     int;
 BEGIN
   INSERT INTO businesses (name, timezone) VALUES ('TEST Double Pay', 'America/Bogota') RETURNING id INTO b_id;
@@ -183,10 +197,14 @@ BEGIN
   INSERT INTO business_members (business_id, user_id, role)
   VALUES (b_id, current_setting('vimdy.caja_test_user_id')::uuid, 'CAJERO');
 
-  INSERT INTO shifts (business_id, branch_id, version, data)
-  VALUES (b_id, br_id, 1,
-    jsonb_build_object('status','OPEN','openedAt',now(),'openingAmount',0,'cashierId','cashier-1')
-  ) RETURNING id INTO shift_id;
+  INSERT INTO cash_registers (business_id, branch_id, code, name, active, status, data)
+  VALUES (b_id, br_id, 'DOUBLE-PAY', 'Test double pay register', true, 'ACTIVE', '{}'::jsonb)
+  RETURNING id INTO cash_register_id;
+  shift_id := gen_random_uuid();
+  PERFORM open_shift_atomic(
+    shift_id, b_id, br_id, cash_register_id,
+    current_setting('vimdy.caja_test_user_id')::uuid, 0, 'Test double pay shift'
+  );
 
   INSERT INTO sales (id, business_id, branch_id, version, data, created_at, updated_at)
   VALUES (sale_id, b_id, br_id, 1,
@@ -194,15 +212,15 @@ BEGIN
 
   -- Primer pago
   PERFORM register_sale_payment_atomic(
-    sale_id, b_id, br_id, 'sale-payment-' || sale_id, NULL,
-    'CASH', 50000::numeric, 50000::numeric, 50000::numeric, 0::numeric, NULL
+    sale_id::text, b_id, br_id, 'sale-payment-' || sale_id::text, NULL,
+    'CASH', 50000::numeric, 50000::numeric, 50000::numeric, 0::numeric, NULL, NULL, 'CASH'
   );
 
   -- Segundo intento: debe fallar con SALE_ALREADY_PAID
   BEGIN
     PERFORM register_sale_payment_atomic(
-      sale_id, b_id, br_id, 'sale-payment-' || sale_id || '-retry', NULL,
-      'CASH', 50000::numeric, 50000::numeric, 50000::numeric, 0::numeric, NULL
+      sale_id::text, b_id, br_id, 'sale-payment-' || sale_id::text || '-retry', NULL,
+      'CASH', 50000::numeric, 50000::numeric, 50000::numeric, 0::numeric, NULL, NULL, 'CASH'
     );
     RAISE EXCEPTION 'FAIL: debería haber fallado con SALE_ALREADY_PAID';
   EXCEPTION
@@ -215,7 +233,7 @@ BEGIN
   -- Verificar: sigue habiendo exactamente 1 movimiento
   SELECT count(*) INTO cnt
   FROM cash_movements
-  WHERE idempotency_key = 'sale-payment-' || sale_id;
+  WHERE idempotency_key = 'sale-payment-' || sale_id::text;
 
   IF cnt <> 1 THEN
     RAISE EXCEPTION 'FAIL: doble cobro creó % movimientos (esperado 1)', cnt;
@@ -226,6 +244,7 @@ BEGIN
   DELETE FROM cash_movements WHERE business_id = b_id AND branch_id = br_id;
   DELETE FROM sales WHERE business_id = b_id AND branch_id = br_id;
   DELETE FROM shifts WHERE business_id = b_id AND branch_id = br_id;
+  DELETE FROM cash_registers WHERE id = cash_register_id;
   DELETE FROM business_members WHERE business_id = b_id;
   DELETE FROM branches WHERE business_id = b_id;
   DELETE FROM businesses WHERE id = b_id;
@@ -237,7 +256,7 @@ DO $$
 DECLARE
   b_id    uuid;
   br_id   uuid;
-  sale_id text := 'sale-no-shift';
+  sale_id uuid := gen_random_uuid();
   raised  boolean := false;
 BEGIN
   INSERT INTO businesses (name, timezone) VALUES ('TEST No Shift', 'America/Bogota') RETURNING id INTO b_id;
@@ -253,8 +272,8 @@ BEGIN
 
   BEGIN
     PERFORM register_sale_payment_atomic(
-      sale_id, b_id, br_id, 'sale-payment-no-shift', NULL,
-      'CASH', 10000::numeric, 10000::numeric, 10000::numeric, 0::numeric, NULL
+      sale_id::text, b_id, br_id, 'sale-payment-no-shift', NULL,
+      'CASH', 10000::numeric, 10000::numeric, 10000::numeric, 0::numeric, NULL, NULL, 'CASH'
     );
   EXCEPTION
     WHEN OTHERS THEN
@@ -282,7 +301,8 @@ DECLARE
   b_id    uuid;
   br_id   uuid;
   shift_id uuid;
-  sale_id text := 'sale-closed-shift';
+  cash_register_id uuid;
+  sale_id uuid := gen_random_uuid();
   raised  boolean := false;
 BEGIN
   INSERT INTO businesses (name, timezone) VALUES ('TEST Closed Shift', 'America/Bogota') RETURNING id INTO b_id;
@@ -292,10 +312,15 @@ BEGIN
   INSERT INTO business_members (business_id, user_id, role)
   VALUES (b_id, current_setting('vimdy.caja_test_user_id')::uuid, 'CAJERO');
 
-  INSERT INTO shifts (business_id, branch_id, version, data)
-  VALUES (b_id, br_id, 1,
-    jsonb_build_object('status','CLOSED','openedAt',now()-interval '1 hour','closedAt',now(),'openingAmount',0,'cashierId','cashier-1')
-  ) RETURNING id INTO shift_id;
+  INSERT INTO cash_registers (business_id, branch_id, code, name, active, status, data)
+  VALUES (b_id, br_id, 'CLOSED-SHIFT', 'Test closed shift register', true, 'ACTIVE', '{}'::jsonb)
+  RETURNING id INTO cash_register_id;
+  shift_id := gen_random_uuid();
+  PERFORM open_shift_atomic(
+    shift_id, b_id, br_id, cash_register_id,
+    current_setting('vimdy.caja_test_user_id')::uuid, 0, 'Test shift to close'
+  );
+  PERFORM close_shift_atomic(shift_id, 0, 'Close before payment test');
 
   INSERT INTO sales (id, business_id, branch_id, version, data, created_at, updated_at)
   VALUES (sale_id, b_id, br_id, 1,
@@ -303,8 +328,8 @@ BEGIN
 
   BEGIN
     PERFORM register_sale_payment_atomic(
-      sale_id, b_id, br_id, 'sale-payment-closed-shift', NULL,
-      'CASH', 10000::numeric, 10000::numeric, 10000::numeric, 0::numeric, NULL
+      sale_id::text, b_id, br_id, 'sale-payment-closed-shift', NULL,
+      'CASH', 10000::numeric, 10000::numeric, 10000::numeric, 0::numeric, NULL, NULL, 'CASH'
     );
   EXCEPTION
     WHEN OTHERS THEN
@@ -320,6 +345,7 @@ BEGIN
   RAISE NOTICE 'PASS: pago con turno cerrado rechazado';
 
   DELETE FROM shifts WHERE business_id = b_id AND branch_id = br_id;
+  DELETE FROM cash_registers WHERE id = cash_register_id;
   DELETE FROM business_members WHERE business_id = b_id;
   DELETE FROM branches WHERE business_id = b_id;
   DELETE FROM businesses WHERE id = b_id;
@@ -333,8 +359,7 @@ DECLARE
   b2_id  uuid;
   br1_id uuid;
   br2_id uuid;
-  shift1 uuid;
-  sale_id text := 'sale-cross-business';
+  sale_id uuid := gen_random_uuid();
   raised   boolean := false;
 BEGIN
   INSERT INTO businesses (name, timezone) VALUES ('TEST Cross Biz 1', 'America/Bogota') RETURNING id INTO b1_id;
@@ -347,19 +372,14 @@ BEGIN
   INSERT INTO business_members (business_id, user_id, role)
   VALUES (b1_id, current_setting('vimdy.caja_test_user_id')::uuid, 'CAJERO');
 
-  INSERT INTO shifts (business_id, branch_id, version, data)
-  VALUES (b2_id, br2_id, 1,
-    jsonb_build_object('status','OPEN','openedAt',now(),'openingAmount',0,'cashierId','cashier-1')
-  ) RETURNING id INTO shift1;
-
   INSERT INTO sales (id, business_id, branch_id, version, data, created_at, updated_at)
   VALUES (sale_id, b2_id, br2_id, 1,
     jsonb_build_object('status','PENDING_PAYMENT','type','QUICK','total',10000,'subtotal',8403,'tax',1597,'discount',0,'items','[]'::jsonb), now(), now());
 
   BEGIN
     PERFORM register_sale_payment_atomic(
-      sale_id, b2_id, br2_id, 'sale-payment-cross-biz', NULL,
-      'CASH', 10000::numeric, 10000::numeric, 10000::numeric, 0::numeric, NULL
+      sale_id::text, b2_id, br2_id, 'sale-payment-cross-biz', NULL,
+      'CASH', 10000::numeric, 10000::numeric, 10000::numeric, 0::numeric, NULL, NULL, 'CASH'
     );
   EXCEPTION
     WHEN OTHERS THEN
@@ -374,7 +394,6 @@ BEGIN
 
   RAISE NOTICE 'PASS: pago en otro business rechazado (multi-tenant isolamento)';
 
-  DELETE FROM shifts WHERE business_id = b2_id AND branch_id = br2_id;
   DELETE FROM sales WHERE business_id = b2_id AND branch_id = br2_id;
   DELETE FROM business_members WHERE business_id = b1_id;
   DELETE FROM branches WHERE business_id = b2_id;
@@ -388,8 +407,7 @@ DO $$
 DECLARE
   b_id    uuid;
   br_id   uuid;
-  shift_id uuid;
-  sale_id text := 'sale-rbac-mesero';
+  sale_id uuid := gen_random_uuid();
   raised  boolean := false;
 BEGIN
   INSERT INTO businesses (name, timezone) VALUES ('TEST RBAC Mesero', 'America/Bogota') RETURNING id INTO b_id;
@@ -399,19 +417,14 @@ BEGIN
   INSERT INTO business_members (business_id, user_id, role)
   VALUES (b_id, current_setting('vimdy.caja_test_user_id')::uuid, 'MESERO');
 
-  INSERT INTO shifts (business_id, branch_id, version, data)
-  VALUES (b_id, br_id, 1,
-    jsonb_build_object('status','OPEN','openedAt',now(),'openingAmount',0,'cashierId','cashier-1')
-  ) RETURNING id INTO shift_id;
-
   INSERT INTO sales (id, business_id, branch_id, version, data, created_at, updated_at)
   VALUES (sale_id, b_id, br_id, 1,
     jsonb_build_object('status','PENDING_PAYMENT','type','QUICK','total',10000,'subtotal',8403,'tax',1597,'discount',0,'items','[]'::jsonb), now(), now());
 
   BEGIN
     PERFORM register_sale_payment_atomic(
-      sale_id, b_id, br_id, 'sale-payment-rbac-mesero', NULL,
-      'CASH', 10000::numeric, 10000::numeric, 10000::numeric, 0::numeric, NULL
+      sale_id::text, b_id, br_id, 'sale-payment-rbac-mesero', NULL,
+      'CASH', 10000::numeric, 10000::numeric, 10000::numeric, 0::numeric, NULL, NULL, 'CASH'
     );
   EXCEPTION
     WHEN OTHERS THEN
@@ -426,7 +439,6 @@ BEGIN
 
   RAISE NOTICE 'PASS: RBAC — MESERO rechazado en pago de venta';
 
-  DELETE FROM shifts WHERE business_id = b_id AND branch_id = br_id;
   DELETE FROM sales WHERE business_id = b_id AND branch_id = br_id;
   DELETE FROM business_members WHERE business_id = b_id;
   DELETE FROM branches WHERE business_id = b_id;
@@ -440,7 +452,8 @@ DECLARE
   b_id        uuid;
   br_id       uuid;
   shift_id    uuid;
-  sale_id     text := 'sale-payment-change';
+  cash_register_id uuid;
+  sale_id     uuid := gen_random_uuid();
   income_cnt  int;
   change_cnt  int;
 BEGIN
@@ -451,10 +464,14 @@ BEGIN
   INSERT INTO business_members (business_id, user_id, role)
   VALUES (b_id, current_setting('vimdy.caja_test_user_id')::uuid, 'CAJERO');
 
-  INSERT INTO shifts (business_id, branch_id, version, data)
-  VALUES (b_id, br_id, 1,
-    jsonb_build_object('status','OPEN','openedAt',now(),'openingAmount',0,'cashierId','cashier-1')
-  ) RETURNING id INTO shift_id;
+  INSERT INTO cash_registers (business_id, branch_id, code, name, active, status, data)
+  VALUES (b_id, br_id, 'PAY-CHANGE', 'Test payment change register', true, 'ACTIVE', '{}'::jsonb)
+  RETURNING id INTO cash_register_id;
+  shift_id := gen_random_uuid();
+  PERFORM open_shift_atomic(
+    shift_id, b_id, br_id, cash_register_id,
+    current_setting('vimdy.caja_test_user_id')::uuid, 0, 'Test payment change shift'
+  );
 
   INSERT INTO sales (id, business_id, branch_id, version, data, created_at, updated_at)
   VALUES (sale_id, b_id, br_id, 1,
@@ -462,22 +479,22 @@ BEGIN
 
   -- Pago en efectivo: recibe 20000, total 10000 → cambio 10000
   PERFORM register_sale_payment_atomic(
-    sale_id, b_id, br_id, 'sale-payment-' || sale_id,
-    'sale-change-' || sale_id,
-    'CASH', 10000::numeric, 10000::numeric, 20000::numeric, 10000::numeric, 'Pago con cambio'
+    sale_id::text, b_id, br_id, 'sale-payment-' || sale_id::text,
+    'sale-change-' || sale_id::text,
+    'CASH', 10000::numeric, 10000::numeric, 20000::numeric, 10000::numeric, 'Pago con cambio', NULL, 'CASH'
   );
 
   -- Verificar: 1 movimiento IN (ingreso)
   SELECT count(*) INTO income_cnt
   FROM cash_movements cm
-  WHERE cm.idempotency_key = 'sale-payment-' || sale_id
+  WHERE cm.idempotency_key = 'sale-payment-' || sale_id::text
     AND cm.data->>'type' = 'IN'
     AND cm.business_id = b_id AND cm.branch_id = br_id;
 
   -- Verificar: 1 movimiento OUT (cambio)
   SELECT count(*) INTO change_cnt
   FROM cash_movements cm
-  WHERE cm.idempotency_key = 'sale-change-' || sale_id
+  WHERE cm.idempotency_key = 'sale-change-' || sale_id::text
     AND cm.data->>'type' = 'OUT'
     AND cm.business_id = b_id AND cm.branch_id = br_id;
 
@@ -490,6 +507,7 @@ BEGIN
   DELETE FROM cash_movements WHERE business_id = b_id AND branch_id = br_id;
   DELETE FROM sales WHERE business_id = b_id AND branch_id = br_id;
   DELETE FROM shifts WHERE business_id = b_id AND branch_id = br_id;
+  DELETE FROM cash_registers WHERE id = cash_register_id;
   DELETE FROM business_members WHERE business_id = b_id;
   DELETE FROM branches WHERE business_id = b_id;
   DELETE FROM businesses WHERE id = b_id;
@@ -502,7 +520,8 @@ DECLARE
   b_id    uuid;
   br_id   uuid;
   shift_id uuid;
-  sale_id text := 'sale-card-payment';
+  cash_register_id uuid;
+  sale_id uuid := gen_random_uuid();
   cnt     int;
 BEGIN
   INSERT INTO businesses (name, timezone) VALUES ('TEST Card Payment', 'America/Bogota') RETURNING id INTO b_id;
@@ -512,38 +531,49 @@ BEGIN
   INSERT INTO business_members (business_id, user_id, role)
   VALUES (b_id, current_setting('vimdy.caja_test_user_id')::uuid, 'CAJERO');
 
-  INSERT INTO shifts (business_id, branch_id, version, data)
-  VALUES (b_id, br_id, 1,
-    jsonb_build_object('status','OPEN','openedAt',now(),'openingAmount',0,'cashierId','cashier-1')
-  ) RETURNING id INTO shift_id;
+  INSERT INTO cash_registers (business_id, branch_id, code, name, active, status, data)
+  VALUES (b_id, br_id, 'CARD-PENDING', 'Test unverified card register', true, 'ACTIVE', '{}'::jsonb)
+  RETURNING id INTO cash_register_id;
+  shift_id := gen_random_uuid();
+  PERFORM open_shift_atomic(
+    shift_id, b_id, br_id, cash_register_id,
+    current_setting('vimdy.caja_test_user_id')::uuid, 0, 'Test unverified card shift'
+  );
 
   INSERT INTO sales (id, business_id, branch_id, version, data, created_at, updated_at)
   VALUES (sale_id, b_id, br_id, 1,
     jsonb_build_object('status','PENDING_PAYMENT','type','QUICK','total',50000,'subtotal',42017,'tax',7978,'discount',0,'items','[]'::jsonb), now(), now());
 
-  -- Pago con tarjeta: cash_amount=0, change=0
-  PERFORM register_sale_payment_atomic(
-    sale_id, b_id, br_id, 'sale-payment-' || sale_id, NULL,
-    'CARD', 50000::numeric, 0::numeric, 50000::numeric, 0::numeric, 'Pago con tarjeta'
-  );
+  -- Without terminal/provider confirmation, CARD must not create a payment.
+  BEGIN
+    PERFORM register_sale_payment_atomic(
+      sale_id::text, b_id, br_id, 'sale-payment-' || sale_id::text, NULL,
+      'CARD', 50000::numeric, 0::numeric, 50000::numeric, 0::numeric,
+      'Pago con tarjeta', cash_register_id, NULL, shift_id
+    );
+    RAISE EXCEPTION 'FAIL: un pago CARD sin verificación fue aceptado';
+  EXCEPTION
+    WHEN OTHERS THEN
+      IF strpos(SQLERRM, 'CAJA_PAYMENT_NOT_VERIFIED') = 0 THEN
+        RAISE;
+      END IF;
+  END;
 
-  -- Verificar: 1 movimiento IN con paymentMethod CARD
   SELECT count(*) INTO cnt
   FROM cash_movements cm
-  WHERE cm.idempotency_key = 'sale-payment-' || sale_id
-    AND cm.data->>'type' = 'IN'
-    AND cm.data->>'paymentMethod' = 'CARD'
+  WHERE cm.idempotency_key = 'sale-payment-' || sale_id::text
     AND cm.business_id = b_id AND cm.branch_id = br_id;
-
-  IF cnt <> 1 THEN
-    RAISE EXCEPTION 'FAIL: esperado 1 movimiento IN con CARD, encontrados %', cnt;
+  IF cnt <> 0
+     OR (SELECT data->>'status' FROM sales WHERE id = sale_id) <> 'PENDING_PAYMENT' THEN
+    RAISE EXCEPTION 'FAIL: CARD sin verificar dejó estado o movimiento financiero';
   END IF;
 
-  RAISE NOTICE 'PASS: pago con tarjeta registra único movimiento sin cambio';
+  RAISE NOTICE 'PASS: pago CARD sin confirmación externa es rechazado sin movimiento';
 
   DELETE FROM cash_movements WHERE business_id = b_id AND branch_id = br_id;
   DELETE FROM sales WHERE business_id = b_id AND branch_id = br_id;
   DELETE FROM shifts WHERE business_id = b_id AND branch_id = br_id;
+  DELETE FROM cash_registers WHERE id = cash_register_id;
   DELETE FROM business_members WHERE business_id = b_id;
   DELETE FROM branches WHERE business_id = b_id;
   DELETE FROM businesses WHERE id = b_id;
@@ -556,8 +586,9 @@ DECLARE
   b_id    uuid;
   br_id   uuid;
   shift_id uuid;
-  sale1   text := 'sale-concurrent-1';
-  sale2   text := 'sale-concurrent-2';
+  cash_register_id uuid;
+  sale1   uuid := gen_random_uuid();
+  sale2   uuid := gen_random_uuid();
   cnt1    int;
   cnt2    int;
 BEGIN
@@ -568,10 +599,14 @@ BEGIN
   INSERT INTO business_members (business_id, user_id, role)
   VALUES (b_id, current_setting('vimdy.caja_test_user_id')::uuid, 'CAJERO');
 
-  INSERT INTO shifts (business_id, branch_id, version, data)
-  VALUES (b_id, br_id, 1,
-    jsonb_build_object('status','OPEN','openedAt',now(),'openingAmount',0,'cashierId','cashier-1')
-  ) RETURNING id INTO shift_id;
+  INSERT INTO cash_registers (business_id, branch_id, code, name, active, status, data)
+  VALUES (b_id, br_id, 'CONCURRENT', 'Test concurrent payment register', true, 'ACTIVE', '{}'::jsonb)
+  RETURNING id INTO cash_register_id;
+  shift_id := gen_random_uuid();
+  PERFORM open_shift_atomic(
+    shift_id, b_id, br_id, cash_register_id,
+    current_setting('vimdy.caja_test_user_id')::uuid, 0, 'Test concurrent payment shift'
+  );
 
   INSERT INTO sales (id, business_id, branch_id, version, data, created_at, updated_at)
   VALUES (sale1, b_id, br_id, 1,
@@ -582,16 +617,16 @@ BEGIN
 
   -- Pago simultáneo de ventas diferentes
   PERFORM register_sale_payment_atomic(
-    sale1, b_id, br_id, 'sale-payment-' || sale1, NULL,
-    'CASH', 10000::numeric, 10000::numeric, 10000::numeric, 0::numeric, NULL
+    sale1::text, b_id, br_id, 'sale-payment-' || sale1::text, NULL,
+    'CASH', 10000::numeric, 10000::numeric, 10000::numeric, 0::numeric, NULL, NULL, 'CASH'
   );
   PERFORM register_sale_payment_atomic(
-    sale2, b_id, br_id, 'sale-payment-' || sale2, NULL,
-    'CASH', 20000::numeric, 20000::numeric, 20000::numeric, 0::numeric, NULL
+    sale2::text, b_id, br_id, 'sale-payment-' || sale2::text, NULL,
+    'CASH', 20000::numeric, 20000::numeric, 20000::numeric, 0::numeric, NULL, NULL, 'CASH'
   );
 
-  SELECT count(*) INTO cnt1 FROM cash_movements WHERE idempotency_key = 'sale-payment-' || sale1;
-  SELECT count(*) INTO cnt2 FROM cash_movements WHERE idempotency_key = 'sale-payment-' || sale2;
+  SELECT count(*) INTO cnt1 FROM cash_movements WHERE idempotency_key = 'sale-payment-' || sale1::text;
+  SELECT count(*) INTO cnt2 FROM cash_movements WHERE idempotency_key = 'sale-payment-' || sale2::text;
 
   IF cnt1 <> 1 OR cnt2 <> 1 THEN
     RAISE EXCEPTION 'FAIL: concurrencia entre ventas — cnt1=% cnt2=% (esperado 1+1)', cnt1, cnt2;
@@ -602,6 +637,7 @@ BEGIN
   DELETE FROM cash_movements WHERE business_id = b_id AND branch_id = br_id;
   DELETE FROM sales WHERE business_id = b_id AND branch_id = br_id;
   DELETE FROM shifts WHERE business_id = b_id AND branch_id = br_id;
+  DELETE FROM cash_registers WHERE id = cash_register_id;
   DELETE FROM business_members WHERE business_id = b_id;
   DELETE FROM branches WHERE business_id = b_id;
   DELETE FROM businesses WHERE id = b_id;
@@ -616,8 +652,10 @@ DECLARE
   br2_id  uuid;
   shift1  uuid;
   shift2  uuid;
-  sale1   text := 'sale-branch-1';
-  sale2   text := 'sale-branch-2';
+  cash_register1_id uuid;
+  cash_register2_id uuid;
+  sale1   uuid := gen_random_uuid();
+  sale2   uuid := gen_random_uuid();
   cnt1    int;
   cnt2    int;
 BEGIN
@@ -629,14 +667,23 @@ BEGIN
   INSERT INTO business_members (business_id, user_id, role)
   VALUES (b_id, current_setting('vimdy.caja_test_user_id')::uuid, 'CAJERO');
 
-  INSERT INTO shifts (business_id, branch_id, version, data)
-  VALUES (b_id, br1_id, 1,
-    jsonb_build_object('status','OPEN','openedAt',now(),'openingAmount',0,'cashierId','c1')
-  ) RETURNING id INTO shift1;
-  INSERT INTO shifts (business_id, branch_id, version, data)
-  VALUES (b_id, br2_id, 1,
-    jsonb_build_object('status','OPEN','openedAt',now(),'openingAmount',0,'cashierId','c2')
-  ) RETURNING id INTO shift2;
+  INSERT INTO cash_registers (business_id, branch_id, code, name, active, status, data)
+  VALUES (b_id, br1_id, 'BRANCH-1', 'Branch 1 register', true, 'ACTIVE', '{}'::jsonb)
+  RETURNING id INTO cash_register1_id;
+  INSERT INTO cash_registers (business_id, branch_id, code, name, active, status, data)
+  VALUES (b_id, br2_id, 'BRANCH-2', 'Branch 2 register', true, 'ACTIVE', '{}'::jsonb)
+  RETURNING id INTO cash_register2_id;
+
+  shift1 := gen_random_uuid();
+  PERFORM open_shift_atomic(
+    shift1, b_id, br1_id, cash_register1_id,
+    current_setting('vimdy.caja_test_user_id')::uuid, 0, 'Branch 1 test shift'
+  );
+  shift2 := gen_random_uuid();
+  PERFORM open_shift_atomic(
+    shift2, b_id, br2_id, cash_register2_id,
+    current_setting('vimdy.caja_test_user_id')::uuid, 0, 'Branch 2 test shift'
+  );
 
   INSERT INTO sales (id, business_id, branch_id, version, data, created_at, updated_at)
   VALUES (sale1, b_id, br1_id, 1,
@@ -647,25 +694,25 @@ BEGIN
 
   -- Pago en sucursal 1
   PERFORM register_sale_payment_atomic(
-    sale1, b_id, br1_id, 'sale-payment-' || sale1, NULL,
-    'CASH', 10000::numeric, 10000::numeric, 10000::numeric, 0::numeric, NULL
+    sale1::text, b_id, br1_id, 'sale-payment-' || sale1::text, NULL,
+    'CASH', 10000::numeric, 10000::numeric, 10000::numeric, 0::numeric, NULL, NULL, 'CASH'
   );
 
   -- Pago en sucursal 2
   PERFORM register_sale_payment_atomic(
-    sale2, b_id, br2_id, 'sale-payment-' || sale2, NULL,
-    'CASH', 20000::numeric, 20000::numeric, 20000::numeric, 0::numeric, NULL
+    sale2::text, b_id, br2_id, 'sale-payment-' || sale2::text, NULL,
+    'CASH', 20000::numeric, 20000::numeric, 20000::numeric, 0::numeric, NULL, NULL, 'CASH'
   );
 
   -- Verificar: cada movimiento está en su propia sucursal
   SELECT count(*) INTO cnt1
   FROM cash_movements cm
-  WHERE cm.idempotency_key = 'sale-payment-' || sale1
+  WHERE cm.idempotency_key = 'sale-payment-' || sale1::text
     AND cm.branch_id = br1_id;
 
   SELECT count(*) INTO cnt2
   FROM cash_movements cm
-  WHERE cm.idempotency_key = 'sale-payment-' || sale2
+  WHERE cm.idempotency_key = 'sale-payment-' || sale2::text
     AND cm.branch_id = br2_id;
 
   IF cnt1 <> 1 OR cnt2 <> 1 THEN
@@ -677,6 +724,7 @@ BEGIN
   DELETE FROM cash_movements WHERE business_id = b_id;
   DELETE FROM sales WHERE business_id = b_id;
   DELETE FROM shifts WHERE business_id = b_id;
+  DELETE FROM cash_registers WHERE business_id = b_id;
   DELETE FROM business_members WHERE business_id = b_id;
   DELETE FROM branches WHERE business_id = b_id;
   DELETE FROM businesses WHERE id = b_id;
@@ -689,7 +737,8 @@ DECLARE
   b_id    uuid;
   br_id   uuid;
   shift_id uuid;
-  sale_id text := 'sale-change-required';
+  cash_register_id uuid;
+  sale_id uuid := gen_random_uuid();
   raised  boolean := false;
 BEGIN
   INSERT INTO businesses (name, timezone) VALUES ('TEST Change Required', 'America/Bogota') RETURNING id INTO b_id;
@@ -699,10 +748,14 @@ BEGIN
   INSERT INTO business_members (business_id, user_id, role)
   VALUES (b_id, current_setting('vimdy.caja_test_user_id')::uuid, 'CAJERO');
 
-  INSERT INTO shifts (business_id, branch_id, version, data)
-  VALUES (b_id, br_id, 1,
-    jsonb_build_object('status','OPEN','openedAt',now(),'openingAmount',0,'cashierId','cashier-1')
-  ) RETURNING id INTO shift_id;
+  INSERT INTO cash_registers (business_id, branch_id, code, name, active, status, data)
+  VALUES (b_id, br_id, 'CHANGE-REQUIRED', 'Test change required register', true, 'ACTIVE', '{}'::jsonb)
+  RETURNING id INTO cash_register_id;
+  shift_id := gen_random_uuid();
+  PERFORM open_shift_atomic(
+    shift_id, b_id, br_id, cash_register_id,
+    current_setting('vimdy.caja_test_user_id')::uuid, 0, 'Test change required shift'
+  );
 
   INSERT INTO sales (id, business_id, branch_id, version, data, created_at, updated_at)
   VALUES (sale_id, b_id, br_id, 1,
@@ -711,8 +764,9 @@ BEGIN
   -- pago CASH con change > 0 pero p_change_id = NULL → debe fallar
   BEGIN
     PERFORM register_sale_payment_atomic(
-      sale_id, b_id, br_id, 'sale-payment-change-req', NULL,
-      'CASH', 10000::numeric, 10000::numeric, 20000::numeric, 10000::numeric, NULL
+      sale_id::text, b_id, br_id, 'sale-payment-change-req', NULL,
+      'CASH', 10000::numeric, 10000::numeric, 20000::numeric, 10000::numeric,
+      NULL, cash_register_id, 'CASH', shift_id
     );
   EXCEPTION
     WHEN OTHERS THEN
@@ -728,6 +782,7 @@ BEGIN
   RAISE NOTICE 'PASS: change_id requerido cuando change > 0';
 
   DELETE FROM shifts WHERE business_id = b_id AND branch_id = br_id;
+  DELETE FROM cash_registers WHERE id = cash_register_id;
   DELETE FROM sales WHERE business_id = b_id AND branch_id = br_id;
   DELETE FROM business_members WHERE business_id = b_id;
   DELETE FROM branches WHERE business_id = b_id;
@@ -741,7 +796,8 @@ DECLARE
   b_id    uuid;
   br_id   uuid;
   shift_id uuid;
-  sale_id text := 'sale-paid-twice';
+  cash_register_id uuid;
+  sale_id uuid := gen_random_uuid();
   raised  boolean := false;
 BEGIN
   INSERT INTO businesses (name, timezone) VALUES ('TEST Paid Twice', 'America/Bogota') RETURNING id INTO b_id;
@@ -751,10 +807,14 @@ BEGIN
   INSERT INTO business_members (business_id, user_id, role)
   VALUES (b_id, current_setting('vimdy.caja_test_user_id')::uuid, 'CAJERO');
 
-  INSERT INTO shifts (business_id, branch_id, version, data)
-  VALUES (b_id, br_id, 1,
-    jsonb_build_object('status','OPEN','openedAt',now(),'openingAmount',0,'cashierId','cashier-1')
-  ) RETURNING id INTO shift_id;
+  INSERT INTO cash_registers (business_id, branch_id, code, name, active, status, data)
+  VALUES (b_id, br_id, 'PAID-TWICE', 'Test paid twice register', true, 'ACTIVE', '{}'::jsonb)
+  RETURNING id INTO cash_register_id;
+  shift_id := gen_random_uuid();
+  PERFORM open_shift_atomic(
+    shift_id, b_id, br_id, cash_register_id,
+    current_setting('vimdy.caja_test_user_id')::uuid, 0, 'Test paid twice shift'
+  );
 
   INSERT INTO sales (id, business_id, branch_id, version, data, created_at, updated_at)
   VALUES (sale_id, b_id, br_id, 1,
@@ -762,8 +822,9 @@ BEGIN
 
   BEGIN
     PERFORM register_sale_payment_atomic(
-      sale_id, b_id, br_id, 'sale-payment-paid-twice', NULL,
-      'CASH', 10000::numeric, 10000::numeric, 10000::numeric, 0::numeric, NULL
+      sale_id::text, b_id, br_id, 'sale-payment-paid-twice', NULL,
+      'CASH', 10000::numeric, 10000::numeric, 10000::numeric, 0::numeric,
+      NULL, cash_register_id, 'CASH', shift_id
     );
   EXCEPTION
     WHEN OTHERS THEN
@@ -781,6 +842,7 @@ BEGIN
   DELETE FROM cash_movements WHERE business_id = b_id AND branch_id = br_id;
   DELETE FROM sales WHERE business_id = b_id AND branch_id = br_id;
   DELETE FROM shifts WHERE business_id = b_id AND branch_id = br_id;
+  DELETE FROM cash_registers WHERE id = cash_register_id;
   DELETE FROM business_members WHERE business_id = b_id;
   DELETE FROM branches WHERE business_id = b_id;
   DELETE FROM businesses WHERE id = b_id;

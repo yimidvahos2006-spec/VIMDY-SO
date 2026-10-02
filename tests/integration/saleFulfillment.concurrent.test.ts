@@ -2,8 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 const config = {
-  url: process.env.VITE_SUPABASE_URL,
-  anonKey: process.env.VITE_SUPABASE_ANON_KEY,
+  url: process.env.VIMDY_GATE1_SUPABASE_URL,
+  anonKey: process.env.VIMDY_GATE1_SUPABASE_ANON_KEY,
   email: process.env.VIMDY_GATE1_EMAIL,
   password: process.env.VIMDY_GATE1_PASSWORD,
   businessId: process.env.VIMDY_GATE1_BUSINESS_ID,
@@ -14,7 +14,6 @@ const config = {
 };
 
 const enabled = Object.values(config).every((value) => Boolean(value));
-const gateSuite = describe.skipIf(!enabled);
 
 function requiredSetting(key: keyof typeof config): string {
   const value = config[key];
@@ -70,10 +69,13 @@ function parseSaleFulfillmentResult(value: unknown): SaleFulfillmentResult | nul
   };
 }
 
-gateSuite("Gate 1 — venta e idempotencia concurrentes en Supabase", () => {
+describe("Gate 1 — venta e idempotencia concurrentes en Supabase", () => {
   let client: SupabaseClient;
 
   beforeAll(async () => {
+    if (!enabled) {
+      throw new Error("BLOCKED_ENVIRONMENT: faltan credenciales o IDs de fixture reales para Gate 1.");
+    }
     const settings = getRequiredConfig();
     client = createClient(settings.url, settings.anonKey, {
       auth: { persistSession: false, autoRefreshToken: false }
@@ -154,20 +156,18 @@ gateSuite("Gate 1 — venta e idempotencia concurrentes en Supabase", () => {
       expect(result?.idempotent).toBe(true);
     }
 
-    const [{ data: updatedProduct, error: updatedProductError }, { data: saleRows, error: salesError }, { data: movements, error: movementsError }, { data: kitchenOrder, error: kitchenError }] =
+    const [{ data: updatedProduct, error: updatedProductError }, { data: saleRows, error: salesError }, { data: kitchenOrder, error: kitchenError }] =
       await Promise.all([
         client.from("products").select("data").eq("id", settings.productId).single(),
         client.from("sales").select("id,data").eq("business_id", settings.businessId).in("id", [firstSaleId, secondSaleId]),
-        client.from("inventory_movements").select("id,data").eq("business_id", settings.businessId).eq("data->>saleId", saleId),
         client.from("kitchen_orders").select("id,data").eq("id", saleId).maybeSingle()
       ]);
-    if (updatedProductError || salesError || movementsError || kitchenError) {
-      throw new Error(`Gate 1 post-sale read failed: ${updatedProductError?.message ?? salesError?.message ?? movementsError?.message ?? kitchenError?.message}`);
+    if (updatedProductError || salesError || kitchenError) {
+      throw new Error(`Gate 1 post-sale read failed: ${updatedProductError?.message ?? salesError?.message ?? kitchenError?.message}`);
     }
 
     expect(Number(updatedProduct.data.stock)).toBe(0);
     expect(saleRows).toHaveLength(1);
-    expect(movements).toHaveLength(1);
     const expectsKitchen =
       business.kitchen_enabled === true &&
       ["kds", "printer", "both"].includes(business.kitchen_output_mode) &&
@@ -209,5 +209,77 @@ gateSuite("Gate 1 — venta e idempotencia concurrentes en Supabase", () => {
     }
     expect(paymentRows).toHaveLength(1);
     expect(persistedSale.data.status).toBe("PAID");
+
+    const cashOperationKeys = [
+      `gate1-cash-concurrent-a-${crypto.randomUUID()}`,
+      `gate1-cash-concurrent-b-${crypto.randomUUID()}`
+    ];
+    const registerManualIncome = (idempotencyKey: string) =>
+      client.rpc("register_cash_movement_enterprise", {
+        p_idempotency_key: idempotencyKey,
+        p_business_id: settings.businessId,
+        p_branch_id: settings.branchId,
+        p_cash_register_id: settings.cashRegisterId,
+        p_shift_id: settings.shiftId,
+        p_type: "IN",
+        p_amount: 1,
+        p_reason_code: "OTHER_IN",
+        p_description: `Gate 1 concurrent cash ${idempotencyKey}`
+      });
+
+    const concurrentCashResults = await Promise.all(cashOperationKeys.map(registerManualIncome));
+    for (const result of concurrentCashResults) {
+      if (result.error) throw new Error(`Atomic cash movement RPC failed: ${result.error.message}`);
+      expect(Array.isArray(result.data) && result.data.length === 1).toBe(true);
+    }
+
+    const conflictingKey = `gate1-cash-key-reuse-${crypto.randomUUID()}`;
+    const initialCashMovement = await client.rpc("register_movement_atomic", {
+      p_idempotency_key: conflictingKey,
+      p_business_id: settings.businessId,
+      p_branch_id: settings.branchId,
+      p_type: "IN",
+      p_amount: 1,
+      p_description: "Gate 1 idempotency payload",
+      p_payment_method: "CASH",
+      p_cash_amount: 1,
+      p_sale_id: null,
+      p_created_at: new Date().toISOString(),
+      p_cash_register_id: settings.cashRegisterId,
+      p_verification_source: "CASH"
+    });
+    if (initialCashMovement.error) {
+      throw new Error(`Initial idempotent cash movement failed: ${initialCashMovement.error.message}`);
+    }
+    const conflictingCashRetry = await client.rpc("register_movement_atomic", {
+      p_idempotency_key: conflictingKey,
+      p_business_id: settings.businessId,
+      p_branch_id: settings.branchId,
+      p_type: "IN",
+      p_amount: 2,
+      p_description: "Gate 1 idempotency payload changed",
+      p_payment_method: "CASH",
+      p_cash_amount: 2,
+      p_sale_id: null,
+      p_created_at: new Date().toISOString(),
+      p_cash_register_id: settings.cashRegisterId,
+      p_verification_source: "CASH"
+    });
+    expect(conflictingCashRetry.error?.message).toContain("CAJA_IDEMPOTENCY_KEY_REUSED");
+
+    const [{ data: concurrentCashRows, error: concurrentCashError },
+      { data: cashAuditRows, error: cashAuditError }] = await Promise.all([
+      client.from("cash_movements").select("id,idempotency_key")
+        .eq("business_id", settings.businessId).eq("branch_id", settings.branchId)
+        .in("idempotency_key", [...cashOperationKeys, conflictingKey]),
+      client.from("audit_logs").select("data")
+        .eq("business_id", settings.businessId).eq("branch_id", settings.branchId)
+        .in("data->>idempotencyKey", [...cashOperationKeys, conflictingKey])
+    ]);
+    if (concurrentCashError || cashAuditError) {
+      throw new Error(`Cash persistence verification failed: ${concurrentCashError?.message ?? cashAuditError?.message}`);
+    }
+    expect(concurrentCashRows).toHaveLength(3);
+    expect(cashAuditRows).toHaveLength(3);
   }, 60_000);
 });

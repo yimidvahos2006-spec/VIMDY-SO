@@ -23,7 +23,7 @@
    "nice to have".
 =========================================================================== */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
 import { Product, Sale } from "../../src/core/entities/Entities";
 
@@ -44,6 +44,8 @@ import { PosCore } from "../../src/core/engines/PosCore";
 import { CashMovement, KitchenOrder } from "../../src/core/entities/Entities";
 import { InMemoryRepository } from "../fakes/InMemoryRepository";
 import { FakeProductRepository } from "../fakes/FakeProductRepository";
+import { DEFAULT_OPERATION_CONFIG } from "../../src/core/config/operation";
+import { operationConfigStore } from "../../src/core/store/operationConfigStore";
 
 function buildSalesEngine() {
   const products = new FakeProductRepository();
@@ -98,8 +100,18 @@ describe("Smoke: venta completa (mostrador)", () => {
   let ctx: ReturnType<typeof buildSalesEngine>;
 
   beforeEach(async () => {
+    operationConfigStore.set({
+      ...DEFAULT_OPERATION_CONFIG,
+      kitchenEnabled: true,
+      kitchenOutputMode: "kds",
+      kdsEnabled: true
+    });
     ctx = buildSalesEngine();
     await ctx.products.save(BURGER);
+  });
+
+  afterEach(() => {
+    operationConfigStore.clear();
   });
 
   it("cobra una venta de principio a fin: inventario, cocina y caja quedan consistentes", async () => {
