@@ -251,7 +251,7 @@ BEGIN
   IF NOT FOUND THEN RAISE EXCEPTION 'CAJA_SHIFT_REGISTER_MISMATCH'; END IF;
 
   IF NOT public.has_business_role(p_business_id, ARRAY['ADMIN','GERENTE'])
-     AND NULLIF(v_shift.data->>'cashierId', '')::uuid IS DISTINCT FROM auth.uid() THEN
+     AND v_shift.cashier_id IS DISTINCT FROM auth.uid() THEN
     RAISE EXCEPTION 'CAJA_SHIFT_OWNER_REQUIRED';
   END IF;
 
@@ -640,7 +640,7 @@ BEGIN
     RAISE EXCEPTION 'SHIFT_FORBIDDEN';
   END IF;
   IF NOT public.has_business_role(p_business_id, ARRAY['ADMIN','GERENTE'])
-     AND NULLIF(v_shift.data->>'cashierId', '')::uuid IS DISTINCT FROM auth.uid() THEN
+     AND v_shift.cashier_id IS DISTINCT FROM auth.uid() THEN
     RAISE EXCEPTION 'SHIFT_OWNER_REQUIRED';
   END IF;
 
@@ -777,7 +777,7 @@ BEGIN
   IF v_shift.data->>'status' <> 'OPEN' THEN RAISE EXCEPTION 'SHIFT_NOT_OPEN'; END IF;
   IF v_shift.cash_register_id IS NULL THEN RAISE EXCEPTION 'SHIFT_CASH_REGISTER_REQUIRED'; END IF;
   IF NOT public.has_business_role(v_shift.business_id, ARRAY['ADMIN','GERENTE'])
-     AND NULLIF(v_shift.data->>'cashierId', '')::uuid IS DISTINCT FROM auth.uid() THEN
+     AND v_shift.cashier_id IS DISTINCT FROM auth.uid() THEN
     RAISE EXCEPTION 'SHIFT_OWNER_REQUIRED';
   END IF;
 

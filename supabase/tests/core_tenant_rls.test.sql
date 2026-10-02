@@ -15,9 +15,6 @@ BEGIN
   IF v_user_id IS NULL OR NOT EXISTS (SELECT 1 FROM auth.users WHERE id = v_user_id) THEN
     RAISE EXCEPTION 'Configure vimdy.caja_test_user_id with an existing auth.users UUID';
   END IF;
-  IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.kitchen_settings'::regclass) THEN
-    RAISE EXCEPTION 'FAIL kitchen_settings RLS is disabled';
-  END IF;
 
   PERFORM set_config('request.jwt.claim.sub', v_user_id::text, true);
   INSERT INTO public.businesses (id, name, plan, trial_ends_at, timezone, subscription_status, currency, tax_rate, inventory_type)

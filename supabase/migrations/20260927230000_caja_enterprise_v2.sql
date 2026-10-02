@@ -230,10 +230,8 @@ BEGIN
     NEW.data := jsonb_set(NEW.data, '{cashRegisterId}', to_jsonb(NEW.cash_register_id::text), true);
   END IF;
 
-  IF TG_TABLE_NAME = 'cash_movements' THEN
-    IF NEW.shift_id IS NOT NULL THEN
-      NEW.data := jsonb_set(NEW.data, '{shiftId}', to_jsonb(NEW.shift_id), true);
-    END IF;
+  IF TG_TABLE_NAME = 'cash_movements' AND NEW.shift_id IS NOT NULL THEN
+    NEW.data := jsonb_set(NEW.data, '{shiftId}', to_jsonb(NEW.shift_id), true);
   END IF;
 
   RETURN NEW;

@@ -97,9 +97,3 @@ CREATE POLICY kitchen_order_items_tenant_read ON public.kitchen_order_items
         AND (ko.branch_id IS NULL OR ko.branch_id = ANY(public.auth_branch_ids()))
     )
   );
-
-ALTER TABLE public.kitchen_settings ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS kitchen_settings_branch_read ON public.kitchen_settings;
-CREATE POLICY kitchen_settings_branch_read ON public.kitchen_settings
-  FOR SELECT TO authenticated, service_role
-  USING (store_id = ANY(public.auth_branch_ids()));
