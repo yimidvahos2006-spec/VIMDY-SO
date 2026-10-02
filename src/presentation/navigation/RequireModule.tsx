@@ -1,12 +1,18 @@
 import React from "react";
 import { Navigate } from "react-router-dom";
 
-import { useEnabledModules } from "../../core/store/useEnabledModules";
+import { useBusinessOperatingProfile } from "../../core/store/useBusinessOperatingProfile";
 import type { ModuleId } from "../../core/config/modules";
+import {
+  hasBusinessCapability,
+  hasBusinessModuleCapability,
+  type BusinessCapabilityId,
+} from "../../core/config/businessOperatingProfile";
 
 interface Props {
   children: React.ReactNode;
   module: ModuleId;
+  alsoCapability?: BusinessCapabilityId;
 }
 
 /**
@@ -16,10 +22,19 @@ interface Props {
  * temporalmente incompleta. Un arreglo vacío, en cambio, es una decisión real
  * y debe bloquear cualquier módulo que no esté habilitado.
  */
-export function RequireModule({ children, module }: Props) {
-  const enabledModules = useEnabledModules();
+export function RequireModule({ children, module, alsoCapability }: Props) {
+  const { status, profile } = useBusinessOperatingProfile();
 
-  if (enabledModules !== null && !enabledModules.includes(module)) {
+  if (status === "idle" || status === "loading") {
+    return <div role="status" aria-live="polite" className="p-6 text-sm text-slate-400">Cargando configuración operativa…</div>;
+  }
+
+  const enabled = profile && (
+    hasBusinessModuleCapability(profile, module)
+    || (alsoCapability ? hasBusinessCapability(profile, alsoCapability) : false)
+  );
+
+  if (status !== "ready" || !profile || !enabled) {
     return <Navigate to="/dashboard" replace />;
   }
 

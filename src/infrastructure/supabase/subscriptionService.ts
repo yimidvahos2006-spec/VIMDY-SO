@@ -71,7 +71,7 @@ export class SubscriptionService {
 
       const now = new Date();
       const trialEndsAt = new Date(now);
-       trialEndsAt.setDate(trialEndsAt.getDate() + TRIAL_PERIOD_DAYS);
+      trialEndsAt.setDate(trialEndsAt.getDate() + TRIAL_PERIOD_DAYS);
 
       const { error: updateError } = await supabase
         .from("businesses")

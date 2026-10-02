@@ -20,6 +20,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
 
   GERENTE: [
     "sales.view", "sales.create", "sales.edit", "sales.refund",
+    "staff.view",
     "inventory.view", "inventory.create", "inventory.edit", "inventory.adjust",
     "customers.view", "customers.create", "customers.edit",
     "kitchen.view", "tables.view", "tables.manage",
@@ -31,6 +32,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
 
   CAJERO: [
     "sales.view", "sales.create",
+    "staff.view",
     "customers.view", "customers.create",
     "cash.view", "cash.registerMovement",
     "shift.view", "shift.close"

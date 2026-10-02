@@ -315,6 +315,8 @@ describe('Auditoría Final: Flujos y Modelos de Negocio', () => {
       expect(result.total).toBe(50000);
       expect(result.received).toBe(50000);
       expect(result.change).toBe(0);
+      expect(result.success).toBe(false);
+      expect(result.verificationStatus).toBe("PENDING_VERIFICATION");
     });
 
     it('Pago insuficiente lanza error', () => {

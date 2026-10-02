@@ -76,6 +76,7 @@ import { kitchenOutputModeStore } from "../../core/store/kitchenOutputModeStore"
 import { subscriptionStore } from "../../core/store/subscriptionStore";
 import { businessOperatingProfileStore } from "../../core/store/businessOperatingProfileStore";
 import { operationConfigStore } from "../../core/store/operationConfigStore";
+import { userSessionStore } from "../../core/store/userSessionStore";
 import { hydrateBusinessOperatingProfile } from "../../core/bootstrap/businessOperatingProfileBootstrap";
 import {
   CountryCode,
@@ -246,16 +247,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const bootstrapGeneration = useRef(0);
   const authOperationInFlight = useRef(0);
+  const authCleanupInProgress = useRef(false);
 
   const clearAuthState = useCallback(() => {
-    stopLocalBusinessSyncs();
-    setUser(null);
-    setRole(null);
-    setSessionId(null);
-    setBusinessId(null);
-    setBusinessCount(0);
-    setOnboardingCompleted(false);
-    setBusinessBootstrapError(null);
+    if (authCleanupInProgress.current) return;
+    authCleanupInProgress.current = true;
+
+    try {
+      stopLocalBusinessSyncs();
+      setUser(null);
+      setRole(null);
+      setSessionId(null);
+      setBusinessId(null);
+      setBusinessCount(0);
+      setOnboardingCompleted(false);
+      setBusinessBootstrapError(null);
+      userSessionStore.logout();
+    } finally {
+      authCleanupInProgress.current = false;
+    }
   }, []);
 
   const applyBusinessSession = useCallback(
@@ -267,24 +277,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       stopLocalBusinessSyncs();
 
-      setCurrentBusinessId(businessSession.businessId);
       const branchId = await resolveDefaultBranchId(businessSession.businessId);
       setCurrentBranchId(branchId);
 
-      void hydrateBusinessOperatingProfile(businessSession.businessId);
-      hydrateBusinessConfig(businessSession);
-      void hydrateSubscription(businessSession.businessId);
-      void ensureIdentity(
-        container.permissionEngine.get(),
-        container.roleEngine.get()
-      );
+      try {
+        void hydrateBusinessOperatingProfile(businessSession.businessId);
+        hydrateBusinessConfig(businessSession);
+        void hydrateSubscription(businessSession.businessId);
+        void ensureIdentity(
+          container.permissionEngine.get(),
+          container.roleEngine.get()
+        );
 
-      startRealtimeSync(businessSession.businessId);
-      startOfflineSalesSync();
-      startOfflineInventorySync();
-      startOfflineTableSync();
-      startOfflineCustomerSync();
-      startOfflineKitchenSync();
+        startRealtimeSync(businessSession.businessId);
+        startOfflineSalesSync();
+        startOfflineInventorySync();
+        startOfflineTableSync();
+        startOfflineCustomerSync();
+        startOfflineKitchenSync();
+      } catch (syncError) {
+        setCurrentBusinessId(null);
+        setCurrentBranchId(null);
+        throw syncError;
+      }
+
+      setCurrentBusinessId(businessSession.businessId);
 
       setUser(authUserState);
       setRole(authRole);
@@ -293,6 +310,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setBusinessCount(1);
       setOnboardingCompleted(businessSession.onboardingCompleted);
       setBusinessBootstrapError(null);
+
+      userSessionStore.login(
+        businessSession.userId,
+        authUserState.name,
+        authRole.name,
+        authUserState.email
+      );
     },
     []
   );
@@ -435,9 +459,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // de este callback. Diferimos el bootstrap al siguiente tick para
         // evitar carreras/deadlocks durante refresh o OAuth.
         if (event === "INITIAL_SESSION") {
-          window.setTimeout(() => {
-            void hydrateAuthSession(session, false);
-          }, 0);
+          void hydrateAuthSession(session, false);
           return;
         }
 
@@ -626,13 +648,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (signOutError) {
         console.warn("[AuthContext] signOut local falló:", signOutError.message);
+        throw signOutError;
       }
     } catch (err) {
       console.warn("[AuthContext] signOut lanzó una excepción:", err);
-    } finally {
-      clearAuthState();
+      throw err;
     }
-  }, [clearAuthState]);
+  }, []);
 
   const handleRequestPasswordReset = useCallback(
     async (email: string) => {

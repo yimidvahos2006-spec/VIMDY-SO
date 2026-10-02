@@ -6,7 +6,6 @@ import { VimdyButton } from "../ui/VimdyButton";
 import { VimdyInput } from "../ui/VimdyInput";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { getDefaultCategoriesForBusinessType } from "../../../core/config/onboardingCategories";
-import { requiresKitchenByDefaultForBusinessType } from "../../../core/config/businessTypes";
 import type { BusinessTypeId } from "../../../core/config/businessTypes";
 import type { Category } from "../../../core/entities/Entities";
 
@@ -65,7 +64,7 @@ export function CategoriesStep({ businessType, onSaved }: CategoriesStepProps) {
       const existing = await container.categoryEngine.get().listAll();
       const existingNames = new Set(existing.map((c) => c.name.toLowerCase()));
       const result: Category[] = [];
-      const requiresKitchen = requiresKitchenByDefaultForBusinessType(businessType);
+      const requiresKitchen = false;
 
       for (const name of allNames) {
         if (existingNames.has(name.toLowerCase())) {

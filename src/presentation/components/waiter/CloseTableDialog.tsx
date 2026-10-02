@@ -106,7 +106,7 @@ export function CloseTableDialog({ table, onClose, onClosed }: Props) {
       // mostrador, y respetando companyConfigStore.autoPrintReceipt
       // (antes esta pantalla imprimía siempre, sin consultar esa opción).
       await productCatalogStore.init();
-      const printableItems = paidSale.items.map((item) => ({
+      const printableItems = paidSale.items.map((item: any) => ({
         name: productCatalogStore.getById(item.productId)?.name ?? item.productId,
         quantity: item.quantity,
         price: item.price,

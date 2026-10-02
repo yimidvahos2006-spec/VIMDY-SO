@@ -16,7 +16,6 @@ import { Receipt } from "./ReceiptEngine";
 
 import { vimdyCore } from "../VimdyCore";
 import { getEffectiveKitchenOutputMode } from "../services/effectiveKitchenOutputMode";
-import { enabledModulesStore } from "../store/enabledModulesStore";
 import { createKitchenOutput } from "../services/KitchenOutputFactory";
 import { getCurrentBusinessId, getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
 
@@ -268,10 +267,6 @@ export class OrderEngine {
    */
   public async sendToKitchen(orderId: string): Promise<Order> {
     const order = await this.getOrder(orderId);
-    const modules = enabledModulesStore.get();
-    if (modules && !modules.includes("cocina")) {
-      throw new Error("KITCHEN_MODULE_DISABLED: el módulo Cocina no está habilitado para este negocio.");
-    }
     const kitchenOutputMode = getEffectiveKitchenOutputMode();
     if (kitchenOutputMode === "none") {
       throw new Error("KITCHEN_OUTPUT_NOT_CONFIGURED: configura una pantalla KDS o impresora para enviar pedidos a cocina.");

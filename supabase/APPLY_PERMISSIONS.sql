@@ -73,7 +73,7 @@ $$;
 -- ----------------------------------------------------------------------------
 -- IMPORTANTE: Las definiciones de has_user_used_trial, record_trial_usage e
 -- is_business_subscription_active ahora están CONSOLIDADAS en la migration:
---   supabase/migrations/20260829_consolidate_subscription_functions.sql
+--   supabase/migrations/20260829000001_consolidate_subscription_functions.sql
 --
 -- Este archivo NO redefine funciones conflictivas. Solo otorga/revoca
 -- permisos. Si este script se ejecuta después de la migration, las
@@ -81,7 +81,7 @@ $$;
 -- ============================================================================
 
 -- Función: Verificar si la suscripción está activa
--- Fuente de verdad consolidada: 20260829_consolidate_subscription_functions.sql
+-- Fuente de verdad consolidada: 20260829000001_consolidate_subscription_functions.sql
 -- Modelo VIMDY: trial | monthly | yearly | expired | suspended
 -- Activo: plan IN ('trial','monthly','yearly') con vigencia de fechas:
 --   - trial: trial_ends_at > now()
@@ -115,7 +115,7 @@ AS $$
 $$;
 
 -- Función: Verificar si ya usó el trial
--- DEFINICIÓN CONSOLIDADA EN: 20260829_consolidate_subscription_functions.sql
+-- DEFINICIÓN CONSOLIDADA EN: 20260829000001_consolidate_subscription_functions.sql
 CREATE OR REPLACE FUNCTION public.has_user_used_trial(p_user_id uuid)
 RETURNS boolean
 LANGUAGE sql
@@ -129,7 +129,7 @@ AS $$
 $$;
 
 -- Función: Registrar uso del trial
--- DEFINICIÓN CONSOLIDADA EN: 20260829_consolidate_subscription_functions.sql
+-- DEFINICIÓN CONSOLIDADA EN: 20260829000001_consolidate_subscription_functions.sql
 -- IMPORTANTE: record_trial_usage SOLO otorga EXECUTE a service_role (NO a authenticated).
 -- El cliente no puede llamar directamente esta RPC. La inserción de
 -- user_trial_usage ocurre exclusivamente desde register-business Edge Function.

@@ -1,6 +1,6 @@
-import { Product } from "../../../core/entities/Entities";
+import { InventoryMovement, Product } from "../../../core/entities/Entities";
 import { SupabaseRepository, reviveDates } from "./SupabaseRepository";
-import { IProductRepository } from "./IProductRepository";
+import { IProductRepository, StockMovementBatchItem } from "./IProductRepository";
 import { supabase } from "../../supabase/supabaseClient";
 import { ProductLocalRepository } from "./ProductLocalRepository";
 import { connectionStore } from "../../../core/store/connectionStore";
@@ -202,6 +202,172 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
     }
 
     return result;
+  }
+
+  public async adjustStockWithKardex(params: {
+    productId: string;
+    delta: number;
+    reason: string;
+    type: InventoryMovement["type"];
+    performedBy?: string;
+    supplierId?: string;
+    supplierName?: string;
+    lossCategory?: InventoryMovement["lossCategory"];
+    movementId: string;
+    branchId?: string;
+    allowNegative?: boolean;
+    extraFields?: Record<string, unknown>;
+  }): Promise<Product> {
+    const { data, error } = await supabase.rpc("adjust_stock_with_kardex_and_fields", {
+      p_product_id: params.productId,
+      p_delta: params.delta,
+      p_reason: params.reason,
+      p_type: params.type,
+      p_performed_by: params.performedBy ?? null,
+      p_supplier_id: params.supplierId ?? null,
+      p_supplier_name: params.supplierName ?? null,
+      p_loss_category: params.lossCategory ?? null,
+      p_movement_id: params.movementId,
+      p_branch_id: params.branchId ?? null,
+      p_allow_negative: params.allowNegative ?? false,
+      p_extra_fields: params.extraFields ?? {}
+    });
+
+    if (error) {
+      if (error.message.includes("INSUFFICIENT_STOCK")) {
+        throw new Error("INSUFFICIENT_STOCK");
+      }
+      if (error.message.includes("PRODUCT_NOT_FOUND")) {
+        throw new Error("PRODUCT_NOT_FOUND");
+      }
+      throw new Error(`SUPABASE_ADJUST_STOCK_WITH_KARDEX_FAILED: ${error.message}`);
+    }
+
+    const result = reviveDates(data as Product);
+    try {
+      await this.local.save(result);
+    } catch (cacheError) {
+      logWarning("[ProductRepository] No se pudo actualizar el stock en caché local", {
+        category: "offline",
+        context: { error: String(cacheError) }
+      });
+    }
+
+    return result;
+  }
+
+  public async adjustStockBatchWithKardex(
+    operationId: string,
+    movements: readonly StockMovementBatchItem[]
+  ): Promise<Product[]> {
+    const { data, error } = await supabase.rpc("adjust_stock_batch_with_kardex", {
+      p_operation_id: operationId,
+      p_movements: movements.map((movement) => ({
+        ...movement,
+        branchId: movement.branchId ?? null,
+        extraFields: movement.extraFields ?? {}
+      }))
+    });
+
+    if (error) {
+      if (error.message.includes("INSUFFICIENT_STOCK")) {
+        throw new Error("INSUFFICIENT_STOCK");
+      }
+      if (error.message.includes("PRODUCT_NOT_FOUND")) {
+        throw new Error("PRODUCT_NOT_FOUND");
+      }
+      if (error.message.includes("IDEMPOTENCY_KEY_REUSED")) {
+        throw new Error("IDEMPOTENCY_KEY_REUSED");
+      }
+      throw new Error(`SUPABASE_ADJUST_STOCK_BATCH_FAILED: ${error.message}`);
+    }
+
+    const products = Array.isArray(data)
+      ? data.map((product) => reviveDates(product as Product))
+      : [];
+    await Promise.all(products.map(async (product) => {
+      try {
+        await this.local.save(product);
+      } catch (cacheError) {
+        logWarning("[ProductRepository] No se pudo actualizar el stock batch en caché local", {
+          category: "offline",
+          context: { productId: product.id, error: String(cacheError) }
+        });
+      }
+    }));
+    return products;
+  }
+
+  public async transferStock(input: {
+    operationId: string;
+    productId: string;
+    fromBranchId: string;
+    toBranchId: string;
+    quantity: number;
+    performedBy?: string;
+  }): Promise<Product[]> {
+    const { data, error } = await supabase.rpc("transfer_stock_atomic", {
+      p_operation_id: input.operationId,
+      p_product_id: input.productId,
+      p_from_branch_id: input.fromBranchId,
+      p_to_branch_id: input.toBranchId,
+      p_quantity: input.quantity,
+      p_performed_by: input.performedBy ?? null
+    });
+    if (error) {
+      if (error.message.includes("INSUFFICIENT_STOCK")) throw new Error("INSUFFICIENT_STOCK");
+      if (error.message.includes("TRANSFER_TARGET_PRODUCT_NOT_FOUND")) throw new Error("TRANSFER_TARGET_PRODUCT_NOT_FOUND");
+      if (error.message.includes("IDEMPOTENCY_KEY_REUSED")) throw new Error("IDEMPOTENCY_KEY_REUSED");
+      throw new Error(`SUPABASE_TRANSFER_STOCK_FAILED: ${error.message}`);
+    }
+
+    const products = Array.isArray(data) ? data.map((product) => reviveDates(product as Product)) : [];
+    await Promise.all(products.map(async (product) => {
+      try {
+        await this.local.save(product);
+      } catch (cacheError) {
+        logWarning("[ProductRepository] No se pudo actualizar el stock transferido en caché local", {
+          category: "offline",
+          context: { productId: product.id, error: String(cacheError) }
+        });
+      }
+    }));
+    return products;
+  }
+
+  public async produceBatch(input: {
+    operationId: string;
+    productId: string;
+    branchId: string;
+    quantity: number;
+    performedBy?: string;
+  }): Promise<Product[]> {
+    const { data, error } = await supabase.rpc("produce_batch_atomic", {
+      p_operation_id: input.operationId,
+      p_product_id: input.productId,
+      p_branch_id: input.branchId,
+      p_quantity: input.quantity,
+      p_performed_by: input.performedBy ?? null
+    });
+    if (error) {
+      if (error.message.includes("INSUFFICIENT_STOCK")) throw new Error("INSUFFICIENT_STOCK");
+      if (error.message.includes("RECIPE_CYCLE")) throw new Error("RECIPE_CYCLE");
+      if (error.message.includes("IDEMPOTENCY_KEY_REUSED")) throw new Error("IDEMPOTENCY_KEY_REUSED");
+      throw new Error(`SUPABASE_PRODUCE_BATCH_FAILED: ${error.message}`);
+    }
+
+    const products = Array.isArray(data) ? data.map((product) => reviveDates(product as Product)) : [];
+    await Promise.all(products.map(async (product) => {
+      try {
+        await this.local.save(product);
+      } catch (cacheError) {
+        logWarning("[ProductRepository] No se pudo actualizar el stock producido en caché local", {
+          category: "offline",
+          context: { productId: product.id, error: String(cacheError) }
+        });
+      }
+    }));
+    return products;
   }
 
   public async findBySkuAndBranch(sku: string, branchId: string): Promise<Product | null> {

@@ -89,13 +89,19 @@ export interface RefundResult {
 /** Sesión de pago que VIMDY mantiene mientras el usuario completa el checkout. */
 export interface PaymentSession {
   id: string;
+  businessId?: string;
+  branchId?: string | null;
   provider: PaymentProviderName;
+  providerReference?: string | null;
   country: CountryCode;
   currency: CurrencyCode;
   amount: number;
   status: PaymentStatus;
+  idempotencyKey?: string | null;
+  metadata?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  expiresAt?: string | null;
 }
 
 /** Evento de webhook ya normalizado, listo para que el resto de VIMDY lo consuma. */

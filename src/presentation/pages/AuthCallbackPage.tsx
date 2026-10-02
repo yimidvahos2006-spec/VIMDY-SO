@@ -30,20 +30,8 @@ export function AuthCallbackPage() {
         const code = query.get("code");
 
         if (!existingSessionData.session && code) {
-          // detectSessionInUrl=true puede estar procesando el callback
-          // automáticamente. Esperamos un momento para no consumir dos veces
-          // un código PKCE, que solo puede intercambiarse una vez.
-          for (let attempt = 0; attempt < 12 && !existingSessionData.session; attempt += 1) {
-            await new Promise((resolve) => window.setTimeout(resolve, 100));
-            const result = await supabase.auth.getSession();
-            if (result.error) throw result.error;
-            existingSessionData = result.data;
-          }
-
-          if (!existingSessionData.session) {
-            const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-            if (exchangeError) throw exchangeError;
-          }
+          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+          if (exchangeError) throw exchangeError;
         } else if (!existingSessionData.session) {
           const accessToken = hash.get("access_token");
           const refreshToken = hash.get("refresh_token");

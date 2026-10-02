@@ -1,0 +1,26 @@
+name: VIMDY release guards
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  release-guards:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Typecheck and production build
+        run: npm run build
+      - name: Check release blockers
+        run: npm run release:guards
+        env:
+          RELEASE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch }}

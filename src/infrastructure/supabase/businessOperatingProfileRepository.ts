@@ -9,7 +9,7 @@
  */
 
 import { supabase } from "./supabaseClient";
-import { isBusinessTypeId, type BusinessTypeId } from "../../core/config/businessTypes";
+import { isStoredBusinessTypeId, type BusinessTypeId } from "../../core/config/businessTypes";
 import { MODULE_CATALOG, type ModuleId } from "../../core/config/modules";
 import {
   type InventoryType,
@@ -96,7 +96,7 @@ function assertBusinessId(businessId: string): string {
 
 function parseBusinessType(value: string | null): BusinessTypeId | null {
   if (value === null || value.trim() === "") return null;
-  if (!isBusinessTypeId(value)) {
+  if (!isStoredBusinessTypeId(value)) {
     throw new Error("BUSINESS_CONFIG_INVALID: business_type no reconocido.");
   }
   return value;

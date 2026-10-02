@@ -35,7 +35,7 @@ const faqs = [
   {
     question: "¿Cuánto cuesta?",
     answer:
-      "Plan mensual: $59.900 COP/mes. Plan anual: $599.000 COP/año (ahorras $119.800).",
+      "Plan mensual: $79.000 COP/mes. Plan anual: $799.000 COP/año (ahorras $149.000).",
   },
   {
     question: "¿Qué métodos de pago acepta?",

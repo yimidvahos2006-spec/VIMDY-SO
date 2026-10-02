@@ -1,6 +1,11 @@
 import { Sale } from "../../../core/entities/Entities";
 import { SupabaseRepository, reviveDates } from "./SupabaseRepository";
 import { supabase, getCurrentBusinessId, getCurrentBranchId } from "../../supabase/supabaseClient";
+import type {
+  CreateSaleFulfillmentRequest,
+  CreateSaleFulfillmentResult,
+  ISaleFulfillmentRepository,
+} from "./ISaleFulfillmentRepository";
 
 /**
  * SaleRepository
@@ -11,8 +16,64 @@ import { supabase, getCurrentBusinessId, getCurrentBranchId } from "../../supaba
  * por negocio mediante Row Level Security y disponibles en cualquier
  * dispositivo donde el mismo negocio inicie sesión.
  */
-export class SaleRepository extends SupabaseRepository<Sale> {
+export class SaleRepository extends SupabaseRepository<Sale> implements ISaleFulfillmentRepository {
   protected tableName = "sales" as const;
+
+  public async createSaleFulfillmentAtomic(
+    request: CreateSaleFulfillmentRequest
+  ): Promise<CreateSaleFulfillmentResult> {
+    const { data, error } = await supabase.rpc("create_sale_fulfillment_atomic", {
+      p_business_id: request.businessId,
+      p_branch_id: request.branchId,
+      p_idempotency_key: request.idempotencyKey,
+      p_sale: {
+        id: request.input.id ?? null,
+        type: request.input.type,
+        items: request.input.items.map((item) => ({
+          productId: item.productId,
+          quantity: item.quantity,
+          note: item.note ?? null,
+          selectedSizeId: item.selectedSizeId ?? null,
+          selectedExtraIds: item.selectedExtraIds ?? []
+        })),
+        customerId: request.input.customerId ?? null,
+        tableId: request.input.tableId ?? null,
+        deliveryAddress: request.input.deliveryAddress ?? null,
+        deliveryFee: request.input.deliveryFee ?? 0,
+        notes: request.input.notes ?? null,
+        waiterId: request.input.waiterId ?? null,
+        priority: request.input.priority ?? "NORMAL",
+        discount: request.input.discount ?? null,
+        tip: request.input.tip ?? null
+      }
+    });
+
+    if (error) {
+      throw new Error(`SALE_FULFILLMENT_RPC_FAILED: ${error.message}`);
+    }
+
+    const result = data as {
+      success?: boolean;
+      idempotent?: boolean;
+      idempotencyKey?: string;
+      sale?: Sale;
+      kitchenOrder?: import("../../../core/entities/Entities").KitchenOrder | null;
+      printerJobId?: string | null;
+      code?: string;
+      error?: string;
+    } | null;
+
+    if (!result?.success || !result.sale) {
+      throw new Error(`${result?.code ?? "SALE_FULFILLMENT_REJECTED"}: ${result?.error ?? "No se creó la venta."}`);
+    }
+
+    return {
+      sale: reviveDates(result.sale),
+      kitchenOrder: result.kitchenOrder ? reviveDates(result.kitchenOrder) : null,
+      printerJobId: result.printerJobId ?? null,
+      idempotent: result.idempotent ?? false
+    };
+  }
 
   /**
    * CRÍTICO #3 del checklist de lanzamiento: ventas de un rango de fechas,

@@ -8,12 +8,9 @@ import type { BusinessTypeId } from "./businessTypes";
  * aquí según el tipo de negocio elegido en el PASO 3, y las crea de
  * verdad en Supabase a través de CategoryEngine.
  *
- * Los dos casos que vinieron especificados en el documento de producto son
- * "restaurante" (Entradas, Platos Fuertes, Bebidas, Postres) y "tienda"
- * (Aseo, Bebidas, Snacks, Lácteos). El resto se completó con un criterio
- * razonable según cómo vende cada tipo de negocio — igual que ya se hizo
- * en modules.ts con DEFAULT_MODULES_BY_BUSINESS_TYPE. Es 100% ajustable:
- * cambiar el negocio de lista aquí es lo único que hace falta.
+ * Las sugerencias solo aplican a los tipos F&B seleccionables en el onboarding.
+ * Los valores legacy permanecen para compatibilidad de datos históricos, no
+ * para ofrecer sectores fuera del alcance en nuevos registros.
  */
 export const DEFAULT_CATEGORIES_BY_BUSINESS_TYPE: Record<BusinessTypeId, string[]> = {
   restaurante: ["Entradas", "Platos Fuertes", "Bebidas", "Postres"],
@@ -22,6 +19,12 @@ export const DEFAULT_CATEGORIES_BY_BUSINESS_TYPE: Record<BusinessTypeId, string[
   asadero: ["Carnes", "Acompañamientos", "Bebidas", "Postres"],
   bar: ["Cervezas", "Cócteles", "Licores", "Snacks"],
   panaderia: ["Panes", "Pasteles", "Bebidas", "Snacks"],
+  pasteleria: ["Tortas", "Porciones", "Postres", "Bebidas"],
+  reposteria: ["Tortas", "Postres", "Galletas", "Bebidas"],
+  jugueria: ["Jugos", "Batidos", "Frutas", "Snacks"],
+  catering: ["Menús", "Entradas", "Platos fuertes", "Postres"],
+  comedor: ["Desayunos", "Almuerzos", "Bebidas", "Adicionales"],
+  cadena: ["Alimentos", "Bebidas", "Complementos", "Postres"],
   tienda: ["Aseo", "Bebidas", "Snacks", "Lácteos"],
   heladeria: ["Helados", "Toppings", "Bebidas", "Postres"],
   hotel: ["Habitaciones", "Restaurante", "Bebidas", "Servicios"],

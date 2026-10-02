@@ -1,4 +1,4 @@
-import type { CountryCode } from "../../../src/core/invoicing/types/invoice.types";
+import type { CountryCode } from "../../../src/core/invoicing/types/invoice.types.ts";
 
 const XMLNS_UBL_INVOICE = "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2";
 const XMLNS_UBL_CREDIT_NOTE = "urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2";

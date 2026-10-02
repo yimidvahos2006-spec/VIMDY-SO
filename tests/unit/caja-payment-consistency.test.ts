@@ -270,22 +270,20 @@ describe("Caja: atomicidad e idempotencia de pagos", () => {
     expect((await ctx.cashMovements.findAll())).toHaveLength(0);
   });
 
-  it("J. pago con tarjeta registra movimiento con paymentMethod CARD", async () => {
+  it("J. una referencia de tarjeta no confirma el pago ni registra caja", async () => {
     ctx.cart.addItem(BURGER, 1);
     const sale = await ctx.salesEngine.quickSale({ cashierId: "cashier-1" });
 
-    const { sale: paidSale } = await ctx.salesEngine.registerPayment(sale, "CARD", {
+    const { sale: pendingSale, payment } = await ctx.salesEngine.registerPayment(sale, "CARD", {
       received: sale.total,
       reference: "card-ref-001",
     });
 
-    expect(paidSale.status).toBe("PAID");
-    expect(paidSale.paymentMethod).toBe("CARD");
-
-    const movements = await ctx.cashMovements.findAll();
-    expect(movements).toHaveLength(1);
-    expect(movements[0].paymentMethod).toBe("CARD");
-    expect(movements[0].cashAmount).toBe(0);
+    expect(payment.success).toBe(false);
+    expect(payment.verificationStatus).toBe("PENDING_VERIFICATION");
+    expect(pendingSale.status).toBe("PENDING_PAYMENT");
+    expect(pendingSale.paymentStatus).toBe("PENDING_VERIFICATION");
+    expect(await ctx.cashMovements.findAll()).toHaveLength(0);
   });
 
   it("K. reembolso total después de pago: stock restaurado, egreso en caja", async () => {
@@ -310,6 +308,42 @@ describe("Caja: atomicidad e idempotencia de pagos", () => {
 
     // Stock restaurado
     expect((await ctx.products.findById(BURGER.id))?.stock).toBe(stockBefore);
+  });
+
+  it("bloquea reembolsos de pagos externos sin cambiar caja, inventario ni venta", async () => {
+    ctx.cart.addItem(BURGER, 1);
+    const sale = await ctx.salesEngine.quickSale({ cashierId: "cashier-1" });
+    const { sale: paidSale } = await ctx.salesEngine.registerPayment(sale, "CASH");
+    const latestPaidSale = await ctx.sales.findById(paidSale.id);
+    if (!latestPaidSale) {
+      throw new Error("TEST_SALE_NOT_FOUND");
+    }
+    await ctx.sales.update({ ...latestPaidSale, paymentMethod: "CARD" });
+    const externalSale = await ctx.sales.findById(paidSale.id);
+    if (!externalSale) {
+      throw new Error("TEST_SALE_NOT_FOUND");
+    }
+
+    const stockBeforeRefund = (await ctx.products.findById(BURGER.id))?.stock;
+    const movementsBeforeRefund = await ctx.cashMovements.findAll();
+
+    await expect(
+      ctx.salesEngine.refundSale(externalSale.id, "Reembolso tarjeta", "cashier-1")
+    ).rejects.toThrow("EXTERNAL_REFUND_REQUIRES_PROVIDER_CONFIRMATION");
+    await expect(
+      ctx.salesEngine.partialRefundSale(
+        externalSale.id,
+        [{ productId: BURGER.id, quantity: 1 }],
+        "Reembolso parcial tarjeta",
+        "cashier-1"
+      )
+    ).rejects.toThrow("EXTERNAL_REFUND_REQUIRES_PROVIDER_CONFIRMATION");
+
+    const unchangedSale = await ctx.sales.findById(externalSale.id);
+    expect(unchangedSale?.status).toBe("PAID");
+    expect(unchangedSale?.refunds ?? []).toHaveLength(0);
+    expect((await ctx.products.findById(BURGER.id))?.stock).toBe(stockBeforeRefund);
+    expect(await ctx.cashMovements.findAll()).toEqual(movementsBeforeRefund);
   });
 
   it("L. reembolso parcial después de pago: stock parcialmente restaurado", async () => {

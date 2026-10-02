@@ -242,7 +242,7 @@ BEGIN
   IF NOT FOUND THEN RAISE EXCEPTION 'CAJA_NO_OPEN_SHIFT'; END IF;
 
   IF NOT public.has_business_role(p_business_id, ARRAY['ADMIN'])
-     AND v_shift.cashier_id IS DISTINCT FROM auth.uid() THEN
+     AND NULLIF(v_shift.data->>'cashierId', '')::uuid IS DISTINCT FROM auth.uid() THEN
     RAISE EXCEPTION 'CAJA_SHIFT_OWNER_REQUIRED';
   END IF;
 
@@ -364,6 +364,7 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
+#variable_conflict use_column
 DECLARE
   v_sale public.sales%ROWTYPE;
   v_shift public.shifts%ROWTYPE;
@@ -401,7 +402,7 @@ BEGIN
 
   SELECT * INTO v_sale
   FROM public.sales s
-  WHERE s.id = p_sale_id AND s.business_id = p_business_id AND s.branch_id = p_branch_id
+  WHERE s.id = p_sale_id::uuid AND s.business_id = p_business_id AND s.branch_id = p_branch_id
   FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'SALE_NOT_FOUND'; END IF;
 
@@ -480,7 +481,7 @@ BEGIN
     END IF;
 
     IF NOT public.has_business_role(p_business_id, ARRAY['ADMIN'])
-       AND v_shift.cashier_id IS DISTINCT FROM auth.uid() THEN
+       AND NULLIF(v_shift.data->>'cashierId', '')::uuid IS DISTINCT FROM auth.uid() THEN
       RAISE EXCEPTION 'CAJA_SHIFT_OWNER_REQUIRED';
     END IF;
 
@@ -567,7 +568,7 @@ BEGIN
     IF NOT FOUND THEN RAISE EXCEPTION 'CAJA_NO_OPEN_SHIFT'; END IF;
 
     IF NOT public.has_business_role(p_business_id, ARRAY['ADMIN'])
-       AND v_shift.cashier_id IS DISTINCT FROM auth.uid() THEN
+       AND NULLIF(v_shift.data->>'cashierId', '')::uuid IS DISTINCT FROM auth.uid() THEN
       RAISE EXCEPTION 'CAJA_SHIFT_OWNER_REQUIRED';
     END IF;
   END IF;
@@ -629,7 +630,7 @@ BEGIN
 
   UPDATE public.sales
   SET data=v_paid_data,version=v_sale.version+1,updated_at=v_payment_date
-  WHERE id=p_sale_id AND business_id=p_business_id AND branch_id=p_branch_id
+  WHERE id=p_sale_id::uuid AND business_id=p_business_id AND branch_id=p_branch_id
     AND version=v_sale.version AND data->>'status' IN ('PENDING_PAYMENT','OPEN');
   IF NOT FOUND THEN RAISE EXCEPTION 'SALE_PAYMENT_CONFLICT'; END IF;
 
@@ -683,7 +684,7 @@ BEGIN
   IF v_shift.data->>'status'='CLOSED' THEN RAISE EXCEPTION 'SHIFT_ALREADY_CLOSED'; END IF;
   IF v_shift.data->>'status'<>'OPEN' THEN RAISE EXCEPTION 'SHIFT_NOT_OPEN'; END IF;
   IF NOT public.has_business_role(v_shift.business_id, ARRAY['ADMIN'])
-     AND v_shift.cashier_id IS DISTINCT FROM auth.uid() THEN
+     AND NULLIF(v_shift.data->>'cashierId', '')::uuid IS DISTINCT FROM auth.uid() THEN
     RAISE EXCEPTION 'SHIFT_OWNER_REQUIRED';
   END IF;
 

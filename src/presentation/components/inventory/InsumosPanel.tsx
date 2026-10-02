@@ -101,7 +101,8 @@ export function InsumosPanel() {
       try {
         const all = await container.supplierEngine.get().listAll();
         setSuppliers(all);
-      } catch {
+      } catch (err) {
+        console.error("[InsumosPanel] No se pudieron cargar los proveedores:", err);
         setSuppliers([]);
       } finally {
         setLoadingSuppliers(false);

@@ -1,6 +1,9 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import { env } from 'node:process';
+
+env.GOMAXPROCS ??= '2';
 
 export default defineConfig({
   plugins: [
@@ -26,7 +29,9 @@ export default defineConfig({
         manualChunks: {
           'vendor-react': ['react', 'react-dom', 'react-router-dom'],
           'vendor-icons': ['lucide-react'],
-          'vendor-supabase': ['@supabase/supabase-js']
+          'vendor-supabase': ['@supabase/supabase-js'],
+          'vendor-charts': ['recharts'],
+          'vendor-three': ['three']
         }
       }
     },

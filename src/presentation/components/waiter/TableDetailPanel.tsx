@@ -163,7 +163,8 @@ export function TableDetailPanel({
     const trimmed = noteDraft.trim();
     run(async () => {
       const currentTable = await container.tableEngine.get().getTable(table.id);
-      const items = currentTable.items.map(item =>
+      if (!currentTable) throw new Error("TABLE_NOT_FOUND");
+      const items = currentTable.items.map((item: any) =>
         item.productId === itemId
           ? { ...item, note: trimmed || undefined }
           : item

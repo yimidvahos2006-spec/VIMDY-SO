@@ -17,7 +17,7 @@ import { VimdyButton } from "../ui/VimdyButton";
 import { useSearch } from "../../../core/store/useSearch";
 import { useCart } from "../../../core/store/useCart";
 import { useProductCatalog } from "../../../core/store/useProductCatalog";
-import { useEnabledModules } from "../../../core/store/useEnabledModules";
+import { useCanUse } from "../../../hooks/useCanUse";
 import { toastStore } from "../../../core/store/toastStore";
 import { weightEntryStore } from "../../../core/store/weightEntryStore";
 import { variantSelectorStore } from "../../../core/store/variantSelectorStore";
@@ -40,8 +40,7 @@ export function PosTopBar() {
 
   const { add } = useCart();
   const { getByBarcode } = useProductCatalog();
-  const enabledModules = useEnabledModules();
-  const hasTablesModule = (enabledModules ?? []).includes("mesas");
+  const hasTablesModule = useCanUse("tables");
 
   const [processing, setProcessing] = useState(false);
   const [voiceSuccess, setVoiceSuccess] = useState<string | null>(null);

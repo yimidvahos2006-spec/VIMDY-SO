@@ -7,6 +7,8 @@ import { getCurrentBusinessId, getCurrentBranchId } from "../../infrastructure/s
 import { CashRegisterEngine } from "./CashRegisterEngine";
 import { cashRegisterStore } from "../store/cashRegisterStore";
 import { activeShiftStore } from "../store/activeShiftStore";
+import { companyConfigStore } from "../store/companyConfigStore";
+import { roundMoney } from "../config/globalization";
 
 /* ===========================================================================
    ShiftEngine
@@ -214,32 +216,35 @@ export class ShiftEngine {
 
     const incomeMovements = movements.filter(movement => movement.type === "IN");
 
-    // Total de ventas sin importar el medio de pago (informativo, no es lo
-    // que debe estar físicamente en el cajón).
-    const totalIncome = incomeMovements.reduce((sum, movement) => sum + movement.amount, 0);
+    const currency = companyConfigStore.get().currency;
 
-    // Solo la porción de cada ingreso que es efectivo físico real. Esta es
-    // la cifra que sí entra en el arqueo — tarjeta/transferencia/QR no
-    // pasan por el cajón, así que no se cuentan aquí.
-    const totalCashIncome = incomeMovements.reduce(
-      (sum, movement) => sum + (movement.cashAmount ?? (movement.paymentMethod === "CASH" || !movement.paymentMethod ? movement.amount : 0)),
-      0
+    const totalIncome = roundMoney(
+      incomeMovements.reduce((sum, movement) => sum + movement.amount, 0),
+      currency
     );
 
-    // Desglose por medio de pago, para mostrarle al cajero cuánto entró
-    // por cada canal aunque no cuente para el efectivo del cajón.
+    const totalCashIncome = roundMoney(
+      incomeMovements.reduce(
+        (sum, movement) => sum + (movement.cashAmount ?? (movement.paymentMethod === "CASH" || !movement.paymentMethod ? movement.amount : 0)),
+        0
+      ),
+      currency
+    );
+
     const incomeByMethod: Record<string, number> = {};
     for (const movement of incomeMovements) {
       const method = movement.paymentMethod ?? "CASH";
-      incomeByMethod[method] = (incomeByMethod[method] ?? 0) + movement.amount;
+      incomeByMethod[method] = roundMoney((incomeByMethod[method] ?? 0) + movement.amount, currency);
     }
 
-    // Los egresos (retiros, gastos) siempre salen del efectivo físico.
-    const totalExpense = movements
-      .filter(movement => movement.type === "OUT")
-      .reduce((sum, movement) => sum + movement.amount, 0);
+    const totalExpense = roundMoney(
+      movements
+        .filter(movement => movement.type === "OUT")
+        .reduce((sum, movement) => sum + movement.amount, 0),
+      currency
+    );
 
-    const expectedAmount = shift.openingAmount + totalCashIncome - totalExpense;
+    const expectedAmount = roundMoney(shift.openingAmount + totalCashIncome - totalExpense, currency);
 
     return { shift, totalIncome, totalExpense, totalCashIncome, incomeByMethod, expectedAmount };
   }

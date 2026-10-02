@@ -26,7 +26,7 @@ create table if not exists user_trial_usage (
 -- Lógica: plan + fechas (trial_ends_at, renewal_date)
 -- ----------------------------------------------------------------------------
 -- Esta prueba valida la función consolidada en:
---   supabase/migrations/20260829_consolidate_subscription_functions.sql
+--   supabase/migrations/20260829000001_consolidate_subscription_functions.sql
 --
 -- Comportamiento esperado (compatible con SubscriptionEngine.ts):
 --   subscription_status = 'trial'    => TRUE (trial activo)

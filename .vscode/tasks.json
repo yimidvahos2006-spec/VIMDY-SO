@@ -1,0 +1,19 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Check local SQL validation tools",
+			"type": "shell",
+			"command": "Get-Command",
+			"args": [
+				"psql",
+				"supabase",
+				"docker",
+				"-ErrorAction",
+				"SilentlyContinue"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		}
+	]
+}

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { useTranslation } from "../../core/i18n/useTranslation";
 import { Table, Product, Waiter } from "../../core/entities/Entities";
@@ -17,9 +18,13 @@ import { TableDetailPanel } from "../components/waiter/TableDetailPanel";
 import { OfflineStatusBadge } from "../components/ui/OfflineStatusBadge";
 import { usePendingTableOperationsQueue } from "../../core/offline/usePendingTableOperationsQueue";
 import { RequirePermission } from "../navigation/RequirePermission";
+import { useCanUse } from "../../hooks/useCanUse";
 
 function MeserosContent() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const tablesEnabled = useCanUse("tables");
+  const waiterModeEnabled = useCanUse("waiters");
   const [ready, setReady] = useState(false);
   const [tables, setTables] = useState<Table[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -120,6 +125,14 @@ function MeserosContent() {
     }
   }
 
+  function handleSelectWaiter(waiter: Waiter) {
+    if (!tablesEnabled && waiterModeEnabled) {
+      navigate("/caja", { state: { tab: "venta", waiterId: waiter.id } });
+      return;
+    }
+    setActiveWaiter(waiter);
+  }
+
   function closeDialogs() {
     setDialog(null);
     setSelectedTableId(null);
@@ -136,7 +149,7 @@ function MeserosContent() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-5xl font-black text-white">{t("waiter.page.title")}</h1>
+            <h1 className="text-5xl font-black text-white">{tablesEnabled ? t("waiter.page.title") : "Pedidos de meseros"}</h1>
             <OfflineStatusBadge
               pendingCount={pendingTableOperationsCount}
               pendingLabelSingular={t("waiter.offline.pendingSingular")}
@@ -146,7 +159,7 @@ function MeserosContent() {
           <p className="text-slate-400 mt-3 text-xl">
             {activeWaiter
               ? t("waiter.page.subtitleWaiter", { name: activeWaiter.name })
-              : t("waiter.page.subtitleAdmin")}
+              : tablesEnabled ? t("waiter.page.subtitleAdmin") : "Selecciona quién atiende la venta de mostrador."}
           </p>
         </div>
 
@@ -167,19 +180,19 @@ function MeserosContent() {
       )}
 
       {/* Paso 1: tocar el nombre — sin login. */}
-      {ready && !activeWaiter && (
-        <WaiterSelect waiters={waiters} onSelect={setActiveWaiter} />
+      {ready && waiterModeEnabled && !activeWaiter && (
+        <WaiterSelect waiters={waiters} onSelect={handleSelectWaiter} />
       )}
 
       {/* Paso 2: mesas, ya con el mesero identificado. */}
-      {ready && activeWaiter && (
+      {ready && tablesEnabled && (!waiterModeEnabled || activeWaiter) && (
         <TableGrid tables={tables} onSelect={handleSelectTable} avgDurationMs={avgDurationMs} />
       )}
 
-      {dialog === "open" && selectedTable && activeWaiter && (
+      {dialog === "open" && selectedTable && (
         <OpenTableDialog
           table={selectedTable}
-          waiterId={activeWaiter.id}
+          waiterId={activeWaiter?.id ?? null}
           onClose={closeDialogs}
           onOpened={() => {
             setDialog("detail");
@@ -210,8 +223,10 @@ function MeserosContent() {
 }
 
 export function Meseros() {
+  const tablesEnabled = useCanUse("tables");
+
   return (
-    <RequirePermission requires="tables.view">
+    <RequirePermission requires={tablesEnabled ? "tables.view" : "staff.view"}>
       <MeserosContent />
     </RequirePermission>
   );
