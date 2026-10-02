@@ -1546,20 +1546,7 @@ export class SalesEngine {
     const paymentResult = this.processPayment(current, method, options);
 
     if (!paymentResult.success && paymentResult.verificationStatus === "PENDING_VERIFICATION") {
-      const pendingSale: Sale = {
-        ...current,
-        paymentMethod: method,
-        paymentReference: options.reference,
-        paymentReceived: paymentResult.received,
-        changeGiven: paymentResult.change,
-        paymentStatus: "PENDING_VERIFICATION"
-      };
-      if (!this.cash.isPaymentAtomicRepository()) {
-        await this.updateSale(pendingSale);
-      } else {
-        await this.updateSale(pendingSale);
-      }
-      return { sale: pendingSale, payment: paymentResult };
+      return { sale: current, payment: paymentResult };
     }
 
     if (!paymentResult.success) {

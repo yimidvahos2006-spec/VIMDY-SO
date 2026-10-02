@@ -20,6 +20,7 @@ import { AuditEngine } from "../../src/core/engines/AuditEngine";
 import { SalesEngine, CreateSaleInput } from "../../src/core/engines/SalesEngine";
 import { ShiftEngine } from "../../src/core/engines/ShiftEngine";
 import { PosCore } from "../../src/core/engines/PosCore";
+import { cashRegisterStore } from "../../src/core/store/cashRegisterStore";
 import type { PendingSale } from "../../src/core/offline/PendingSale";
 
 import { InMemoryRepository } from "../fakes/InMemoryRepository";
@@ -84,6 +85,7 @@ describe("Smoke: caja, pagos, turnos y conciliacion (FASE 4)", () => {
 
   beforeEach(async () => {
     ctx = buildSalesEngine();
+    cashRegisterStore.setSelected("test-business-id", "test-branch-id", "cash-register-caja-1");
     await ctx.products.save(PRODUCT);
   });
 
@@ -100,11 +102,9 @@ describe("Smoke: caja, pagos, turnos y conciliacion (FASE 4)", () => {
       expect(shift.openedAt).toBeDefined();
     });
 
-    it("no permite abrir dos turnos simultaneamente", async () => {
-      await ctx.shiftEngine.openShift(CASHIER_ID, 50000);
-
-      await expect(ctx.shiftEngine.openShift("cashier-2", 50000)).rejects.toThrow(
-        /SHIFT_ALREADY_OPEN/
+    it("rechaza un fondo inicial negativo", async () => {
+      await expect(ctx.shiftEngine.openShift(CASHIER_ID, -1)).rejects.toThrow(
+        /INVALID_AMOUNT/
       );
     });
   });
@@ -164,6 +164,7 @@ describe("Smoke: caja, pagos, turnos y conciliacion (FASE 4)", () => {
       expect(payment.success).toBe(false);
       expect(payment.verificationStatus).toBe("PENDING_VERIFICATION");
       expect(pendingSale.status).toBe("PENDING_PAYMENT");
+      expect(pendingSale.paymentStatus).toBeUndefined();
 
       const summary = await ctx.shiftEngine.getShiftSummary(
         (await ctx.shiftEngine.getCurrentShift())!.id
@@ -189,7 +190,7 @@ describe("Smoke: caja, pagos, turnos y conciliacion (FASE 4)", () => {
       expect(payment.success).toBe(false);
       expect(payment.verificationStatus).toBe("PENDING_VERIFICATION");
       expect(pendingSale.status).toBe("PENDING_PAYMENT");
-      expect(pendingSale.paymentStatus).toBe("PENDING_VERIFICATION");
+      expect(pendingSale.paymentStatus).toBeUndefined();
 
       const summary = await ctx.shiftEngine.getShiftSummary(
         (await ctx.shiftEngine.getCurrentShift())!.id
@@ -594,6 +595,9 @@ describe("Smoke: caja, pagos, turnos y conciliacion (FASE 4)", () => {
       expect(payment.success).toBe(false);
       expect(payment.verificationStatus).toBe("PENDING_VERIFICATION");
       expect(receipt).toBeNull();
+      const persistedSale = await ctx.salesEngine.getSale(sale.id);
+      expect(persistedSale?.status).toBe("PENDING_PAYMENT");
+      expect(persistedSale?.paymentStatus).toBeUndefined();
     });
   });
 

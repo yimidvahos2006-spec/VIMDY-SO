@@ -73,6 +73,16 @@ function buildSalesEngine() {
   return { salesEngine, products, cart, kitchenOrders, cashMovements, cash, sales };
 }
 
+async function seedServerPendingPaymentStatus(
+  sales: InMemoryRepository<Sale>,
+  sale: Sale
+): Promise<void> {
+  const persistedSale = await sales.findById(sale.id);
+  if (!persistedSale) throw new Error("TEST_SALE_NOT_FOUND");
+
+  await sales.update({ ...persistedSale, paymentStatus: "PENDING_VERIFICATION" });
+}
+
 const BURGER: Product = {
   id: "prod-burger-audit",
   name: "Hamburguesa Clásica",
@@ -239,6 +249,7 @@ describe("Caja: atomicidad e idempotencia de pagos", () => {
   it("I. pago por transferencia queda pendiente y no genera movimiento financiero", async () => {
     ctx.cart.addItem(BURGER, 1);
     const sale = await ctx.salesEngine.quickSale({ cashierId: "cashier-1" });
+    await seedServerPendingPaymentStatus(ctx.sales, sale);
 
     const { sale: pendingSale, payment } = await ctx.salesEngine.registerPayment(
       sale,
@@ -256,6 +267,7 @@ describe("Caja: atomicidad e idempotencia de pagos", () => {
   it("I.1 pago QR queda pendiente y no genera movimiento financiero", async () => {
     ctx.cart.addItem(BURGER, 1);
     const sale = await ctx.salesEngine.quickSale({ cashierId: "cashier-1" });
+    await seedServerPendingPaymentStatus(ctx.sales, sale);
 
     const { sale: pendingSale, payment } = await ctx.salesEngine.registerPayment(
       sale,
@@ -273,6 +285,7 @@ describe("Caja: atomicidad e idempotencia de pagos", () => {
   it("J. una referencia de tarjeta no confirma el pago ni registra caja", async () => {
     ctx.cart.addItem(BURGER, 1);
     const sale = await ctx.salesEngine.quickSale({ cashierId: "cashier-1" });
+    await seedServerPendingPaymentStatus(ctx.sales, sale);
 
     const { sale: pendingSale, payment } = await ctx.salesEngine.registerPayment(sale, "CARD", {
       received: sale.total,

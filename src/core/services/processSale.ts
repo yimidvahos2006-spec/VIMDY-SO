@@ -241,7 +241,7 @@ async function chargeSaleOffline(
   method: PaymentMethod,
   mixed: MixedPayment | undefined,
   itemNames: Map<string, string>
-): Promise<{ success: boolean; invoiceError?: string; pendingVerification?: boolean }> {
+): Promise<{ success: boolean; invoiceError?: string; pendingVerification?: boolean; pendingSync?: boolean }> {
   const payment = paymentStore.get();
 
   if (method === "CASH") {
@@ -319,8 +319,9 @@ async function chargeSaleOffline(
   paymentStore.reset();
 
   return {
-    success: true,
-    pendingVerification: method !== "CASH"
+    success: false,
+    pendingVerification: method !== "CASH",
+    pendingSync: true
   };
 }
 
@@ -339,7 +340,7 @@ export async function chargeSale(
   sale: Sale,
   params: ProcessSaleParams,
   precomputedItemNames?: Map<string, string>
-): Promise<{ success: boolean; invoiceError?: string; pendingVerification?: boolean }> {
+): Promise<{ success: boolean; invoiceError?: string; pendingVerification?: boolean; pendingSync?: boolean }> {
   // Los nombres de producto no viven en Sale/SaleItem (solo productId+price+
   // quantity), así que normalmente se toman del carrito real. BUG que se
   // arregla acá: si esta venta ya se armó/encoló offline en el paso
@@ -414,7 +415,7 @@ export async function chargeSale(
       toast.warning(paymentResult.message);
       cartStore.clear();
       paymentStore.reset();
-      return { success: true, pendingVerification: true };
+      return { success: false, pendingVerification: true };
     }
 
     const receipt = await container.salesEngine.get().generateReceipt(
@@ -491,7 +492,7 @@ export async function chargeSale(
  * offline: si no hay conexión, ambos pasos internos caen a la cola local
  * sin que el cajero note más que el aviso de "sin conexión".
  */
-export async function processSale(params: ProcessSaleParams): Promise<{ success: boolean; invoiceError?: string; pendingVerification?: boolean }> {
+export async function processSale(params: ProcessSaleParams): Promise<{ success: boolean; invoiceError?: string; pendingVerification?: boolean; pendingSync?: boolean }> {
   // Se capturan los nombres ANTES de sendOrderToKitchen (ver comentario en
   // chargeSale de arriba): si no hay conexión, sendOrderToKitchen vacía el
   // carrito internamente antes de que lleguemos a chargeSale.
