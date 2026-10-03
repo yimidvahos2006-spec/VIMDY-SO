@@ -25,7 +25,10 @@
    14. Consistencia después de cada paso  -> se verifica en cada bloque, no al final
 =========================================================================== */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { operationConfigStore } from "../../src/core/store/operationConfigStore";
+import { kitchenOutputModeStore } from "../../src/core/store/kitchenOutputModeStore";
+import { DEFAULT_OPERATION_CONFIG } from "../../src/core/config/operation";
 
 import { Category, Product, Sale, CashMovement, KitchenOrder } from "../../src/core/entities/Entities";
 
@@ -92,6 +95,14 @@ describe("Punto 10 — Auditoría final de Inventario VIMDY (recorrido completo)
   let ctx: ReturnType<typeof buildNegocio>;
 
   beforeEach(() => {
+    operationConfigStore.set({
+      ...DEFAULT_OPERATION_CONFIG,
+      kitchenEnabled: true,
+      kitchenOutputMode: "kds",
+      kdsEnabled: true,
+      salesChannels: ["presencial"]
+    });
+    kitchenOutputModeStore.set("pantalla");
     ctx = buildNegocio();
   });
 

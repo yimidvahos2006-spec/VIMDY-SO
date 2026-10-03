@@ -7,7 +7,10 @@
    inventario descuenta → cierra caja → reportes coinciden.
    =========================================================================== */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { operationConfigStore } from "../../src/core/store/operationConfigStore";
+import { kitchenOutputModeStore } from "../../src/core/store/kitchenOutputModeStore";
+import { DEFAULT_OPERATION_CONFIG } from "../../src/core/config/operation";
 
 import {
   Product,
@@ -129,6 +132,14 @@ describe("Validación operacional: Restaurante", () => {
   let harinaId: string;
 
   beforeEach(async () => {
+    operationConfigStore.set({
+      ...DEFAULT_OPERATION_CONFIG,
+      kitchenEnabled: true,
+      kitchenOutputMode: "kds",
+      kdsEnabled: true,
+      salesChannels: ["presencial"]
+    });
+    kitchenOutputModeStore.set("pantalla");
     ctx = buildContext();
 
     const carne = await createProduct(ctx, {
@@ -257,6 +268,10 @@ describe("Validación operacional: Restaurante", () => {
     expect(kitchenOrders[0].items[0].quantity).toBe(2);
 
     // 5. Cocina prepara y entrega (simulado)
+    // La maquina de estados de KitchenEngine es lineal y no permite saltar LISTO
+    // (PENDIENTE -> EN_PREPARACION -> LISTO -> ENTREGADO).
+    await ctx.kitchen.updateStatus(kitchenOrders[0].id, "EN_PREPARACION");
+    await ctx.kitchen.updateStatus(kitchenOrders[0].id, "LISTO");
     await ctx.kitchen.updateStatus(kitchenOrders[0].id, "ENTREGADO");
 
     // 6. Cobrar mesa

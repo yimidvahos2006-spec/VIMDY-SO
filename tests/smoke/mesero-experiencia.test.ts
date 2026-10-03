@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { operationConfigStore } from "../../src/core/store/operationConfigStore";
+import { kitchenOutputModeStore } from "../../src/core/store/kitchenOutputModeStore";
+import { DEFAULT_OPERATION_CONFIG } from "../../src/core/config/operation";
 
 import { Product, Table, OrderPriority } from "../../src/core/entities/Entities";
 import { InMemoryRepository } from "../fakes/InMemoryRepository";
@@ -94,6 +97,16 @@ describe("Smoke: experiencia del mesero en VIMDY", () => {
   let ctx: ReturnType<typeof buildContext>;
 
   beforeEach(async () => {
+    // La salida a cocina es fail-closed por defecto ("none"): este flujo SI
+    // ejercita KDS, asi que se habilita de forma explicita.
+    operationConfigStore.set({
+      ...DEFAULT_OPERATION_CONFIG,
+      kitchenEnabled: true,
+      kitchenOutputMode: "kds",
+      kdsEnabled: true,
+      salesChannels: ["presencial"]
+    });
+    kitchenOutputModeStore.set("pantalla");
     ctx = buildContext();
     await ctx.products.save(HAMBURGUESA);
     await ctx.products.save(GASEOSA);

@@ -59,13 +59,23 @@ describe("Smoke: salidaCocina decide pantalla vs impresora", () => {
     expect(saved[0].items).toHaveLength(1);
   });
 
-  it('"impresora" no guarda en KitchenEngine pero tampoco lanza error', async () => {
+  it('"impresora" registra la comanda en KitchenEngine y no lanza error aunque no haya navegador', async () => {
+    // La salida "impresora" SI persiste la comanda en KitchenEngine (asi queda
+    // historial y el ciclo de la orden se puede seguir) y ademas intenta
+    // imprimir. Este test se escribio cuando KitchenPrinterOutput era un stub
+    // no-op y por eso esperaba 0 guardados; hoy la salida esta implementada de
+    // verdad, y "ambos" usa el flag alreadySaved justamente para no guardar dos
+    // veces cuando la pantalla ya lo hizo.
+    //
+    // La impresion fisica no es verificable en Node (no hay window): el output
+    // lo detecta y retorna sin error. Eso es BLOCKED_ENVIRONMENT, no un fallo.
     const { kitchen, kitchenOrders } = buildKitchenEngine();
     const output = createKitchenOutput("impresora", kitchen);
 
     await expect(output.send(SAMPLE_ORDER)).resolves.toBeUndefined();
 
     const saved = await kitchenOrders.findAll();
-    expect(saved).toHaveLength(0);
+    expect(saved).toHaveLength(1);
+    expect(saved[0].id).toBe(SAMPLE_ORDER.id);
   });
 });

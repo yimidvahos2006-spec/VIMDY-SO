@@ -4,7 +4,10 @@
    atomicidad openTable/closeTable.
 =========================================================================== */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { operationConfigStore } from "../../src/core/store/operationConfigStore";
+import { kitchenOutputModeStore } from "../../src/core/store/kitchenOutputModeStore";
+import { DEFAULT_OPERATION_CONFIG } from "../../src/core/config/operation";
 
 import {
   Product,
@@ -123,6 +126,26 @@ function buildContext(businessId = "biz-1", branchId = "branch-1") {
 }
 
 describe("FASE 5 — Cierre definitivo: cocina multi-tenant, envío sin duplicados, atomicidad", () => {
+
+  beforeEach(() => {
+    // La salida a cocina es fail-closed por defecto (kitchenOutputModeStore="none")
+    // para no mandar comandas a una pantalla inexistente mientras el perfil se
+    // hidrata. Estos flujos SI ejercitan cocina/KDS, asi que se habilita de forma
+    // explicita, igual que requiere-cocina.test.ts.
+    operationConfigStore.set({
+      ...DEFAULT_OPERATION_CONFIG,
+      kitchenEnabled: true,
+      kitchenOutputMode: "kds",
+      kdsEnabled: true,
+      salesChannels: ["presencial"]
+    });
+    kitchenOutputModeStore.set("pantalla");
+  });
+
+  afterEach(() => {
+    operationConfigStore.clear();
+    kitchenOutputModeStore.clear();
+  });
   // ========================================================================
   // 1. KITCHENORDER MULTI-TENANT
   // ========================================================================

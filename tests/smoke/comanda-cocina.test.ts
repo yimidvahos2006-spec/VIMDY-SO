@@ -70,6 +70,14 @@ describe("Smoke: creación y entrega de comanda de cocina", () => {
     active = await ctx.kitchen.getActiveOrders();
     expect(active[0].status).toBe("EN_PREPARACION");
 
+    // La maquina de estados de KitchenEngine es lineal y deliberada
+    // (PENDIENTE -> EN_PREPARACION -> LISTO -> ENTREGADO): no se puede saltar
+    // LISTO. Este test se escribio antes de que esa maquina existiera y debe
+    // recorrer el camino legal para llegar al mismo resultado que comprueba.
+    await ctx.kitchen.updateStatus(order.id, "LISTO");
+    active = await ctx.kitchen.getActiveOrders();
+    expect(active[0].status).toBe("LISTO");
+
     await ctx.kitchen.updateStatus(order.id, "ENTREGADO");
 
     active = await ctx.kitchen.getActiveOrders();
@@ -85,15 +93,22 @@ describe("Smoke: creación y entrega de comanda de cocina", () => {
     const order = buildOrder();
     await ctx.kitchen.save(order);
 
+    // Camino legal completo hasta ENTREGADO.
+    await ctx.kitchen.updateStatus(order.id, "EN_PREPARACION");
+    await ctx.kitchen.updateStatus(order.id, "LISTO");
     await ctx.kitchen.updateStatus(order.id, "ENTREGADO");
     const firstDelivered = await ctx.kitchen.getById(order.id);
     const firstDeliveredAt = firstDelivered!.deliveredAt;
 
     // Reintento (ej. doble click en "Entregar" que alcanzó a salir antes
-    // de que la UI deshabilitara el botón).
-    await ctx.kitchen.updateStatus(order.id, "ENTREGADO");
-    const secondDelivered = await ctx.kitchen.getById(order.id);
+    // de que la UI deshabilitara el boton). Una comanda ya ENTREGADA esta
+    // bloqueada (ORDER_LOCKED), que es una garantia MAS fuerte que no
+    // recalcular deliveredAt: la orden no se puede volver a tocar.
+    await expect(
+      ctx.kitchen.updateStatus(order.id, "ENTREGADO")
+    ).rejects.toThrow("ORDER_LOCKED");
 
+    const secondDelivered = await ctx.kitchen.getById(order.id);
     expect(secondDelivered!.deliveredAt).toEqual(firstDeliveredAt);
   });
 

@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { operationConfigStore } from "../../src/core/store/operationConfigStore";
+import { kitchenOutputModeStore } from "../../src/core/store/kitchenOutputModeStore";
+import { DEFAULT_OPERATION_CONFIG } from "../../src/core/config/operation";
 
 import { Product, Sale, CashMovement, Shift, KitchenOrder } from "../../src/core/entities/Entities";
 import { CartEngine } from "../../src/core/engines/CartEngine";
@@ -72,12 +75,23 @@ describe("Smoke: venta con recibo y cierre de turno", () => {
   let ctx: ReturnType<typeof buildSalesAndShiftEngines>;
 
   beforeEach(async () => {
+    operationConfigStore.set({
+      ...DEFAULT_OPERATION_CONFIG,
+      kitchenEnabled: true,
+      kitchenOutputMode: "kds",
+      kdsEnabled: true,
+      salesChannels: ["presencial"]
+    });
+    kitchenOutputModeStore.set("pantalla");
     ctx = buildSalesAndShiftEngines();
     await ctx.products.save(BURGER);
   });
 
   it("cierra el ciclo completo: abre turno, vende, cobra, genera recibo y cierra turno", async () => {
-    const shift = await ctx.shiftEngine.openShift("cashier-1", 50000, "Apertura inicial");
+    // El cierre de turno exige cashRegisterId (fail-closed de Paso 2:
+  // CAJA_CASH_REGISTER_REQUIRED_FOR_CLOSE). Este ctx no cablea cashRegisters,
+  // asi que se pasa el id explicitamente al abrir el turno.
+  const shift = await ctx.shiftEngine.openShift("cashier-1", 50000, "Apertura inicial", "cash-reg-1");
     const cart = ctx.cart;
     cart.addItem(BURGER, 2);
 
