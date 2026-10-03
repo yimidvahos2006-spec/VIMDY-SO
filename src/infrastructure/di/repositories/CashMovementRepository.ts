@@ -57,6 +57,34 @@ export interface ICashMovementRepository extends IRepository<CashMovement> {
     reference?: string | null;
     verificationSource?: "CASH" | "EXTERNAL_TERMINAL" | "PROVIDER" | null;
   }): Promise<{ income: CashMovement; change: CashMovement | null }>;
+
+  /**
+   * Ejecuta un reembolso CASH de forma atómica en servidor mediante la RPC
+   * `refund_sale_cash_atomic()`. Garantiza:
+   * 1. Valida que la venta esté PAID/CLOSED y paymentStatus = CONFIRMED
+   * 2. Valida que paymentMethod = CASH (reembolsos externos usan otro flujo)
+   * 3. Calcula montos reembolsables por ítem (respeta reembolsos previos)
+   * 4. Reversa inventario/Kardex atómicamente
+   * 5. Registra movimiento de caja OUT + payment_refunds + audit_log
+   * 6. Actualiza estado de venta (REFUNDED / parcialmente reembolsada)
+   * 7. Idempotencia por p_refund_id (business_id + idempotency_key)
+   */
+  refundSaleCashAtomic(params: {
+    businessId: string;
+    branchId: string;
+    saleId: string;
+    refundId: string;
+    refundItems: { productId: string; quantity: number }[];
+    reason: string;
+    cashRegisterId?: string | null;
+  }): Promise<{
+    success: boolean;
+    idempotent: boolean;
+    refundId: string;
+    refundAmount: number;
+    cashMovementId: string;
+    sale: any;
+  }>;
 }
 
 export class CashMovementRepository
@@ -169,11 +197,70 @@ export class CashMovementRepository
       };
     }
 
-    return { income, change: changeMovement };
+return { income, change: changeMovement };
   }
 
   /**
-    * Idempotencia + atomicidad vía RPC `register_movement_atomic()`.
+   * Ejecuta reembolso CASH atómico vía RPC `refund_sale_cash_atomic()`.
+   * La RPC valida todo en servidor: venta pagada, método CASH, montos reembolsables,
+   * inventario, caja, y registra payment_refunds + cash_movements + audit_log + sale update.
+   */
+  public async refundSaleCashAtomic(params: {
+    businessId: string;
+    branchId: string;
+    saleId: string;
+    refundId: string;
+    refundItems: { productId: string; quantity: number }[];
+    reason: string;
+    cashRegisterId?: string | null;
+  }): Promise<{
+    success: boolean;
+    idempotent: boolean;
+    refundId: string;
+    refundAmount: number;
+    cashMovementId: string;
+    sale: any;
+  }> {
+    const { data, error } = await supabase.rpc("refund_sale_cash_atomic", {
+      p_business_id: params.businessId,
+      p_branch_id: params.branchId,
+      p_sale_id: params.saleId,
+      p_refund_id: params.refundId,
+      p_refund_items: params.refundItems,
+      p_reason: params.reason,
+      p_cash_register_id: params.cashRegisterId ?? null,
+    });
+
+    if (error) {
+      logError(error, {
+        category: "payment",
+        context: {
+          saleId: params.saleId,
+          refundId: params.refundId,
+          businessId: params.businessId,
+          branchId: params.branchId,
+        },
+      });
+      throw new Error(`SUPABASE_REFUND_SALE_CASH_FAILED: ${error.message}`);
+    }
+
+    const row = data?.[0];
+    if (!row) {
+      throw new Error("SUPABASE_REFUND_SALE_CASH_FAILED: la RPC no devolvió resultado.");
+    }
+
+    return {
+      success: row.success ?? true,
+      idempotent: row.idempotent ?? false,
+      refundId: row.refundid ?? row.refund_id ?? "",
+      refundAmount: Number(row.refundamount ?? row.refund_amount ?? 0),
+      cashMovementId: row.cashmovementid ?? row.cash_movement_id ?? params.refundId,
+      sale: row.sale ?? null,
+    };
+  }
+
+  /**
+   * Idempotencia + atomicidad vía RPC `register_movement_atomic()`.
     * El RPC hace ON CONFLICT (business_id, branch_id, idempotency_key)
     * DO NOTHING en servidor: si dos cajeros intentan registrar el mismo
     * movimiento al mismo tiempo, UNO inserta y el otro obtiene el mismo

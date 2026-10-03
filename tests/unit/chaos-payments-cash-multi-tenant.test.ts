@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const { mockSupabase } = vi.hoisted(() => {
   const mockFrom = vi.fn(() => ({
@@ -52,12 +52,20 @@ import { InMemoryRepository } from "../fakes/InMemoryRepository";
 import { FakeProductRepository } from "../fakes/FakeProductRepository";
 import { AuditLog } from "../../src/core/entities/Entities";
 import { setCurrentBusinessId, setCurrentBranchId } from "../../src/infrastructure/supabase/supabaseClient";
+import { DEFAULT_OPERATION_CONFIG } from "../../src/core/config/operation";
+import { operationConfigStore } from "../../src/core/store/operationConfigStore";
+import { kitchenOutputModeStore } from "../../src/core/store/kitchenOutputModeStore";
 
 describe("P3 — Caos: pagos, caja, multi-tenant", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     setCurrentBusinessId(null);
     setCurrentBranchId(null);
+  });
+
+  afterEach(() => {
+    operationConfigStore.clear();
+    kitchenOutputModeStore.clear();
   });
 
   describe("PAGOS — webhook duplicado", () => {
@@ -284,6 +292,18 @@ describe("P3 — Caos: pagos, caja, multi-tenant", () => {
         new AuditEngine(auditLogs as any)
       );
 
+      // Sin esto, SalesEngine.sendToKitchen() hace early-return null
+      // (kitchenEnabled !== true) y nunca tocaría el kitchen mockeado: el
+      // fallo inyectado no ocurriría y no habría rollback que verificar.
+      operationConfigStore.set({
+        ...DEFAULT_OPERATION_CONFIG,
+        kitchenEnabled: true,
+        kitchenOutputMode: "kds",
+        kdsEnabled: true,
+        salesChannels: ["presencial"]
+      });
+      kitchenOutputModeStore.set("pantalla");
+
       await expect(
         salesEngine.createSale({
           id: "sale-chaos",
@@ -412,7 +432,15 @@ describe("P3 — Caos: pagos, caja, multi-tenant", () => {
       expect(product?.stock).toBe(3);
     });
 
-    it("pago fallido a mitad de camino: la venta queda PENDING_PAYMENT y el stock se repone", async () => {
+    it("pago fallido a mitad de camino: createSale ya consumió el stock, el fallo de pago NO lo restaura y el reintento cobra sin descontar de nuevo", async () => {
+      // CONTRATO A — el consumo de inventario ocurre al CREAR la venta, no al
+      // cobrar. create_sale_fulfillment_atomic descuenta stock y deja la venta
+      // PENDING_PAYMENT + FULFILLED en la misma transacción; register_sale_
+      // payment_atomic solo toca cash_movements + sales. Por eso un cobro
+      // fallido NO repone stock: la venta sigue abierta sosteniendo la reserva,
+      // y quien la libera es cancelSale(), no un pago rechazado. Si se
+      // repusiera acá, el mismo stock quedaría libre para otra venta y un
+      // reintento exitoso cerraría una venta PAID sin haber consumido nada.
       setCurrentBusinessId("b-pay-fail");
       setCurrentBranchId("br-pay-fail");
 
@@ -421,6 +449,7 @@ describe("P3 — Caos: pagos, caja, multi-tenant", () => {
       const kitchenOrders = new InMemoryRepository<any>("kitchen_orders");
       const cashMovements = new InMemoryRepository<any>("cash_movements");
       const auditLogs = new InMemoryRepository<AuditLog>("audit_logs");
+      const kardexMovements = new InMemoryRepository<any>("movements");
 
       await products.save({
         id: "prod-pay-fail",
@@ -432,7 +461,8 @@ describe("P3 — Caos: pagos, caja, multi-tenant", () => {
         lastUpdated: new Date()
       });
 
-      const inventory = new InventoryEngine(products as any, new KardexEngine(new InMemoryRepository<any>("movements") as any));
+      const kardex = new KardexEngine(kardexMovements as any);
+      const inventory = new InventoryEngine(products as any, kardex);
       const cash = new CashEngine(cashMovements as any);
       const salesEngine = new SalesEngine(
         sales as any,
@@ -450,6 +480,11 @@ describe("P3 — Caos: pagos, caja, multi-tenant", () => {
         new AuditEngine(auditLogs as any)
       );
 
+      const decreases = async () =>
+        (await kardex.getHistory("prod-pay-fail")).filter((m) => m.type === "DECREASE");
+
+      expect((await products.findById("prod-pay-fail"))?.stock).toBe(5);
+
       const sale = await salesEngine.createSale({
         id: "sale-pay-fail",
         type: "QUICK",
@@ -457,22 +492,51 @@ describe("P3 — Caos: pagos, caja, multi-tenant", () => {
         cashierId: "cashier-1"
       });
 
+      // createSale consumió el inventario exactamente una vez: 5 -> 3, con un
+      // único DECREASE en Kardex. La venta nace FULFILLED (reserva ya tomada).
       expect(sale.status).toBe("PENDING_PAYMENT");
+      expect(sale.fulfillmentStatus).toBe("FULFILLED");
       expect((await products.findById("prod-pay-fail"))?.stock).toBe(3);
+      expect(await decreases()).toHaveLength(1);
+      expect(await cashMovements.findAll()).toHaveLength(0);
 
-      (cash.registerSalePaymentAtomic as any) = vi.fn(async () => {
-        throw new Error("CASH_RPC_FAILED");
-      });
+      // La caja se cae a mitad de camino: el RPC de cobro rechaza.
+      vi.spyOn(cash, "registerSalePaymentAtomic").mockRejectedValueOnce(
+        new Error("CASH_RPC_FAILED")
+      );
 
       await expect(
         salesEngine.registerPayment(sale, "CASH", { received: sale.total })
       ).rejects.toThrow("CASH_RPC_FAILED");
 
-      const updatedSale = await salesEngine.getSale(sale.id);
-      expect(updatedSale?.status).toBe("PENDING_PAYMENT");
+      const failedSale = await salesEngine.getSale(sale.id);
+      expect(failedSale?.status).toBe("PENDING_PAYMENT");
 
-      const stockAfterFailedPayment = (await products.findById("prod-pay-fail"))?.stock ?? 0;
-      expect(stockAfterFailedPayment).toBe(5);
+      // El fallo de pago NO revierte el consumo: stock intacto en 3, un único
+      // DECREASE, cero movimientos de caja y una sola venta (sin duplicar).
+      expect((await products.findById("prod-pay-fail"))?.stock).toBe(3);
+      expect(await decreases()).toHaveLength(1);
+      expect(await cashMovements.findAll()).toHaveLength(0);
+      expect(await sales.findAll()).toHaveLength(1);
+
+      // Reintento con la caja arriba. La venta sigue FULFILLED, así que el
+      // camino de cobro no toca inventario: cobra sin descontar de nuevo.
+      const { sale: paidSale } = await salesEngine.registerPayment(sale, "CASH", {
+        received: sale.total
+      });
+
+      expect(paidSale.status).toBe("PAID");
+      expect(paidSale.paymentStatus).toBe("CONFIRMED");
+      expect(paidSale.paymentMethod).toBe("CASH");
+      expect((await products.findById("prod-pay-fail"))?.stock).toBe(3);
+      expect(await decreases()).toHaveLength(1);
+
+      // Un único efecto financiero del pago, con clave idempotente estable.
+      const movements = await cashMovements.findAll();
+      expect(movements).toHaveLength(1);
+      expect(movements[0].type).toBe("IN");
+      expect(movements[0].id).toBe(`sale-payment-${sale.id}`);
+      expect(movements[0].amount).toBe(sale.total);
     });
 
     it("venta con stock insuficiente: no se crea la venta y no se modifica el inventario", async () => {

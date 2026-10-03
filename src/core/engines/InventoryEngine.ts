@@ -291,6 +291,22 @@ export class InventoryEngine {
     await this.applySaleStockChanges(consumption, "INCREASE", reason, operationId);
   }
 
+  /**
+   * Devuelve los productos REALES cuyo Kardex debe tener movimientos
+   * asociados a una venta: la misma expansión que consumeForSale usa
+   * para descontar stock (ingredientes de recetas, no el producto
+   * padre que no maneja stock propio; excluye servicios con
+   * trackStock=false). verifyInventoryTrail usa esto para no generar
+   * falsos positivos en productos con receta.
+   */
+  public async resolveExpectedTrailTargets(
+    items: SaleStockItem[]
+  ): Promise<string[]> {
+    const productById = await this.loadProductsForSale(items);
+    const consumption = this.expandSaleConsumption(items, productById);
+    return Array.from(consumption.keys());
+  }
+
   private async loadProductsForSale(items: SaleStockItem[]): Promise<Map<string, Product>> {
     const repository = this.getRepository();
     const productById = new Map<string, Product>();

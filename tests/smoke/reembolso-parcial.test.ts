@@ -39,16 +39,17 @@ import { AuditEngine } from "../../src/core/engines/AuditEngine";
 import { SalesEngine } from "../../src/core/engines/SalesEngine";
 import { PosCore } from "../../src/core/engines/PosCore";
 
-import { CashMovement, KitchenOrder } from "../../src/core/entities/Entities";
+import { KitchenOrder } from "../../src/core/entities/Entities";
 import { InMemoryRepository } from "../fakes/InMemoryRepository";
 import { FakeProductRepository } from "../fakes/FakeProductRepository";
+import { FakeCashMovementRepository } from "../fakes/FakeCashMovementRepository";
 
 function buildSalesEngine() {
   const products = new FakeProductRepository();
   const sales = new InMemoryRepository<Sale>("sales");
   const receipts = new InMemoryRepository("receipts");
   const kitchenOrders = new InMemoryRepository<KitchenOrder>("kitchen_orders");
-  const cashMovements = new InMemoryRepository<CashMovement>("cash_movements");
+  const cashMovements = new FakeCashMovementRepository(sales as any, products);
   const customers = new InMemoryRepository("customers");
   const movements = new InMemoryRepository("inventory_movements");
   const auditLogs = new InMemoryRepository("audit_logs");

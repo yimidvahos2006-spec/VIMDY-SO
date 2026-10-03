@@ -43,13 +43,14 @@ import { PosCore } from "../../src/core/engines/PosCore";
 import { InMemoryRepository } from "../fakes/InMemoryRepository";
 import { InMemoryMovementRepository } from "../fakes/InMemoryMovementRepository";
 import { FakeProductRepository } from "../fakes/FakeProductRepository";
+import { FakeCashMovementRepository } from "../fakes/FakeCashMovementRepository";
 
 function buildSalesEngine() {
   const products = new FakeProductRepository();
   const sales = new InMemoryRepository<Sale>("sales");
   const receipts = new InMemoryRepository("receipts");
   const kitchenOrders = new InMemoryRepository<KitchenOrder>("kitchen_orders");
-  const cashMovements = new InMemoryRepository<CashMovement>("cash_movements");
+  const cashMovements = new FakeCashMovementRepository(sales as any, products);
   const customers = new InMemoryRepository("customers");
   const movements = new InMemoryMovementRepository();
   const auditLogs = new InMemoryRepository("audit_logs");

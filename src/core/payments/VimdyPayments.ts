@@ -37,11 +37,13 @@ export class VimdyPayments {
   static async pay(input: PaymentRoutingInput): Promise<PaymentResult> {
     const { providerInstance, request } = GlobalPaymentRouter.route(input);
 
-    PaymentSessionManager.create({
+    await PaymentSessionManager.create({
       provider: request.provider,
       country: request.country,
       currency: request.currency,
-      amount: request.amount
+      amount: request.amount,
+      businessId: request.businessId,
+      metadata: { origin: "vimdy_payments", plan: request.plan, businessType: request.businessType }
     });
 
     return providerInstance.createPayment(request);
@@ -57,9 +59,78 @@ export class VimdyPayments {
     return PaymentFactory.create(provider).cancelPayment(paymentId);
   }
 
-  /** Reembolsa un pago, total o parcial. */
+  /** Reembolsa un pago, total o parcial. Delega en el proveedor correspondiente. */
   static async refundPayment(provider: PaymentProviderName, request: RefundRequest): Promise<RefundResult> {
     return PaymentFactory.create(provider).refundPayment(request);
+  }
+
+  /**
+   * Solicita un reembolso para un pago externo (suscripción) de forma atómica
+   * en servidor mediante la RPC `request_subscription_refund_atomic()`.
+   * Garantiza idempotencia y validaciones server-side.
+   */
+  static async requestExternalRefund(params: {
+    subscriptionPaymentId: string;
+    amount?: number;
+    idempotencyKey: string;
+    reason: string;
+    actorId: string;
+  }): Promise<{ success: boolean; idempotent: boolean; refund: any }> {
+    const { supabase } = await import("../../infrastructure/supabase/supabaseClient");
+    const { data, error } = await supabase.rpc("request_subscription_refund_atomic", {
+      p_subscription_payment_id: params.subscriptionPaymentId,
+      p_amount: params.amount ?? null,
+      p_idempotency_key: params.idempotencyKey,
+      p_reason: params.reason,
+      p_actor_id: params.actorId,
+    });
+
+    if (error) {
+      throw new Error(`EXTERNAL_REFUND_REQUEST_FAILED: ${error.message}`);
+    }
+
+    const row = data?.[0];
+    if (!row) {
+      throw new Error("EXTERNAL_REFUND_REQUEST_FAILED: la RPC no devolvió resultado.");
+    }
+
+    return {
+      success: row.success ?? true,
+      idempotent: row.idempotent ?? false,
+      refund: row.refund ?? null,
+    };
+  }
+
+  /**
+   * Confirma o rechaza un reembolso externo mediante la RPC
+   * `settle_subscription_refund_atomic()`. Solo service_role puede llamarla.
+   */
+  static async settleExternalRefund(params: {
+    refundId: string;
+    status: "pending" | "confirmed" | "failed";
+    providerReference?: string | null;
+  }): Promise<{ success: boolean; idempotent: boolean; status: string }> {
+    const { supabase } = await import("../../infrastructure/supabase/supabaseClient");
+    const { data, error } = await supabase.rpc("settle_subscription_refund_atomic", {
+      p_refund_id: params.refundId,
+      p_status: params.status,
+      p_provider_reference: params.providerReference ?? null,
+    });
+
+    if (error) {
+      throw new Error(`EXTERNAL_REFUND_SETTLE_FAILED: ${error.message}`);
+    }
+
+    const row = data?.[0];
+    if (!row) {
+      throw new Error("EXTERNAL_REFUND_SETTLE_FAILED: la RPC no devolvió resultado.");
+    }
+
+    return {
+      success: row.success ?? true,
+      idempotent: row.idempotent ?? false,
+      status: row.status ?? params.status,
+    };
   }
 
   /**
