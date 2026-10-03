@@ -20,7 +20,10 @@
    - Kardex
    =========================================================================== */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { operationConfigStore } from "../../src/core/store/operationConfigStore";
+import { kitchenOutputModeStore } from "../../src/core/store/kitchenOutputModeStore";
+import { DEFAULT_OPERATION_CONFIG } from "../../src/core/config/operation";
 
 import {
   Product,
@@ -233,6 +236,14 @@ describe("Auditoría funcional: ciclo completo Inventario + Ventas", () => {
   let ingredienteHarina: Product;
 
   beforeEach(async () => {
+    operationConfigStore.set({
+      ...DEFAULT_OPERATION_CONFIG,
+      kitchenEnabled: true,
+      kitchenOutputMode: "kds",
+      kdsEnabled: true,
+      salesChannels: ["presencial"]
+    });
+    kitchenOutputModeStore.set("pantalla");
     ctx = buildContext();
 
     ingredienteCarne = await createIngredienteCarne(ctx.inventory);

@@ -168,13 +168,25 @@ export class TableEngine {
 
     let order: Order | undefined;
     if (this.orders) {
-      order = await this.orders.createOrder({
-        source: "TABLE",
-        tableId: table.id,
-        waiterId: resolvedInput.waiterId,
-        customerId: resolvedInput.customerId,
-        notes: resolvedInput.notes
-      });
+      // El fallo al crear el pedido se traduce a un error de dominio propio de
+      // TableEngine. Sin este wrap, un fallo de DB (ORDER_DB_DOWN) se filtra
+      // crudo al UI y el contrato de openTable se rompe para el consumidor.
+      // Se conserva la causa original para no perder diagnostico.
+      try {
+        order = await this.orders.createOrder({
+          source: "TABLE",
+          tableId: table.id,
+          waiterId: resolvedInput.waiterId,
+          customerId: resolvedInput.customerId,
+          notes: resolvedInput.notes
+        });
+      } catch (orderError) {
+        // Se incluye la causa original en el mensaje porque el target de
+        // TypeScript del proyecto no soporta la sobrecarga Error(msg, { cause }).
+        throw new Error(
+          `ORDER_CREATION_FAILED: no se pudo crear el pedido para la mesa "${table.name}". Causa: ${String(orderError)}`
+        );
+      }
     }
 
     const opened: Table = {

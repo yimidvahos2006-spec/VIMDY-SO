@@ -3,7 +3,10 @@
    VALIDACIÓN OPERACIONAL — Multi-negocio
    =========================================================================== */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { operationConfigStore } from "../../src/core/store/operationConfigStore";
+import { kitchenOutputModeStore } from "../../src/core/store/kitchenOutputModeStore";
+import { DEFAULT_OPERATION_CONFIG } from "../../src/core/config/operation";
 
 import {
   Product,
@@ -109,6 +112,14 @@ describe("Validación operacional: Cafetería", () => {
   let productIds: string[];
 
   beforeEach(async () => {
+    operationConfigStore.set({
+      ...DEFAULT_OPERATION_CONFIG,
+      kitchenEnabled: true,
+      kitchenOutputMode: "kds",
+      kdsEnabled: true,
+      salesChannels: ["presencial"]
+    });
+    kitchenOutputModeStore.set("pantalla");
     ctx = buildContext();
     productIds = [];
 
@@ -156,6 +167,14 @@ describe("Validación operacional: Bar", () => {
   let productIds: string[];
 
   beforeEach(async () => {
+    operationConfigStore.set({
+      ...DEFAULT_OPERATION_CONFIG,
+      kitchenEnabled: true,
+      kitchenOutputMode: "kds",
+      kdsEnabled: true,
+      salesChannels: ["presencial"]
+    });
+    kitchenOutputModeStore.set("pantalla");
     ctx = buildContext();
     productIds = [];
 
@@ -200,6 +219,14 @@ describe("Validación operacional: Tienda/Supermercado", () => {
   let productIds: string[];
 
   beforeEach(async () => {
+    operationConfigStore.set({
+      ...DEFAULT_OPERATION_CONFIG,
+      kitchenEnabled: true,
+      kitchenOutputMode: "kds",
+      kdsEnabled: true,
+      salesChannels: ["presencial"]
+    });
+    kitchenOutputModeStore.set("pantalla");
     ctx = buildContext();
     productIds = [];
 
@@ -239,6 +266,14 @@ describe("Validación operacional: Servicios", () => {
   let productIds: string[];
 
   beforeEach(async () => {
+    operationConfigStore.set({
+      ...DEFAULT_OPERATION_CONFIG,
+      kitchenEnabled: true,
+      kitchenOutputMode: "kds",
+      kdsEnabled: true,
+      salesChannels: ["presencial"]
+    });
+    kitchenOutputModeStore.set("pantalla");
     ctx = buildContext();
     productIds = [];
 
@@ -278,6 +313,14 @@ describe("Validación operacional: Multi-sucursal", () => {
   let productIds: string[];
 
   beforeEach(async () => {
+    operationConfigStore.set({
+      ...DEFAULT_OPERATION_CONFIG,
+      kitchenEnabled: true,
+      kitchenOutputMode: "kds",
+      kdsEnabled: true,
+      salesChannels: ["presencial"]
+    });
+    kitchenOutputModeStore.set("pantalla");
     ctx = buildContext();
     productIds = [];
 

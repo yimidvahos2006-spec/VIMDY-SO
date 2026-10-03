@@ -7,7 +7,10 @@
    directa, aislamiento y cancelaciones.
 =========================================================================== */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { operationConfigStore } from "../../src/core/store/operationConfigStore";
+import { kitchenOutputModeStore } from "../../src/core/store/kitchenOutputModeStore";
+import { DEFAULT_OPERATION_CONFIG } from "../../src/core/config/operation";
 
 import {
   Product,
@@ -139,6 +142,18 @@ describe("FASE 5 — Mesas + Cocina + Pedidos", () => {
   let ctx: ReturnType<typeof buildContext>;
 
   beforeEach(async () => {
+    // La salida a cocina es fail-closed por defecto (kitchenOutputModeStore="none")
+    // para no mandar comandas a una pantalla inexistente mientras el perfil se
+    // hidrata. Estos flujos SI exercises cocina/KDS, asi que se habilita de
+    // forma explicita, igual que requiere-cocina.test.ts.
+    operationConfigStore.set({
+      ...DEFAULT_OPERATION_CONFIG,
+      kitchenEnabled: true,
+      kitchenOutputMode: "kds",
+      kdsEnabled: true,
+      salesChannels: ["presencial"]
+    });
+    kitchenOutputModeStore.set("pantalla");
     ctx = buildContext();
     await ctx.products.save(BURGER);
     await ctx.products.save(SODA);

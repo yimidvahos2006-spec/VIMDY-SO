@@ -18,7 +18,10 @@
     10. Stock se respeta para productos trackStock=true
    =========================================================================== */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { operationConfigStore } from "../../src/core/store/operationConfigStore";
+import { kitchenOutputModeStore } from "../../src/core/store/kitchenOutputModeStore";
+import { DEFAULT_OPERATION_CONFIG } from "../../src/core/config/operation";
 
 import {
   Product,
@@ -238,6 +241,17 @@ describe("Auditoría funcional: Cocina / Barra / Sin preparación", () => {
   let ctx: ReturnType<typeof buildContext>;
 
   beforeEach(async () => {
+    // Salida de cocina fail-closed por defecto ("none"): este flujo SI verifica
+    // que los productos que requieren preparacion lleguen a Cocina, asi que se
+    // habilita KDS de forma explicita.
+    operationConfigStore.set({
+      ...DEFAULT_OPERATION_CONFIG,
+      kitchenEnabled: true,
+      kitchenOutputMode: "kds",
+      kdsEnabled: true,
+      salesChannels: ["presencial"]
+    });
+    kitchenOutputModeStore.set("pantalla");
     ctx = buildContext();
 
     // Guardar todos los productos e ingredientes
