@@ -36,13 +36,14 @@ import { PosCore } from "../../src/core/engines/PosCore";
 
 import { InMemoryRepository } from "../fakes/InMemoryRepository";
 import { FakeProductRepository } from "../fakes/FakeProductRepository";
+import { FakeCashMovementRepository } from "../fakes/FakeCashMovementRepository";
 
 function buildSalesEngine() {
   const products = new FakeProductRepository();
   const sales = new InMemoryRepository<Sale>("sales");
   const receipts = new InMemoryRepository("receipts");
   const kitchenOrders = new InMemoryRepository<KitchenOrder>("kitchen_orders");
-  const cashMovements = new InMemoryRepository<CashMovement>("cash_movements");
+  const cashMovements = new FakeCashMovementRepository(sales as any, products);
   const customers = new InMemoryRepository("customers");
   const movements = new InMemoryRepository("inventory_movements");
   const auditLogs = new InMemoryRepository("audit_logs");
@@ -151,24 +152,32 @@ describe("Caja: atomicidad e idempotencia de pagos", () => {
     expect(movements).toHaveLength(1);
   });
 
-  it("D. retry después de fallo: restaura inventario y luego paga", async () => {
+  it("D. retry después de fallo: venta mantiene inventario reservado y luego paga", async () => {
     ctx.cart.addItem(BURGER, 2);
     const sale = await ctx.salesEngine.quickSale({ cashierId: "cashier-1" });
+    // quickSale (ruta NO diferida) ya descontó inventario al
+    // crear la venta: el stock quedó reservado para esta venta.
+    expect((await ctx.products.findById(BURGER.id))?.stock).toBe(8);
 
     // Mock que falla la primera vez, luego usa la implementación real
     vi.spyOn(ctx.cash, "registerSalePaymentAtomic").mockImplementationOnce(async () => {
       throw new Error("CASH_RPC_FAILED");
     });
 
-    // Primer intento: falla, inventario restaurado
+    // Primer intento: falla. En la ruta no-diferida el inventario
+    // se descontó en createSale (flujo aparte ya confirmado), NO
+    // en este cobro: la venta sigue PENDING_PAYMENT y CONSERVA su
+    // reserva. Restaurarla aquí dejaría stock libre para otras
+    // ventas y un reintento exitoso produciría una venta PAID con
+    // inventario no consumido.
     await expect(ctx.salesEngine.registerPayment(sale, "CASH")).rejects.toThrow("CASH_RPC_FAILED");
-    expect((await ctx.products.findById(BURGER.id))?.stock).toBe(10); // restaurado
+    expect((await ctx.products.findById(BURGER.id))?.stock).toBe(8);
 
-    // Segundo intento: éxito
+    // Segundo intento: éxito. registerPayment no vuelve a descontar
+    // (ya está descontado desde createSale).
     const { sale: paidSale2 } = await ctx.salesEngine.registerPayment(sale, "CASH");
     expect(paidSale2.status).toBe("PAID");
-    // Stock restaurado en el fallo y no readquirido en el retry (registerPayment no descuenta)
-    expect((await ctx.products.findById(BURGER.id))?.stock).toBe(10);
+    expect((await ctx.products.findById(BURGER.id))?.stock).toBe(8);
 
     const movements = await ctx.cashMovements.findAll();
     expect(movements).toHaveLength(1); // solo un movimiento después del retry exitoso
@@ -193,7 +202,7 @@ describe("Caja: atomicidad e idempotencia de pagos", () => {
     expect(movements[1].amount).toBe(sale2.total);
   });
 
-  it("F. pago fallido: inventario restaurado, venta sigue PENDING_PAYMENT", async () => {
+  it("F. pago fallido (no diferido): venta sigue PENDING_PAYMENT con inventario reservado", async () => {
     ctx.cart.addItem(BURGER, 2);
     const sale = await ctx.salesEngine.quickSale({ cashierId: "cashier-1" });
     expect((await ctx.products.findById(BURGER.id))?.stock).toBe(8);
@@ -206,8 +215,11 @@ describe("Caja: atomicidad e idempotencia de pagos", () => {
       "RPC_TIMEOUT"
     );
 
-    // Inventario restaurado
-    expect((await ctx.products.findById(BURGER.id))?.stock).toBe(10);
+    // Ruta no-diferida: el inventario se descontó en createSale
+    // y la venta lo conserva mientras sigue PENDING_PAYMENT.
+    // No se restaura en un cobro fallido — la reserva sigue
+    // vigente para esta venta.
+    expect((await ctx.products.findById(BURGER.id))?.stock).toBe(8);
 
     // Venta sigue PENDING_PAYMENT
     const unfreshSale = await ctx.salesEngine.getSale(sale.id);
@@ -216,6 +228,51 @@ describe("Caja: atomicidad e idempotencia de pagos", () => {
     // No movimientos de caja
     const movements = await ctx.cashMovements.findAll();
     expect(movements).toHaveLength(0);
+  });
+
+  it("N. pago fallido en caja de cobro inmediato: stock vuelve exactamente al inicial", async () => {
+    // REGRESIÓN (auditoría Paso 3): en la venta de Caja de
+    // cobro inmediato (deferFulfillment) el inventario se
+    // reserva justo antes del cobro, en una escritura local
+    // aparte que ya quedó confirmada. Si el cobro falla, la
+    // reserva debe revertirse y el stock debe volver a ser
+    // EXACTAMENTE el inicial: ni aumentado ni reducido.
+    const stockInicial = (await ctx.products.findById(BURGER.id))?.stock ?? 0;
+    expect(stockInicial).toBe(10);
+
+    ctx.cart.addItem(BURGER, 2);
+    const sale = await ctx.salesEngine.quickSale({
+      cashierId: "cashier-1",
+      deferFulfillment: true,
+    });
+    // La venta se creó sin consumir inventario todavía.
+    expect(sale.fulfillmentStatus).toBe("PENDING");
+    expect((await ctx.products.findById(BURGER.id))?.stock).toBe(stockInicial);
+
+    vi.spyOn(ctx.cash, "registerSalePaymentAtomic").mockRejectedValueOnce(
+      new Error("RPC_TIMEOUT")
+    );
+
+    await expect(ctx.salesEngine.registerPayment(sale, "CASH")).rejects.toThrow(
+      "RPC_TIMEOUT"
+    );
+
+    // La reserva se revirtió: stock exactamente igual al inicial.
+    expect((await ctx.products.findById(BURGER.id))?.stock).toBe(stockInicial);
+
+    // La venta vuelve a PENDING (sin reserva) y sigue PENDING_PAYMENT.
+    const unfreshSale = await ctx.salesEngine.getSale(sale.id);
+    expect(unfreshSale?.status).toBe("PENDING_PAYMENT");
+    expect(unfreshSale?.fulfillmentStatus).toBe("PENDING");
+
+    // Sin movimientos de caja.
+    expect(await ctx.cashMovements.findAll()).toHaveLength(0);
+
+    // Reintento exitoso: esta vez sí se reserva y se confirma.
+    const { sale: paidSale } = await ctx.salesEngine.registerPayment(sale, "CASH");
+    expect(paidSale.status).toBe("PAID");
+    expect((await ctx.products.findById(BURGER.id))?.stock).toBe(stockInicial - 2);
+    expect(await ctx.cashMovements.findAll()).toHaveLength(1);
   });
 
   it("G. venta PAID no puede cobrarse dos veces", async () => {

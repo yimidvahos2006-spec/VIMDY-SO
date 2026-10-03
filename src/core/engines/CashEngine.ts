@@ -72,6 +72,15 @@ export class CashEngine {
     );
   }
 
+  private isRefundAtomicRepository(
+    repo: unknown = this.repository
+  ): repo is ICashMovementRepository {
+    return (
+      typeof (repo as ICashMovementRepository | null)?.refundSaleCashAtomic ===
+      "function"
+    );
+  }
+
   private async persistMovement(
     movement: CashMovement,
     atomicId?: string
@@ -385,6 +394,38 @@ export class CashEngine {
       isAtomic,
     };
   }
+
+  /**
+   * Ejecuta un reembolso CASH de forma atómica en servidor mediante la RPC
+   * `refund_sale_cash_atomic()`. Garantiza atomicidad completa:
+   * - Valida venta pagada, método CASH, montos reembolsables
+   * - Reversa inventario/Kardex atómicamente
+   * - Registra movimiento de caja OUT + payment_refunds + audit_log
+   * - Actualiza estado de venta (REFUNDED / parcialmente reembolsada)
+   * - Idempotencia por refundId (business_id + idempotency_key)
+   */
+  public async refundSaleCashAtomic(params: {
+    businessId: string;
+    branchId: string;
+    saleId: string;
+    refundId: string;
+    refundItems: { productId: string; quantity: number }[];
+    reason: string;
+    cashRegisterId?: string | null;
+  }): Promise<{
+    success: boolean;
+    idempotent: boolean;
+    refundId: string;
+    refundAmount: number;
+    cashMovementId: string;
+    sale: any;
+  }> {
+    if (!this.isRefundAtomicRepository(this.repository)) {
+      throw new Error("REFUND_ATOMIC_NOT_SUPPORTED: el repositorio no soporta refund_sale_cash_atomic");
+    }
+    return this.repository.refundSaleCashAtomic(params);
+  }
+
   public async getMovementsForShift(shiftId: string, openedAt?: Date, closedAt: Date = new Date()): Promise<CashMovement[]> {
     if (!shiftId) throw new Error("SHIFT_ID_REQUIRED");
     const movements = await this.getAllMovements();

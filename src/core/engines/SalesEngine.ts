@@ -1032,7 +1032,8 @@ export class SalesEngine {
 
   /**
    * Reembolsa una venta pagada: revierte el pago, restituye inventario
-   * y registra el egreso correspondiente en caja.
+   * y registra el egreso correspondiente en caja usando la RPC atómica
+   * refund_sale_cash_atomic() que garantiza atomicidad completa en servidor.
    */
   public async refundSale(
     id: string,
@@ -1077,53 +1078,49 @@ export class SalesEngine {
       );
     }
 
-    // 🔒 FIX: Calcular el monto restante incluyendo impuestos/descuentos
-    // Usamos el total de la venta menos lo ya reembolsado
-    const alreadyRefundedTotal = (sale.refunds ?? []).reduce((sum, r) => sum + r.amount, 0);
-    const remainingAmount = roundMoney(Math.max((sale.total ?? 0) - alreadyRefundedTotal, 0), companyConfigStore.get().currency);
-
+    // Pre-check de trazabilidad: antes de tocar caja/inventario en
+    // servidor, verificamos que el Kardex tenga el rastro de la
+    // venta (mismo criterio que consumeForSale: productos reales,
+    // no el producto padre con receta). Falla rápido si falta.
     await this.verifyInventoryTrail(sale);
+
+    const businessId = getCurrentBusinessId();
+    const branchId = getCurrentBranchId();
+    if (!businessId || !branchId) {
+      throw new Error("NO_BUSINESS_BRANCH_CONTEXT: se requiere negocio y sucursal para reembolsar.");
+    }
 
     // 🔒 FIX DE SEGURIDAD: Usar ID determinístico para el reembolso
     // basado en el índice de reembolsos existentes. Si el reintento se
     // dispara con el mismo estado de la venta (mismo número de reembolsos),
-    // el ID coincide → saveAtomic hace upsert → no duplica movimientos de caja.
+    // el ID coincide → RPC hace upsert → no duplica movimientos de caja.
     const refundIndex = (sale.refunds ?? []).length;
     const refundRecordId = `refund-${sale.id}-${refundIndex}`;
-    const cashExpenseId = `sale-refund-${sale.id}-${refundIndex}`;
 
-    // Primero registrar el movimiento de caja (con ID determinístico)
-    // Si esto falla, NO restauramos el inventario - no queda inconsistente
-    await this.updateCash(sale, "OUT", remainingAmount, cashExpenseId);
-
-    // Luego restaurar el inventario
-    // Si esto falla, el movimiento de caja ya está registrado y podemos compensar
-    await this.updateInventory(
-      remainingItems,
-      `Reembolso venta ${sale.code ?? sale.id}: ${reason}`,
-      "INCREASE"
-    );
-
-    const refunded = await this.updateSale({
-      ...sale,
-      status: "REFUNDED",
-      refunds: [...(sale.refunds ?? []), {
-        id: refundRecordId,
-        items: remainingItems.map(i => ({ productId: i.productId, quantity: i.quantity })),
-        amount: remainingAmount,
-        reason,
-        actorId,
-        createdAt: new Date()
-      }],
-      notes: this.appendNote(sale.notes, `Reembolsada: ${reason}`)
+    // Llamar a la RPC atómica que hace TODO en servidor:
+    // - Valida venta, método CASH, montos reembolsables
+    // - Reversa inventario/Kardex
+    // - Registra cash_movement OUT + payment_refunds + audit_log
+    // - Actualiza sale.data (status, refunds)
+    const refundResult = await this.cash.refundSaleCashAtomic({
+      businessId,
+      branchId,
+      saleId: sale.id,
+      refundId: refundRecordId,
+      refundItems: remainingItems.map(i => ({ productId: i.productId, quantity: i.quantity })),
+      reason,
+      cashRegisterId: sale.cashRegisterId ?? null,
     });
 
-    // reverseDashboardForSale ahora recibe el monto/cantidad REALES que
-    // faltaban (no sale.total/sale.items completos), para no duplicar lo
-    // que un reembolso parcial previo ya había restado del Dashboard.
-    const remainingQuantity = remainingItems.reduce((sum, item) => sum + item.quantity, 0);
-    this.reverseDashboardForSale(sale, remainingAmount, remainingQuantity);
+    // La RPC ya actualizó la venta en BD. Recuperamos la versión actualizada.
+    const updatedSale = await this.getSale(sale.id);
+    if (!updatedSale) {
+      throw new Error("REFUND_SALE_NOT_FOUND_AFTER_ATOMIC: la venta desapareció tras el reembolso atómico");
+    }
 
+    // Actualizar dashboard con los datos reales del reembolso atómico
+    const remainingQuantity = remainingItems.reduce((sum, item) => sum + item.quantity, 0);
+    this.reverseDashboardForSale(sale, refundResult.refundAmount, remainingQuantity);
     await this.updateDashboard();
 
     await this.audit.log(
@@ -1134,7 +1131,7 @@ export class SalesEngine {
       sale.id
     );
 
-    return { sale: refunded, payment: this.confirmedCashRefund(remainingAmount) };
+    return { sale: updatedSale, payment: this.confirmedCashRefund(refundResult.refundAmount) };
   }
 
   private assertCashRefundSupported(sale: Sale): void {
@@ -1214,6 +1211,9 @@ export class SalesEngine {
    * a `status: "REFUNDED"`, igual que un reembolso total — para que el
    * resto del sistema (reportes, caja, /caja → "Ya fue reembolsada")
    * la trate exactamente igual que si se hubiera usado refundSale().
+   *
+   * Usa la RPC atómica refund_sale_cash_atomic() que garantiza atomicidad
+   * completa en servidor (validación, inventario, caja, auditoría, venta).
    */
   public async partialRefundSale(
     id: string,
@@ -1286,99 +1286,68 @@ export class SalesEngine {
 
     await this.verifyInventoryTrail(sale);
 
+    const businessId = getCurrentBusinessId();
+    const branchId = getCurrentBranchId();
+    if (!businessId || !branchId) {
+      throw new Error("NO_BUSINESS_BRANCH_CONTEXT: se requiere negocio y sucursal para reembolsar.");
+    }
+
     // 🔒 FIX DE SEGURIDAD: Usar ID determinístico para el reembolso parcial
     // basado en el índice de reembolsos existentes. Si el reintento se
-    // dispara con el mismo estado de la venta, el ID coincide → saveAtomic
-    // hace upsert → no duplica movimientos de caja.
+    // dispara con el mismo estado de la venta, el ID coincide → RPC hace
+    // upsert → no duplica movimientos de caja.
     const refundIndex = (sale.refunds ?? []).length;
-    const refundRecord: SaleRefundRecord = {
-      id: `refund-${sale.id}-${refundIndex}`,
-      items: cleanItems,
-      amount: refundAmount,
+    const refundRecordId = `refund-${sale.id}-${refundIndex}`;
+
+    // Llamar a la RPC atómica que hace TODO en servidor
+    const refundResult = await this.cash.refundSaleCashAtomic({
+      businessId,
+      branchId,
+      saleId: sale.id,
+      refundId: refundRecordId,
+      refundItems: cleanItems,
       reason,
-      actorId,
-      createdAt: new Date()
-    };
-    const cashExpenseId = `sale-refund-${sale.id}-${refundIndex}`;
+      cashRegisterId: sale.cashRegisterId ?? null,
+    });
 
-    // Solo se repone al inventario lo que efectivamente se está
-    // devolviendo en ESTE reembolso, no la venta entera.
-    const restockItems: SaleItem[] = cleanItems.map(line => ({
-      productId: line.productId,
-      quantity: line.quantity,
-      price: priceByProduct.get(line.productId) ?? 0
-    }));
-
-    // Primero registrar el movimiento de caja (con ID determinístico)
-    await this.cash.registerExpense(
-      refundAmount,
-      `Reembolso parcial venta ${sale.code ?? sale.id}`,
-      cashExpenseId
-    );
-
-    // Luego restaurar el inventario
-    await this.updateInventory(
-      restockItems,
-      `Reembolso parcial venta ${sale.code ?? sale.id}: ${reason}`,
-      "INCREASE"
-    );
-
-    // ¿Con este reembolso ya no queda NADA reembolsable? Entonces es,
-    // en la práctica, un reembolso total hecho ítem por ítem — se marca
-    // la venta como REFUNDED igual que refundSale().
-    const refundedSoFar = this.getRefundedQuantities(sale);
-    const projectedRefunded: Record<string, number> = { ...refundedSoFar };
-    for (const line of cleanItems) {
-      projectedRefunded[line.productId] =
-        (projectedRefunded[line.productId] ?? 0) + line.quantity;
+    // La RPC ya actualizó la venta en BD. Recuperamos la versión actualizada.
+    const updatedSale = await this.getSale(sale.id);
+    if (!updatedSale) {
+      throw new Error("REFUND_SALE_NOT_FOUND_AFTER_ATOMIC: la venta desapareció tras el reembolso atómico");
     }
-    const fullyRefundedNow = sale.items.every(
-      item => (projectedRefunded[item.productId] ?? 0) >= item.quantity
-    );
 
-    const updated: Sale = {
-      ...sale,
-      status: fullyRefundedNow ? "REFUNDED" : sale.status,
-      refunds: [...(sale.refunds ?? []), refundRecord],
-      notes: this.appendNote(
-        sale.notes,
-        `Reembolso parcial (${reason}): ${cleanItems
-          .map(line => `${line.quantity}× ${line.productId}`)
-          .join(", ")}`
-      )
-    };
-
-    const savedSale = await this.updateSale(updated);
-
+    // Determinar si fue reembolso total o parcial basado en el resultado
     const refundedUnits = cleanItems.reduce((sum, line) => sum + line.quantity, 0);
+    const isFullyRefunded = updatedSale.status === "REFUNDED";
 
-    if (fullyRefundedNow) {
+    // Actualizar dashboard
+    if (isFullyRefunded) {
       const previouslyRefunded = (sale.refunds ?? [])
-        .filter(r => r.id !== refundRecord.id)
+        .filter(r => r.id !== refundRecordId)
         .reduce((sum, r) => sum + r.amount, 0);
       const remainingToReverse = sale.total - previouslyRefunded;
       this.reverseDashboardForSale(sale, remainingToReverse);
     } else {
       const saleCashAmount = sale.cashAmount ?? (sale.paymentMethod === "CASH" ? sale.total : 0);
-      const cashPortion = sale.total > 0 ? (saleCashAmount * refundAmount) / sale.total : 0;
-      dashboardStore.partialReverseSale(refundAmount, refundedUnits, cashPortion);
+      const cashPortion = sale.total > 0 ? (saleCashAmount * refundResult.refundAmount) / sale.total : 0;
+      dashboardStore.partialReverseSale(refundResult.refundAmount, refundedUnits, cashPortion);
     }
 
     await this.updateDashboard();
 
     await this.audit.log(
       actorId ?? sale.cashierId ?? "system",
-      "SALE_PARTIALLY_REFUNDED",
+      isFullyRefunded ? "SALE_REFUNDED" : "SALE_PARTIALLY_REFUNDED",
       "sales",
-      `Venta ${sale.code ?? sale.id}: reembolso parcial de ${refundedUnits} unidad(es) ` +
-        `por ${refundAmount} ${currency}. Motivo: ${reason}`,
+      `Venta ${sale.code ?? sale.id}: ${isFullyRefunded ? "reembolso total" : "reembolso parcial"} de ${refundedUnits} unidad(es) ` +
+        `por ${refundResult.refundAmount} ${currency}. Motivo: ${reason}`,
       sale.id
     );
 
     return {
-      sale: savedSale,
-      payment: this.confirmedCashRefund(refundAmount),
-      amount: refundAmount
+      sale: updatedSale,
+      payment: this.confirmedCashRefund(refundResult.refundAmount),
+      amount: refundResult.refundAmount
     };
   }
 
@@ -1607,16 +1576,32 @@ export class SalesEngine {
               : "PROVIDER",
       });
     } catch (err: unknown) {
-      if (!isAtomicRepo || deferredInventoryReserved) {
+      // Solo la reserva diferida (Caja de cobro inmediato) consumió
+      // inventario en ESTE flujo, mediante una escritura local aparte
+      // (updateInventory DECREASE arriba) que ya quedó confirmada.
+      // La RPC register_sale_payment_atomic NO toca inventario — solo
+      // cash_movements y sales —, así que su rollback nunca restaura
+      // stock y no existe riesgo de doble restauración aquí.
+      //
+      // En la ruta NO diferida el inventario se descontó en createSale
+      // (otro flujo ya confirmado): la venta sigue PENDING_PAYMENT y
+      // conserva su reserva. Restaurarla aquí dejaría stock disponible
+      // para otras ventas, y un reintento exitoso produciría una venta
+      // PAID con inventario no consumido.
+      if (deferredInventoryReserved) {
         try {
-          if (deferredInventoryReserved) {
-            await this.updateInventory(current.items, `Pago fallido: ${String(err)}`, "INCREASE");
-            await this.updateSale({ ...current, fulfillmentStatus: "PENDING" });
-          } else if (!isAtomicRepo) {
-            await this.updateInventory(current.items, `Pago fallido: ${String(err)}`, "INCREASE");
-          }
+          await this.updateInventory(current.items, `Pago fallido: ${String(err)}`, "INCREASE");
+          // Re-leer la venta antes de revertir: updateSale() ya
+          // avanzó la versión optimista (INVENTORY_CONFIRMED), así
+          // que `current` trae una versión stale que lanzaría
+          // OptimisticLockError justo en el rollback.
+          const fresh = await this.getSale(current.id);
+          await this.updateSale({
+            ...(fresh ?? current),
+            fulfillmentStatus: "PENDING",
+          });
         } catch {
-          logWarning("No se pudo restaurar inventario tras pago fallido", {
+          logWarning("No se pudo revertir una reserva de inventario que no se pudo persistir", {
             category: "sales",
             context: { saleId: current.id, error: String(err) }
           });
@@ -1655,7 +1640,12 @@ export class SalesEngine {
 
     let finalSale = updatedSale;
     if (deferredInventoryReserved) {
-      finalSale = await this.completeDeferredFulfillment(updatedSale);
+      // El cobro atómico (RPC o repositorio atómico) ya avanzó la
+      // versión de la venta a PAID, así que `updatedSale` trae una
+      // versión stale que lanzaría OptimisticLockError justo aquí.
+      // Re-leemos para completar la preparación con la versión fresca.
+      const fresh = await this.getSale(current.id);
+      finalSale = await this.completeDeferredFulfillment(fresh ?? updatedSale);
     }
 
     // Todo lo que NO es la verdad financiera queda fuera de la transacción
@@ -2271,18 +2261,32 @@ export class SalesEngine {
   /**
    * Verifica, a través del Kardex, que exista trazabilidad de los
    * movimientos de inventario asociados a una venta antes de reembolsarla.
+   *
+   * Pregunta por los productos REALES que consume la venta (la misma
+   * expansión que consumeForSale: ingredientes de recetas, no el
+   * producto padre que no maneja stock propio). Preguntar por
+   * item.productId tal cual generaba un falso positivo permanente
+   * en cualquier producto con receta o sin stock propio.
    */
   private async verifyInventoryTrail(sale: Sale): Promise<void> {
     const reference = sale.code ?? sale.id;
 
-    for (const item of sale.items) {
-      const history = await this.kardex.getHistory(item.productId);
+    const stockItems = sale.items.map((item) => ({
+      productId: item.productId,
+      quantity: item.quantity,
+      selectedSize: item.selectedSize,
+      selectedExtras: item.selectedExtras,
+    }));
+    const expectedTargets = await this.inventory.resolveExpectedTrailTargets(stockItems);
+
+    for (const productId of expectedTargets) {
+      const history = await this.kardex.getHistory(productId);
       const hasTrail = history.some(movement => movement.reason.includes(reference));
 
       if (!hasTrail) {
-        logWarning(`Sin trazabilidad en Kardex para el producto ${item.productId} de la venta ${reference}.`, {
+        logWarning(`Sin trazabilidad en Kardex para el producto ${productId} de la venta ${reference}.`, {
           category: "inventory",
-          context: { productId: item.productId, saleReference: reference }
+          context: { productId, saleReference: reference }
         });
       }
     }
