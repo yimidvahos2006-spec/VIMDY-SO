@@ -1,0 +1,28 @@
+# VIMDY OS production release denylist.
+# The packaging script is fail-closed and independently enforces these rules.
+
+.env
+.env.*
+!.env.example
+!.env.template
+docker.env
+test-key.pem
+*.pem
+*.key
+
+.git/
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+.cache/
+.temp/
+supabase/.temp/
+caja_repair_temp/
+
+# Local/editor/system noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

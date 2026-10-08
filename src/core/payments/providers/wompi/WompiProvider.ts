@@ -1,22 +1,29 @@
 /**
  * WompiProvider.ts
  * ---------------------------------------------------------------------------
- * Implementación de IPaymentProvider para Wompi (Colombia).
- * Nadie fuera de payments/ debe importar esta clase directamente: siempre
- * se accede a través de PaymentFactory / GlobalPaymentRouter / VimdyPayments.
+ * Adaptador cliente de Wompi para VIMDY Payments.
  *
- * MISIÓN 3 — integración real con la API oficial de Wompi. Ninguna llave
- * privada vive aquí (este archivo corre en el navegador): las llaves
- * privadas (integridad, eventos) viven SOLO como secrets de las Edge
- * Functions. Este archivo únicamente:
- *   1) Le pide a wompi-create-checkout (Edge Function) que arme una sesión
- *      de pago real y devuelva la URL del Web Checkout de Wompi, ya
- *      firmada — nunca construye esa URL ni esa firma por su cuenta.
- *   2) Consulta el estado de una transacción directamente contra la API
- *      pública de Wompi (GET /v1/transactions/:id no requiere ninguna
- *      llave — es pública por diseño, ver docs.wompi.co).
- *   3) Para cancelar/reembolsar (operaciones que sí exigen la llave
- *      privada del comercio) delega en sus propias Edge Functions.
+ * Este archivo NO contiene secretos de Wompi. La llave privada, el secret de
+ * integridad y la validación de webhooks viven exclusivamente en Supabase
+ * Edge Functions.
+ *
+ * Flujo de suscripción VIMDY:
+ *   WompiProvider.createPayment()
+ *      -> wompi-create-checkout
+ *      -> firma de integridad server-side
+ *      -> Wompi Web Checkout
+ *      -> wompi-webhook
+ *
+ * Flujo POS externo Wompi:
+ *   wompi-create-pos-checkout
+ *      -> create_wompi_sale_payment_session_atomic
+ *      -> Wompi Web Checkout
+ *      -> wompi-pos-webhook
+ *
+ * Los tokens de tarjeta, PSE y Nequi no se reciben aquí porque el contrato
+ * actual de PaymentRequest no expone datos sensibles ni un card token. En el
+ * flujo hospedado, Wompi recoge esos datos dentro de su checkout. No se debe
+ * implementar tokenización de tarjeta en este archivo con una llave privada.
  */
 
 import { supabase } from "../../../../infrastructure/supabase/supabaseClient";
@@ -40,60 +47,156 @@ interface WompiCheckoutFunctionResponse {
   ok: true;
   checkoutUrl: string;
   reference: string;
+  existing?: boolean;
 }
 
 interface WompiTransactionApiResponse {
-  data: {
-    id: string;
-    status: string;
-    amount_in_cents: number;
-    currency: string;
-    created_at: string;
-    reference: string;
-  };
+  id: string;
+  status: string;
+  amount_in_cents: number;
+  currency: string;
+  created_at: string;
+  reference: string;
 }
 
-/** Extrae el mensaje detallado de un error de Edge Function. */
-async function extractFunctionErrorMessage(fnError: unknown, fallback: string): Promise<string> {
-  const context = (fnError as { context?: Response })?.context;
+interface WompiTransactionFunctionResponse {
+  ok: true;
+  transaction: WompiTransactionApiResponse;
+}
+
+interface FunctionErrorContext {
+  context?: Response;
+  message?: string;
+}
+
+const WOMPI_COUNTRY = "CO";
+const WOMPI_CURRENCY: CurrencyCode = "COP";
+const WOMPI_METHODS: PaymentMethodCode[] = ["pse", "nequi", "card"];
+const MAX_MONEY_DELTA = 0.005;
+
+async function extractFunctionErrorMessage(
+  fnError: unknown,
+  fallback: string
+): Promise<string> {
+  const candidate = fnError as FunctionErrorContext | null;
+  const context = candidate?.context;
+
   if (context && typeof context.json === "function") {
     try {
-      const body = await context.json();
-      if (body?.error) return body.error as string;
+      const body = (await context.json()) as {
+        error?: unknown;
+        detail?: unknown;
+      };
+
+      if (typeof body.error === "string" && body.error.trim()) {
+        return body.detail && typeof body.detail === "string"
+          ? `${body.error}: ${body.detail}`
+          : body.error;
+      }
     } catch {
-      // El body no era JSON válido; nos quedamos con el mensaje genérico.
+      // La respuesta de error puede no ser JSON. Se usa el fallback.
     }
   }
-  return (fnError as { message?: string })?.message ?? fallback;
+
+  if (typeof candidate?.message === "string" && candidate.message.trim()) {
+    return candidate.message;
+  }
+
+  return fallback;
+}
+
+function assertHttpsUrl(value: unknown, field: string): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`WOMPI_INVALID_RESPONSE: ${field} es obligatorio.`);
+  }
+
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`WOMPI_INVALID_RESPONSE: ${field} no es una URL válida.`);
+  }
+
+  if (url.protocol !== "https:") {
+    throw new Error(`WOMPI_INVALID_RESPONSE: ${field} debe usar HTTPS.`);
+  }
+
+  return url.toString();
+}
+
+function assertPositiveMoney(value: number, field: string): void {
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`WOMPI_INVALID_${field.toUpperCase()}: monto inválido.`);
+  }
 }
 
 export class WompiProvider implements IPaymentProvider {
   readonly name: PaymentProviderName = "wompi";
 
-  /**
-   * Crea la sesión de pago real. NUNCA cobra directamente ni construye la
-   * URL de Wompi acá: eso exige la firma de integridad, que solo la Edge
-   * Function wompi-create-checkout puede calcular (tiene el secret).
-   * El resultado trae `checkoutUrl`: quien llame a VimdyPayments.pay()
-   * (UpgradeModal.tsx) debe redirigir el navegador ahí para completar el
-   * pago en el Web Checkout hospedado por Wompi.
-   */
   async createPayment(request: PaymentRequest): Promise<PaymentResult> {
+    if (!request.businessId?.trim()) {
+      throw new Error("WOMPI_BUSINESS_ID_REQUIRED");
+    }
+
+    if (request.country.toUpperCase() !== WOMPI_COUNTRY) {
+      throw new Error(
+        "WOMPI_COUNTRY_NOT_SUPPORTED: Wompi en VIMDY está habilitado para Colombia."
+      );
+    }
+
+    if (request.currency !== WOMPI_CURRENCY) {
+      throw new Error(
+        `WOMPI_CURRENCY_NOT_SUPPORTED: se esperaba ${WOMPI_CURRENCY}, se recibió ${request.currency}.`
+      );
+    }
+
     if (request.plan !== "monthly" && request.plan !== "yearly") {
-      throw new Error(`WompiProvider: plan no facturable por Wompi ("${request.plan}").`);
+      throw new Error(
+        `WompiProvider: plan no facturable por Wompi ("${request.plan}").`
+      );
+    }
+
+    assertPositiveMoney(request.amount, "amount");
+
+    if (request.method && !WOMPI_METHODS.includes(request.method)) {
+      throw new Error(
+        `WOMPI_METHOD_NOT_SUPPORTED: ${request.method}.`
+      );
     }
 
     const { data, error } = await supabase.functions.invoke<WompiCheckoutFunctionResponse>(
       "wompi-create-checkout",
-      { body: { businessId: request.businessId, plan: request.plan } }
+      {
+        body: {
+          businessId: request.businessId,
+          plan: request.plan
+        }
+      }
     );
 
     if (error) {
-      throw new Error(await extractFunctionErrorMessage(error, "No se pudo iniciar el pago con Wompi."));
+      throw new Error(
+        await extractFunctionErrorMessage(
+          error,
+          "No se pudo iniciar el pago con Wompi."
+        )
+      );
     }
 
     if (!data?.checkoutUrl || !data.reference) {
-      throw new Error("WompiProvider: la Edge Function no devolvió una sesión de pago válida.");
+      throw new Error(
+        "WOMPI_INVALID_CHECKOUT_RESPONSE: la Edge Function no devolvió checkoutUrl y reference válidos."
+      );
+    }
+
+    const checkoutUrl = assertHttpsUrl(
+      data.checkoutUrl,
+      "checkoutUrl"
+    );
+
+    const reference = data.reference.trim();
+    if (!reference) {
+      throw new Error("WOMPI_INVALID_REFERENCE");
     }
 
     return {
@@ -101,141 +204,230 @@ export class WompiProvider implements IPaymentProvider {
       provider: this.name,
       status: "pending",
       amount: request.amount,
-      currency: request.currency,
+      currency: WOMPI_CURRENCY,
       createdAt: nowIso(),
-      checkoutUrl: data.checkoutUrl,
-      reference: data.reference
+      checkoutUrl,
+      reference,
+      raw: {
+        existing: data.existing ?? false,
+        method: request.method ?? null
+      }
     };
   }
 
-  /**
-   * Consulta el estado REAL de una transacción en Wompi. Ahora delega en la
-   * Edge Function `wompi-get-transaction` para no exponer la base URL de
-   * Wompi ni permitir consultas directas desde el navegador. La Edge Function
-   * valida autenticación/autorización y usa WOMPI_PUBLIC_KEY server-side.
-   */
   async getPayment(paymentId: string): Promise<PaymentResult> {
-    const { data, error } = await supabase.functions.invoke<{ ok: true; transaction: WompiTransactionApiResponse["data"] }>(
+    const normalizedPaymentId = paymentId?.trim();
+
+    if (!normalizedPaymentId) {
+      throw new Error("WOMPI_PAYMENT_ID_REQUIRED");
+    }
+
+    const { data, error } = await supabase.functions.invoke<WompiTransactionFunctionResponse>(
       "wompi-get-transaction",
-      { body: { transactionId: paymentId } }
+      {
+        body: {
+          transactionId: normalizedPaymentId
+        }
+      }
     );
 
     if (error) {
-      throw new Error(`WompiProvider: no se pudo consultar la transacción "${paymentId}" (${error.message}).`);
+      throw new Error(
+        await extractFunctionErrorMessage(
+          error,
+          `No se pudo consultar la transacción ${normalizedPaymentId} en Wompi.`
+        )
+      );
     }
 
     if (!data?.transaction) {
-      throw new Error(`WompiProvider: la Edge Function no devolvió la transacción "${paymentId}".`);
+      throw new Error(
+        `WOMPI_INVALID_TRANSACTION_RESPONSE: no se recibió la transacción ${normalizedPaymentId}.`
+      );
     }
 
     const transaction = data.transaction;
+
+    if (!transaction.id || !transaction.reference) {
+      throw new Error("WOMPI_INVALID_TRANSACTION_RESPONSE: faltan id o reference.");
+    }
+
+    if (!Number.isFinite(transaction.amount_in_cents) || transaction.amount_in_cents < 0) {
+      throw new Error("WOMPI_INVALID_TRANSACTION_RESPONSE: amount_in_cents inválido.");
+    }
+
+    if (transaction.currency !== WOMPI_CURRENCY) {
+      throw new Error(
+        `WOMPI_CURRENCY_MISMATCH: Wompi devolvió ${transaction.currency}.`
+      );
+    }
 
     return {
       id: transaction.id,
       provider: this.name,
       status: this.getStatus(transaction.status),
       amount: transaction.amount_in_cents / 100,
-      currency: transaction.currency as CurrencyCode,
-      createdAt: transaction.created_at,
+      currency: WOMPI_CURRENCY,
+      createdAt: transaction.created_at || nowIso(),
       reference: transaction.reference,
       raw: transaction
     };
   }
 
-  /**
-   * Anular una transacción exige la llave PRIVADA del comercio (POST
-   * /v1/transactions/:id/void con Authorization: Bearer <private_key>),
-   * así que jamás puede hacerse desde el navegador. Delega en su propia
-   * Edge Function, igual que wompi-create-checkout.
-   */
   async cancelPayment(paymentId: string): Promise<PaymentResult> {
-    const { data, error } = await supabase.functions.invoke<{ ok: true; transaction: WompiTransactionApiResponse["data"] }>(
+    const normalizedPaymentId = paymentId?.trim();
+
+    if (!normalizedPaymentId) {
+      throw new Error("WOMPI_PAYMENT_ID_REQUIRED");
+    }
+
+    const { data, error } = await supabase.functions.invoke<WompiTransactionFunctionResponse>(
       "wompi-void-transaction",
-      { body: { transactionId: paymentId } }
+      {
+        body: {
+          transactionId: normalizedPaymentId
+        }
+      }
     );
 
     if (error) {
-      throw new Error(await extractFunctionErrorMessage(error, "No se pudo anular el pago en Wompi."));
+      throw new Error(
+        await extractFunctionErrorMessage(
+          error,
+          "No se pudo anular el pago en Wompi."
+        )
+      );
     }
 
     if (!data?.transaction) {
-      throw new Error("WompiProvider: la Edge Function no devolvió la transacción anulada.");
+      throw new Error(
+        "WOMPI_INVALID_VOID_RESPONSE: la Edge Function no devolvió la transacción anulada."
+      );
     }
 
-    const transaction = data.transaction;
-    return {
-      id: transaction.id,
-      provider: this.name,
-      status: this.getStatus(transaction.status),
-      amount: transaction.amount_in_cents / 100,
-      currency: transaction.currency as CurrencyCode,
-      createdAt: transaction.created_at,
-      reference: transaction.reference,
-      raw: transaction
-    };
+    return this.mapTransaction(data.transaction);
   }
 
-  /**
-   * Wompi no tiene un endpoint de "reembolso" propio para transacciones ya
-   * capturadas por PSE/tarjeta desde la API pública: los reembolsos de
-   * comercio se gestionan con la llave privada. Se centraliza igual en una
-   * Edge Function dedicada para no exponer esa llave.
-   */
   async refundPayment(request: RefundRequest): Promise<RefundResult> {
-    const { data, error } = await supabase.functions.invoke<{ ok: true; transaction: WompiTransactionApiResponse["data"] }>(
+    const paymentId = request.paymentId?.trim();
+
+    if (!paymentId) {
+      throw new Error("WOMPI_PAYMENT_ID_REQUIRED");
+    }
+
+    if (
+      request.amount !== undefined &&
+      (!Number.isFinite(request.amount) || request.amount <= 0)
+    ) {
+      throw new Error("WOMPI_REFUND_AMOUNT_INVALID");
+    }
+
+    const { data, error } = await supabase.functions.invoke<WompiTransactionFunctionResponse>(
       "wompi-refund-transaction",
-      { body: { transactionId: request.paymentId, amount: request.amount, reason: request.reason } }
+      {
+        body: {
+          transactionId: paymentId,
+          amount: request.amount,
+          reason: request.reason
+        }
+      }
     );
 
     if (error) {
-      throw new Error(await extractFunctionErrorMessage(error, "No se pudo reembolsar el pago en Wompi."));
+      throw new Error(
+        await extractFunctionErrorMessage(
+          error,
+          "No se pudo reembolsar el pago en Wompi."
+        )
+      );
     }
 
     if (!data?.transaction) {
-      throw new Error("WompiProvider: la Edge Function no devolvió la transacción reembolsada.");
+      throw new Error(
+        "WOMPI_INVALID_REFUND_RESPONSE: la Edge Function no devolvió la transacción reembolsada."
+      );
     }
 
     const transaction = data.transaction;
+
     return {
       id: transaction.id,
-      paymentId: request.paymentId,
+      paymentId,
       provider: this.name,
-      status: this.getStatus(transaction.status),
+      status: this.getRefundStatus(transaction.status),
       amount: transaction.amount_in_cents / 100,
-      createdAt: transaction.created_at,
+      createdAt: transaction.created_at || nowIso(),
       raw: transaction
     };
   }
 
   getAvailableMethods(_country: CountryCode): PaymentMethodCode[] {
-    return ["pse", "nequi", "card"];
+    return [...WOMPI_METHODS];
   }
 
   getCurrency(_country: CountryCode): CurrencyCode {
-    return "COP";
+    return WOMPI_CURRENCY;
   }
 
   getStatus(providerStatus: string): PaymentStatus {
+    const normalized = providerStatus?.trim().toUpperCase();
+
     const map: Record<string, PaymentStatus> = {
       PENDING: "pending",
       APPROVED: "approved",
       DECLINED: "declined",
       VOIDED: "cancelled",
-      ERROR: "error"
+      ERROR: "error",
+      FAILED: "error"
     };
-    return map[providerStatus] ?? "error";
+
+    return map[normalized] ?? "error";
+  }
+
+  private getRefundStatus(providerStatus: string): PaymentStatus {
+    const normalized = providerStatus?.trim().toUpperCase();
+
+    if (normalized === "PENDING") return "pending";
+    if (normalized === "APPROVED") return "refunded";
+    if (normalized === "VOIDED") return "cancelled";
+    if (normalized === "DECLINED") return "declined";
+
+    return "error";
+  }
+
+  private mapTransaction(
+    transaction: WompiTransactionApiResponse
+  ): PaymentResult {
+    if (!transaction?.id) {
+      throw new Error("WOMPI_INVALID_TRANSACTION_RESPONSE");
+    }
+
+    if (
+      !Number.isFinite(transaction.amount_in_cents) ||
+      transaction.amount_in_cents < 0
+    ) {
+      throw new Error("WOMPI_INVALID_TRANSACTION_AMOUNT");
+    }
+
+    if (transaction.currency !== WOMPI_CURRENCY) {
+      throw new Error("WOMPI_CURRENCY_MISMATCH");
+    }
+
+    return {
+      id: transaction.id,
+      provider: this.name,
+      status: this.getStatus(transaction.status),
+      amount: transaction.amount_in_cents / 100,
+      currency: WOMPI_CURRENCY,
+      createdAt: transaction.created_at || nowIso(),
+      reference: transaction.reference,
+      raw: transaction
+    };
   }
 
   /**
-   * La validación real de un webhook de Wompi exige el "events secret"
-   * (distinto de la llave de integridad), que tampoco puede vivir en el
-   * navegador. Por diseño, este método SIEMPRE falla cerrado (devuelve
-   * false) cuando corre en el cliente — la validación de verdad ocurre en
-   * la Edge Function wompi-webhook, que tiene su propia copia de esta
-   * lógica con el secret disponible como variable de entorno de servidor.
-   * Se deja implementado (no como placeholder que confía a ciegas) para
-   * que quede explícito que este archivo nunca es la fuente de verdad de
-   * un webhook.
+   * Webhooks reales se validan server-side con WOMPI_EVENTS_SECRET.
+   * El navegador no posee ese secreto y por eso este método falla cerrado.
    */
   validateResponse(_payload: unknown, _signature?: string): boolean {
     return false;

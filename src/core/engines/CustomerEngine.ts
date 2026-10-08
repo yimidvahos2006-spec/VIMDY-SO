@@ -54,10 +54,10 @@ export class CustomerEngine {
   /**
    * Paso 6: búsqueda de clientes por nombre, teléfono o correo.
    *
-   * Usa SOLO campos que el modelo declara en `Customer` (name, phone, email).
-   * No se busca por documento porque `Customer` no tiene ese campo: el id es un
-   * UUID aleatorio (ver useCustomers.createCustomer) y la pantalla de POS
-   * anuncia "Buscar por nombre o teléfono".
+   * Usa SOLO campos que el modelo declara en `Customer` (name, phone, email,
+   * documentType, documentNumber). La búsqueda operativa de clientes sigue
+   * siendo por nombre, teléfono y correo; el documento fiscal se utiliza para
+   * facturación electrónica y no sustituye la identificación interna por UUID.
    *
    * El filtrado por negocio/sucursal NO se hace aquí: lo aplica el RLS del
    * repositorio, de modo que el usuario solo puede buscar dentro de lo que su

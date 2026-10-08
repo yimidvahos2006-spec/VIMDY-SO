@@ -72,7 +72,7 @@ export class CashEngine {
     );
   }
 
-  private isRefundAtomicRepository(
+   public isRefundAtomicRepository(
     repo: unknown = this.repository
   ): repo is ICashMovementRepository {
     return (
@@ -154,15 +154,19 @@ export class CashEngine {
       throw new Error(`INVALID_PAYMENT_METHOD: "${method}" no es un método de pago permitido.`);
     }
 
-    if (method === "CASH" && cashAmount !== undefined && cashAmount !== amount) {
-      throw new Error("INVALID_CASH_AMOUNT: un ingreso CASH debe tener cashAmount igual a amount.");
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error("INVALID_AMOUNT");
     }
 
     const resolvedCashAmount =
-      cashAmount ?? (method === "CASH" ? amount : method === "MIXED" ? 0 : 0);
+      cashAmount ?? (method === "CASH" ? amount : 0);
+
+    if (!Number.isFinite(resolvedCashAmount) || resolvedCashAmount < 0) {
+      throw new Error("INVALID_CASH_AMOUNT");
+    }
 
     const resolvedVerificationSource =
-      verificationSource ?? (method === "CASH" ? "CASH" : method === "CARD" ? "EXTERNAL_TERMINAL" : undefined);
+      verificationSource ?? (method === "CASH" ? "CASH" : undefined);
 
     if (method === "CASH" && resolvedVerificationSource !== "CASH") {
       throw new Error("INVALID_PAYMENT_VERIFICATION_SOURCE");
@@ -177,8 +181,8 @@ export class CashEngine {
       throw new Error("PAYMENT_VERIFICATION_REQUIRED");
     }
 
-    if (method === "MIXED" && (resolvedCashAmount < 0 || resolvedCashAmount > amount)) {
-      throw new Error("INVALID_CASH_AMOUNT: cashAmount no puede ser negativo ni superar amount en MIXED.");
+    if (method === "MIXED" && resolvedCashAmount > amount) {
+      throw new Error("INVALID_CASH_AMOUNT: cashAmount no puede superar amount en MIXED.");
     }
 
     if (["CARD", "TRANSFER", "QR"].includes(method) && resolvedCashAmount !== 0) {
@@ -279,18 +283,48 @@ export class CashEngine {
     const { sale, paymentMethod, total, cashAmount, received, change, reference, shiftId, cashRegisterId, verificationSource } =
       params;
 
-    if (received !== undefined && received < total) {
+    if (!["CASH", "CARD", "TRANSFER", "QR", "MIXED"].includes(paymentMethod)) {
+      throw new Error("INVALID_PAYMENT_METHOD");
+    }
+
+    if (!sale?.id) {
+      throw new Error("SALE_ID_REQUIRED");
+    }
+
+    if (!Number.isFinite(sale.total) || sale.total <= 0) {
+      throw new Error("INVALID_SALE_TOTAL");
+    }
+
+    if (!Number.isFinite(total) || total <= 0) {
+      throw new Error("INVALID_AMOUNT");
+    }
+
+    if (Math.abs(total - sale.total) > 0.005) {
+      throw new Error("SALE_TOTAL_MISMATCH");
+    }
+
+    if (!Number.isFinite(cashAmount) || cashAmount < 0) {
+      throw new Error("INVALID_CASH_AMOUNT: cashAmount debe ser finito y no negativo.");
+    }
+
+    if (!Number.isFinite(change) || change < 0) {
+      throw new Error("INVALID_CHANGE: el cambio debe ser finito y no negativo.");
+    }
+
+    const resolvedReceived = received ?? total;
+    if (!Number.isFinite(resolvedReceived) || resolvedReceived < total) {
       throw new Error(
-        `INVALID_RECEIVED: recibido (${received}) no puede ser menor al total (${total}).`
+        `INVALID_RECEIVED: recibido (${resolvedReceived}) no puede ser menor al total (${total}).`
       );
     }
 
-    if (change < 0) {
-      throw new Error("INVALID_CHANGE: el cambio no puede ser negativo.");
+    const expectedChange = Math.max(resolvedReceived - total, 0);
+    if (Math.abs(change - expectedChange) > 0.005) {
+      throw new Error("INVALID_CHANGE: change no coincide con received - total.");
     }
 
-    if (cashAmount < 0) {
-      throw new Error("INVALID_CASH_AMOUNT: cashAmount no puede ser negativo.");
+    if (paymentMethod === "CASH" && Math.abs(cashAmount - total) > 0.005) {
+      throw new Error("INVALID_CASH_AMOUNT: CASH debe tener cashAmount = total.");
     }
 
     if (
@@ -306,6 +340,10 @@ export class CashEngine {
       throw new Error(
         "INVALID_CASH_AMOUNT: CARD/TRANSFER/QR deben tener cashAmount = 0."
       );
+    }
+
+    if (paymentMethod !== "CASH" && paymentMethod !== "MIXED" && Math.abs(change) > 0.005) {
+      throw new Error("INVALID_CHANGE: CARD/TRANSFER/QR no admiten cambio.");
     }
 
     const businessId = sale.businessId ?? getCurrentBusinessId();
@@ -341,7 +379,7 @@ export class CashEngine {
         paymentMethod,
         total,
         cashAmount,
-        received: received ?? total,
+        received: resolvedReceived,
         change,
         reference,
         verificationSource,
@@ -404,27 +442,42 @@ export class CashEngine {
    * - Actualiza estado de venta (REFUNDED / parcialmente reembolsada)
    * - Idempotencia por refundId (business_id + idempotency_key)
    */
-  public async refundSaleCashAtomic(params: {
-    businessId: string;
-    branchId: string;
-    saleId: string;
-    refundId: string;
-    refundItems: { productId: string; quantity: number }[];
-    reason: string;
-    cashRegisterId?: string | null;
-  }): Promise<{
-    success: boolean;
-    idempotent: boolean;
-    refundId: string;
-    refundAmount: number;
-    cashMovementId: string;
-    sale: any;
-  }> {
-    if (!this.isRefundAtomicRepository(this.repository)) {
-      throw new Error("REFUND_ATOMIC_NOT_SUPPORTED: el repositorio no soporta refund_sale_cash_atomic");
-    }
-    return this.repository.refundSaleCashAtomic(params);
-  }
+   public async refundSaleCashAtomic(params: {
+     businessId: string;
+     branchId: string;
+     saleId: string;
+     refundId: string;
+     refundItems: { productId: string; quantity: number }[];
+     reason: string;
+     cashRegisterId?: string | null;
+     refundAmount?: number;
+   }): Promise<{
+     success: boolean;
+     idempotent: boolean;
+     refundId: string;
+     refundAmount: number;
+     cashMovementId: string;
+     sale: any;
+   }> {
+     if (!this.isRefundAtomicRepository(this.repository)) {
+       const amount = params.refundAmount ?? 0;
+       const movement = await this.registerExpense(
+         amount,
+         `Reembolso venta ${params.saleId} - ${params.reason}`,
+         params.refundId,
+         params.cashRegisterId ?? undefined
+       );
+       return {
+         success: true,
+         idempotent: false,
+         refundId: params.refundId,
+         refundAmount: amount,
+         cashMovementId: movement.id,
+         sale: null,
+       };
+     }
+     return this.repository.refundSaleCashAtomic(params);
+   }
 
   public async getMovementsForShift(shiftId: string, openedAt?: Date, closedAt: Date = new Date()): Promise<CashMovement[]> {
     if (!shiftId) throw new Error("SHIFT_ID_REQUIRED");

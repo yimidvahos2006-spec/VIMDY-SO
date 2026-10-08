@@ -23,7 +23,7 @@ export interface IProductRepository extends IRepository<Product> {
   produceBatch?(input: {
     operationId: string;
     productId: string;
-    branchId: string;
+     branchId?: string;
     quantity: number;
     performedBy?: string;
   }): Promise<Product[]>;

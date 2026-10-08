@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState } from "react";
 import { Plus, X, Loader2, CheckCircle2 } from "lucide-react";
 
 import { VimdyCard } from "../ui/VimdyCard";
@@ -23,6 +23,7 @@ export function CategoriesStep({ businessType, onSaved }: CategoriesStepProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<Category[]>([]);
+  const actionInFlight = useRef(false);
 
   function toggleSuggestion(name: string) {
     const newSet = new Set(selectedSuggestions);
@@ -48,28 +49,36 @@ export function CategoriesStep({ businessType, onSaved }: CategoriesStepProps) {
   }
 
   async function handleSave() {
+    if (actionInFlight.current) return;
+    actionInFlight.current = true;
     setSaving(true);
     setError(null);
 
-    const finalNames = Array.from(selectedSuggestions);
-    const allNames = [...finalNames, ...customNames];
-
-    if (allNames.length === 0) {
-      onSaved([]);
-      setSaving(false);
-      return;
-    }
-
     try {
+      const allNames = Array.from(new Map(
+        [...selectedSuggestions, ...customNames]
+          .map((name) => [name.trim().toLowerCase(), name.trim()] as const)
+          .filter(([key, name]) => key.length > 0 && name.length > 0)
+      ).values());
+
+      if (allNames.length === 0) {
+        onSaved([]);
+        return;
+      }
+
       const existing = await container.categoryEngine.get().listAll();
-      const existingNames = new Set(existing.map((c) => c.name.toLowerCase()));
+      const existingByName = new Map(existing.map((category) => [
+        category.name.trim().toLowerCase(),
+        category
+      ]));
       const result: Category[] = [];
       const requiresKitchen = false;
 
       for (const name of allNames) {
-        if (existingNames.has(name.toLowerCase())) {
-          const existingCat = existing.find((c) => c.name.toLowerCase() === name.toLowerCase());
-          if (existingCat) result.push(existingCat);
+        const normalizedName = name.trim().toLowerCase();
+        const existingCategory = existingByName.get(normalizedName);
+        if (existingCategory) {
+          result.push(existingCategory);
           continue;
         }
         const category = await container.categoryEngine.get().create({
@@ -77,28 +86,33 @@ export function CategoriesStep({ businessType, onSaved }: CategoriesStepProps) {
           requiresKitchenByDefault: requiresKitchen
         });
         result.push(category);
+        existingByName.set(normalizedName, category);
       }
 
-      const toReturn = result.filter((c) =>
-        allNames.some((n) => n.toLowerCase() === c.name.toLowerCase())
-      );
-      setCreated(toReturn);
-      onSaved(toReturn);
+      setCreated(result);
+      onSaved(result);
     } catch (err) {
       const message = err instanceof Error ? err.message : "No se pudieron crear las categorías.";
       setError(message);
     } finally {
+      actionInFlight.current = false;
       setSaving(false);
     }
   }
 
   async function handleSkip() {
+    if (actionInFlight.current) return;
+    actionInFlight.current = true;
+    setSaving(true);
     try {
       await container.categoryEngine.get().listAll();
+      onSaved([]);
     } catch {
-      // ignore
+      onSaved([]);
+    } finally {
+      actionInFlight.current = false;
+      setSaving(false);
     }
-    onSaved([]);
   }
 
   const allNames = [...Array.from(selectedSuggestions), ...customNames];
@@ -106,7 +120,7 @@ export function CategoriesStep({ businessType, onSaved }: CategoriesStepProps) {
   return (
     <div className="w-full max-w-3xl mx-auto">
       <div className="text-center mb-10">
-        <p className="text-vimdy-micro uppercase tracking-widest text-vimdy-accent font-semibold mb-3">Paso 6 de 7</p>
+        <p className="text-vimdy-micro uppercase tracking-widest text-vimdy-accent font-semibold mb-3">Paso 5 de 7</p>
         <h2 className="text-vimdy-h2 text-vimdy-text mb-2">Organiza tus categorías</h2>
         <p className="text-vimdy-small text-vimdy-text-secondary max-w-md mx-auto">
           Selecciona las categorías sugeridas para tu negocio o escribe las tuyas propias.

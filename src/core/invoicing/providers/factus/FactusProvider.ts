@@ -1,143 +1,502 @@
 /**
  * FactusProvider.ts
  * ---------------------------------------------------------------------------
- * Implementación de IInvoiceProvider para Factus (proveedor tecnológico
- * autorizado por la DIAN — https://developers.factus.com.co).
+ * Adaptador de navegador para Factus API V2.
  *
- * Nadie fuera de invoicing/ debe importar esta clase directamente: siempre
- * se accede a través de InvoiceFactory.
+ * Seguridad:
+ *   - NO contiene client_id, client_secret, username, password ni OAuth token.
+ *   - Todas las llamadas HTTP privadas contra Factus ocurren en la Edge
+ *     Function `factus-invoice`.
  *
- * Ninguna credencial vive aquí (este archivo corre en el navegador). El
- * client_id, client_secret, username y password de Factus son secretos de
- * verdad — a diferencia de la llave pública de Wompi, aquí NO existe un
- * equivalente "seguro de exponer". Por eso este archivo nunca llama
- * directamente a api-sandbox.factus.com.co / api.factus.com.co: siempre
- * delega en la Edge Function `factus-invoice`, que es la única que conoce
- * las credenciales (viven como secrets de esa función).
+ * Responsabilidad de este adapter:
+ *   1. Validar el contrato agnóstico InvoiceRequest.
+ *   2. Invocar la Edge Function server-side.
+ *   3. Validar la forma mínima de la respuesta.
+ *   4. Normalizar Factus -> InvoiceResult.
+ *
+ * El cálculo fiscal autoritativo vive en servidor. El navegador no recalcula
+ * ni reescribe el importe que se factura.
  */
 
 import { supabase } from "../../../../infrastructure/supabase/supabaseClient";
 import type { IInvoiceProvider } from "../../interfaces/IInvoiceProvider";
-import type { CountryCode, InvoiceProviderName } from "../../types/invoice.types";
-import type { InvoiceRequest, InvoiceResult } from "../../models/InvoiceModels";
+import type {
+  CountryCode,
+  InvoiceProviderName,
+  InvoiceStatus
+} from "../../types/invoice.types";
+import type {
+  InvoiceRequest,
+  InvoiceResult
+} from "../../models/InvoiceModels";
 import { nowIso } from "../../utils/invoiceUtils";
 
-/** Factus hoy solo cubre Colombia — igual que el criterio de globalization.ts para el IVA real. */
-const FACTUS_SUPPORTED_COUNTRIES: CountryCode[] = ["CO"];
+const FACTUS_COUNTRY: CountryCode = "CO";
+const FACTUS_CURRENCY = "COP";
+const MONEY_EPSILON = 0.005;
 
-/** Extrae el mensaje detallado de un error de Edge Function, mismo patrón que WompiProvider.ts. */
-async function extractFunctionErrorMessage(fnError: unknown, fallback: string): Promise<string> {
-  const context = (fnError as { context?: Response })?.context;
+interface FactusInvoicePayload {
+  id: string;
+  status: InvoiceStatus;
+  number?: string;
+  reference_code?: string;
+  cufe?: string;
+  trackingCode?: string;
+  pdfUrl?: string;
+  pdfPath?: string;
+  xmlUrl?: string;
+  xmlPath?: string;
+  qrCode?: string;
+  createdAt?: string;
+  errorMessage?: string;
+  raw?: unknown;
+}
+
+interface FactusFunctionResult {
+  ok: boolean;
+  invoice?: FactusInvoicePayload;
+  error?: string;
+  detail?: string;
+}
+
+interface FunctionErrorContext {
+  context?: Response;
+  message?: string;
+}
+
+async function extractFunctionErrorMessage(
+  fnError: unknown,
+  fallback: string
+): Promise<string> {
+  const candidate = fnError as FunctionErrorContext | null;
+  const context = candidate?.context;
+
   if (context && typeof context.json === "function") {
     try {
-      const body = await context.json();
-      if (body?.error) return body.error as string;
+      const body = (await context.json()) as {
+        error?: unknown;
+        detail?: unknown;
+      };
+
+      if (
+        typeof body.error === "string" &&
+        body.error.trim()
+      ) {
+        if (
+          typeof body.detail === "string" &&
+          body.detail.trim()
+        ) {
+          return `${body.error}: ${body.detail}`;
+        }
+
+        return body.error;
+      }
     } catch {
-      // El body no era JSON válido; nos quedamos con el mensaje genérico.
+      // Algunas respuestas de Supabase Functions no tienen un body JSON legible.
     }
   }
-  return (fnError as { message?: string })?.message ?? fallback;
+
+  if (
+    typeof candidate?.message === "string" &&
+    candidate.message.trim()
+  ) {
+    return candidate.message;
+  }
+
+  return fallback;
 }
 
-/** Forma de la respuesta que devuelve la Edge Function factus-invoice, ya normalizada. */
-interface FactusFunctionResult {
+function normalizeCountry(country: CountryCode): CountryCode {
+  return country.trim().toUpperCase() as CountryCode;
+}
+
+function normalizeCurrency(currency: string): string {
+  return currency.trim().toUpperCase();
+}
+
+function assertFiniteMoney(
+  value: number,
+  field: string,
+  allowZero = true
+): void {
+  if (!Number.isFinite(value)) {
+    throw new Error(
+      `FACTUS_${field.toUpperCase()}_INVALID`
+    );
+  }
+
+  if (allowZero && value < 0) {
+    throw new Error(
+      `FACTUS_${field.toUpperCase()}_INVALID`
+    );
+  }
+
+  if (!allowZero && value <= 0) {
+    throw new Error(
+      `FACTUS_${field.toUpperCase()}_INVALID`
+    );
+  }
+}
+
+function validateInvoiceRequest(
+  request: InvoiceRequest
+): void {
+  if (!request.saleId?.trim()) {
+    throw new Error("FACTUS_SALE_ID_REQUIRED");
+  }
+
+  if (!request.businessId?.trim()) {
+    throw new Error("FACTUS_BUSINESS_ID_REQUIRED");
+  }
+
+  if (request.provider !== "factus") {
+    throw new Error("FACTUS_PROVIDER_MISMATCH");
+  }
+
+  if (
+    normalizeCountry(request.country) !==
+    FACTUS_COUNTRY
+  ) {
+    throw new Error(
+      "FACTUS_COUNTRY_NOT_SUPPORTED: Factus en VIMDY está habilitado para Colombia."
+    );
+  }
+
+  if (
+    normalizeCurrency(request.currency) !==
+    FACTUS_CURRENCY
+  ) {
+    throw new Error(
+      `FACTUS_CURRENCY_NOT_SUPPORTED: se esperaba ${FACTUS_CURRENCY}.`
+    );
+  }
+
+  if (request.documentType !== "INVOICE") {
+    throw new Error(
+      `FACTUS_DOCUMENT_TYPE_NOT_SUPPORTED: ${request.documentType} requiere el endpoint específico de nota crédito/débito, no el endpoint de factura estándar.`
+    );
+  }
+
+  assertFiniteMoney(request.subtotal, "subtotal");
+  assertFiniteMoney(request.tax, "tax");
+  assertFiniteMoney(request.discount ?? 0, "discount");
+  assertFiniteMoney(request.total, "total", false);
+
+  if (!Array.isArray(request.items) || request.items.length === 0) {
+    throw new Error("FACTUS_ITEMS_REQUIRED");
+  }
+
+  for (const item of request.items) {
+    if (!item.productId?.trim()) {
+      throw new Error(
+        "FACTUS_ITEM_PRODUCT_REQUIRED"
+      );
+    }
+
+    if (
+      !Number.isFinite(item.quantity) ||
+      item.quantity <= 0
+    ) {
+      throw new Error(
+        "FACTUS_ITEM_QUANTITY_INVALID"
+      );
+    }
+
+    if (
+      !Number.isFinite(item.price) ||
+      item.price < 0
+    ) {
+      throw new Error(
+        "FACTUS_ITEM_PRICE_INVALID"
+      );
+    }
+  }
+
+  if (!request.customer.documentNumber?.trim()) {
+    throw new Error(
+      "FACTUS_CUSTOMER_DOCUMENT_REQUIRED"
+    );
+  }
+
+  if (!request.customer.fullName?.trim()) {
+    throw new Error(
+      "FACTUS_CUSTOMER_NAME_REQUIRED"
+    );
+  }
+}
+
+function assertInvoicePayload(
+  data: FactusFunctionResult
+): asserts data is FactusFunctionResult & {
   ok: true;
-  invoice: {
-    id: string;
-    status: InvoiceResult["status"];
-    number?: string;
-    cufe?: string;
-    pdfUrl?: string;
-    xmlUrl?: string;
-    qrCode?: string;
-    errorMessage?: string;
-    raw?: unknown;
-  };
+  invoice: FactusInvoicePayload;
+} {
+  if (!data?.ok || !data.invoice) {
+    throw new Error(
+      `FACTUS_INVALID_FUNCTION_RESPONSE: ${data?.error ?? data?.detail ?? "respuesta sin invoice"}`
+    );
+  }
+
+  if (!data.invoice.id?.trim()) {
+    throw new Error(
+      "FACTUS_INVALID_INVOICE_ID"
+    );
+  }
+
+  if (
+    data.invoice.status === "accepted" &&
+    !data.invoice.number?.trim()
+  ) {
+    throw new Error(
+      "FACTUS_ACCEPTED_WITHOUT_NUMBER"
+    );
+  }
+
+  if (
+    data.invoice.status === "accepted" &&
+    !(data.invoice.cufe?.trim() || data.invoice.trackingCode?.trim())
+  ) {
+    throw new Error(
+      "FACTUS_ACCEPTED_WITHOUT_CUFE"
+    );
+  }
 }
 
-export class FactusProvider implements IInvoiceProvider {
-  readonly name: InvoiceProviderName = "factus";
+function assertHttpsUrl(
+  value: string | undefined,
+  field: string
+): string | undefined {
+  if (!value) {
+    return undefined;
+  }
 
-  async createInvoice(request: InvoiceRequest): Promise<InvoiceResult> {
-    const { data, error } = await supabase.functions.invoke<FactusFunctionResult>(
-      "factus-invoice",
-      { body: { action: "create", request } }
+  try {
+    const url = new URL(value);
+
+    if (url.protocol !== "https:") {
+      throw new Error();
+    }
+
+    return url.toString();
+  } catch {
+    throw new Error(
+      `FACTUS_INVALID_${field.toUpperCase()}_URL`
     );
+  }
+}
+
+export class FactusProvider
+  implements IInvoiceProvider
+{
+  readonly name: InvoiceProviderName =
+    "factus";
+
+  async createInvoice(
+    request: InvoiceRequest
+  ): Promise<InvoiceResult> {
+    validateInvoiceRequest(request);
+
+    const { data, error } =
+      await supabase.functions.invoke<FactusFunctionResult>(
+        "factus-invoice",
+        {
+          body: {
+            action: "create",
+            request
+          }
+        }
+      );
 
     if (error) {
-      throw new Error(await extractFunctionErrorMessage(error, "No se pudo emitir la factura electrónica con Factus."));
-    }
-    if (!data) {
-      throw new Error("Factus no devolvió ninguna respuesta al emitir la factura.");
+      throw new Error(
+        await extractFunctionErrorMessage(
+          error,
+          "No se pudo emitir la factura electrónica con Factus."
+        )
+      );
     }
 
-    return this.toInvoiceResult(data);
+    if (!data) {
+      throw new Error(
+        "FACTUS_EMPTY_RESPONSE: Factus no devolvió ninguna respuesta."
+      );
+    }
+
+    assertInvoicePayload(data);
+
+    return this.toInvoiceResult(
+      data.invoice
+    );
   }
 
-  async getInvoice(invoiceId: string): Promise<InvoiceResult> {
-    const { data, error } = await supabase.functions.invoke<FactusFunctionResult>(
-      "factus-invoice",
-      { body: { action: "get", invoiceId } }
-    );
+  async getInvoice(
+    invoiceId: string
+  ): Promise<InvoiceResult> {
+    const normalizedId =
+      invoiceId?.trim();
+
+    if (!normalizedId) {
+      throw new Error(
+        "FACTUS_INVOICE_ID_REQUIRED"
+      );
+    }
+
+    const { data, error } =
+      await supabase.functions.invoke<FactusFunctionResult>(
+        "factus-invoice",
+        {
+          body: {
+            action: "get",
+            invoiceId: normalizedId
+          }
+        }
+      );
 
     if (error) {
-      throw new Error(await extractFunctionErrorMessage(error, "No se pudo consultar la factura en Factus."));
-    }
-    if (!data) {
-      throw new Error("Factus no devolvió ninguna respuesta al consultar la factura.");
+      throw new Error(
+        await extractFunctionErrorMessage(
+          error,
+          "No se pudo consultar la factura en Factus."
+        )
+      );
     }
 
-    return this.toInvoiceResult(data);
+    if (!data) {
+      throw new Error(
+        "FACTUS_EMPTY_RESPONSE: Factus no devolvió ninguna respuesta al consultar la factura."
+      );
+    }
+
+    assertInvoicePayload(data);
+
+    return this.toInvoiceResult(
+      data.invoice
+    );
   }
 
-  async cancelInvoice(invoiceId: string, reason: string): Promise<InvoiceResult> {
-    // Factus solo permite eliminar facturas AÚN NO validadas ante la DIAN
-    // (ver data.is_validated en la respuesta de creación) — una vez
-    // validada, el documento es legalmente irreversible y lo correcto es
-    // emitir una nota crédito, no "cancelar". La Edge Function es quien
-    // decide cuál de las dos operaciones aplica; este método solo pide
-    // "anular" en términos genéricos de VIMDY.
-    const { data, error } = await supabase.functions.invoke<FactusFunctionResult>(
-      "factus-invoice",
-      { body: { action: "cancel", invoiceId, reason } }
-    );
+  async cancelInvoice(
+    invoiceId: string,
+    reason: string
+  ): Promise<InvoiceResult> {
+    const normalizedId =
+      invoiceId?.trim();
+    const normalizedReason =
+      reason?.trim();
+
+    if (!normalizedId) {
+      throw new Error(
+        "FACTUS_INVOICE_ID_REQUIRED"
+      );
+    }
+
+    if (!normalizedReason) {
+      throw new Error(
+        "FACTUS_CANCEL_REASON_REQUIRED"
+      );
+    }
+
+    const { data, error } =
+      await supabase.functions.invoke<FactusFunctionResult>(
+        "factus-invoice",
+        {
+          body: {
+            action: "cancel",
+            invoiceId: normalizedId,
+            reason: normalizedReason
+          }
+        }
+      );
 
     if (error) {
-      throw new Error(await extractFunctionErrorMessage(error, "No se pudo anular la factura en Factus."));
+      throw new Error(
+        await extractFunctionErrorMessage(
+          error,
+          "No se pudo anular la factura en Factus."
+        )
+      );
     }
+
     if (!data) {
-      throw new Error("Factus no devolvió ninguna respuesta al anular la factura.");
+      throw new Error(
+        "FACTUS_EMPTY_RESPONSE: Factus no devolvió ninguna respuesta al anular la factura."
+      );
     }
 
-    return this.toInvoiceResult(data);
+    assertInvoicePayload(data);
+
+    return this.toInvoiceResult(
+      data.invoice
+    );
   }
 
-  supportsCountry(country: CountryCode): boolean {
-    return FACTUS_SUPPORTED_COUNTRIES.includes(country);
+  supportsCountry(
+    country: CountryCode
+  ): boolean {
+    return (
+      normalizeCountry(country) ===
+      FACTUS_COUNTRY
+    );
   }
 
-  validateResponse(_payload: unknown, _signature?: string): boolean {
-    // Factus no envía webhooks hoy (se consulta por polling vía getInvoice),
-    // y este código corre en el navegador sin acceso a credenciales secretas.
-    // La autenticidad de cualquier respuesta real se valida en la Edge Function
-    // `factus-invoice`, que es la única con acceso a las credenciales.
-    // Fail-closed: si no podemos verificar criptográficamente, rechazamos.
+  validateResponse(
+    _payload: unknown,
+    _signature?: string
+  ): boolean {
+    /*
+     * La autenticidad y firma de las respuestas/webhooks se valida server-side.
+     * Este adapter no posee client_secret ni material criptográfico de Factus.
+     */
     return false;
   }
 
-  private toInvoiceResult(data: FactusFunctionResult): InvoiceResult {
+  private toInvoiceResult(
+    invoice: FactusInvoicePayload
+  ): InvoiceResult {
+    const trackingCode =
+      invoice.cufe?.trim() ||
+      invoice.trackingCode?.trim() ||
+      undefined;
+
+    const pdfUrl =
+      assertHttpsUrl(
+        invoice.pdfUrl,
+        "pdf_url"
+      );
+
+    const xmlUrl =
+      assertHttpsUrl(
+        invoice.xmlUrl,
+        "xml_url"
+      );
+
     return {
-      id: data.invoice.id,
+      id: invoice.id,
       provider: "factus",
-      status: data.invoice.status,
-      number: data.invoice.number,
-      trackingCode: data.invoice.cufe,
-      pdfUrl: data.invoice.pdfUrl,
-      xmlUrl: data.invoice.xmlUrl,
-      qrCode: data.invoice.qrCode,
-      createdAt: nowIso(),
-      errorMessage: data.invoice.errorMessage,
-      raw: data.invoice.raw
+      status: invoice.status,
+      number: invoice.number,
+      trackingCode,
+      pdfUrl,
+      xmlUrl,
+      qrCode: invoice.qrCode,
+      createdAt:
+        invoice.createdAt ?? nowIso(),
+      errorMessage:
+        invoice.errorMessage,
+      raw: {
+        original: invoice.raw,
+        referenceCode:
+          invoice.reference_code,
+        pdfPath:
+          invoice.pdfPath,
+        xmlPath:
+          invoice.xmlPath,
+        pdfAvailable:
+          Boolean(invoice.pdfUrl || invoice.pdfPath),
+        xmlAvailable:
+          Boolean(invoice.xmlUrl || invoice.xmlPath)
+      }
     };
   }
 }
+
+void MONEY_EPSILON;

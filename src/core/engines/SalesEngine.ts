@@ -14,7 +14,7 @@ import {
 
 import { SaleRepository } from "../../infrastructure/di/repositories/SaleRepository";
 import { logWarning } from "../../infrastructure/logging/opsLogger";
-import { getCurrentBusinessId, getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
+import { supabase, getCurrentBusinessId, getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
 
 import { CartEngine } from "./CartEngine";
 import { InventoryEngine } from "./InventoryEngine";
@@ -290,6 +290,15 @@ export class SalesEngine {
           tip: input.tip
         }
       });
+
+      // Un retry idempotente ya encontró la venta, el fulfillment, el
+      // inventario y la cocina creados por el primer intento. No debemos
+      // volver a ejecutar efectos secundarios locales como alertas o
+      // auditoría porque eso convertiría un retry financiero/operativo en
+      // un segundo evento lógico.
+      if (result.idempotent) {
+        return result.sale;
+      }
 
       void this.generateEvents().catch((error: unknown) => {
         logWarning("No se pudieron actualizar alertas después de la venta confirmada.", {
@@ -1102,6 +1111,37 @@ export class SalesEngine {
     // - Reversa inventario/Kardex
     // - Registra cash_movement OUT + payment_refunds + audit_log
     // - Actualiza sale.data (status, refunds)
+    const isNonAtomic = !this.cash.isRefundAtomicRepository();
+    const currency = companyConfigStore.get().currency;
+
+    let refundAmount = 0;
+    if (isNonAtomic) {
+      const priceByProduct = new Map(sale.items.map(item => [item.productId, item.price ?? 0]));
+      const refundSubtotal = remainingItems.reduce(
+        (sum, item) => sum + (priceByProduct.get(item.productId) ?? 0) * item.quantity,
+        0
+      );
+      const saleSubtotal = sale.subtotal ?? this.calculateSubtotal(sale.items);
+      const effectiveRate = saleSubtotal > 0 ? refundSubtotal / saleSubtotal : 0;
+      const refundTax = roundMoney((sale.tax ?? 0) * effectiveRate, currency);
+      const refundDiscount = roundMoney((sale.discount ?? 0) * effectiveRate, currency);
+      refundAmount = roundMoney(
+        Math.max(refundSubtotal + refundTax - refundDiscount, 0),
+        currency
+      );
+
+      await this.inventory.restoreForSale(
+        remainingItems,
+        `Reembolso venta ${sale.id}`,
+        sale.id
+      );
+
+      await this.saleRepository.update({
+        ...sale,
+        status: "REFUNDED",
+      });
+    }
+
     const refundResult = await this.cash.refundSaleCashAtomic({
       businessId,
       branchId,
@@ -1110,6 +1150,7 @@ export class SalesEngine {
       refundItems: remainingItems.map(i => ({ productId: i.productId, quantity: i.quantity })),
       reason,
       cashRegisterId: sale.cashRegisterId ?? null,
+      refundAmount,
     });
 
     // La RPC ya actualizó la venta en BD. Recuperamos la versión actualizada.
@@ -1300,6 +1341,7 @@ export class SalesEngine {
     const refundRecordId = `refund-${sale.id}-${refundIndex}`;
 
     // Llamar a la RPC atómica que hace TODO en servidor
+    const isNonAtomic = !this.cash.isRefundAtomicRepository();
     const refundResult = await this.cash.refundSaleCashAtomic({
       businessId,
       branchId,
@@ -1308,7 +1350,51 @@ export class SalesEngine {
       refundItems: cleanItems,
       reason,
       cashRegisterId: sale.cashRegisterId ?? null,
+      refundAmount,
     });
+
+    if (isNonAtomic) {
+      const saleItemsToRestore = cleanItems.map(line => {
+        const saleItem = sale.items.find(i => i.productId === line.productId);
+        return {
+          productId: line.productId,
+          quantity: line.quantity,
+          selectedSize: saleItem?.selectedSize,
+          selectedExtras: saleItem?.selectedExtras,
+        };
+      });
+
+      await this.inventory.restoreForSale(
+        saleItemsToRestore,
+        `Reembolso parcial venta ${sale.id}`,
+        sale.id
+      );
+
+      const refundRecord: SaleRefundRecord = {
+        id: refundRecordId,
+        items: cleanItems,
+        amount: refundAmount,
+        reason,
+        actorId: actorId ?? sale.cashierId ?? "system",
+        createdAt: new Date(),
+      };
+
+      const refundedAfter = this.getRefundedQuantities({
+        ...sale,
+        refunds: [...(sale.refunds ?? []), refundRecord],
+      });
+      const isFullyRefundedNow = sale.items.every(
+        item => item.quantity <= (refundedAfter[item.productId] ?? 0)
+      );
+
+      await this.saleRepository.update({
+        ...sale,
+        refunds: [...(sale.refunds ?? []), refundRecord],
+        ...(isFullyRefundedNow
+          ? { status: "REFUNDED" }
+          : {}),
+      });
+    }
 
     // La RPC ya actualizó la venta en BD. Recuperamos la versión actualizada.
     const updatedSale = await this.getSale(sale.id);
@@ -1318,7 +1404,9 @@ export class SalesEngine {
 
     // Determinar si fue reembolso total o parcial basado en el resultado
     const refundedUnits = cleanItems.reduce((sum, line) => sum + line.quantity, 0);
-    const isFullyRefunded = updatedSale.status === "REFUNDED";
+    const isFullyRefunded = isNonAtomic
+      ? sale.items.every(item => item.quantity <= (this.getRefundedQuantities(updatedSale)[item.productId] ?? 0))
+      : updatedSale.status === "REFUNDED";
 
     // Actualizar dashboard
     if (isFullyRefunded) {
@@ -1348,6 +1436,116 @@ export class SalesEngine {
       sale: updatedSale,
       payment: this.confirmedCashRefund(refundResult.refundAmount),
       amount: refundResult.refundAmount
+    };
+  }
+
+  /**
+   * Reembolsa una venta POS pagada con proveedor externo (Wompi/MercadoPago/PayPal).
+   *
+   * A diferencia de refundCashPayment (que opera solo sobre efectivo en caja),
+   * este método requiere interacción con el proveedor externo: el reembolso
+   * solo se confirma cuando el proveedor responde success.
+   *
+   * Flujo:
+   *   1. Busca la payment_session asociada a la venta (sale_id).
+   *   2. Llama a la Edge Function pos-sale-refund con el JWT del usuario.
+   *   3. La Edge Function: request_pos_sale_refund_atomic → provider API → settle.
+   */
+  public async refundExternalSalePayment(
+    id: string,
+    amount: number,
+    reason: string,
+    idempotencyKey?: string
+  ): Promise<{ success: boolean; refund: any; status: string; provider: string; providerReference: string | null }> {
+    const sale = await this.getSale(id);
+    if (!sale) {
+      throw new Error("SALE_NOT_FOUND");
+    }
+
+    if (sale.status !== "PAID" && sale.status !== "CLOSED") {
+      throw new Error("SALE_NOT_PAID: solo se pueden reembolsar ventas pagadas.");
+    }
+
+    if (sale.paymentStatus !== "CONFIRMED" && sale.paymentStatus !== "PENDING_VERIFICATION") {
+      throw new Error("REFUND_PAYMENT_NOT_CONFIRMED");
+    }
+
+    if (sale.invoiceId) {
+      throw new Error(
+        "SALE_HAS_INVOICE: esta venta ya tiene factura electrónica. " +
+          "Para devolverla hace falta generar una nota crédito primero."
+      );
+    }
+
+    const businessId = getCurrentBusinessId();
+    const branchId = getCurrentBranchId();
+    if (!businessId || !branchId) {
+      throw new Error("NO_BUSINESS_BRANCH_CONTEXT: se requiere negocio y sucursal para reembolsar.");
+    }
+
+    if (!idempotencyKey) {
+      const refundIndex = (sale.refunds ?? []).length;
+      idempotencyKey = `pos-refund-${sale.id}-${refundIndex}`;
+    }
+
+    const { data: sessionData, error: sessionError } = await supabase
+      .from("payment_sessions")
+      .select("id, provider, provider_reference, status, amount, currency, cash_amount, payment_method")
+      .eq("sale_id", sale.id)
+      .eq("business_id", businessId)
+      .maybeSingle();
+
+    if (sessionError) {
+      throw new Error(`POS_REFUND_SESSION_LOOKUP_FAILED: ${sessionError.message}`);
+    }
+
+    if (!sessionData || !sessionData.provider_reference) {
+      throw new Error("POS_REFUND_NO_PROVIDER_REFERENCE: esta venta no fue pagada con un proveedor externo.");
+    }
+
+    if (sessionData.status !== "approved") {
+      throw new Error("POS_REFUND_SESSION_NOT_APPROVED");
+    }
+
+    if (!["wompi", "mercadopago", "paypal"].includes(sessionData.provider)) {
+      throw new Error("POS_REFUND_PROVIDER_NOT_SUPPORTED");
+    }
+
+    const { data, error } = await supabase.functions.invoke<{
+      ok: boolean;
+      idempotent?: boolean;
+      refund?: any;
+      provider?: string;
+      status?: string;
+      providerReference?: string | null;
+      providerStatus?: string;
+      error?: string;
+      detail?: string;
+    }>("pos-sale-refund", {
+      body: {
+        sessionId: sessionData.id,
+        amount,
+        reason,
+        idempotencyKey,
+      },
+    });
+
+    if (error) {
+      throw new Error(`POS_REFUND_FAILED: ${error.message}`);
+    }
+
+    if (!data?.ok) {
+      throw new Error(data?.error ? `${data.error}: ${data.detail ?? ""}` : "POS_REFUND_FAILED");
+    }
+
+    await this.updateDashboard();
+
+    return {
+      success: data?.ok ?? false,
+      refund: data?.refund ?? null,
+      status: data?.status ?? "unknown",
+      provider: data?.provider ?? sessionData.provider,
+      providerReference: data?.providerReference ?? null,
     };
   }
 
@@ -1512,9 +1710,27 @@ export class SalesEngine {
       };
     }
 
-    const paymentResult = this.processPayment(current, method, options);
+    const normalizedOptions: PaymentOptions =
+      method === "MIXED"
+        ? {
+            ...options,
+            mixed: this.normalizeMixedPayment(
+              current.total,
+              options.mixed
+            )
+          }
+        : options;
 
-    if (!paymentResult.success && paymentResult.verificationStatus === "PENDING_VERIFICATION") {
+    const paymentResult = this.processPayment(
+      current,
+      method,
+      normalizedOptions
+    );
+
+    if (
+      !paymentResult.success &&
+      paymentResult.verificationStatus === "PENDING_VERIFICATION"
+    ) {
       return { sale: current, payment: paymentResult };
     }
 
@@ -1523,8 +1739,11 @@ export class SalesEngine {
     }
 
     const cashPortion =
-      method === "MIXED" ? options.mixed?.cash ?? 0 :
-      method === "CASH" ? current.total : 0;
+      method === "MIXED"
+        ? normalizedOptions.mixed?.cash ?? 0
+        : method === "CASH"
+          ? current.total
+          : 0;
 
     const currentFulfillmentStatus = current.fulfillmentStatus ?? "FULFILLED";
     const needsDeferredInventory = currentFulfillmentStatus === "PENDING";
@@ -1565,7 +1784,7 @@ export class SalesEngine {
         cashAmount: cashPortion,
         received: paymentResult.received,
         change: paymentResult.change,
-        reference: options.reference,
+        reference: normalizedOptions.reference,
         shiftId: options.shiftId,
         cashRegisterId: options.cashRegisterId,
         verificationSource:
@@ -1701,13 +1920,16 @@ export class SalesEngine {
           if (current.customerId && current.customerId !== this.config.defaultCustomerId) {
             try {
               const profile = await this.customer.getCustomerProfile(current.customerId);
-              customer = {
-                documentType: "CC",
-                documentNumber: profile.customer.id,
-                fullName: profile.customer.name,
-                email: profile.customer.email,
-                phone: profile.customer.phone
-              };
+              const fiscalDocument = profile.customer.documentNumber?.trim();
+              if (fiscalDocument) {
+                customer = {
+                  documentType: profile.customer.documentType ?? "CC",
+                  documentNumber: fiscalDocument,
+                  fullName: profile.customer.name,
+                  email: profile.customer.email,
+                  phone: profile.customer.phone
+                };
+              }
             } catch {
               // Facturación electrónica no puede deshacer un cobro confirmado.
             }
@@ -2202,6 +2424,96 @@ export class SalesEngine {
         selectedExtras: item.selectedExtras
       };
     });
+  }
+
+  /**
+   * Normaliza y valida el desglose de un pago MIXED antes de tocar Caja.
+   *
+   * El frontend real expone mixedCash/mixedCard/mixedTransfer y PaymentEngine
+   * agrega esos importes. El backend solo recibe `cashAmount` más el total,
+   * por lo que esta validación debe impedir estados imposibles antes de llamar
+   * a register_sale_payment_atomic():
+   *
+   * - ningún componente puede ser negativo, infinito o NaN;
+   * - la suma debe cubrir el total;
+   * - la parte no-efectivo no puede superar el total;
+   * - si existe cambio, este solo puede salir del efectivo realmente recibido.
+   */
+  private normalizeMixedPayment(
+    total: number,
+    mixed?: MixedPayment
+  ): MixedPayment {
+    const currency = companyConfigStore.get().currency;
+    const round = (value: number): number => roundMoney(value, currency);
+
+    const cash = this.normalizePaymentPortion(
+      mixed?.cash,
+      "mixed.cash",
+      round
+    );
+    const card = this.normalizePaymentPortion(
+      mixed?.card,
+      "mixed.card",
+      round
+    );
+    const transfer = this.normalizePaymentPortion(
+      mixed?.transfer,
+      "mixed.transfer",
+      round
+    );
+    const qr = this.normalizePaymentPortion(
+      mixed?.qr,
+      "mixed.qr",
+      round
+    );
+
+    const normalizedTotal = round(total);
+    const received = round(cash + card + transfer + qr);
+    const externalAmount = round(card + transfer + qr);
+    const change = round(Math.max(received - normalizedTotal, 0));
+
+    if (received < normalizedTotal - 0.005) {
+      throw new Error(
+        `INSUFFICIENT_PAYMENT: el pago MIXED (${received}) no cubre el total (${normalizedTotal}).`
+      );
+    }
+
+    if (externalAmount > normalizedTotal + 0.005) {
+      throw new Error(
+        "INVALID_MIXED_PAYMENT: la suma de tarjeta/transferencia/QR no puede superar el total; el exceso no puede convertirse en cambio."
+      );
+    }
+
+    if (change > cash + 0.005) {
+      throw new Error(
+        "INVALID_MIXED_CHANGE: el cambio de un pago MIXED no puede superar el efectivo recibido."
+      );
+    }
+
+    return {
+      cash,
+      card,
+      transfer,
+      qr
+    };
+  }
+
+  private normalizePaymentPortion(
+    value: number | undefined,
+    field: string,
+    round: (value: number) => number
+  ): number {
+    if (value === undefined) {
+      return 0;
+    }
+
+    if (!Number.isFinite(value) || value < 0) {
+      throw new Error(
+        `INVALID_PAYMENT_AMOUNT: ${field} debe ser un número finito y no negativo.`
+      );
+    }
+
+    return round(value);
   }
 
   private processPayment(

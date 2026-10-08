@@ -15,6 +15,7 @@ import { VimdyInput } from "../ui/VimdyInput";
 import { PasswordField } from "../ui/PasswordField";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { useAuth } from "../../context/AuthContext";
+import { translateBusinessError } from "../../../core/errors/translateBusinessError";
 import type { ModuleId } from "../../../core/config/modules";
 
 interface EmployeesStepProps {
@@ -68,6 +69,11 @@ export function EmployeesStep({ enabledModules, onDone }: EmployeesStepProps) {
     event.preventDefault();
     if (saving) return;
 
+    if (!user?.id) {
+      setError("AUTH_USER_REQUIRED");
+      return;
+    }
+
     if (!name.trim() || !email.trim() || !password.trim()) {
       setError("Completa nombre, correo y contraseña.");
       return;
@@ -77,7 +83,7 @@ export function EmployeesStep({ enabledModules, onDone }: EmployeesStepProps) {
     setError(null);
 
     try {
-      const created = await container.userEngine.get().createUser(user?.id ?? "ADMIN", {
+      const created = await container.userEngine.get().createUser(user.id, {
         name: name.trim(),
         email: email.trim(),
         password: password.trim(),
@@ -90,7 +96,7 @@ export function EmployeesStep({ enabledModules, onDone }: EmployeesStepProps) {
       setEmail("");
       setPassword("");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "No se pudo crear el empleado.";
+      const message = translateBusinessError(err, "No se pudo crear el empleado.");
       setError(message);
     } finally {
       setSaving(false);
@@ -102,7 +108,7 @@ export function EmployeesStep({ enabledModules, onDone }: EmployeesStepProps) {
   return (
     <div className="w-full max-w-3xl mx-auto">
       <div className="text-center mb-10">
-        <p className="text-vimdy-micro uppercase tracking-widest text-vimdy-accent font-semibold mb-3">Paso 5 de 7</p>
+        <p className="text-vimdy-micro uppercase tracking-widest text-vimdy-accent font-semibold mb-3">Paso 4 de 7</p>
         <h2 className="text-vimdy-h2 text-vimdy-text mb-2">¿Quieres agregar empleados?</h2>
         <p className="text-vimdy-small text-vimdy-text-secondary max-w-md mx-auto">
           Puedes omitir este paso y agregarlos después desde Configuración.
@@ -184,7 +190,7 @@ export function EmployeesStep({ enabledModules, onDone }: EmployeesStepProps) {
           {error && (
             <div className="flex items-start gap-2 rounded-vimdy-md border border-vimdy-danger/40 bg-vimdy-danger-bg px-4 py-3 text-vimdy-small text-vimdy-danger">
               <span className="mt-0.5 shrink-0">⚠</span>
-              <span>{error}</span>
+              <span>{translateBusinessError(new Error(error), "No se pudo crear el empleado.")}</span>
             </div>
           )}
 

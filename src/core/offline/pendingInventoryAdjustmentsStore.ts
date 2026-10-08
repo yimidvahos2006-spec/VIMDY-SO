@@ -42,7 +42,10 @@ class PendingInventoryAdjustmentsStore extends ObservableStore<PendingInventoryA
   }
 
   async refresh(): Promise<void> {
-    const items = await repository.findAll();
+    const items = (await repository.findAll()).sort((a, b) => {
+      const byDate = a.queuedAt.getTime() - b.queuedAt.getTime();
+      return byDate !== 0 ? byDate : a.id.localeCompare(b.id);
+    });
     this.publish({ items, loaded: true });
   }
 

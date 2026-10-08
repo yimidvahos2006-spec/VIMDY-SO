@@ -25,6 +25,18 @@ export class CategoryRepository extends SupabaseRepository<Category> {
   /** Caché local en IndexedDB — ver CategoryLocalRepository. */
   private readonly local = new CategoryLocalRepository();
 
+  public async save(category: Category): Promise<void> {
+    await super.save(category);
+    try {
+      await this.local.save(category);
+    } catch (error) {
+      logWarning("[CategoryRepository] No se pudo guardar la categoría en caché local", {
+        category: "offline",
+        context: { error: String(error) }
+      });
+    }
+  }
+
   public async findAll(): Promise<Category[]> {
     const cached = await this.local.findAll();
 

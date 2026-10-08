@@ -15,40 +15,49 @@ export class KardexEngine {
    * ese movimiento puntual ya existe (ver `exists()` abajo) y no vuelve a
    * aplicar el mismo ajuste de stock una segunda vez.
    */
-  public async record(
-    productId: string,
-    quantity: number,
-    type: InventoryMovement['type'],
-    reason: string,
-    performedBy?: string,
-    supplierId?: string,
-    supplierName?: string,
-    lossCategory?: LossCategory,
-    movementId?: string,
-    productName?: string,
-    branchId?: string
-  ): Promise<void> {
-    const movement: InventoryMovement = {
-      id: movementId ?? crypto.randomUUID(),
-      productId,
-      productName,
-      quantity,
-      date: new Date(),
-      type,
-      reason,
-      performedBy,
-      supplierId,
-      supplierName,
-      lossCategory,
-      branchId,
-    };
+   public async record(
+     productId: string,
+     quantity: number,
+     type: InventoryMovement['type'],
+     reason: string,
+     performedBy?: string,
+     supplierId?: string,
+     supplierName?: string,
+     lossCategory?: LossCategory,
+     movementId?: string,
+     productName?: string,
+     branchId?: string,
+     stockBefore?: number,
+     stockAfter?: number
+   ): Promise<void> {
+     const movement: InventoryMovement = {
+       id: movementId ?? crypto.randomUUID(),
+       productId,
+       productName,
+       quantity,
+       date: new Date(),
+       type,
+       reason,
+       performedBy,
+       supplierId,
+       supplierName,
+       lossCategory,
+       branchId,
+       stockBefore,
+       stockAfter,
+     };
 
-    await this.movementRepository.save(movement);
-  }
+     await this.movementRepository.save(movement);
+   }
 
   /** PASO 1.7 — ver nota de idempotencia en record(): permite chequear si un movimiento con ese id ya se aplicó. */
   public async exists(movementId: string): Promise<boolean> {
     return this.movementRepository.exists(movementId);
+  }
+
+  public async hasMovements(productId: string): Promise<boolean> {
+    const movements = await this.movementRepository.findAll();
+    return movements.some((m) => m.productId === productId);
   }
 
   public async getHistory(productId: string): Promise<InventoryMovement[]> {

@@ -1,156 +1,219 @@
-const { CryptoKey, encrypt, decrypt } = await import("node:crypto").then(() => null) || {};
-
 import fs from "node:fs";
 import path from "node:path";
-import { execSync } from "node:child_process";
-import { X509Certificate } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { X509Certificate, webcrypto } from "node:crypto";
 
-const opensslPath = "C:\\Program Files\\Git\\usr\\bin\\openssl.exe";
+const opensslPath =
+  process.env.OPENSSL_PATH?.trim() ||
+  (process.platform === "win32"
+    ? "C:\\Program Files\\Git\\usr\\bin\\openssl.exe"
+    : "openssl");
 
-function runOpenSsl(args: string[]): string {
-  const result = execSync(`"${opensslPath}" ${args.join(" ")}`, {
+function runOpenSsl(args, input) {
+  const result = execFileSync(opensslPath, args, {
     encoding: "utf8",
+    input,
     stdio: ["pipe", "pipe", "pipe"],
   });
   return result;
 }
 
-async function aesGcmEncrypt(plainText: string, key: string): Promise<string> {
+function extractPemBlock(pem, type) {
+  const pattern = new RegExp(
+    `-----BEGIN ${type}-----([\\s\\S]*?)-----END ${type}-----`
+  );
+  const match = pem.match(pattern);
+
+  if (!match) {
+    throw new Error(`PEM_BLOCK_NOT_FOUND: ${type}`);
+  }
+
+  return `-----BEGIN ${type}-----\n${match[1].trim()}\n-----END ${type}-----`;
+}
+
+async function aesGcmEncrypt(plainText, key) {
   const encoder = new TextEncoder();
   const keyData = encoder.encode(key.padEnd(32).slice(0, 32));
-  const cryptoKey = await crypto.subtle.importKey(
+
+  const cryptoKey = await webcrypto.subtle.importKey(
     "raw",
     keyData,
     { name: "AES-GCM" },
     false,
     ["encrypt"]
   );
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const encrypted = await crypto.subtle.encrypt(
+
+  const iv = webcrypto.getRandomValues(new Uint8Array(12));
+
+  const encrypted = await webcrypto.subtle.encrypt(
     { name: "AES-GCM", iv },
     cryptoKey,
     encoder.encode(plainText)
   );
+
   const combined = new Uint8Array(iv.length + encrypted.byteLength);
   combined.set(iv);
   combined.set(new Uint8Array(encrypted), iv.length);
+
   return Buffer.from(combined).toString("base64");
 }
 
-async function aesGcmDecrypt(encryptedB64: string, key: string): Promise<string> {
+async function aesGcmDecrypt(encryptedB64, key) {
   const keyData = new TextEncoder().encode(key.padEnd(32).slice(0, 32));
-  const cryptoKey = await crypto.subtle.importKey(
+
+  const cryptoKey = await webcrypto.subtle.importKey(
     "raw",
     keyData,
     { name: "AES-GCM" },
     false,
     ["decrypt"]
   );
-  const combined = Uint8Array.from(Buffer.from(encryptedB64, "base64"));
+
+  const combined = Uint8Array.from(
+    Buffer.from(encryptedB64, "base64")
+  );
+
   const iv = combined.slice(0, 12);
   const data = combined.slice(12);
-  const decrypted = await crypto.subtle.decrypt(
+
+  const decrypted = await webcrypto.subtle.decrypt(
     { name: "AES-GCM", iv },
     cryptoKey,
     data
   );
+
   return new TextDecoder().decode(decrypted);
 }
 
-interface CertificateInfo {
-  certPem: string;
-  privateKeyPem: string;
-  serialNumber: string;
-  issuer: string;
-  subject: string;
-  validFrom: Date;
-  validTo: Date;
-  thumbprintSHA1: string;
-  thumbprintSHA256: string;
-}
+async function extractP12Info(p12Path, password) {
+  const tmpDir = path.join(
+    path.dirname(p12Path),
+    "_p12_extract_" + Date.now()
+  );
 
-async function extractP12Info(p12Path: string, password: string): Promise<CertificateInfo> {
-  const tmpDir = path.join(path.dirname(p12Path), "_p12_extract_" + Date.now());
   fs.mkdirSync(tmpDir, { recursive: true });
 
   try {
-    // Extract private key in PKCS#8 uncompressed PEM
-    const keyPem = runOpenSsl([
-      "pkcs12",
-      "-in", `"${p12Path}"`,
-      "-passin", `pass:${password}`,
-      "-nocerts",
-      "-nodes",
-      "-keyout", `"${path.join(tmpDir, "key.pem")}"`,
-    ]);
+    const keyPem = runOpenSsl(
+      [
+        "pkcs12",
+        "-in",
+        p12Path,
+        "-passin",
+        "stdin",
+        "-nocerts",
+        "-nodes",
+        "-out",
+        path.join(tmpDir, "key.pem"),
+      ],
+      `${password}\n`
+    );
 
-    // The above writes to file, read it
-    const privateKeyPem = fs.readFileSync(path.join(tmpDir, "key.pem"), "utf8");
+    const privateKeyPem = fs.readFileSync(
+      path.join(tmpDir, "key.pem"),
+      "utf8"
+    );
 
-    // Convert to PKCS#8 if it's PKCS#1
     let pkcs8Key = privateKeyPem;
+
     if (privateKeyPem.includes("BEGIN RSA PRIVATE KEY")) {
       const pkcs8 = runOpenSsl([
         "pkcs8",
         "-topk8",
-        "-inform", "PEM",
-        "-in", `"${path.join(tmpDir, "key.pem")}"`,
-        "-outform", "PEM",
+        "-inform",
+        "PEM",
+        "-in",
+        path.join(tmpDir, "key.pem"),
+        "-outform",
+        "PEM",
         "-nocrypt",
       ]);
+
       pkcs8Key = pkcs8;
     }
 
-    // Extract certificate
-    const certPem = runOpenSsl([
-      "pkcs12",
-      "-in", `"${p12Path}"`,
-      "-passin", `pass:${password}`,
-      "-clcerts",
-      "-nokeys",
-    ]);
+    const certPem = runOpenSsl(
+      [
+        "pkcs12",
+        "-in",
+        p12Path,
+        "-passin",
+        "stdin",
+        "-clcerts",
+        "-nokeys",
+      ],
+      `${password}\n`
+    );
 
-    // Parse certificate info
-    const cert = new X509Certificate(certPem);
+    const normalizedCertPem = extractPemBlock(
+      certPem,
+      "CERTIFICATE"
+    );
+
+    const cert = new X509Certificate(normalizedCertPem);
     const parsed = cert;
 
-    // Validate private key matches certificate
-    const keyObj = await crypto.subtle.importKey(
+    const keyObj = await webcrypto.subtle.importKey(
       "pkcs8",
       await exportKeyToDer(pkcs8Key),
-      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+      {
+        name: "RSASSA-PKCS1-v1_5",
+        hash: "SHA-256",
+      },
       false,
-      ["verify"]
+      ["sign"]
     );
 
-    const certKeyObj = await crypto.subtle.importKey(
+    const certSpkiDer = cert.publicKey.export({
+      type: "spki",
+      format: "der",
+    });
+
+    const certKeyObj = await webcrypto.subtle.importKey(
       "spki",
-      await exportCertToDer(certPem),
-      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+      certSpkiDer,
+      {
+        name: "RSASSA-PKCS1-v1_5",
+        hash: "SHA-256",
+      },
       false,
       ["verify"]
     );
 
-    // Verify they match by signing and verifying
     const testMessage = new TextEncoder().encode("test");
-    const signature = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", keyObj, testMessage);
-    const matches = await crypto.subtle.verify(
-      { name: "RSASSA-PKCS1-v1_5" },
+
+    const signature = await webcrypto.subtle.sign(
+      "RSASSA-PKCS1-v1_5",
+      keyObj,
+      testMessage
+    );
+
+    const matches = await webcrypto.subtle.verify(
+      {
+        name: "RSASSA-PKCS1-v1_5",
+      },
       certKeyObj,
       signature,
       testMessage
     );
 
     if (!matches) {
-      throw new Error("CERT_KEY_MISMATCH: la clave privada no corresponde al certificado");
+      throw new Error(
+        "CERT_KEY_MISMATCH: la clave privada no corresponde al certificado"
+      );
     }
+
+    const normalizedPrivateKeyPem = extractPemBlock(
+      pkcs8Key,
+      "PRIVATE KEY"
+    );
 
     const thumbprintSHA1 = cert.fingerprint;
     const thumbprintSHA256 = cert.fingerprint256;
 
     return {
-      certPem: certPem.trim(),
-      privateKeyPem: pkcs8Key.trim(),
+      certPem: normalizedCertPem,
+      privateKeyPem: normalizedPrivateKeyPem,
       serialNumber: parsed.serialNumber,
       issuer: parsed.issuer,
       subject: parsed.subject,
@@ -160,35 +223,41 @@ async function extractP12Info(p12Path: string, password: string): Promise<Certif
       thumbprintSHA256,
     };
   } finally {
-    // Clean up temp files
     try {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
+      fs.rmSync(tmpDir, {
+        recursive: true,
+        force: true,
+      });
     } catch {}
   }
 }
 
-async function exportKeyToDer(pemKey: string): Promise<Uint8Array> {
-  const base64 = pemKey
-    .replace(/-----BEGIN[^]*?-----/, "")
-    .replace(/-----END[^]*?-----/, "")
-    .replace(/\s+/g, "");
-  return Uint8Array.from(Buffer.from(base64, "base64"));
-}
+async function exportKeyToDer(pemKey) {
+  const normalized = extractPemBlock(
+    pemKey,
+    "PRIVATE KEY"
+  );
 
-async function exportCertToDer(pemCert: string): Promise<Uint8Array> {
-  const base64 = pemCert
-    .replace(/-----BEGIN CERTIFICATE-----/, "")
-    .replace(/-----END CERTIFICATE-----/, "")
+  const base64 = normalized
+    .replace("-----BEGIN PRIVATE KEY-----", "")
+    .replace("-----END PRIVATE KEY-----", "")
     .replace(/\s+/g, "");
-  return Uint8Array.from(Buffer.from(base64, "base64"));
+
+  return Uint8Array.from(
+    Buffer.from(base64, "base64")
+  );
 }
 
 async function main() {
   const args = process.argv.slice(2);
 
   if (args.length < 4) {
-    console.error("Usage: node prepare-certificate.mjs <p12_path> <p12_password> <encryption_key> <business_id>");
+    console.error(
+      "Usage: node prepare-certificate.mjs <p12_path> <p12_password> <encryption_key> <business_id>"
+    );
+
     console.error("");
+
     console.error("Steps:");
     console.error("1. Validates P12/PFX");
     console.error("2. Validates private key matches certificate");
@@ -197,6 +266,7 @@ async function main() {
     console.error("5. Outputs SQL INSERT for dian_certificates");
     console.error("6. Validates certificate expiration");
     console.error("7. Cleans up all temporary files");
+
     process.exit(1);
   }
 
@@ -205,65 +275,166 @@ async function main() {
   const encryptionKey = args[2];
   const businessId = args[3];
 
-  // Step 1: Validate file exists
+  if (!/^[0-9a-fA-F-]{36}$/.test(businessId)) {
+    console.error(
+      "ERROR: business_id must be a UUID"
+    );
+    process.exit(1);
+  }
+
   if (!fs.existsSync(p12Path)) {
-    console.error("ERROR: P12 file not found:", p12Path);
+    console.error(
+      "ERROR: P12 file not found:",
+      p12Path
+    );
     process.exit(1);
   }
 
-  console.log("=== DIAN Certificate Preparation ===\n");
+  console.log(
+    "=== DIAN Certificate Preparation ===\n"
+  );
 
-  // Step 1-2: Extract and validate P12
-  console.log("[1] Validating P12/PFX and extracting PEM...");
-  let certInfo: CertificateInfo;
+  console.log(
+    "[1] Validating P12/PFX and extracting PEM..."
+  );
+
+  let certInfo;
+
   try {
-    certInfo = await extractP12Info(p12Path, password);
-    console.log("  OK - Certificate extracted and validated");
+    certInfo = await extractP12Info(
+      p12Path,
+      password
+    );
+
+    console.log(
+      "  OK - Certificate extracted and validated"
+    );
   } catch (e) {
-    console.error("  FAIL -", (e as Error).message);
+    console.error(
+      "  FAIL -",
+      e instanceof Error ? e.message : String(e)
+    );
+
     process.exit(1);
   }
 
-  // Step 3: Validate expiration
-  console.log("\n[2] Checking certificate expiration...");
+  console.log(
+    "\n[2] Checking certificate expiration..."
+  );
+
   const now = new Date();
+
   if (certInfo.validTo < now) {
-    console.error("  FAIL - Certificate expired on", certInfo.validTo.toISOString());
+    console.error(
+      "  FAIL - Certificate expired on",
+      certInfo.validTo.toISOString()
+    );
+
     process.exit(1);
   }
-  console.log("  OK - Valid until", certInfo.validTo.toISOString());
 
-  // Step 4: Encrypt
-  console.log("\n[3] Encrypting with AES-256-GCM...");
-  const encryptedKey = await aesGcmEncrypt(certInfo.privateKeyPem, encryptionKey);
-  const encryptedCert = await aesGcmEncrypt(certInfo.certPem, encryptionKey);
-  console.log("  OK - Private key and certificate encrypted");
+  console.log(
+    "  OK - Valid until",
+    certInfo.validTo.toISOString()
+  );
 
-  // Step 5: Verify decryption roundtrip
-  console.log("\n[4] Verifying decryption roundtrip...");
-  const decryptedKey = await aesGcmDecrypt(encryptedKey, encryptionKey);
-  const decryptedCert = await aesGcmDecrypt(encryptedCert, encryptionKey);
-  if (decryptedKey !== certInfo.privateKeyPem || decryptedCert !== certInfo.certPem) {
-    console.error("  FAIL - Decryption roundtrip mismatch");
+  console.log(
+    "\n[3] Encrypting with AES-256-GCM..."
+  );
+
+  const encryptedKey = await aesGcmEncrypt(
+    certInfo.privateKeyPem,
+    encryptionKey
+  );
+
+  const encryptedCert = await aesGcmEncrypt(
+    certInfo.certPem,
+    encryptionKey
+  );
+
+  console.log(
+    "  OK - Private key and certificate encrypted"
+  );
+
+  console.log(
+    "\n[4] Verifying decryption roundtrip..."
+  );
+
+  const decryptedKey = await aesGcmDecrypt(
+    encryptedKey,
+    encryptionKey
+  );
+
+  const decryptedCert = await aesGcmDecrypt(
+    encryptedCert,
+    encryptionKey
+  );
+
+  if (
+    decryptedKey !== certInfo.privateKeyPem ||
+    decryptedCert !== certInfo.certPem
+  ) {
+    console.error(
+      "  FAIL - Decryption roundtrip mismatch"
+    );
+
     process.exit(1);
   }
-  console.log("  OK - Decryption verified");
 
-  // Step 6: Output SQL
-  console.log("\n[5] Certificate metadata:");
-  console.log("  Serial:", certInfo.serialNumber);
-  console.log("  Subject:", certInfo.subject);
-  console.log("  Issuer:", certInfo.issuer);
-  console.log("  SHA1:", certInfo.thumbprintSHA1);
-  console.log("  SHA256:", certInfo.thumbprintSHA256);
-  console.log("  Valid:", certInfo.validFrom.toISOString(), "→", certInfo.validTo.toISOString());
+  console.log(
+    "  OK - Decryption verified"
+  );
 
-  // Generate SQL INSERT (encrypted values only)
-  const encryptedKeySQL = encryptedKey.replace(/'/g, "''");
-  const encryptedCertSQL = encryptedCert.replace(/'/g, "''");
-  const serialSQL = certInfo.serialNumber.replace(/'/g, "''");
-  const issuerSQL = certInfo.issuer.replace(/'/g, "''");
-  const expDate = certInfo.validTo.toISOString();
+  console.log(
+    "\n[5] Certificate metadata:"
+  );
+
+  console.log(
+    "  Serial:",
+    certInfo.serialNumber
+  );
+
+  console.log(
+    "  Subject:",
+    certInfo.subject
+  );
+
+  console.log(
+    "  Issuer:",
+    certInfo.issuer
+  );
+
+  console.log(
+    "  SHA1:",
+    certInfo.thumbprintSHA1
+  );
+
+  console.log(
+    "  SHA256:",
+    certInfo.thumbprintSHA256
+  );
+
+  console.log(
+    "  Valid:",
+    certInfo.validFrom.toISOString(),
+    "→",
+    certInfo.validTo.toISOString()
+  );
+
+  const encryptedKeySQL =
+    encryptedKey.replace(/'/g, "''");
+
+  const encryptedCertSQL =
+    encryptedCert.replace(/'/g, "''");
+
+  const serialSQL =
+    certInfo.serialNumber.replace(/'/g, "''");
+
+  const issuerSQL =
+    certInfo.issuer.replace(/'/g, "''");
+
+  const expDate =
+    certInfo.validTo.toISOString();
 
   const sql = `
 -- ONLY RUN THIS AFTER DIAN_CERT_ENCRYPTION_KEY IS SET TO THE REAL VALUE
@@ -292,9 +463,9 @@ INSERT INTO dian_certificates (
   '${expDate}'::timestamptz,
   '${issuerSQL}',
   'XAdES',
-  NULL,  -- set via business table
-  NULL,  -- set via business table
-  NULL,  -- certificate PIN if needed (separate from software PIN)
+  NULL,
+  NULL,
+  NULL,
   '${encryptedKeySQL}',
   '${encryptedCertSQL}',
   true
@@ -312,16 +483,34 @@ RETURNING id;
 -- WHERE id = '${businessId}'::uuid;
   `;
 
-  console.log("\n[6] SQL for dian_certificates insert:");
-  console.log("  (run via: supabase db query --linked)");
-  console.log("  (encrypted values are safe to pipe to SQL)");
+  console.log(
+    "\n[6] SQL for dian_certificates insert:"
+  );
+
+  console.log(
+    "  (run via: supabase db query --linked)"
+  );
+
+  console.log(
+    "  (encrypted values are safe to pipe to SQL)"
+  );
+
   console.log("\n" + sql);
 
-  console.log("\n[7] All temp files cleaned up.");
-  console.log("\n=== Preparación completada ===");
+  console.log(
+    "\n[7] All temp files cleaned up."
+  );
+
+  console.log(
+    "\n=== Preparación completada ==="
+  );
 }
 
 main().catch((err) => {
-  console.error("Fatal error:", err);
+  console.error(
+    "Fatal error:",
+    err
+  );
+
   process.exit(1);
 });

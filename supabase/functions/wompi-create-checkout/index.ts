@@ -44,7 +44,7 @@ type Plan = "monthly" | "yearly";
 // y de COUNTRY_PRICE_MAP en mercadopago-checkout — misma fuente de verdad,
 // una copia por Edge Function porque cada una corre aislada.
 const PLAN_PRICE_BY_COUNTRY: Record<string, Record<Plan, number>> = {
-  CO: { monthly: 79000, yearly: 799000 }
+  CO: { monthly: 59900, yearly: 718800 }
 };
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
@@ -197,44 +197,50 @@ Deno.serve(async (req: Request) => {
     const currency = (business.currency as string) ?? "COP";
     const amount = pricing[plan];
     const amountInCents = Math.round(amount * 100);
-    const reference = `wompi_${businessId.slice(0, 8)}_${Date.now()}`;
-    const idempotencyKey = crypto.randomUUID();
+    const checkoutWindow = Math.floor(Date.now() / (5 * 60 * 1000));
+    const reference = `wompi_${businessId}_${plan}_${checkoutWindow}`;
+    const idempotencyKey = `${businessId}:${plan}:${checkoutWindow}`;
 
-    // 3) Protección server-side contra doble checkout: si ya existe un pago
-    //    pending para el mismo negocio y plan creado en los últimos 5 minutos,
-    //    no crear uno nuevo. Esto previene dos pestañas/dos clics rápidos.
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-    const { data: recentPending, error: recentPendingError } = await admin
+    // 3) Firma de integridad calculada antes de reutilizar un checkout pendiente
+    //    para garantizar que la URL devuelta sea válida incluso al reintentar en
+    //    dos pestañas o tras un refresh.
+    const signature = await buildIntegritySignature(reference, amountInCents, currency, WOMPI_INTEGRITY_SECRET);
+
+    // 4) La clave determinista permite reutilizar el mismo checkout en la misma
+    //    ventana. Si dos peticiones concurrentes llegaran antes de que la primera
+    //    inserción sea visible, la restricción única de la base de datos es la
+    //    última defensa; el conflicto se resuelve recuperando la fila existente.
+    const { data: existingPayment, error: existingPaymentError } = await admin
       .from("subscription_payments")
-      .select("id, wompi_reference, created_at")
-      .eq("business_id", businessId)
-      .eq("plan", plan)
-      .eq("status", "pending")
-      .gte("created_at", fiveMinutesAgo)
-      .order("created_at", { ascending: false })
-      .limit(1)
+      .select("id, wompi_reference, status")
+      .eq("wompi_reference", reference)
       .maybeSingle();
 
-    if (recentPendingError) {
-      return json({ error: "PAYMENT_CHECK_FAILED", detail: recentPendingError.message }, 500);
+    if (existingPaymentError) {
+      return json({ error: "PAYMENT_CHECK_FAILED", detail: existingPaymentError.message }, 500);
     }
 
-    if (recentPending) {
-      // Devolver el checkout existente para que el usuario no pierda su pago
-      // anterior por un clic doble.
+    if (existingPayment) {
+      const existingSignature = await buildIntegritySignature(
+        existingPayment.wompi_reference,
+        amountInCents,
+        currency,
+        WOMPI_INTEGRITY_SECRET
+      );
+
       return json({
         ok: true,
-        checkoutUrl: buildCheckoutUrl(recentPending.wompi_reference, amountInCents, currency, signature),
-        reference: recentPending.wompi_reference,
+        checkoutUrl: buildCheckoutUrl(existingPayment.wompi_reference, amountInCents, currency, existingSignature),
+        reference: existingPayment.wompi_reference,
         existing: true
       });
     }
 
-    // 4) Se deja el intento en 'pending' ANTES de armar la URL de Wompi —
+    // 5) Se deja el intento en 'pending' ANTES de armar la URL de Wompi —
     //    mismo patrón que mercadopago-checkout — para que el webhook
     //    siempre tenga una fila esperándolo con el monto/moneda reales a
-    //    comparar. El idempotency_key previene dobles intentos desde el
-    //    mismo frontend.
+    //    comparar. La clave determinista y la restricción única evitan dobles
+    //    intentos desde dos pestañas concurrentes.
     const { error: insertError } = await admin.from("subscription_payments").insert({
       business_id: businessId,
       plan,
@@ -246,15 +252,40 @@ Deno.serve(async (req: Request) => {
     });
 
     if (insertError) {
-      return json({ error: "PAYMENT_RECORD_FAILED", detail: insertError.message }, 500);
+      const { data: conflictedPayment, error: conflictedPaymentError } = await admin
+        .from("subscription_payments")
+        .select("wompi_reference")
+        .eq("wompi_reference", reference)
+        .maybeSingle();
+
+      if (conflictedPaymentError) {
+        return json({ error: "PAYMENT_RECORD_FAILED", detail: insertError.message }, 500);
+      }
+
+      if (!conflictedPayment) {
+        return json({ error: "PAYMENT_RECORD_FAILED", detail: insertError.message }, 500);
+      }
+
+      const conflictedSignature = await buildIntegritySignature(
+        conflictedPayment.wompi_reference,
+        amountInCents,
+        currency,
+        WOMPI_INTEGRITY_SECRET
+      );
+
+      return json({
+        ok: true,
+        checkoutUrl: buildCheckoutUrl(conflictedPayment.wompi_reference, amountInCents, currency, conflictedSignature),
+        reference: conflictedPayment.wompi_reference,
+        existing: true
+      });
     }
 
-    // 4) Firmar la sesión del Web Checkout de Wompi. A diferencia de
+    // 6) Firmar la sesión del Web Checkout de Wompi. A diferencia de
     //    Mercado Pago/PayPal, Wompi no expone un endpoint de "crear sesión":
     //    el Web Checkout se arma como una URL con querystring firmada — Wompi
     //    valida esa firma al cargar la página, no hace falta llamar a su API
     //    acá.
-    const signature = await buildIntegritySignature(reference, amountInCents, currency, WOMPI_INTEGRITY_SECRET);
     const checkoutUrl = buildCheckoutUrl(reference, amountInCents, currency, signature);
 
     return json({ ok: true, checkoutUrl, reference });

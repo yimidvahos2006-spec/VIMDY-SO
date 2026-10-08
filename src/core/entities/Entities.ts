@@ -433,6 +433,9 @@ export interface Sale {
 
 export interface Customer {
   readonly id: string;
+  /** Datos fiscales opcionales para facturación electrónica. */
+  readonly documentType?: "CC" | "CE" | "NIT" | "PASSPORT" | "OTHER";
+  readonly documentNumber?: string;
   /**
    * Bloqueo optimista (CRÍTICO #6 del checklist): número de versión
    * de este registro en la base de datos. Lo asigna/incrementa
@@ -711,9 +714,11 @@ export interface InventoryMovement {
    * ventas normales (consumeForSale) nunca la traen: no son una pérdida,
    * son inventario que sí generó ingreso.
    */
-  readonly lossCategory?: LossCategory;
-  readonly branchId?: string;
-}
+   readonly lossCategory?: LossCategory;
+   readonly branchId?: string;
+   readonly stockBefore?: number;
+   readonly stockAfter?: number;
+ }
 
 /**
  * Prioridad MANUAL de una comanda, elegida por el mesero/cajero al enviar

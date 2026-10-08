@@ -88,6 +88,12 @@ export function isStoredBusinessTypeId(value: string): value is BusinessTypeId {
   return isBusinessTypeId(value) || LEGACY_BUSINESS_TYPE_IDS.some((type) => type === value);
 }
 
+export function assertBusinessTypeId(value: unknown): asserts value is BusinessTypeId {
+  if (typeof value !== "string" || !isStoredBusinessTypeId(value)) {
+    throw new Error("El tipo de negocio seleccionado no es válido.");
+  }
+}
+
 /**
  * La cocina NO se habilita por defecto solo por el tipo de negocio.
  * La decisión debe venir de la configuración operativa explícita del negocio

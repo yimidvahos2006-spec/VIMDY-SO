@@ -1,59 +1,213 @@
 import { ObservableStore } from "../store/ObservableStore";
-import { PendingTableOperation, PendingTableOperationType } from "./PendingTableOperation";
+import {
+  PendingTableOperation,
+  PendingTableOperationType,
+  PendingTableStateSnapshot
+} from "./PendingTableOperation";
 import { PendingTableOperationRepository } from "../../infrastructure/di/repositories/PendingTableOperationRepository";
-import { OpenTableInput, CloseTableInput } from "../engines/TableEngine";
-import { getCurrentBranchId, requireCurrentBusinessId } from "../../infrastructure/supabase/supabaseClient";
+import {
+  OpenTableInput,
+  CloseTableInput
+} from "../engines/TableEngine";
+import { Table } from "../entities/Entities";
+import { CartEngine } from "../engines/CartEngine";
+import { TableLocalRepository } from "../../infrastructure/di/repositories/TableLocalRepository";
+import { productCatalogStore } from "../store/productCatalogStore";
+import { companyConfigStore } from "../store/companyConfigStore";
+import {
+  getCurrentBranchId,
+  requireCurrentBusinessId
+} from "../../infrastructure/supabase/supabaseClient";
 
 const repository = new PendingTableOperationRepository();
+const tableLocalRepository = new TableLocalRepository();
 
 export interface PendingTableOperationsSnapshot {
   readonly items: PendingTableOperation[];
-  /** false hasta que se hace la primera lectura de IndexedDB al arrancar. */
   readonly loaded: boolean;
 }
 
-const EMPTY_SNAPSHOT: PendingTableOperationsSnapshot = { items: [], loaded: false };
+const EMPTY_SNAPSHOT: PendingTableOperationsSnapshot = {
+  items: [],
+  loaded: false
+};
 
-/**
- * pendingTableOperationsStore
- * ---------------------------------------------------------------------------
- * PASO 1.8 del plan offline: capa reactiva (ObservableStore) sobre
- * PendingTableOperationRepository — mismo patrón exacto que
- * pendingSalesStore/pendingInventoryAdjustmentsStore, aplicado a
- * aperturas/cierres de mesa en vez de ventas de mostrador o ajustes de
- * inventario.
- *
- * `enqueue()` lo llama offlineTable.ts cuando TableEngine.openTable()/
- * closeTable() falla por red; syncPendingTableOperations.ts usa
- * `list()`/`markSyncing()`/`markFailed()`/`remove()`; y cualquier pantalla
- * puede leer el snapshot (ver Paso 1.10, banner "offline elegante" en
- * Mesas) para mostrar cuántas operaciones faltan por sincronizar.
- *
- * Se auto-hidrata al importarse el módulo (igual que las otras dos colas).
- */
+function snapshotTable(table: Table): PendingTableStateSnapshot {
+  return {
+    status: table.status,
+    peopleCount: table.peopleCount,
+    waiterId: table.waiterId,
+    customerId: table.customerId,
+    notes: table.notes,
+    items: table.items.map((item) => ({ ...item })),
+    subtotal: Number(table.subtotal ?? 0),
+    tax: Number(table.tax ?? 0),
+    discount: Number(table.discount ?? 0),
+    total: Number(table.total ?? 0),
+    openOperationId: table.openOperationId
+  };
+}
+
+function calculatedFinancials(
+  items: Table["items"],
+  table: Table
+): Pick<PendingTableStateSnapshot, "subtotal" | "tax" | "total"> {
+  const subtotal = Number(
+    items
+      .reduce((sum, item) => sum + item.price * item.quantity, 0)
+      .toFixed(2)
+  );
+  const tax = Number(
+    (subtotal * (companyConfigStore.get().tax / 100)).toFixed(2)
+  );
+  const total = Number(
+    Math.max(
+      subtotal + tax - Number(table.discount ?? 0),
+      0
+    ).toFixed(2)
+  );
+
+  return { subtotal, tax, total };
+}
+
+function buildExpectedAfter(
+  table: Table,
+  params: {
+    type: PendingTableOperationType;
+    openInput?: OpenTableInput;
+    closeInput?: CloseTableInput;
+    addItemInput?: {
+      productId: string;
+      quantity: number;
+      note?: string;
+    };
+    removeItemInput?: { productId: string };
+    updateQuantityInput?: {
+      productId: string;
+      quantity: number;
+    };
+    sendToKitchenInput?: { priority?: string };
+  },
+  normalizedOpenInput?: OpenTableInput,
+  normalizedCloseInput?: CloseTableInput
+): PendingTableStateSnapshot | undefined {
+  const current = snapshotTable(table);
+
+  if (params.type === "OPEN") {
+    const input = normalizedOpenInput ?? params.openInput;
+    return {
+      ...current,
+      status: "BUSY",
+      peopleCount: input?.peopleCount ?? table.peopleCount ?? 0,
+      waiterId: input?.waiterId ?? table.waiterId,
+      customerId: input?.customerId ?? table.customerId,
+      notes: input?.notes ?? table.notes,
+      openOperationId: input?.operationId
+    };
+  }
+
+  if (params.type === "CLOSE") {
+    return {
+      status: "FREE",
+      peopleCount: 0,
+      waiterId: undefined,
+      customerId: undefined,
+      notes: undefined,
+      items: [],
+      subtotal: 0,
+      tax: 0,
+      discount: 0,
+      total: 0,
+      openOperationId: undefined
+    };
+  }
+
+  if (params.type === "ADD_ITEM" && params.addItemInput) {
+    const product = productCatalogStore.getById(
+      params.addItemInput.productId
+    );
+
+    if (!product) {
+      return undefined;
+    }
+
+    const cart = new CartEngine();
+    cart.loadItems(table.items);
+    cart.addItem(
+      product,
+      params.addItemInput.quantity,
+      params.addItemInput.note
+    );
+
+    const items = cart.getItems();
+    return {
+      ...current,
+      items,
+      ...calculatedFinancials(items, table)
+    };
+  }
+
+  if (params.type === "REMOVE_ITEM" && params.removeItemInput) {
+    const cart = new CartEngine();
+    cart.loadItems(table.items);
+    cart.removeItem(params.removeItemInput.productId);
+
+    const items = cart.getItems();
+    return {
+      ...current,
+      items,
+      ...calculatedFinancials(items, table)
+    };
+  }
+
+  if (params.type === "UPDATE_QUANTITY" && params.updateQuantityInput) {
+    const cart = new CartEngine();
+    cart.loadItems(table.items);
+    cart.updateQuantity(
+      params.updateQuantityInput.productId,
+      params.updateQuantityInput.quantity
+    );
+
+    const items = cart.getItems();
+    return {
+      ...current,
+      items,
+      ...calculatedFinancials(items, table)
+    };
+  }
+
+  if (params.type === "SEND_TO_KITCHEN") {
+    return {
+      ...current,
+      status: "CUENTA_SOLICITADA"
+    };
+  }
+
+  return undefined;
+}
+
 class PendingTableOperationsStore extends ObservableStore<PendingTableOperationsSnapshot> {
   constructor() {
     super(EMPTY_SNAPSHOT);
+
     if (typeof indexedDB !== "undefined") {
       void this.refresh();
     }
   }
 
   async refresh(): Promise<void> {
-    const items = await repository.findAll();
+    const items = (await repository.findAll()).sort((a, b) => {
+      const byDate = a.queuedAt.getTime() - b.queuedAt.getTime();
+      return byDate !== 0 ? byDate : a.id.localeCompare(b.id);
+    });
+
     this.publish({ items, loaded: true });
   }
 
-  /** Vuelve a leer directamente de la cola persistida para obtener solo las operaciones de mesa pendientes. */
   async findSyncable(): Promise<PendingTableOperation[]> {
     return repository.findSyncable();
   }
 
-  /**
-   * Guarda una apertura o un cierre de mesa hecho offline en la cola
-   * local. Para CLOSE, `closeInput.saleId` debe venir ya generado por el
-   * llamador (ver nota de idempotencia en PendingTableOperation.ts).
-   */
   async enqueue(params: {
     id: string;
     tableId: string;
@@ -66,58 +220,91 @@ class PendingTableOperationsStore extends ObservableStore<PendingTableOperations
     updateQuantityInput?: { productId: string; quantity: number };
     sendToKitchenInput?: { priority?: string };
   }): Promise<PendingTableOperation> {
-    if (typeof indexedDB === "undefined") {
-      let businessId = "";
-      let branchId = "";
-      try {
-        businessId = requireCurrentBusinessId();
-      } catch {
-        businessId = "";
-      }
-      try {
-        branchId = getCurrentBranchId() ?? "";
-      } catch {
-        branchId = "";
-      }
-      return {
-        id: params.id,
-        tableId: params.tableId,
-        tableName: params.tableName,
-        type: params.type,
-        openInput: params.openInput,
-        closeInput: params.closeInput,
-        addItemInput: params.addItemInput,
-        removeItemInput: params.removeItemInput,
-        updateQuantityInput: params.updateQuantityInput,
-        sendToKitchenInput: params.sendToKitchenInput,
-        status: "PENDING_SYNC",
-        queuedAt: new Date(),
-        attempts: 0,
-        businessId,
-        branchId
-      };
+    if (!params.id) {
+      throw new Error(
+        "PENDING_TABLE_OPERATION_REQUIRES_ID: la operación de mesa necesita un id."
+      );
     }
 
     const existing = await repository.findById(params.id);
+
+    const normalizedOpenInput =
+      params.type === "OPEN" && params.openInput
+        ? {
+            ...params.openInput,
+            operationId:
+              params.openInput.operationId ??
+              existing?.openInput?.operationId ??
+              params.id
+          }
+        : params.openInput;
+
+    const normalizedCloseInput =
+      params.type === "CLOSE" && params.closeInput
+        ? {
+            ...params.closeInput,
+            saleId:
+              params.closeInput.saleId ??
+              existing?.closeInput?.saleId ??
+              params.id
+          }
+        : params.closeInput;
+
+    let expectedBefore: PendingTableStateSnapshot | undefined;
+    let expectedAfter: PendingTableStateSnapshot | undefined;
+
+    if (typeof indexedDB !== "undefined") {
+      const localTable = await tableLocalRepository.findById(
+        params.tableId
+      );
+
+      if (localTable) {
+        expectedBefore = snapshotTable(localTable);
+        expectedAfter = buildExpectedAfter(
+          localTable,
+          params,
+          normalizedOpenInput,
+          normalizedCloseInput
+        );
+      }
+    }
 
     const pendingOperation: PendingTableOperation = {
       id: params.id,
       tableId: params.tableId,
       tableName: params.tableName,
       type: params.type,
-      openInput: params.openInput,
-      closeInput: params.closeInput,
+      openInput: normalizedOpenInput,
+      closeInput: normalizedCloseInput,
       addItemInput: params.addItemInput,
       removeItemInput: params.removeItemInput,
       updateQuantityInput: params.updateQuantityInput,
       sendToKitchenInput: params.sendToKitchenInput,
+      expectedBefore: existing?.expectedBefore ?? expectedBefore,
+      expectedAfter: existing?.expectedAfter ?? expectedAfter,
       status: "PENDING_SYNC",
       queuedAt: existing?.queuedAt ?? new Date(),
       attempts: existing?.attempts ?? 0,
       lastAttemptAt: existing?.lastAttemptAt,
       lastError: existing?.lastError,
-      businessId: existing?.businessId ?? (() => { try { return requireCurrentBusinessId(); } catch { return ""; } })(),
-      branchId: existing?.branchId ?? (() => { try { return getCurrentBranchId() ?? ""; } catch { return ""; } })()
+      businessId:
+        existing?.businessId ??
+        (() => {
+          try {
+            return requireCurrentBusinessId();
+          } catch {
+            return "";
+          }
+        })(),
+      branchId:
+        existing?.branchId ??
+        (() => {
+          try {
+            return getCurrentBranchId() ?? "";
+          } catch {
+            return "";
+          }
+        })()
     };
 
     await repository.save(pendingOperation);
@@ -126,7 +313,6 @@ class PendingTableOperationsStore extends ObservableStore<PendingTableOperations
     return pendingOperation;
   }
 
-  /** Antes de reintentar contra el servidor: marca "sincronizando" y suma un intento. */
   async markSyncing(id: string): Promise<boolean> {
     const current = await repository.findById(id);
     if (!current) return false;
@@ -141,7 +327,6 @@ class PendingTableOperationsStore extends ObservableStore<PendingTableOperations
     return true;
   }
 
-  /** El intento de sincronización falló: registra el motivo y la saca del ciclo automático. */
   async markFailed(id: string, error: string): Promise<void> {
     const current = await repository.findById(id);
     if (!current) return;
@@ -155,7 +340,6 @@ class PendingTableOperationsStore extends ObservableStore<PendingTableOperations
     await this.refresh();
   }
 
-  /** Error permanente de negocio: ya no se reintentará automáticamente. */
   async markPermanentFailure(id: string, error: string): Promise<void> {
     const current = await repository.findById(id);
     if (!current) return;
@@ -169,22 +353,22 @@ class PendingTableOperationsStore extends ObservableStore<PendingTableOperations
     await this.refresh();
   }
 
-  /** Vuelve a dejarla disponible para el próximo ciclo de sincronización (ej. reintento manual). */
   async requeue(id: string): Promise<void> {
     const current = await repository.findById(id);
     if (!current) return;
 
-    await repository.update({ ...current, status: "PENDING_SYNC" });
+    await repository.update({
+      ...current,
+      status: "PENDING_SYNC"
+    });
     await this.refresh();
   }
 
-  /** La operación ya se sincronizó de verdad contra Supabase: sale de la cola para siempre. */
   async remove(id: string): Promise<void> {
     await repository.delete(id);
     await this.refresh();
   }
 
-  /** Vuelve a poner en cola las operaciones de mesa que quedaron en SYNCING por un cierre/recarga abrupta. */
   async recoverStuckSyncing(): Promise<void> {
     const items = await repository.findAll();
     const stuck = items.filter((op) => op.status === "SYNCING");
@@ -192,22 +376,24 @@ class PendingTableOperationsStore extends ObservableStore<PendingTableOperations
     if (stuck.length === 0) return;
 
     await Promise.all(
-      stuck.map((op) => repository.update({ ...op, status: "PENDING_SYNC" }))
+      stuck.map((op) =>
+        repository.update({ ...op, status: "PENDING_SYNC" })
+      )
     );
 
     await this.refresh();
   }
 
-  /** Operaciones que siguen esperando turno para sincronizarse (no las que ya están en curso). */
   syncable(): PendingTableOperation[] {
-    return this.snapshot.items.filter((op) => op.status === "PENDING_SYNC");
+    return this.snapshot.items.filter(
+      (op) => op.status === "PENDING_SYNC"
+    );
   }
 
   list(): PendingTableOperation[] {
     return this.snapshot.items;
   }
 
-  /** Cuántas operaciones hay en la cola en total. */
   count(): number {
     return this.snapshot.items.length;
   }
@@ -218,4 +404,5 @@ class PendingTableOperationsStore extends ObservableStore<PendingTableOperations
   }
 }
 
-export const pendingTableOperationsStore = new PendingTableOperationsStore();
+export const pendingTableOperationsStore =
+  new PendingTableOperationsStore();

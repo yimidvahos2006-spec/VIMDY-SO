@@ -69,22 +69,23 @@ export interface ICashMovementRepository extends IRepository<CashMovement> {
    * 6. Actualiza estado de venta (REFUNDED / parcialmente reembolsada)
    * 7. Idempotencia por p_refund_id (business_id + idempotency_key)
    */
-  refundSaleCashAtomic(params: {
-    businessId: string;
-    branchId: string;
-    saleId: string;
-    refundId: string;
-    refundItems: { productId: string; quantity: number }[];
-    reason: string;
-    cashRegisterId?: string | null;
-  }): Promise<{
-    success: boolean;
-    idempotent: boolean;
-    refundId: string;
-    refundAmount: number;
-    cashMovementId: string;
-    sale: any;
-  }>;
+   refundSaleCashAtomic(params: {
+     businessId: string;
+     branchId: string;
+     saleId: string;
+     refundId: string;
+     refundItems: { productId: string; quantity: number }[];
+     reason: string;
+     cashRegisterId?: string | null;
+     refundAmount?: number;
+   }): Promise<{
+     success: boolean;
+     idempotent: boolean;
+     refundId: string;
+     refundAmount: number;
+     cashMovementId: string;
+     sale: any;
+   }>;
 }
 
 export class CashMovementRepository

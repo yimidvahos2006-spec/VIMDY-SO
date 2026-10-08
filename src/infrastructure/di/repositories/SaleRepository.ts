@@ -77,9 +77,15 @@ export class SaleRepository extends SupabaseRepository<Sale> implements ISaleFul
 
   /**
    * CRÍTICO #3 del checklist de lanzamiento: ventas de un rango de fechas,
-   * filtradas y ordenadas por la base de datos usando la columna generada
-   * `sale_date` (ver hot_columns_migration.sql) en vez de traer TODAS las
-   * ventas del negocio con findAll() y filtrar en JavaScript.
+   * filtradas y ordenadas por la base de datos usando `sales.created_at` en vez
+   * de traer TODAS las ventas del negocio con findAll() y filtrar en JavaScript.
+   *
+   * A7.4-A: antes usaba la columna plana `sale_date`, que ya NO existe (el
+   * esquema es documental: `sales.data` jsonb + created_at/updated_at). Esa
+   * columna era una "hot column" de una migracion que vivia fuera de
+   * `supabase/migrations/` y se perdio. La fecha canonica de venta es
+   * `created_at`, que `create_sale_fulfillment_atomic` refleja como
+   * `data->>'createdAt'` y que PostgREST si indexa.
    */
   public async findByDateRange(start: Date, end: Date): Promise<Sale[]> {
     const { data, error } = await supabase
@@ -87,9 +93,9 @@ export class SaleRepository extends SupabaseRepository<Sale> implements ISaleFul
       .select("data")
       .eq("business_id", getCurrentBusinessId())
       .eq("branch_id", getCurrentBranchId())
-      .gte("sale_date", start.toISOString())
-      .lt("sale_date", end.toISOString())
-      .order("sale_date", { ascending: false });
+      .gte("created_at", start.toISOString())
+      .lt("created_at", end.toISOString())
+      .order("created_at", { ascending: false });
 
     if (error) throw new Error(`SUPABASE_FIND_BY_DATE_RANGE_FAILED (sales): ${error.message}`);
 
@@ -97,33 +103,53 @@ export class SaleRepository extends SupabaseRepository<Sale> implements ISaleFul
   }
 
   /**
-   * Suma el total de ventas de un rango de fechas SIN traer el jsonb
-   * completo de cada venta a JavaScript — solo pide la columna numérica
-   * `sale_total` (ya indexada) y suma. Pensado para tarjetas de resumen
-   * del Dashboard ("ventas de hoy", "ventas del mes").
+   * Suma el total de ventas COBRADAS de un rango de fechas.
+   *
+   * A7.4-A: antes leia `sale_total` y filtraba por `sale_date` (columnas
+   * inexistentes). Ahora:
+   *   - fecha  -> `sales.created_at`
+   *   - monto  -> `data->>'total'`, con conversion SEGURA (solo acepta el
+   *     formato numerico plano; cualquier otra cosa suma 0 en vez de lanzar).
+   *   - status -> se replica el criterio del motor de cobro: una venta cuenta
+   *     solo si esta `PAID` o `CLOSED`. Se excluyen PENDING_PAYMENT, OPEN,
+   *     CANCELLED, REFUNDED y cualquier otro estado no cobrado.
    */
   public async getTotalRevenue(start: Date, end: Date): Promise<number> {
     const { data, error } = await supabase
       .from("sales")
-      .select("sale_total")
+      .select("data")
       .eq("business_id", getCurrentBusinessId())
       .eq("branch_id", getCurrentBranchId())
-      .gte("sale_date", start.toISOString())
-      .lt("sale_date", end.toISOString());
+      .in("data->>status", ["PAID", "CLOSED"])
+      .gte("created_at", start.toISOString())
+      .lt("created_at", end.toISOString());
 
     if (error) throw new Error(`SUPABASE_GET_TOTAL_REVENUE_FAILED (sales): ${error.message}`);
 
-    return (data ?? []).reduce((sum, row) => sum + (Number(row.sale_total) || 0), 0);
+    return (data ?? []).reduce((sum, row) => {
+      const rawTotal = (row.data as Sale | undefined)?.total;
+      // Solo `numero plano`: evita que un total sucio lance la consulta completa.
+      const safeTotal =
+        typeof rawTotal === "number"
+          ? rawTotal
+          : typeof rawTotal === "string" && /^[0-9]+([.][0-9]+)?$/.test(rawTotal)
+            ? Number(rawTotal)
+            : 0;
+      return sum + (Number.isFinite(safeTotal) ? safeTotal : 0);
+    }, 0);
   }
 
   /**
    * FASE 3 (Optimización) — historial de compras de UN cliente, filtrado y
-   * ordenado por la base de datos usando la columna generada
-   * `sale_customer_id` (ver customer_purchase_history_migration.sql) en vez
-   * de traer TODAS las ventas del negocio con findAll() y filtrar en
-   * JavaScript. Lo usa CustomerEngine.getCustomerProfile(), que antes era
-   * el cuello de botella más notorio en Caja (se llama cada vez que se
-   * elige un cliente en PosCustomer.tsx, justo en hora pico).
+   * ordenado por la base de datos en vez de traer TODAS las ventas del negocio
+   * con findAll() y filtrar en JavaScript. Lo usa
+   * CustomerEngine.getCustomerProfile(), que antes era el cuello de botella más
+   * notorio en Caja (se llama cada vez que se elige un cliente en
+   * PosCustomer.tsx, justo en hora pico).
+   *
+   * A7.4-A: antes filtraba por la columna plana `sale_customer_id` y ordenaba
+   * por `sale_date` (ambas inexistentes). Ahora el cliente vive en el jsonb
+   * (`data->>'customerId'`) y el orden usa `created_at`.
    */
   public async findByCustomer(customerId: string): Promise<Sale[]> {
     const { data, error } = await supabase
@@ -131,8 +157,8 @@ export class SaleRepository extends SupabaseRepository<Sale> implements ISaleFul
       .select("data")
       .eq("business_id", getCurrentBusinessId())
       .eq("branch_id", getCurrentBranchId())
-      .eq("sale_customer_id", customerId)
-      .order("sale_date", { ascending: false });
+      .eq("data->>customerId", customerId)
+      .order("created_at", { ascending: false });
 
     if (error) throw new Error(`SUPABASE_FIND_BY_CUSTOMER_FAILED (sales): ${error.message}`);
 

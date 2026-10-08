@@ -4,7 +4,7 @@ const plans = [
   {
     id: "monthly",
     name: "Mensual",
-    price: "$79.000",
+    price: "$59.900",
     period: "/ mes",
     cta: "Comenzar",
     highlighted: false,
@@ -13,12 +13,11 @@ const plans = [
   {
     id: "yearly",
     name: "Anual",
-    price: "$799.000",
+    price: "$718.800",
     period: "/ año",
     cta: "Comenzar",
     highlighted: true,
-    savings: "Ahorras $149.000",
-    description: "Un año de VIMDY con un precio más conveniente.",
+    description: "Pago anual sin descuento implícito: 12 × precio mensual.",
   },
 ];
 
@@ -106,9 +105,9 @@ export function Pricing() {
                   {plan.description}
                 </p>
 
-                {plan.savings && (
+                {plan.highlighted && (
                   <div className="mt-5 inline-flex items-center rounded-full border border-cyan-300/10 bg-cyan-300/[0.05] px-3 py-1.5 text-xs font-medium text-cyan-200/85">
-                    {plan.savings}
+                    Cobro anual estable
                   </div>
                 )}
 

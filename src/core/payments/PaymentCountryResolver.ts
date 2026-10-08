@@ -1,15 +1,13 @@
 /**
  * PaymentCountryResolver.ts
  * ---------------------------------------------------------------------------
- * Única fuente de verdad sobre QUÉ PROVEEDOR usar según el país.
- * Esta es la ÚNICA pieza de todo VIMDY que conoce la relación
- * país → proveedor. Nadie más debería tener un if/else de país y proveedor:
- * ese tipo de lógica queda prohibida fuera de este archivo.
+ * Única fuente de verdad sobre país -> proveedor de VIMDY Payments.
+ *
+ * Ningún otro archivo del motor debe duplicar esta relación.
  */
 
 import type { CountryCode, PaymentProviderName } from "./types/payment.types";
 
-/** Mapa país → proveedor. Regla de negocio central de VIMDY Payments. */
 const COUNTRY_PROVIDER_MAP: Record<string, PaymentProviderName> = {
   CO: "wompi",
   AR: "paypal",
@@ -23,12 +21,11 @@ const COUNTRY_PROVIDER_MAP: Record<string, PaymentProviderName> = {
   ES: "paypal"
 };
 
-/** Proveedor usado cuando el país no tiene una regla explícita. */
 const DEFAULT_PROVIDER: PaymentProviderName = "paypal";
 
 export class PaymentCountryResolver {
-  /** Resuelve qué proveedor debe usarse para un país dado. */
   static resolve(country: CountryCode): PaymentProviderName {
-    return COUNTRY_PROVIDER_MAP[country] ?? DEFAULT_PROVIDER;
+    const normalizedCountry = String(country ?? "").trim().toUpperCase();
+    return COUNTRY_PROVIDER_MAP[normalizedCountry] ?? DEFAULT_PROVIDER;
   }
 }

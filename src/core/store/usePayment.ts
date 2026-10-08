@@ -58,6 +58,10 @@ export function usePayment() {
     paymentStore.setRequiresInvoice(value);
   };
 
+  const setUseWompiCheckout = (value: boolean) => {
+    paymentStore.setUseWompiCheckout(value);
+  };
+
   return {
     ...state,
     setMethod,
@@ -72,6 +76,7 @@ export function usePayment() {
     setNotes,
     setPriority,
     setRequiresInvoice,
+    setUseWompiCheckout,
     mixedReceived: paymentStore.getMixedReceived(),
     isPaid: paymentStore.isPaid()
   };

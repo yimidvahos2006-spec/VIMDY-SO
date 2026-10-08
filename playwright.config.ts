@@ -22,9 +22,9 @@ export default defineConfig({
     }
   ],
   webServer: {
-    command: "npm run dev",
+    command: "npm run dev -- --mode e2e",
     url: BASE_URL,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 180_000
   }
 });

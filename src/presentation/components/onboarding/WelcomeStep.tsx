@@ -12,10 +12,10 @@ interface WelcomeStepProps {
 }
 
 /**
- * PASO 2 del asistente de onboarding (FASE 3).
+ * PASO 1 del asistente de onboarding.
  *
  * Pantalla de bienvenida pura: no lee ni escribe nada en Supabase — solo
- * saluda y dispara onStart() para avanzar al PASO 3 (tipo de negocio).
+ * saluda y dispara onStart() para avanzar al PASO 2 (tipo de negocio).
  * El nombre que muestra es el real de la sesión (useAuth().user.name),
  * nunca un placeholder inventado.
  *
@@ -50,12 +50,6 @@ export function WelcomeStep({ ownerName, onStart }: WelcomeStepProps) {
         <WelcomeAmbientMotes />
 
         <div className="relative z-10">
-          <div className="flex justify-center gap-1.5 mb-10" aria-hidden="true">
-            <span className="w-5 h-[3px] rounded-full bg-vimdy-accent" />
-            <span className="w-5 h-[3px] rounded-full bg-vimdy-border-subtle" />
-            <span className="w-5 h-[3px] rounded-full bg-vimdy-border-subtle" />
-          </div>
-
           <div className="mx-auto mb-8 flex justify-center">
             <WelcomeEmblem />
           </div>

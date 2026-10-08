@@ -1,13 +1,17 @@
 /**
  * PaymentMethodResolver.ts
  * ---------------------------------------------------------------------------
- * Decide qué métodos de pago mostrarle al usuario según el país. Es una
- * capa de presentación: no ejecuta pagos, solo dice qué opciones ofrecer.
+ * Resuelve los métodos que VIMDY Payments puede presentar para el checkout
+ * de suscripciones según el país.
+ *
+ * Este resolver NO ejecuta pagos y NO representa los métodos POS internos
+ * CASH/CARD/TRANSFER/QR/MIXED. Esos forman parte del flujo operativo del POS
+ * y se gobiernan por CashEngine / PaymentState / register_sale_payment_atomic.
  */
 
 import type { CountryCode, PaymentMethodCode } from "./types/payment.types";
 
-const COUNTRY_METHODS_MAP: Record<string, PaymentMethodCode[]> = {
+const COUNTRY_METHODS_MAP: Record<string, readonly PaymentMethodCode[]> = {
   CO: ["pse", "nequi", "card"],
   AR: ["paypal", "card"],
   CL: ["paypal", "card"],
@@ -20,11 +24,17 @@ const COUNTRY_METHODS_MAP: Record<string, PaymentMethodCode[]> = {
   ES: ["paypal", "card"]
 };
 
-/** Métodos usados cuando el país no tiene una regla explícita. */
-const DEFAULT_METHODS: PaymentMethodCode[] = ["paypal", "card"];
+const DEFAULT_METHODS: readonly PaymentMethodCode[] = ["paypal", "card"];
 
 export class PaymentMethodResolver {
   static resolve(country: CountryCode): PaymentMethodCode[] {
-    return COUNTRY_METHODS_MAP[country] ?? DEFAULT_METHODS;
+    const normalizedCountry = PaymentMethodResolver.normalizeCountry(country);
+    const methods = COUNTRY_METHODS_MAP[normalizedCountry] ?? DEFAULT_METHODS;
+
+    return [...methods];
+  }
+
+  private static normalizeCountry(country: CountryCode): string {
+    return String(country ?? "").trim().toUpperCase();
   }
 }

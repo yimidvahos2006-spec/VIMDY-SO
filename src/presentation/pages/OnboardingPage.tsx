@@ -32,7 +32,7 @@ import type { Category } from "../../core/entities/Entities";
  * Asistente de configuración inicial.
  *
  * CRÍTICO:
- * El borrador local está aislado por businessId. Nunca se utiliza una clave
+ * El borrador local está aislado por userId y businessId. Nunca se utiliza una clave
  * global como "vimdy_onboarding_step", porque esa clave podía hacer que una
  * cuenta nueva heredara el paso de otra cuenta que usó el mismo navegador.
  *
@@ -56,42 +56,47 @@ export function OnboardingPage() {
   const [businessType, setBusinessType] = useState<BusinessTypeId | null>(null);
   const [enabledModules, setEnabledModules] = useState<ModuleId[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [draftScope, setDraftScope] = useState<string | null>(null);
 
   useEffect(() => {
     onboardingDraftStore.clearLegacy();
   }, []);
 
   useEffect(() => {
-    if (!isReady || !businessId) {
+    if (!isReady || !user?.id || !businessId) {
       setDraftLoaded(false);
+      setDraftScope(null);
       return;
     }
 
-    const draft: OnboardingDraft | null = onboardingDraftStore.get(businessId);
+    const draft: OnboardingDraft | null = onboardingDraftStore.get(user.id, businessId);
 
     setStep(draft?.step && ONBOARDING_STEPS_BUILT.includes(draft.step) ? draft.step : "welcome");
     setBusinessType(draft?.businessType ?? null);
     setEnabledModules(draft?.enabledModules ?? []);
     setCategories(draft?.categories ?? []);
+    setDraftScope(`${user.id}:${businessId}`);
     setDraftLoaded(true);
-  }, [businessId, isReady]);
+  }, [businessId, isReady, user?.id]);
 
   useEffect(() => {
-    if (!draftLoaded || !businessId) return;
+    const currentUserId = user?.id;
+    const currentScope = currentUserId && businessId ? `${currentUserId}:${businessId}` : null;
+    if (!draftLoaded || !currentScope || draftScope !== currentScope) return;
 
-    onboardingDraftStore.save(businessId, {
+    onboardingDraftStore.save(currentUserId || "", businessId || "", {
       step,
       businessType,
       enabledModules,
       categories
     });
-  }, [businessId, draftLoaded, step, businessType, enabledModules, categories]);
+  }, [businessId, draftLoaded, draftScope, step, businessType, enabledModules, categories, user?.id]);
 
   useEffect(() => {
-    if (onboardingCompleted) {
-      onboardingDraftStore.clear(businessId);
+    if (onboardingCompleted && user?.id) {
+      onboardingDraftStore.clear(user.id, businessId);
     }
-  }, [businessId, onboardingCompleted]);
+  }, [businessId, onboardingCompleted, user?.id]);
 
   if (!isReady) return null;
 
@@ -201,7 +206,9 @@ export function OnboardingPage() {
           <LoadingStep onDone={() => setStep(nextOnboardingStep("loading"))} />
         )}
 
-        {stepIsBuilt && step === "final" && <FinalStep />}
+        {stepIsBuilt && step === "final" && (
+          <FinalStep onAddProduct={() => setStep("first_product")} />
+        )}
 
         {!stepIsBuilt && (
           <GlassCard className="w-full max-w-md p-8 text-center">

@@ -68,6 +68,15 @@ import { PatternLearningEngine } from '../../core/engines/PatternLearningEngine'
 import { CommandEngine } from '../../core/engines/CommandEngine';
 import { CopilotApiClient } from './CopilotApiClient';
 import { logError } from "../logging/opsLogger";
+import { PendingKitchenOrderRepository } from "./repositories/PendingKitchenOrderRepository";
+import type { IInvoiceProvider } from "../../core/invoicing/interfaces/IInvoiceProvider";
+import { configureInvoiceProviderResolver } from "../../core/invoicing/InvoiceFactory";
+import { FactusProvider } from "../../core/invoicing/providers/factus/FactusProvider";
+import { DianProvider } from "../../core/invoicing/providers/dian/DianProvider";
+import {
+  PendingKitchenOrdersStore,
+  registerPendingKitchenOrdersStoreResolver
+} from "../../core/store/pendingKitchenOrdersStore";
 
 // --------------------
 // REPOS — se crean eager porque son ligeros
@@ -94,6 +103,18 @@ const businessSnapshotRepo = new BusinessSnapshotRepository();
 const notificationRepo = new NotificationRepository();
 const waiterRepo = new WaiterRepository();
 const receiptRepo = new ReceiptRepository();
+
+// --------------------
+// OFFLINE KITCHEN REPOSITORY — lazy y encapsulado en CompositionRoot
+// --------------------
+let pendingKitchenOrderRepo: PendingKitchenOrderRepository | null = null;
+let pendingKitchenOrdersStoreInstance: PendingKitchenOrdersStore | null = null;
+
+// --------------------
+// INVOICING PROVIDERS — lazy y centralizados exclusivamente en CompositionRoot
+// --------------------
+let factusProviderInstance: IInvoiceProvider | null = null;
+let dianProviderInstance: IInvoiceProvider | null = null;
 
 // --------------------
 // LAZY SINGLETON HELPERS — los engines se instancian solo al usarse
@@ -143,6 +164,40 @@ let copilotService: CopilotService | null = null;
 let inventoryService: InventoryService | null = null;
 let customerService: CustomerService | null = null;
 let kitchenService: KitchenService | null = null;
+
+function ensurePendingKitchenOrderRepository(): PendingKitchenOrderRepository {
+  if (!pendingKitchenOrderRepo) {
+    pendingKitchenOrderRepo = new PendingKitchenOrderRepository();
+  }
+
+  return pendingKitchenOrderRepo;
+}
+
+function ensurePendingKitchenOrdersStore(): PendingKitchenOrdersStore {
+  if (!pendingKitchenOrdersStoreInstance) {
+    pendingKitchenOrdersStoreInstance = new PendingKitchenOrdersStore(
+      ensurePendingKitchenOrderRepository()
+    );
+  }
+
+  return pendingKitchenOrdersStoreInstance;
+}
+
+function ensureFactusProvider(): IInvoiceProvider {
+  if (!factusProviderInstance) {
+    factusProviderInstance = new FactusProvider();
+  }
+
+  return factusProviderInstance;
+}
+
+function ensureDianProvider(): IInvoiceProvider {
+  if (!dianProviderInstance) {
+    dianProviderInstance = new DianProvider();
+  }
+
+  return dianProviderInstance;
+}
 
 function ensurePermissionEngine(): PermissionEngine {
   if (!permissionEngine) permissionEngine = new PermissionEngine(permissionRepo);
@@ -402,6 +457,27 @@ export const categoriesReady: Promise<void> = Promise.resolve();
 export const productsReady: Promise<void> = categoriesReady;
 export const tablesReady: Promise<void> = Promise.resolve();
 
+// La resolución queda registrada una sola vez; la instancia y su repositorio
+// continúan siendo lazy y permanecen encapsulados dentro de este CompositionRoot.
+registerPendingKitchenOrdersStoreResolver(ensurePendingKitchenOrdersStore);
+
+// La factoría fiscal nunca construye providers concretos. CompositionRoot
+// entrega únicamente resolvers lazy que crean/reutilizan las implementaciones.
+configureInvoiceProviderResolver((provider) => {
+  switch (provider) {
+    case "factus":
+      return ensureFactusProvider();
+    case "dian":
+      return ensureDianProvider();
+    default: {
+      const exhaustiveCheck: never = provider;
+      throw new Error(
+        `CompositionRoot: proveedor fiscal no soportado (${exhaustiveCheck}).`
+      );
+    }
+  }
+});
+
 /**
  * PASO 9 — Aprendizaje: cada vez que se cierra un turno de caja (fin del
  * día operativo, aunque haya varios cajeros/turnos ese mismo día),
@@ -421,6 +497,11 @@ vimdyCore.on("shift", (payload) => {
 // SERVICES — también lazy, misma API pública
 // --------------------
 export const container = {
+  invoiceProviders: {
+    factus: { get(): IInvoiceProvider { return ensureFactusProvider(); } },
+    dian: { get(): IInvoiceProvider { return ensureDianProvider(); } }
+  },
+  pendingKitchenOrdersStore: { get() { return ensurePendingKitchenOrdersStore(); } },
   copilotService: { get() { return ensureCopilotService(); } },
   commandEngine: { get() { return ensureCommandEngine(); } },
   questionRouter: { get() { return ensureQuestionRouter(); } },

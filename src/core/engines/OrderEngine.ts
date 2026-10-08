@@ -6,6 +6,7 @@ import {
   Product,
   Sale
 } from "../entities/Entities";
+import type { KitchenOrder } from "../entities/Entities";
 
 import { IRepository } from "../../infrastructure/di/repositories/IRepository";
 
@@ -47,6 +48,61 @@ export interface CreateOrderInput {
   readonly waiterId?: string;
   readonly customerId?: string;
   readonly notes?: string;
+  /** Identidad durable de una operación de apertura de mesa. */
+  readonly operationId?: string;
+  /** Identidad explícita para retries; si existe no se genera otro UUID. */
+  readonly id?: string;
+  /** Personas de la sesión de mesa al momento de abrirla. */
+  readonly peopleCount?: number;
+}
+
+async function deterministicUuid(seed: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(seed)
+  );
+  const bytes = new Uint8Array(digest).slice(0, 16);
+
+  // UUID v8 determinista (RFC 9562): la identidad viene del seed y no
+  // cambia cuando la misma operación se reintenta después de una caída.
+  bytes[6] = (bytes[6] & 0x0f) | 0x80;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+  const hex = Array.from(bytes, (value) =>
+    value.toString(16).padStart(2, "0")
+  ).join("");
+
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20, 32)
+  ].join("-");
+}
+
+function kitchenFingerprint(
+  orderId: string,
+  items: SaleItem[],
+): string {
+  const normalized = [...items]
+    .sort((a, b) =>
+      a.productId.localeCompare(b.productId) ||
+      a.quantity - b.quantity ||
+      a.price - b.price ||
+      String(a.note ?? "").localeCompare(String(b.note ?? ""))
+    )
+    .map((item) => ({
+      productId: item.productId,
+      quantity: item.quantity,
+      price: Number(item.price.toFixed(2)),
+      note: item.note ?? "",
+      requiresKitchen: item.requiresKitchen === true,
+      selectedSizeId: item.selectedSizeId ?? null,
+      selectedExtraIds: item.selectedExtraIds ?? []
+    }));
+
+  return JSON.stringify({ orderId, items: normalized });
 }
 
 export interface AddOrderItemInput {
@@ -91,11 +147,52 @@ export class OrderEngine {
   ======================================================================= */
 
   public async createOrder(input: CreateOrderInput): Promise<Order> {
+    const businessId = getCurrentBusinessId() ?? undefined;
+    const branchId = getCurrentBranchId() ?? undefined;
+    const operationId = input.operationId?.trim() || undefined;
+    const stableId = input.id?.trim() || (
+      operationId
+        ? await deterministicUuid(`vimdy:table-order:${operationId}`)
+        : undefined
+    );
+
+    if (stableId) {
+      const existing = await this.orderRepository.findById(stableId);
+
+      if (existing) {
+        if (
+          businessId &&
+          existing.businessId &&
+          existing.businessId !== businessId
+        ) {
+          throw new Error("ORDER_NOT_FOUND");
+        }
+
+        if (
+          branchId &&
+          existing.branchId &&
+          existing.branchId !== branchId
+        ) {
+          throw new Error("ORDER_NOT_FOUND");
+        }
+
+        if (
+          input.tableId &&
+          existing.tableId &&
+          existing.tableId !== input.tableId
+        ) {
+          throw new Error("ORDER_OPERATION_REUSED");
+        }
+
+        return existing;
+      }
+    }
+
     const now = new Date();
     const orderNumber = await this.nextOrderNumber();
 
-    const order: Order = {
-      id: crypto.randomUUID(),
+    const order = {
+      id: stableId ?? crypto.randomUUID(),
       code: this.generateOrderCode(input.source),
       orderNumber,
       source: input.source,
@@ -104,14 +201,37 @@ export class OrderEngine {
       customerId: input.customerId,
       items: [],
       notes: input.notes,
-      status: "DRAFT",
+      status: "DRAFT" as const,
       createdAt: now,
       updatedAt: now,
-      businessId: getCurrentBusinessId() ?? undefined,
-      branchId: getCurrentBranchId() ?? undefined
+      businessId,
+      branchId,
+      ...(operationId ? { openOperationId: operationId } : {}),
+      ...(input.peopleCount !== undefined
+        ? { peopleCount: Math.max(0, Math.floor(input.peopleCount)) }
+        : {})
+    } as Order & {
+      readonly openOperationId?: string;
+      readonly peopleCount?: number;
     };
 
-    await this.orderRepository.save(order);
+    try {
+      await this.orderRepository.save(order);
+    } catch (error) {
+      if (operationId) {
+        const existingByOperation = (
+          await this.getOrdersByTable(input.tableId ?? "")
+        ).find((candidate) =>
+          (candidate as Order & { openOperationId?: string })
+            .openOperationId === operationId
+        );
+
+        if (existingByOperation) {
+          return existingByOperation;
+        }
+      }
+      throw error;
+    }
 
     this.emit(order, "order.created");
 
@@ -261,9 +381,10 @@ export class OrderEngine {
   }
 
   /**
-   * Envía el pedido a cocina. Puede llamarse más de una vez sobre el mismo
-   * pedido lógico (ej. se agregaron postres después): cada llamada crea
-   * una nueva comanda con los items vigentes en ese momento.
+   * Envía el pedido a cocina de forma idempotente. La identidad de la
+   * comanda se deriva del pedido + contenido exacto enviado; por eso un
+   * retry después de una caída de red reutiliza el mismo registro en vez
+   * de generar otra comanda.
    */
   public async sendToKitchen(orderId: string): Promise<Order> {
     const order = await this.getOrder(orderId);
@@ -282,53 +403,123 @@ export class OrderEngine {
       );
     }
 
-    // Solo los productos que de verdad necesitan preparación entran a la
-    // comanda (ver SaleItem.requiresKitchen, capturado en addItem()). Un
-    // pedido de solo bebidas embotelladas, por ejemplo, no genera ticket
-    // en Cocina.
     const previousOrders = await this.kitchen.getByOrderId(order.id);
     const sentQuantities = new Map<string, number>();
-    for (const prev of previousOrders) {
-      for (const item of prev.items) {
-        sentQuantities.set(item.productId, (sentQuantities.get(item.productId) ?? 0) + item.quantity);
+
+    for (const previous of previousOrders) {
+      if (previous.status === "CANCELADO") continue;
+      for (const item of previous.items) {
+        sentQuantities.set(
+          item.productId,
+          (sentQuantities.get(item.productId) ?? 0) + item.quantity
+        );
       }
     }
 
     const kitchenItems = order.items
-      .filter(item => item.requiresKitchen === true)
-      .map(item => {
+      .filter((item) => item.requiresKitchen === true)
+      .map((item) => {
         const sent = sentQuantities.get(item.productId) ?? 0;
         if (item.quantity <= sent) return null;
         return { ...item, quantity: item.quantity - sent };
       })
-      .filter((item): item is NonNullable<typeof item> => item !== null);
+      .filter(
+        (item): item is NonNullable<typeof item> => item !== null
+      );
 
     if (kitchenItems.length === 0) {
+      const existing = [...previousOrders]
+        .reverse()
+        .find((candidate) => candidate.status !== "CANCELADO");
+
+      if (existing) {
+        if (order.kitchenOrderId !== existing.id || order.status === "CONFIRMED") {
+          const recovered = await this.updateOrder(order.id, {
+            status: existing.status === "PENDIENTE"
+              ? "SENT_TO_KITCHEN"
+              : (KITCHEN_STATUS_MAP[existing.status] ?? "SENT_TO_KITCHEN"),
+            kitchenOrderId: existing.id
+          });
+          this.emit(recovered, "order.sent_to_kitchen.recovered");
+          return recovered;
+        }
+        return order;
+      }
+
       throw new Error(
         "NOTHING_REQUIRES_KITCHEN: ningún producto nuevo de este pedido necesita preparación en cocina."
       );
     }
 
-    const kitchenOrderId = crypto.randomUUID();
+    const sendSequence = previousOrders.reduce((max, candidate) => {
+      const sequence = Number(
+        (candidate as KitchenOrder & { sendSequence?: number }).sendSequence
+      );
+      return Number.isFinite(sequence) ? Math.max(max, sequence) : max;
+    }, previousOrders.length);
 
-    await createKitchenOutput(kitchenOutputMode, this.kitchen).send({
+    const sendIdentity = kitchenFingerprint(
+      `${order.id}:${sendSequence + 1}`,
+      kitchenItems
+    );
+
+    const sendOperationId = await deterministicUuid(
+      `vimdy:kitchen-send:${sendIdentity}`
+    );
+    const kitchenOrderId = await deterministicUuid(
+      `vimdy:kitchen-order:${sendOperationId}`
+    );
+
+    const existingSameOperation = previousOrders.find(
+      (candidate) => candidate.id === kitchenOrderId
+    );
+
+    if (existingSameOperation && existingSameOperation.status !== "CANCELADO") {
+      const recovered = await this.updateOrder(order.id, {
+        status: existingSameOperation.status === "PENDIENTE"
+          ? "SENT_TO_KITCHEN"
+          : (KITCHEN_STATUS_MAP[existingSameOperation.status] ?? "SENT_TO_KITCHEN"),
+        kitchenOrderId
+      });
+
+      this.emit(recovered, "order.sent_to_kitchen.recovered");
+      return recovered;
+    }
+
+    const kitchenOrder = {
       id: kitchenOrderId,
       items: kitchenItems,
-      status: "PENDIENTE",
+      status: "PENDIENTE" as const,
       createdAt: new Date(),
       origin: this.describeOrderOrigin(order),
       waiterId: order.waiterId,
       orderNumber: order.orderNumber,
-      businessId: getCurrentBusinessId(),
+      businessId: getCurrentBusinessId() ?? undefined,
       branchId: getCurrentBranchId() ?? undefined,
       tableId: order.tableId,
-      orderId: order.id
-    });
+      orderId: order.id,
+      sendOperationId,
+      tableSessionId: (order as Order & { openOperationId?: string }).openOperationId,
+      sendSequence: sendSequence + 1
+    } as KitchenOrder & {
+      sendOperationId: string;
+      tableSessionId?: string;
+      sendSequence: number;
+    };
 
-    const sent = await this.updateOrder(orderId, {
-      status: "SENT_TO_KITCHEN",
-      kitchenOrderId
-    });
+    await createKitchenOutput(kitchenOutputMode, this.kitchen).send(kitchenOrder);
+
+    let sent: Order;
+    try {
+      sent = await this.updateOrder(orderId, {
+        status: "SENT_TO_KITCHEN",
+        kitchenOrderId
+      });
+    } catch (error) {
+      // La comanda ya fue persistida con una identidad determinista. En el
+      // siguiente retry se recuperará por kitchenOrderId sin duplicarla.
+      throw error;
+    }
 
     this.emit(sent, "order.sent_to_kitchen");
 
@@ -414,10 +605,53 @@ export class OrderEngine {
       throw new Error("EMPTY_ORDER: el pedido no tiene productos para cobrar.");
     }
 
-    if (order.status === "COMPLETED" || order.status === "CANCELLED") {
+    if (order.status === "CANCELLED") {
       throw new Error(
         `ORDER_LOCKED: no se puede cobrar un pedido "${order.status}".`
       );
+    }
+
+    if (order.status === "COMPLETED") {
+      if (!order.saleId) {
+        throw new Error("ORDER_COMPLETED_WITHOUT_SALE: el pedido figura completado pero no tiene saleId.");
+      }
+
+      const completedSale = await this.sales.getSale(order.saleId);
+      if (!completedSale) {
+        throw new Error("ORDER_COMPLETED_SALE_NOT_FOUND: el pedido figura completado pero su venta no existe.");
+      }
+
+      const existingReceipt = await this.sales.getReceiptBySaleId(completedSale.id);
+      const receipt = existingReceipt ?? await this.sales.generateReceipt(
+        completedSale,
+        input.customerName ?? "Cliente General",
+        input.cashier ?? "Administrador",
+        input.method,
+        completedSale.paymentReceived ?? input.received ?? completedSale.total,
+        completedSale.discount ?? 0
+      );
+
+      const payment: PaymentResult = {
+        success: true,
+        method: (completedSale.paymentMethod as PaymentMethod | undefined) ?? input.method,
+        total: completedSale.total,
+        received: completedSale.paymentReceived ?? input.received ?? completedSale.total,
+        change: completedSale.changeGiven ?? 0,
+        reference: completedSale.paymentReference ?? input.reference,
+        message: "El pedido ya estaba cobrado; se recuperó el resultado idempotente.",
+        date: completedSale.paidAt ?? completedSale.updatedAt,
+        verificationStatus: completedSale.paymentVerificationSource === "EXTERNAL_TERMINAL"
+          ? "EXTERNAL_TERMINAL"
+          : "CONFIRMED",
+        invoiceError: undefined
+      };
+
+      return {
+        order,
+        sale: completedSale,
+        payment,
+        receipt
+      };
     }
 
     const items = order.items.map(item => ({
@@ -434,7 +668,14 @@ export class OrderEngine {
       { received: input.received, reference: input.reference }
     );
 
-    const receipt = await this.sales.generateReceipt(
+    if (!payment.success) {
+      throw new Error(
+        "ORDER_PAYMENT_PENDING_VERIFICATION: el pago todavía no está confirmado."
+      );
+    }
+
+    const existingReceipt = await this.sales.getReceiptBySaleId(paidSale.id);
+    const receipt = existingReceipt ?? await this.sales.generateReceipt(
       paidSale,
       input.customerName ?? "Cliente General",
       input.cashier ?? "Administrador",
@@ -443,7 +684,9 @@ export class OrderEngine {
       paidSale.discount ?? 0
     );
 
-    this.sales.printReceipt(receipt);
+    if (!existingReceipt) {
+      this.sales.printReceipt(receipt);
+    }
 
     const completed = await this.updateOrder(order.id, {
       status: "COMPLETED",
@@ -485,6 +728,13 @@ export class OrderEngine {
     items: { productId: string; quantity: number; price: number }[],
     input: CheckoutOrderInput
   ): Promise<Sale> {
+    // La venta derivada del Order conserva la misma identidad en cualquier
+    // retry. Esto evita crear una segunda venta/inventario si la tablet pierde
+    // la respuesta después de que el servidor ya creó la primera.
+    const saleId = await deterministicUuid(
+      `vimdy:order-sale:${order.id}`
+    );
+
     switch (order.source) {
       case "TABLE":
         if (!order.tableId) {
@@ -492,17 +742,20 @@ export class OrderEngine {
         }
 
         return this.sales.tableSale({
+          id: saleId,
           tableId: order.tableId,
           source: items,
           customerId: order.customerId,
           cashierId: input.cashierId,
           waiterId: order.waiterId,
           discount: input.discount,
-          notes: order.notes
+          notes: order.notes,
+          skipKitchen: Boolean(order.kitchenOrderId)
         });
 
       case "DELIVERY":
         return this.sales.deliverySale({
+          id: saleId,
           deliveryAddress: input.deliveryAddress ?? "",
           deliveryFee: input.deliveryFee,
           source: items,
@@ -516,6 +769,7 @@ export class OrderEngine {
       case "TAKEOUT":
       default:
         return this.sales.quickSale({
+          id: saleId,
           source: items,
           customerId: order.customerId,
           cashierId: input.cashierId,

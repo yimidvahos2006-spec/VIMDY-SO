@@ -96,6 +96,9 @@ const PricingPage = lazy(() =>
 const DemoFondoPage = lazy(() =>
   import("../marketing/pages/DemoFondoPage").then((m) => ({ default: m.DemoFondoPage }))
 );
+const PosCheckoutPage = lazy(() =>
+  import("../presentation/pages/PosCheckoutPage").then((m) => ({ default: m.PosCheckoutPage }))
+);
 const FeaturesPage = lazy(() =>
   import("../marketing/pages/FeaturesPage").then((m) => ({ default: m.FeaturesPage }))
 );
@@ -281,12 +284,17 @@ function AuthenticatedApp() {
                 }
               />
 
-              <Route
-                path="*"
-                element={<NotFoundPage />}
-              />
+               <Route
+                 path="/pos/checkout/:sessionId"
+                 element={<PosCheckoutPage />}
+               />
 
-              </Routes>
+               <Route
+                 path="*"
+                 element={<NotFoundPage />}
+               />
+
+               </Routes>
             </Suspense>
           </ErrorBoundary>
         </MainLayout>

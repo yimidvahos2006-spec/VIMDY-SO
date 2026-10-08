@@ -51,7 +51,23 @@ export class ShiftEngine {
   private isAtomicShiftRepository(
     repo: unknown
   ): repo is IShiftRepository {
-    return typeof (repo as IShiftRepository | null)?.closeAtomic === "function";
+    const candidate = repo as Partial<IShiftRepository> | null;
+    return (
+      typeof candidate?.openAtomic === "function" &&
+      typeof candidate?.closeAtomic === "function"
+    );
+  }
+
+  private isAtomicShiftOpenRepository(
+    repo: unknown
+  ): repo is IShiftRepository {
+    return typeof (repo as Partial<IShiftRepository> | null)?.openAtomic === "function";
+  }
+
+  private isAtomicShiftCloseRepository(
+    repo: unknown
+  ): repo is IShiftRepository {
+    return typeof (repo as Partial<IShiftRepository> | null)?.closeAtomic === "function";
   }
 
   /**
@@ -70,7 +86,9 @@ export class ShiftEngine {
     notes?: string,
     cashRegisterId?: string
   ): Promise<Shift> {
-    if (openingAmount < 0) throw new Error("INVALID_AMOUNT: el fondo inicial no puede ser negativo.");
+    if (!Number.isFinite(openingAmount) || openingAmount < 0) {
+      throw new Error("INVALID_AMOUNT: el fondo inicial debe ser un número finito y no negativo.");
+    }
     const businessId = getCurrentBusinessId();
     const branchId = getCurrentBranchId();
     if (!businessId) throw new Error("NO_BUSINESS_CONTEXT");
@@ -90,7 +108,7 @@ export class ShiftEngine {
 
     const shiftId = crypto.randomUUID();
 
-    if (this.isAtomicShiftRepository(this.repository) && resolvedRegisterId) {
+    if (this.isAtomicShiftOpenRepository(this.repository) && resolvedRegisterId) {
       const opened = await this.repository.openAtomic(
         shiftId, businessId, branchId, resolvedRegisterId, cashierId, openingAmount, notes
       );
@@ -100,7 +118,7 @@ export class ShiftEngine {
       return opened;
     }
 
-    const current = await this.getCurrentShift(cashierId, resolvedRegisterId);
+    const current = await this.getCurrentShift(undefined, resolvedRegisterId);
     if (current) throw new Error(`SHIFT_ALREADY_OPEN: ya existe un turno abierto (id "${current.id}").`);
 
     const shift: Shift = {
@@ -133,8 +151,7 @@ export class ShiftEngine {
       // actual. Los datos legacy sin business/branch ya no se adoptan.
       if (shift.businessId !== businessId) return false;
       if (shift.branchId !== branchId) return false;
-      // Un turno enterprise sin caja física es inválido para operación.
-      if (!shift.cashRegisterId) return false;
+      if (this.cashRegisters && !shift.cashRegisterId) return false;
       if (cashierId && shift.cashierId !== cashierId) return false;
       if (selected && shift.cashRegisterId !== selected) return false;
       return true;
@@ -201,7 +218,7 @@ export class ShiftEngine {
       throw new Error("SHIFT_BUSINESS_BRANCH_CONTEXT_MISMATCH");
     }
     const selectedRegisterId = cashRegisterStore.getSelectedId();
-    if (!shift.cashRegisterId) {
+    if (this.cashRegisters && !shift.cashRegisterId) {
       throw new Error("CAJA_CASH_REGISTER_REQUIRED_FOR_CLOSE");
     }
     if (selectedRegisterId && shift.cashRegisterId !== selectedRegisterId) {
@@ -267,14 +284,14 @@ export class ShiftEngine {
     countedAmount: number,
     notes?: string
   ): Promise<Shift> {
-    if (countedAmount < 0) {
+    if (!Number.isFinite(countedAmount) || countedAmount < 0) {
       throw new Error(
-        "INVALID_AMOUNT: el monto contado no puede ser negativo."
+        "INVALID_AMOUNT: el monto contado debe ser un número finito y no negativo."
       );
     }
 
     // Producción real: cierre atómico en servidor.
-    if (this.isAtomicShiftRepository(this.repository)) {
+    if (this.isAtomicShiftCloseRepository(this.repository)) {
       const closedShift = await this.repository.closeAtomic(
         shiftId,
         countedAmount,

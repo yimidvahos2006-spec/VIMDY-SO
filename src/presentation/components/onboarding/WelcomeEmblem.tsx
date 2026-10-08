@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { VimdyLogo } from "../ui/VimdyLogo";
 
 /**
- * WelcomeEmblem — emblema premium del Paso 2 (WelcomeStep).
+ * WelcomeEmblem — emblema premium del Paso 1 (WelcomeStep).
  *
  * Solo se usa aquí. Renderiza una faceta (hexágono vía clip-path) con
  * el degradé azul del isotipo (vimdy-blue → vimdy-accent) a baja

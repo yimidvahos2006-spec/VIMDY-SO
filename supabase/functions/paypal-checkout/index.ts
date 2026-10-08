@@ -45,16 +45,16 @@ type Plan = "monthly" | "yearly";
 // Espejo server-side de SUBSCRIPTION_PLANS (src/core/entities/SubscriptionTypes.ts)
 // Precios reales por país para los 10 países soportados.
 const PLAN_PRICE_BY_COUNTRY: Record<string, Record<Plan, number>> = {
-  CO: { monthly: 79000, yearly: 799000 },
-  US: { monthly: 89, yearly: 899 },
-  MX: { monthly: 1499, yearly: 14990 },
-  PE: { monthly: 149, yearly: 1490 },
-  CL: { monthly: 14990, yearly: 149900 },
-  AR: { monthly: 89999, yearly: 899999 },
-  EC: { monthly: 59, yearly: 599 },
-  PA: { monthly: 69, yearly: 699 },
-  VE: { monthly: 49, yearly: 499 },
-  ES: { monthly: 69, yearly: 699 }
+  CO: { monthly: 59900, yearly: 718800 },
+  US: { monthly: 89, yearly: 1068 },
+  MX: { monthly: 1499, yearly: 17988 },
+  PE: { monthly: 149, yearly: 1788 },
+  CL: { monthly: 14990, yearly: 179880 },
+  AR: { monthly: 89999, yearly: 1079988 },
+  EC: { monthly: 59, yearly: 708 },
+  PA: { monthly: 69, yearly: 828 },
+  VE: { monthly: 49, yearly: 588 },
+  ES: { monthly: 69, yearly: 828 }
 };
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");

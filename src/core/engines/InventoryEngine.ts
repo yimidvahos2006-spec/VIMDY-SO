@@ -73,10 +73,21 @@ export class InventoryEngine {
     return this.getById(productId);
   }
 
-  public async createProduct(input: ProductInput, _performedBy?: string): Promise<Product> {
+   public async createProduct(input: ProductInput, performedBy?: string): Promise<Product> {
     const name = input.name.trim();
     if (!name) {
       throw new Error('PRODUCT_NAME_REQUIRED');
+    }
+
+    // Validate no duplicate ingredients in recipe
+    if (input.recipe && input.recipe.length > 0) {
+      const seen = new Set<string>();
+      for (const item of input.recipe) {
+        if (seen.has(item.productId)) {
+          throw new Error('INGREDIENTE_DUPLICADO');
+        }
+        seen.add(item.productId);
+      }
     }
 
     const categoryId = input.categoryId ?? "uncategorized";
@@ -93,14 +104,35 @@ export class InventoryEngine {
       stock: input.stock ?? 0,
       minStock: input.minStock ?? 0,
       active: input.active ?? true,
-      trackStock: input.trackStock ?? true,
-      requiresKitchen: input.isIngredient ? false : input.requiresKitchen ?? categoryDefault ?? false,
+      trackStock: input.isIngredient ? true : (input.trackStock ?? true),
+      requiresKitchen: input.isIngredient ? false : (input.requiresKitchen ?? categoryDefault ?? false),
+      isIngredient: input.isIngredient ?? false,
       lastUpdated: input.lastUpdated ?? now,
       createdAt: input.createdAt ?? now,
     };
 
-    await this.getRepository().save(product);
-    return product;
+     await this.getRepository().save(product);
+
+     if (product.stock > 0) {
+       const branchId = getCurrentBranchId() ?? undefined;
+       await this.getKardex().record(
+         product.id,
+         product.stock,
+         "INCREASE",
+         "Stock inicial",
+         performedBy ?? undefined,
+         undefined,
+         undefined,
+         undefined,
+         undefined,
+         undefined,
+         branchId,
+         0,
+         product.stock
+       );
+     }
+
+     return product;
   }
 
   public async updateProduct(id: string, input: ProductInput): Promise<Product> {
@@ -117,6 +149,16 @@ export class InventoryEngine {
       lastUpdated: new Date(),
     };
 
+    if (input.recipe !== undefined && input.recipe.length === 0) {
+      (updated as any).recipe = undefined;
+    }
+    if (input.sizes !== undefined && input.sizes.length === 0) {
+      (updated as any).sizes = undefined;
+    }
+    if (input.extras !== undefined && input.extras.length === 0) {
+      (updated as any).extras = undefined;
+    }
+
     await this.getRepository().update(updated);
     return updated;
   }
@@ -124,6 +166,24 @@ export class InventoryEngine {
   public async deleteProduct(id: string): Promise<void> {
     if (!(await this.getRepository().exists(id))) {
       throw new Error('PRODUCT_NOT_FOUND');
+    }
+
+    // Check if product is referenced as an ingredient in any recipe
+    const allProducts = await this.getRepository().findAll();
+    for (const product of allProducts) {
+      if (product.recipe && product.recipe.some((item) => item.productId === id)) {
+        throw new Error('PRODUCT_IN_USE');
+      }
+    }
+
+    // Soft-delete: deactivate products that have stock history (movimientos)
+    const product = await this.getRepository().findById(id);
+    if (product && this.kardex) {
+      const hasMovements = await this.kardex.hasMovements(id);
+      if (hasMovements) {
+        await this.getRepository().update({ ...product, active: false });
+        return;
+      }
     }
 
     await this.getRepository().delete(id);
@@ -196,7 +256,13 @@ export class InventoryEngine {
     const repository = this.getRepository();
     const product = await repository.findById(params.productId);
     if (!product) throw new Error("PRODUCT_NOT_FOUND");
-    if (product.trackStock === false) {
+
+    // BATCH products consume ingredients, not their own stock tracked via trackStock.
+    // ON_DEMAND products with recipes also don't track their own stock.
+    // Services (trackStock=false, no recipe) should not have stock adjusted.
+    const isRecipeBased = product.recipe && product.recipe.length > 0;
+    const isService = product.trackStock === false && !isRecipeBased && product.productionMode !== "BATCH";
+    if (isService) {
       throw new Error("PRODUCT_STOCK_TRACKING_DISABLED");
     }
 
@@ -239,29 +305,34 @@ export class InventoryEngine {
       return;
     }
 
-    const kardex = this.getKardex();
-    if (await kardex.exists(movementId)) return;
-    await repository.adjustStock(
-      params.productId,
-      params.quantity,
-      extraFields,
-      companyConfigStore.get().allowNegativeStock,
-      branchId
-    );
-    await kardex.record(
-      params.productId,
-      Math.abs(params.quantity),
-      type,
-      params.reason,
-      params.performedBy,
-      params.supplierId,
-      supplier?.name,
-      params.lossCategory,
-      movementId,
-      product.name,
-      branchId
-    );
-  }
+     const kardex = this.getKardex();
+     if (await kardex.exists(movementId)) return;
+
+     const stockBefore = (await repository.findById(params.productId))?.stock ?? 0;
+     const updatedProduct = await repository.adjustStock(
+       params.productId,
+       params.quantity,
+       extraFields,
+       companyConfigStore.get().allowNegativeStock,
+       branchId
+     );
+     const stockAfter = updatedProduct.stock;
+     await kardex.record(
+       params.productId,
+       Math.abs(params.quantity),
+       type,
+       params.reason,
+       params.performedBy,
+       params.supplierId,
+       supplier?.name,
+       params.lossCategory,
+       movementId,
+       product.name,
+       branchId,
+       stockBefore,
+       stockAfter
+     );
+   }
 
   public async getLowStockProducts(): Promise<Product[]> {
     return (await this.listAll()).filter((product) => {
@@ -455,23 +526,117 @@ export class InventoryEngine {
     quantity: number,
     performedBy?: string,
     operationId = crypto.randomUUID()
-  ): Promise<void> {
+  ): Promise<{
+    product: Product;
+    consumed: Array<{ productId: string; name: string; quantity: number }>;
+    reference: string;
+  }> {
     if (!Number.isFinite(quantity) || quantity <= 0) {
-      throw new Error("INVALID_PRODUCTION_QUANTITY");
+      throw new Error("INVALID_QUANTITY");
     }
     if (!productId) throw new Error("PRODUCT_NOT_FOUND");
-    const branchId = getCurrentBranchId();
-    if (!branchId) throw new Error("BRANCH_CONTEXT_REQUIRED");
 
     const repository = this.getRepository();
-    if (!repository.produceBatch) throw new Error("BATCH_PRODUCTION_NOT_SUPPORTED");
-    await repository.produceBatch({
+    const branchId = getCurrentBranchId();
+
+    if (!branchId) {
+      throw new Error("NO_BRANCH_CONTEXT");
+    }
+
+    if (!repository.produceBatch) {
+      throw new Error("BATCH_PRODUCTION_NOT_SUPPORTED");
+    }
+
+    const reference = `PROD-${operationId.slice(0, 8).toUpperCase()}`;
+
+    const product = await repository.findById(productId);
+    if (!product) {
+      throw new Error("PRODUCT_NOT_FOUND");
+    }
+
+    if (product.productionMode !== "BATCH") {
+      throw new Error("NOT_BATCH_PRODUCT");
+    }
+
+    if (product.branchId && product.branchId !== branchId) {
+      throw new Error("BRANCH_SCOPE_MISMATCH");
+    }
+
+    const recipe = product.recipe ?? [];
+    if (recipe.length === 0) {
+      throw new Error("NO_RECIPE");
+    }
+
+    const ingredientIds = Array.from(
+      new Set(recipe.map((item) => item.productId))
+    );
+    const ingredients = await repository.findMany(ingredientIds);
+    const ingredientMap = new Map(ingredients.map((ingredient) => [ingredient.id, ingredient]));
+
+    const allowNegative = companyConfigStore.get().allowNegativeStock;
+    const consumed: Array<{ productId: string; name: string; quantity: number }> = [];
+
+    for (const item of recipe) {
+      if (!Number.isFinite(item.quantity) || item.quantity <= 0) {
+        throw new Error("INVALID_RECIPE_QUANTITY");
+      }
+
+      const ingredient = ingredientMap.get(item.productId);
+      if (!ingredient) {
+        throw new Error("PRODUCT_NOT_FOUND");
+      }
+
+      if (ingredient.businessId && product.businessId && ingredient.businessId !== product.businessId) {
+        throw new Error("BUSINESS_SCOPE_MISMATCH");
+      }
+
+      if (ingredient.branchId && ingredient.branchId !== branchId) {
+        throw new Error("BRANCH_SCOPE_MISMATCH");
+      }
+
+      const totalNeeded = item.quantity * quantity;
+      if (!Number.isFinite(totalNeeded) || totalNeeded <= 0) {
+        throw new Error("INVALID_RECIPE_QUANTITY");
+      }
+
+      if (ingredient.stock < totalNeeded && !allowNegative) {
+        throw new Error("INSUFFICIENT_STOCK");
+      }
+
+      consumed.push({
+        productId: ingredient.id,
+        name: ingredient.name,
+        quantity: totalNeeded,
+      });
+    }
+
+    // ProductionRepository.produceBatch() delegates directly to the atomic
+    // Supabase RPC `produce_batch_atomic()`. That RPC already consumes the
+    // recipe, increments finished stock, writes the Kardex and records the
+    // operation ledger under `operationId`. The engine MUST NOT call
+    // KardexEngine.record() again, because doing so would duplicate the
+    // inventory history after every successful batch.
+    const updatedProducts = await repository.produceBatch({
       operationId,
       productId,
       branchId,
       quantity,
-      performedBy
+      performedBy,
     });
+
+    const updatedProduct =
+      updatedProducts.find((item) => item.id === productId) ??
+      (await repository.findById(productId));
+
+    if (!updatedProduct) {
+      throw new Error("BATCH_PRODUCTION_RESULT_MISSING");
+    }
+
+    return {
+      product: updatedProduct,
+      consumed,
+      reference,
+    };
   }
 }
 
