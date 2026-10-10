@@ -4,64 +4,85 @@ import { toast } from "../store/toastStore";
 import { isNetworkFailure } from "../services/offlineSale";
 import { pendingCustomerOperationsStore } from "./pendingCustomerOperationsStore";
 import type { PendingCustomerOperation } from "./PendingCustomerOperation";
-import { getCurrentBusinessId, getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
+import {
+  getCurrentBusinessId,
+  getCurrentBranchId
+} from "../../infrastructure/supabase/supabaseClient";
 import { MAX_OFFLINE_ATTEMPTS, isBusinessError } from "./offlineConstants";
 
-/**
- * syncPendingCustomerOperations.ts
- * ---------------------------------------------------------------------------
- * PASO 1.9 del plan offline: recorre la cola (pendingCustomerOperationsStore)
- * y reproduce cada creación de cliente contra Supabase usando el MISMO
- * engine real que usa la creación online (CustomerEngine.save()) — nunca un
- * camino paralelo. Mismo diseño que syncPendingSales.ts /
- * syncPendingInventoryAdjustments.ts / syncPendingTableOperations.ts.
- *
- * Arranca/para junto con la sesión del negocio (ver start()/stop(), y su
- * conexión en AuthContext.tsx junto a startOfflineSalesSync/
- * startOfflineInventorySync/startOfflineTableSync).
- */
+const SYNC_BACKOFF_MS = 5000;
 
 let syncPromise: Promise<void> | null = null;
 let unsubscribeConnection: (() => void) | null = null;
 let unsubscribeQueue: (() => void) | null = null;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let lifecycleActive = false;
+let syncBackoffUntil = 0;
 
 async function syncOne(pending: PendingCustomerOperation): Promise<void> {
   const currentBusinessId = getCurrentBusinessId();
   const currentBranchId = getCurrentBranchId();
 
-  if (pending.businessId !== currentBusinessId || pending.branchId !== currentBranchId) {
+  if (!currentBusinessId || !currentBranchId) {
+    throw new Error(
+      `CONTEXT_MISMATCH: no hay negocio/sucursal activos para sincronizar el cliente ${pending.id}.`
+    );
+  }
+
+  if (
+    pending.businessId !== currentBusinessId ||
+    pending.branchId !== currentBranchId
+  ) {
     throw new Error(
       `CONTEXT_MISMATCH: el cliente offline pertenece a ${pending.businessId}/${pending.branchId}, pero la sesión actual es ${currentBusinessId}/${currentBranchId}.`
     );
   }
 
+  // CustomerRepository.save() usa upsert por id: el mismo customer.id es la
+  // clave de idempotencia. No se usa una segunda ruta paralela.
   await container.customerEngine.get().save(pending.customer);
+}
+
+function scheduleRetry(): void {
+  if (!lifecycleActive || retryTimer) return;
+
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    triggerIfNeeded();
+  }, SYNC_BACKOFF_MS);
 }
 
 export async function syncPendingCustomerOperations(): Promise<void> {
   if (syncPromise) return syncPromise;
 
   syncPromise = (async () => {
-    if (!connectionStore.isOnline()) return;
-
-    await pendingCustomerOperationsStore.recoverStuckSyncing();
-    const queue = await pendingCustomerOperationsStore.findSyncable();
-    if (queue.length === 0) return;
-
     let syncedCount = 0;
     let failedCount = 0;
 
     try {
+      if (!connectionStore.isOnline()) return;
+      if (Date.now() < syncBackoffUntil) return;
+
+      await pendingCustomerOperationsStore.recoverStuckSyncing();
+      const queue = await pendingCustomerOperationsStore.findSyncable();
+      if (queue.length === 0) return;
+
       for (const pending of queue) {
         if (!connectionStore.isOnline()) break;
+        if (Date.now() < syncBackoffUntil) break;
 
-        if ((pending.attempts ?? 0) >= MAX_OFFLINE_ATTEMPTS) {
-          await pendingCustomerOperationsStore.markPermanentFailure(pending.id, "MAX_ATTEMPTS_REACHED");
+        if (pending.attempts >= MAX_OFFLINE_ATTEMPTS) {
+          await pendingCustomerOperationsStore.markPermanentFailure(
+            pending.id,
+            "MAX_ATTEMPTS_REACHED"
+          );
           failedCount += 1;
           continue;
         }
 
-        const started = await pendingCustomerOperationsStore.markSyncing(pending.id);
+        const started = await pendingCustomerOperationsStore.markSyncing(
+          pending.id
+        );
         if (!started) continue;
 
         try {
@@ -69,24 +90,42 @@ export async function syncPendingCustomerOperations(): Promise<void> {
           await pendingCustomerOperationsStore.remove(pending.id);
           syncedCount += 1;
         } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+
           if (isNetworkFailure(error)) {
+            syncBackoffUntil = Date.now() + SYNC_BACKOFF_MS;
             await pendingCustomerOperationsStore.requeue(pending.id);
+            scheduleRetry();
             break;
           }
 
           if (isBusinessError(error)) {
-            await pendingCustomerOperationsStore.markPermanentFailure(pending.id, error instanceof Error ? error.message : String(error));
+            await pendingCustomerOperationsStore.markPermanentFailure(
+              pending.id,
+              message
+            );
             failedCount += 1;
             continue;
           }
 
-          const message = error instanceof Error ? error.message : "Error desconocido al sincronizar.";
-          await pendingCustomerOperationsStore.markFailed(pending.id, message);
+          await pendingCustomerOperationsStore.markFailed(
+            pending.id,
+            message
+          );
           failedCount += 1;
         }
       }
     } finally {
       syncPromise = null;
+
+      if (
+        lifecycleActive &&
+        connectionStore.isOnline() &&
+        Date.now() >= syncBackoffUntil
+      ) {
+        queueMicrotask(triggerIfNeeded);
+      }
     }
 
     if (syncedCount > 0) {
@@ -101,7 +140,7 @@ export async function syncPendingCustomerOperations(): Promise<void> {
       toast.error(
         failedCount === 1
           ? "1 cliente sin conexión no se pudo sincronizar y quedó para revisión manual."
-          : `${failedCount} clientes sin conexión no se pudieron sincronizar y quedaron para revisión manual.`
+          : `${failedCount} clientes sin conexión no pudieron sincronizarse y quedaron para revisión manual.`
       );
     }
   })();
@@ -110,24 +149,44 @@ export async function syncPendingCustomerOperations(): Promise<void> {
 }
 
 function triggerIfNeeded(): void {
-  if (connectionStore.isOnline() && pendingCustomerOperationsStore.syncable().length > 0) {
-    void syncPendingCustomerOperations();
+  if (
+    !connectionStore.isOnline() ||
+    Date.now() < syncBackoffUntil ||
+    pendingCustomerOperationsStore.syncable().length === 0
+  ) {
+    return;
   }
+
+  void syncPendingCustomerOperations();
 }
 
 export function startOfflineCustomerSync(): void {
-  if (unsubscribeConnection || unsubscribeQueue) return;
+  lifecycleActive = true;
 
-  unsubscribeConnection = connectionStore.subscribe(triggerIfNeeded);
-  unsubscribeQueue = pendingCustomerOperationsStore.subscribe(triggerIfNeeded);
+  if (!unsubscribeConnection) {
+    unsubscribeConnection = connectionStore.subscribe(triggerIfNeeded);
+  }
+
+  if (!unsubscribeQueue) {
+    unsubscribeQueue = pendingCustomerOperationsStore.subscribe(
+      triggerIfNeeded
+    );
+  }
 
   triggerIfNeeded();
 }
 
 export function stopOfflineCustomerSync(): void {
+  lifecycleActive = false;
+
   unsubscribeConnection?.();
   unsubscribeQueue?.();
+
   unsubscribeConnection = null;
   unsubscribeQueue = null;
-  syncPromise = null;
+
+  if (retryTimer) {
+    clearTimeout(retryTimer);
+    retryTimer = null;
+  }
 }

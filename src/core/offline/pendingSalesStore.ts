@@ -1,182 +1,413 @@
 import { ObservableStore } from "../store/ObservableStore";
-import { PendingSale, QueuedSalePayment } from "./PendingSale";
+import type {
+  PendingSale,
+  QueuedSalePayment
+} from "./PendingSale";
 import { PendingSaleRepository } from "../../infrastructure/di/repositories/PendingSaleRepository";
-import { CreateSaleInput } from "../engines/SalesEngine";
-import { getCurrentBranchId, requireCurrentBusinessId } from "../../infrastructure/supabase/supabaseClient";
+import type {
+  CreateSaleInput
+} from "../engines/SalesEngine";
+import {
+  getCurrentBranchId,
+  requireCurrentBusinessId
+} from "../../infrastructure/supabase/supabaseClient";
 
-const repository = new PendingSaleRepository();
+const repository =
+  new PendingSaleRepository();
 
 export interface PendingSalesSnapshot {
   readonly items: PendingSale[];
-  /** false hasta que se hace la primera lectura de IndexedDB al arrancar. */
   readonly loaded: boolean;
 }
 
-const EMPTY_SNAPSHOT: PendingSalesSnapshot = { items: [], loaded: false };
+const EMPTY_SNAPSHOT:
+  PendingSalesSnapshot = {
+    items: [],
+    loaded: false
+  };
 
 /**
- * pendingSalesStore
- * ---------------------------------------------------------------------------
- * Parte 2 del plan de ventas offline: capa reactiva (ObservableStore, igual
- * que productCatalogStore sobre InventoryEngine) sobre PendingSaleRepository.
- * La Parte 3 (processSale offline) llama a `enqueue()`, la Parte 4
- * (sincronización) usa `list()`/`markSyncing()`/`markFailed()`/`remove()`,
- * y la Parte 5 (banner del cajero) lee el snapshot para saber cuántas
- * ventas faltan por sincronizar sin tener que preguntar a IndexedDB cada
- * vez que se pinta la pantalla.
+ * Cola reactiva de ventas offline.
  *
- * Se auto-hidrata al importarse el módulo (igual que connectionStore):
- * si el cajero cerró la pestaña con ventas pendientes, el contador
- * arranca mostrando el número correcto desde el primer render.
+ * La persistencia real pertenece a PendingSaleRepository. Este store
+ * solamente mantiene una copia reactiva para los consumidores de la UI
+ * y para el servicio de sincronización.
  */
 class PendingSalesStore extends ObservableStore<PendingSalesSnapshot> {
   constructor() {
-    super(EMPTY_SNAPSHOT);
-    if (typeof indexedDB !== "undefined") {
+    super(
+      EMPTY_SNAPSHOT
+    );
+
+    /*
+     * Durante SSR/tests IndexedDB puede no existir.
+     * En navegador se hidrata automáticamente.
+     */
+    if (
+      typeof indexedDB !==
+      "undefined"
+    ) {
       void this.refresh();
     }
   }
 
+  /**
+   * Recarga completamente el snapshot desde la persistencia local.
+   */
   async refresh(): Promise<void> {
-    const items = await repository.findAll();
-    this.publish({ items, loaded: true });
+    const items =
+      await repository.findAll();
+
+    this.publish({
+      items,
+      loaded: true
+    });
   }
 
-  /** Vuelve a leer directamente de la cola persistida para obtener solo las ventas pendientes. */
+  /**
+   * Devuelve directamente las ventas disponibles para sincronización.
+   *
+   * Se consulta el repositorio en lugar del snapshot para evitar utilizar
+   * datos potencialmente antiguos cuando el proceso de sincronización
+   * empieza.
+   */
   async findSyncable(): Promise<PendingSale[]> {
     return repository.findSyncable();
   }
 
   /**
-   * Guarda una venta cobrada offline en la cola local. Llamar UNA sola
-   * vez por intento de cobro offline — `createSaleInput.id` es la misma
-   * clave de idempotencia que ya viaja hasta SalesEngine.createSale(),
-   * así que reintentar el mismo cobro (mismo id) sobrescribe el mismo
-   * registro en vez de duplicarlo en la cola.
+   * Encola una operación offline.
+   *
+   * La clave del registro y createSaleInput.id son exactamente la misma.
+   * Esto evita que un mismo intento de venta genere dos registros locales.
    */
-  async enqueue(params: {
-    createSaleInput: CreateSaleInput;
-    payment?: QueuedSalePayment;
-    cashierName?: string;
-  }): Promise<PendingSale> {
-    if (!params.createSaleInput.id) {
+  async enqueue(
+    params: {
+      createSaleInput: CreateSaleInput;
+      payment?: QueuedSalePayment;
+      cashierName?: string;
+    }
+  ): Promise<PendingSale> {
+    const saleId =
+      params.createSaleInput.id;
+
+    if (
+      !saleId ||
+      !saleId.trim()
+    ) {
       throw new Error(
-        "PENDING_SALE_REQUIRES_ID: createSaleInput.id es obligatorio para encolar una venta offline (es la clave de idempotencia, ver checklist crítico #4)."
+        "PENDING_SALE_REQUIRES_ID: createSaleInput.id es obligatorio para encolar una venta offline (es la clave de idempotencia)."
       );
     }
 
-    const existing = await repository.findById(params.createSaleInput.id);
+    const existing =
+      await repository.findById(
+        saleId
+      );
 
-    const pendingSale: PendingSale = {
-      id: params.createSaleInput.id,
-      createSaleInput: params.createSaleInput,
-      payment: params.payment ?? existing?.payment,
-      cashierName: params.cashierName ?? existing?.cashierName,
-      status: "PENDING_SYNC",
-      queuedAt: existing?.queuedAt ?? new Date(),
-      attempts: existing?.attempts ?? 0,
-      lastAttemptAt: existing?.lastAttemptAt,
-      lastError: existing?.lastError,
-      businessId: requireCurrentBusinessId(),
-      branchId: getCurrentBranchId() ?? ""
-    };
+    const businessId =
+      requireCurrentBusinessId();
 
-    await repository.save(pendingSale);
+    const branchId =
+      getCurrentBranchId();
+
+    if (!branchId) {
+      throw new Error(
+        "CONTEXT_MISMATCH: no existe una sucursal activa para guardar la venta offline."
+      );
+    }
+
+    /*
+     * Si el registro ya existe, conservamos:
+     * - queuedAt
+     * - attempts
+     * - último intento
+     * - errores anteriores
+     *
+     * Esto es importante para que repetir enqueue() no resetee el estado
+     * de idempotencia de la operación.
+     */
+    const pendingSale:
+      PendingSale = {
+        id:
+          saleId,
+
+        createSaleInput:
+          params.createSaleInput,
+
+        payment:
+          params.payment ??
+          existing?.payment,
+
+        cashierName:
+          params.cashierName ??
+          existing?.cashierName,
+
+        status:
+          "PENDING_SYNC",
+
+        queuedAt:
+          existing?.queuedAt ??
+          new Date(),
+
+        attempts:
+          existing?.attempts ??
+          0,
+
+        lastAttemptAt:
+          existing?.lastAttemptAt,
+
+        lastError:
+          existing?.lastError,
+
+        businessId,
+
+        branchId
+      };
+
+    await repository.save(
+      pendingSale
+    );
+
     await this.refresh();
 
     return pendingSale;
   }
 
-  /** Antes de reintentar contra el servidor (Parte 4): marca "sincronizando" y suma un intento. */
-  async markSyncing(id: string): Promise<boolean> {
-    const current = await repository.findById(id);
-    if (!current) return false;
+  /**
+   * Marca una operación como actualmente sincronizándose.
+   *
+   * El incremento del contador ocurre antes de ejecutar la petición remota.
+   * Si el navegador muere durante la petición, recoverStuckSyncing() podrá
+   * devolverla al estado PENDING_SYNC.
+   */
+  async markSyncing(
+    id: string
+  ): Promise<boolean> {
+    const current =
+      await repository.findById(
+        id
+      );
+
+    if (!current) {
+      return false;
+    }
 
     await repository.update({
       ...current,
-      status: "SYNCING",
-      attempts: current.attempts + 1,
-      lastAttemptAt: new Date()
+
+      status:
+        "SYNCING",
+
+      attempts:
+        current.attempts + 1,
+
+      lastAttemptAt:
+        new Date()
     });
+
     await this.refresh();
+
     return true;
   }
 
-  /** El intento de sincronización falló: registra el motivo y la saca del ciclo automático. */
-  async markFailed(id: string, error: string): Promise<void> {
-    const current = await repository.findById(id);
-    if (!current) return;
+  /**
+   * Marca un fallo genérico.
+   *
+   * Se mantiene el registro local para que no desaparezca información de
+   * una operación cuyo estado remoto necesita investigación.
+   */
+  async markFailed(
+    id: string,
+    error: string
+  ): Promise<void> {
+    const current =
+      await repository.findById(
+        id
+      );
+
+    if (!current) {
+      return;
+    }
 
     await repository.update({
       ...current,
-      status: "FAILED",
-      lastError: error,
-      lastAttemptAt: new Date()
+
+      status:
+        "FAILED",
+
+      lastError:
+        error,
+
+      lastAttemptAt:
+        new Date()
     });
+
     await this.refresh();
   }
 
-  /** Error permanente de negocio: ya no se reintentará automáticamente. */
-  async markPermanentFailure(id: string, error: string): Promise<void> {
-    const current = await repository.findById(id);
-    if (!current) return;
+  /**
+   * Marca un error de negocio que no debe reintentarse automáticamente.
+   *
+   * Ejemplos:
+   * - producto eliminado;
+   * - permisos insuficientes;
+   * - contexto incorrecto;
+   * - stock insuficiente;
+   * - datos inválidos.
+   */
+  async markPermanentFailure(
+    id: string,
+    error: string
+  ): Promise<void> {
+    const current =
+      await repository.findById(
+        id
+      );
+
+    if (!current) {
+      return;
+    }
 
     await repository.update({
       ...current,
-      status: "PERMANENT_FAILURE",
-      lastError: error,
-      lastAttemptAt: new Date()
+
+      status:
+        "PERMANENT_FAILURE",
+
+      lastError:
+        error,
+
+      lastAttemptAt:
+        new Date()
     });
+
     await this.refresh();
   }
 
-  /** Vuelve a dejarla disponible para el próximo ciclo de sincronización (ej. reintento manual). */
-  async requeue(id: string): Promise<void> {
-    const current = await repository.findById(id);
-    if (!current) return;
+  /**
+   * Devuelve una operación al ciclo automático.
+   *
+   * Se utiliza para errores temporales como pérdida de conexión.
+   */
+  async requeue(
+    id: string
+  ): Promise<void> {
+    const current =
+      await repository.findById(
+        id
+      );
 
-    await repository.update({ ...current, status: "PENDING_SYNC" });
+    if (!current) {
+      return;
+    }
+
+    await repository.update({
+      ...current,
+
+      status:
+        "PENDING_SYNC"
+    });
+
     await this.refresh();
   }
 
-  /** La venta ya se sincronizó de verdad contra Supabase: sale de la cola para siempre. */
-  async remove(id: string): Promise<void> {
-    await repository.delete(id);
-    await this.refresh();
-  }
-
-  /** Vuelve a poner en cola las ventas que quedaron en SYNCING por un cierre/recarga abrupta. */
-  async recoverStuckSyncing(): Promise<void> {
-    const items = await repository.findAll();
-    const stuck = items.filter((sale) => sale.status === "SYNCING");
-
-    if (stuck.length === 0) return;
-
-    await Promise.all(
-      stuck.map((sale) => repository.update({ ...sale, status: "PENDING_SYNC" }))
+  /**
+   * Elimina una venta únicamente después de haber completado correctamente
+   * la sincronización remota.
+   */
+  async remove(
+    id: string
+  ): Promise<void> {
+    await repository.delete(
+      id
     );
 
     await this.refresh();
   }
 
-  /** Ventas que siguen esperando turno para sincronizarse (no las que ya están en curso). */
-  syncable(): PendingSale[] {
-    return this.snapshot.items.filter((sale) => sale.status === "PENDING_SYNC");
+  /**
+   * Recupera operaciones que quedaron en SYNCING por:
+   *
+   * - cierre del navegador;
+   * - pérdida de energía;
+   * - refresh;
+   * - crash de JavaScript.
+   *
+   * No se elimina ninguna operación.
+   */
+  async recoverStuckSyncing(): Promise<void> {
+    const items =
+      await repository.findAll();
+
+    const stuck =
+      items.filter(
+        (sale) =>
+          sale.status ===
+          "SYNCING"
+      );
+
+    if (
+      stuck.length === 0
+    ) {
+      return;
+    }
+
+    await Promise.all(
+      stuck.map(
+        (sale) =>
+          repository.update({
+            ...sale,
+
+            status:
+              "PENDING_SYNC"
+          })
+      )
+    );
+
+    await this.refresh();
   }
 
+  /**
+   * Devuelve únicamente operaciones que esperan sincronización.
+   */
+  syncable(): PendingSale[] {
+    return this.snapshot.items.filter(
+      (sale) =>
+        sale.status ===
+        "PENDING_SYNC"
+    );
+  }
+
+  /**
+   * Devuelve el snapshot actual en memoria.
+   */
   list(): PendingSale[] {
     return this.snapshot.items;
   }
 
-  /** Cuántas ventas hay en la cola en total (para el banner de la Parte 5). */
+  /**
+   * Cantidad total de registros almacenados.
+   *
+   * Incluye FAILED y PERMANENT_FAILURE para que la UI pueda mostrar que
+   * existe trabajo que requiere revisión.
+   */
   count(): number {
     return this.snapshot.items.length;
   }
 
+  /**
+   * Vacía completamente la cola.
+   *
+   * Debe utilizarse únicamente desde una operación administrativa
+   * deliberada, nunca después de una sincronización individual.
+   */
   async clear(): Promise<void> {
     await repository.clear();
+
     await this.refresh();
   }
 }
 
-export const pendingSalesStore = new PendingSalesStore();
+export const pendingSalesStore =
+  new PendingSalesStore();

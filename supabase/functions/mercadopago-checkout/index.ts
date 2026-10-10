@@ -45,11 +45,11 @@ type Plan = "monthly" | "yearly";
 // Espejo de COUNTRY_PRICE_MAP en src/core/entities/SubscriptionTypes.ts
 // para los 5 países donde Mercado Pago está habilitado (CO, AR, CL, MX, PE).
 const PLAN_PRICE_BY_COUNTRY: Record<string, Record<Plan, number>> = {
-  CO: { monthly: 79000, yearly: 799000 },
-  AR: { monthly: 89999, yearly: 899999 },
-  CL: { monthly: 14990, yearly: 149900 },
-  MX: { monthly: 1499, yearly: 14990 },
-  PE: { monthly: 149, yearly: 1490 }
+  CO: { monthly: 59900, yearly: 718800 },
+  AR: { monthly: 89999, yearly: 1079988 },
+  CL: { monthly: 14990, yearly: 179880 },
+  MX: { monthly: 1499, yearly: 17988 },
+  PE: { monthly: 149, yearly: 1788 }
 };
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");

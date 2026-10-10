@@ -4,6 +4,8 @@ import { Rocket, Loader2, CheckCircle2 } from "lucide-react";
 import { VimdyCard } from "../ui/VimdyCard";
 import { VimdyButton } from "../ui/VimdyButton";
 import { useAuth } from "../../context/AuthContext";
+import { container } from "../../../infrastructure/di/CompositionRoot";
+import { translateBusinessError } from "../../../core/errors/translateBusinessError";
 
 interface Particle {
   id: number;
@@ -27,11 +29,36 @@ function createParticles(count: number): Particle[] {
   }));
 }
 
-export function FinalStep() {
+interface FinalStepProps {
+  onAddProduct: () => void;
+}
+
+export function FinalStep({ onAddProduct }: FinalStepProps) {
   const { completeOnboarding } = useAuth();
   const [finishing, setFinishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [checkingProducts, setCheckingProducts] = useState(true);
+  const [hasActiveProduct, setHasActiveProduct] = useState(false);
   const [particles] = useState(() => createParticles(40));
+
+  useEffect(() => {
+    let mounted = true;
+
+    void container.inventoryEngine.get().listAll()
+      .then((products) => {
+        if (mounted) setHasActiveProduct(products.some((product) => product.active !== false));
+      })
+      .catch(() => {
+        if (mounted) setError("No se pudo comprobar el inventario. Intenta de nuevo.");
+      })
+      .finally(() => {
+        if (mounted) setCheckingProducts(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     const styleId = "confetti-keyframes";
@@ -60,10 +87,30 @@ export function FinalStep() {
     try {
       await completeOnboarding();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "No se pudo terminar la configuración.";
+      const message = translateBusinessError(err, "No se pudo terminar la configuración.");
+      if (err instanceof Error && err.message.includes("ONBOARDING_PRODUCT_REQUIRED")) {
+        setHasActiveProduct(false);
+      }
       setError(message);
       setFinishing(false);
     }
+  }
+
+  if (checkingProducts) {
+    return <p className="text-vimdy-small text-vimdy-text-secondary">Comprobando productos...</p>;
+  }
+
+  if (!hasActiveProduct) {
+    return (
+      <div className="w-full max-w-md mx-auto text-center">
+        <h2 className="text-vimdy-h2 text-vimdy-text mb-2">Falta un producto activo</h2>
+        <p className="text-vimdy-small text-vimdy-text-secondary mb-5">
+          Crea al menos un producto activo antes de terminar la configuración.
+        </p>
+        {error && <p className="text-vimdy-small text-vimdy-danger mb-4">{error}</p>}
+        <VimdyButton onClick={onAddProduct}>Agregar producto</VimdyButton>
+      </div>
+    );
   }
 
   return (

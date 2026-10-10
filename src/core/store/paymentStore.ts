@@ -49,10 +49,15 @@ export interface PaymentState {
   priority: OrderPriority;
 
   // Paso 7 — botón Cobrar inteligente: si el cajero marca que esta venta
-  // necesita factura, el botón final cambia de "Cobrar" a "Pagar y
-  // facturar". Por ahora es solo una señal de UI (no hay InvoiceEngine
+  // necesita factura, el botón final cambia de "Cobrar" a
+  // "Pagar y facturar". Por ahora es solo una señal de UI (no hay InvoiceEngine
   // todavía); cuando exista, este flag es lo que lo dispara.
   requiresInvoice: boolean;
+
+  // POS externo: si es true, se crea un checkout de Wompi en vez de pedir
+  // referencia manual. El pago queda PENDING_VERIFICATION hasta que el webhook
+  // confirme.
+  useWompiCheckout: boolean;
 }
 
 const INITIAL_STATE: PaymentState = {
@@ -75,7 +80,8 @@ const INITIAL_STATE: PaymentState = {
   mixedTransfer: 0,
   notes: "",
   priority: "NORMAL",
-  requiresInvoice: false
+  requiresInvoice: false,
+  useWompiCheckout: false,
 };
 
 class PaymentStore extends ObservableStore<PaymentState> {
@@ -93,8 +99,9 @@ class PaymentStore extends ObservableStore<PaymentState> {
     return this.snapshot;
   }
 
-  setMethod(method: PaymentMethod) {
+   setMethod(method: PaymentMethod) {
     this.state.method = method;
+    this.state.useWompiCheckout = false;
 
     if (method !== "cash") {
       this.state.received = Math.max(this.state.total, 0);
@@ -185,6 +192,11 @@ class PaymentStore extends ObservableStore<PaymentState> {
 
   setRequiresInvoice(value: boolean) {
     this.state.requiresInvoice = value;
+    this.sync();
+  }
+
+  setUseWompiCheckout(value: boolean) {
+    this.state.useWompiCheckout = value;
     this.sync();
   }
 

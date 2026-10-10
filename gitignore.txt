@@ -1,0 +1,57 @@
+# Dependencies / build outputs
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+.vite/
+.cache/
+# Environment and local secrets
+.env
+.env.*
+!.env.example
+!.env.template
+docker.env
+*.pem
+*.key
+# Local Supabase state / credentials / generated metadata
+.supabase/
+supabase/.temp/
+supabase/.branches/
+supabase/.env.local
+supabase/.env.*.local
+src/.temp/
+# Local repair / debug clones
+caja_repair_temp/
+vimdy_migration_cleanup_*/
+vimdy-audit/
+# Logs and tool output
+*.log
+npm-debug.log*
+.playwright-mcp/
+playwright-screenshots/
+/console_messages.txt
+/build-*.txt
+/out.txt
+/test-output.txt
+/tsc-*.txt
+/null
+/%SystemDrive%/
+# Root-level screenshots and previews (assets live in public/ or src/)
+/*.png
+/demo-fondo-snapshot.yml
+# Editor / OS artifacts
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+# Release staging
+.release/
+.release-*/
+# Vercel CLI (contiene VERCEL_OIDC_TOKEN)
+.vercel/
+# TypeScript
+*.tsbuildinfo
+
+# Legacy config sample file; .env.example is the only supported template
+env.example.txt

@@ -1,0 +1,41 @@
+# VIMDY OS production release denylist.
+# The packaging script is fail-closed and independently enforces these rules.
+
+.env
+.env.*
+!.env.example
+!.env.template
+docker.env
+test-key.pem
+*.pem
+*.key
+
+.git/
+.vercel/
+node_modules/
+dist/
+tests/
+coverage/
+playwright-report/
+playwright-screenshots/
+test-results/
+.cache/
+.temp/
+supabase/.temp/
+caja_repair_temp/
+vimdy-audit/
+vimdy_migration_cleanup_*/
+%SystemDrive%/
+
+# Local/editor/system noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+# Additional fail-closed exclusions for local state and duplicate config samples
+.playwright-mcp/
+src/.temp/
+env.example.txt
+*.log
+*.p12
+*.pfx

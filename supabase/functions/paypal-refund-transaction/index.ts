@@ -193,69 +193,152 @@ Deno.serve(async (req: Request) => {
     // 4) El monto a reembolsar viene en la MISMA unidad que
     //    subscription_payments.amount. Si no se especifica, se reembolsa
     //    el monto total original de la fila, no lo que el cliente diga.
-    const refundAmount = payload.amount ?? Number(paymentRow.amount);
+        const refundAmount = payload.amount ?? Number(paymentRow.amount);
     if (refundAmount > Number(paymentRow.amount) + 0.01) {
       return json({ error: "AMOUNT_EXCEEDS_ORIGINAL: el reembolso no puede superar lo pagado." }, 400);
     }
 
+    // A6.9: la idempotency key la envia el caller y se conserva entre
+    // reintentos del MISMO intento. No se deriva de payment+amount porque dos
+    // refunds legitimos sobre el mismo saldo colisionarian y el segundo
+    // devolveria en silencio el refund anterior. Mismo criterio que valida la
+    // RPC (1..200 chars).
+    const idempotencyKey = typeof payload.idempotencyKey === "string"
+      ? payload.idempotencyKey.trim()
+      : "";
+    if (idempotencyKey.length < 1 || idempotencyKey.length > 200) {
+      return json({
+        error: "IDEMPOTENCY_KEY_REQUIRED: envia idempotencyKey estable para este intento de reembolso (1..200 chars) y reusala en los reintentos."
+      }, 400);
+    }
+
+    // Paso 1: reservar saldo en server ANTES de llamar al proveedor. Si
+    // PayPal rechaza, hay que cerrar el refund como 'failed' para liberar la
+    // reserva; si el resultado es ambiguo, se queda 'pending'.
+    const { data: refundRequest, error: refundRequestError } = await admin.rpc(
+      "request_subscription_refund_atomic",
+      {
+        p_subscription_payment_id: paymentRow.id,
+        p_amount: refundAmount,
+        p_idempotency_key: idempotencyKey,
+        p_reason: payload.reason ?? "Refund solicitado por admin",
+        p_actor_id: authUser.id
+      }
+    );
+
+    if (refundRequestError) {
+      return json({ error: "REFUND_REQUEST_FAILED", detail: refundRequestError.message }, 400);
+    }
+
+    const requestResult = refundRequest as {
+      success?: boolean;
+      idempotent?: boolean;
+      refund?: { id?: string; status?: string };
+    };
+
+    if (requestResult.idempotent && requestResult.refund?.status === "confirmed") {
+      return json({ ok: true, idempotent: true, refund: { id: requestResult.refund.id, status: "confirmed" } });
+    }
+
+    const refundId = requestResult.refund?.id;
+    if (!refundId) {
+      return json({ error: "REFUND_REQUEST_FAILED", detail: "no se obtuvo refundId" }, 500);
+    }
+
     // 5) Reembolsar en PayPal con el client secret — esto es lo único que
     //    este endpoint le agrega a la operación (el navegador no puede
-    //    hacerlo).
+    //    hacerlo). El PayPal-Request-Id usa la MISMA key del caller, asi el
+    //    provider deduplica el mismo intento.
     const accessToken = await getPayPalAccessToken();
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15_000);
-    const paypalResponse = await fetch(
-      `${resolvePayPalApiBase()}/v2/payments/captures/${paymentRow.paypal_capture_id}/refund`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-          "PayPal-Request-Id": `refund-${paymentRow.id}`
-        },
-        body: JSON.stringify({
-          amount: { value: refundAmount.toFixed(2), currency_code: paymentRow.currency },
-          note_to_payer: payload.reason?.slice(0, 255)
-        }),
-        signal: controller.signal
-      }
-    );
-    clearTimeout(timeoutId);
+    let paypalResponse: Response;
+    try {
+      paypalResponse = await fetch(
+        `${resolvePayPalApiBase()}/v2/payments/captures/${paymentRow.paypal_capture_id}/refund`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+            "PayPal-Request-Id": idempotencyKey
+          },
+          body: JSON.stringify({
+            amount: { value: refundAmount.toFixed(2), currency_code: paymentRow.currency },
+            note_to_payer: payload.reason?.slice(0, 255)
+          }),
+          signal: controller.signal
+        }
+      );
+    } catch (providerError) {
+      // Timeout / error de red: PayPal pudo procesar el refund. NO se marca
+      // 'failed' a ciegas: queda 'pending' para reconciliacion.
+      return json({
+        error: "PAYPAL_REFUND_UNKNOWN",
+        detail: "No se pudo confirmar el resultado con PayPal. El refund queda pendiente de reconciliacion.",
+        refundId,
+        idempotencyKey
+      }, 502);
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     const refundBody = (await paypalResponse.json()) as PayPalRefundApiResponse;
+    const providerReference = refundBody.id != null ? String(refundBody.id) : null;
 
     if (!paypalResponse.ok) {
+      // Rechazo explicito: se cierra el refund y se libera la reserva.
+      await admin.rpc("settle_subscription_refund_atomic", {
+        p_refund_id: refundId,
+        p_status: "failed",
+        p_provider_reference: providerReference,
+        p_now: new Date().toISOString()
+      });
       return json(
         { error: "PAYPAL_REFUND_REJECTED", detail: refundBody.message ?? `PayPal respondió HTTP ${paypalResponse.status}.` },
         502
       );
     }
 
-    // 6) El reembolso en PayPal quedó "COMPLETED" o "PENDING" (revisión de
-    //    PayPal, poco común). En ambos casos ya se movió/se moverá dinero
-    //    de verdad, así que se refleja en nuestro histórico usando la función
-    //    SQL server-side.
-    const { data: refundResult, error: refundError } = await admin.rpc(
-      "refund_subscription_payment_server_side",
+    // 6) PayPal devuelve COMPLETED o PENDING. COMPLETED confirma; PENDING queda
+    //    abierto para reconciliacion. Ninguno marca 'failed'.
+    const paypalStatus = String(refundBody.status ?? "PENDING").toUpperCase();
+    const settleStatus = paypalStatus === "COMPLETED" ? "confirmed" : "pending";
+
+    const { data: settleResult, error: settleError } = await admin.rpc(
+      "settle_subscription_refund_atomic",
       {
-        p_payment_id: paymentRow.id,
-        p_refund_amount: refundAmount,
-        p_provider_refund_id: refundBody.id ?? "",
+        p_refund_id: refundId,
+        p_status: settleStatus,
+        p_provider_reference: providerReference,
         p_now: new Date().toISOString()
       }
     );
 
-    if (refundError) {
-      return json({ error: "REFUND_UPDATE_FAILED", detail: refundError.message }, 500);
+    if (settleError) {
+      return json({ error: "REFUND_SETTLE_FAILED", detail: settleError.message, refundId }, 500);
     }
 
-    const result = refundResult as {
-      ok: boolean;
-      is_total_refund: boolean;
-      new_payment_status: string;
+    const settled = settleResult as {
+      status?: string;
+      paymentStatus?: string;
+      refundedAmount?: number;
     };
 
-    return json({ ok: true, refund: refundBody, isTotalRefund: result.is_total_refund });
+    return json({
+      ok: true,
+      refund: {
+        id: refundId,
+        providerReference,
+        status: settleStatus,
+        providerStatus: paypalStatus,
+        amount: refundAmount,
+        paymentStatus: settled.paymentStatus,
+        refundedAmount: settled.refundedAmount,
+        raw: refundBody
+      },
+      isTotalRefund: settled.paymentStatus === "refunded"
+    });
   } catch (error) {
     return json({ error: "PAYPAL_REFUND_FAILED", detail: String(error) }, 500);
   }

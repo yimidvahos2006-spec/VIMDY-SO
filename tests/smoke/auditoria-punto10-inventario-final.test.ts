@@ -54,13 +54,13 @@ import { FakeProductRepository } from "../fakes/FakeProductRepository";
 import { getStockStatus } from "../../src/core/utils/productStockStatus";
 
 function buildNegocio() {
-  const products = new FakeProductRepository();
+  const movements = new InMemoryMovementRepository();
+  const products = new FakeProductRepository(movements);
   const sales = new InMemoryRepository<Sale>("sales");
   const receipts = new InMemoryRepository("receipts");
   const kitchenOrders = new InMemoryRepository<KitchenOrder>("kitchen_orders");
   const cashMovements = new InMemoryRepository<CashMovement>("cash_movements");
   const customers = new InMemoryRepository("customers");
-  const movements = new InMemoryMovementRepository();
   const auditLogs = new InMemoryRepository("audit_logs");
   const categories = new InMemoryRepository<Category>("categories");
 

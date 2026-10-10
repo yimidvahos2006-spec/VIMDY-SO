@@ -1,7 +1,0 @@
-- generic [ref=e4]:
-  - heading "Fondo animado de partículas VIMDY" [level=1] [ref=e10]:
-    - generic [ref=e11]: Fondo animado
-    - generic [ref=e12]: de partículas VIMDY
-  - paragraph [ref=e13]: Miles de partículas luminosas forman y disuelven símbolos de la industria gastronómica — VIMDY, platos, cubiertos, mesas y más — en un ciclo continuo de aproximadamente 5 segundos cada figura.
-  - link "Contactar a VIMDY" [ref=e14] [cursor=pointer]:
-    - /url: /contacto

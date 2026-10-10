@@ -46,7 +46,7 @@ describe("InventoryEngine", () => {
         quantity: 4,
         performedBy: "actor"
       });
-      await expect(engine.produceBatch("product-1", 0)).rejects.toThrow("INVALID_PRODUCTION_QUANTITY");
+      await expect(engine.produceBatch("product-1", 0)).rejects.toThrow("INVALID_QUANTITY");
     } finally {
       setCurrentBranchId(null);
     }

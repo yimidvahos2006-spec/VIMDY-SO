@@ -23,11 +23,11 @@ export class PaymentValidator {
     if (!input.businessType) {
       throw new Error("PaymentValidator: el tipo de negocio es obligatorio.");
     }
-    if (!input.plan) {
-      throw new Error("PaymentValidator: el plan es obligatorio.");
+    if (!input.plan || (input.plan !== "monthly" && input.plan !== "yearly")) {
+      throw new Error("PaymentValidator: el plan debe ser 'monthly' o 'yearly'.");
     }
-    if (typeof input.amount !== "number" || Number.isNaN(input.amount) || input.amount <= 0) {
-      throw new Error("PaymentValidator: el monto debe ser un número mayor a 0.");
+    if (input.amount !== undefined && (typeof input.amount !== "number" || Number.isNaN(input.amount) || input.amount <= 0)) {
+      throw new Error("PaymentValidator: si se envía un monto, debe ser un número mayor a 0.");
     }
   }
 }

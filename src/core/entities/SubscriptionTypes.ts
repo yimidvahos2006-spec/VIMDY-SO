@@ -93,8 +93,8 @@ export const SUBSCRIPTION_PLANS: PlanDefinition[] = [
   {
     id: "monthly",
     name: "Plan Mensual",
-    price: 89,
-    currency: "USD",
+    price: 59900,
+    currency: "COP",
     billingLabel: "Facturación mensual",
     features: [
       "Todas las funciones de VIMDY incluidas",
@@ -106,31 +106,30 @@ export const SUBSCRIPTION_PLANS: PlanDefinition[] = [
   {
     id: "yearly",
     name: "Plan Anual",
-    price: 899,
-    currency: "USD",
+    price: 718800,
+    currency: "COP",
     billingLabel: "Facturación anual",
-    highlight: "Ahorra $149.000",
     features: [
       "Todas las funciones de VIMDY incluidas",
       "Soporte prioritario por WhatsApp",
       "Actualizaciones automáticas",
       "Acceso completo a POS, inventario, reportes y más",
-      "$149.000 de ahorro frente al plan mensual"
+      "Cobro anual sin descuento implícito: 12 × precio mensual"
     ]
   }
 ];
 
 const COUNTRY_PRICE_MAP: Record<string, Record<"monthly" | "yearly", number>> = {
-  CO: { monthly: 79000, yearly: 799000 },
-  US: { monthly: 89, yearly: 899 },
-  MX: { monthly: 1499, yearly: 14990 },
-  PE: { monthly: 149, yearly: 1490 },
-  CL: { monthly: 14990, yearly: 149900 },
-  AR: { monthly: 89999, yearly: 899999 },
-  EC: { monthly: 59, yearly: 599 },
-  PA: { monthly: 69, yearly: 699 },
-  VE: { monthly: 49, yearly: 499 },
-  ES: { monthly: 69, yearly: 699 }
+  CO: { monthly: 59900, yearly: 718800 },
+  US: { monthly: 89, yearly: 1068 },
+  MX: { monthly: 1499, yearly: 17988 },
+  PE: { monthly: 149, yearly: 1788 },
+  CL: { monthly: 14990, yearly: 179880 },
+  AR: { monthly: 89999, yearly: 1079988 },
+  EC: { monthly: 59, yearly: 708 },
+  PA: { monthly: 69, yearly: 828 },
+  VE: { monthly: 49, yearly: 588 },
+  ES: { monthly: 69, yearly: 828 }
 };
 
 export function getPlanPrice(planId: "monthly" | "yearly", countryCode: string): number {

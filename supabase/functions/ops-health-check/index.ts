@@ -28,14 +28,20 @@
 // Sin uno de los dos, esta función solo corre si alguien la llama a mano.
 //
 // CONFIGURACIÓN REQUERIDA:
-//   supabase secrets set OPS_SECRET=<cadena larga aleatoria>
-//   supabase secrets set OPS_WEBHOOK_URL=<tu webhook de Slack/Discord>
+//   - La clave API secreta `vimdy_backend_rotation_20261009` debe existir en
+//     Settings -> API Keys del proyecto Supabase. Se lee desde la variable
+//     administrada SUPABASE_SECRET_KEYS; no debe copiarse al código.
+//   - OPS_SECRET=<cadena larga aleatoria>
+//   - OPS_WEBHOOK_URL=<tu webhook de Slack/Discord>
+//   - Para desarrollo local solamente: VIMDY_SUPABASE_SECRET_KEY en un archivo
+//     local ignorado por Git. Nunca usar el archivo local en producción.
 //
 // Despliegue:
 //   supabase functions deploy ops-health-check --no-verify-jwt
 // ============================================================================
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { getSupabaseAdminKey } from "../_shared/supabaseAdminKey.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -54,7 +60,7 @@ const OPS_ERROR_THRESHOLD = 5; // más de 5 errores reales en 15 min = algo se e
 const OPS_STUCK_PAYMENT_HOURS = 6; // payments-reconcile ya corre cada 10 min; si sigue pending 6h, algo falló en serio
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
-const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+const SUPABASE_ADMIN_KEY = getSupabaseAdminKey();
 const OPS_SECRET = Deno.env.get("OPS_SECRET");
 const OPS_WEBHOOK_URL = Deno.env.get("OPS_WEBHOOK_URL");
 
@@ -88,7 +94,7 @@ Deno.serve(async (req: Request) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !OPS_SECRET) {
+  if (!SUPABASE_URL || !SUPABASE_ADMIN_KEY || !OPS_SECRET) {
     return json({ error: "SERVER_CONFIG_MISSING" }, 500);
   }
 
@@ -96,7 +102,27 @@ Deno.serve(async (req: Request) => {
     return json({ error: "UNAUTHORIZED" }, 401);
   }
 
-  const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+  // Supabase's new sb_secret_* API keys must be sent only in the `apikey`
+  // header. supabase-js may otherwise attach the supplied key as
+  // `Authorization: Bearer ...`, which is interpreted as a JWT and rejected.
+  // Keep all other query behavior from supabase-js, but remove Authorization
+  // on outgoing requests from this admin-only database client.
+  const admin = createClient(SUPABASE_URL, SUPABASE_ADMIN_KEY, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false
+    },
+    global: {
+      fetch: (input: RequestInfo | URL, init?: RequestInit) => {
+        const inputHeaders = input instanceof Request ? input.headers : undefined;
+        const headers = new Headers(init?.headers ?? inputHeaders);
+        headers.set("apikey", SUPABASE_ADMIN_KEY);
+        headers.delete("authorization");
+        return fetch(input, { ...init, headers });
+      }
+    }
+  });
   const problems: string[] = [];
 
   // ---- 1. Errores recientes -------------------------------------------

@@ -74,6 +74,8 @@ const CODE_MESSAGES: Record<string, (detail: string) => string> = {
   },
   PRODUCT_NOT_FOUND: () =>
     "Este producto ya no existe (puede que otro usuario lo haya eliminado).",
+  ONBOARDING_PRODUCT_REQUIRED: () =>
+    "Crea al menos un producto activo antes de terminar la configuración.",
   SUPABASE_ADJUST_STOCK_FAILED: () => "No se pudo actualizar el stock. Intenta de nuevo.",
 
   // Turno de caja
@@ -114,6 +116,7 @@ const CODE_MESSAGES: Record<string, (detail: string) => string> = {
 
   // Usuarios, roles y permisos
   ACCESS_DENIED: () => "No tienes permiso para hacer esto. Pide ayuda a un administrador.",
+  AUTH_USER_REQUIRED: () => "Inicia sesión de nuevo para agregar empleados.",
   EMAIL_ALREADY_IN_USE: (detail) =>
     detail || "Este correo ya está registrado. Usa otro correo o inicia sesión si ya tienes cuenta.",
   ROLE_ALREADY_EXISTS: (detail) => detail || "Ya existe un rol con ese identificador.",

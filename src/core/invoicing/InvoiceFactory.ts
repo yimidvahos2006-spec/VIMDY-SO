@@ -1,76 +1,206 @@
 /**
  * InvoiceFactory.ts
  * ---------------------------------------------------------------------------
- * Único lugar de todo VIMDY que sabe instanciar un proveedor concreto de
- * facturación electrónica. Agregar un proveedor nuevo en el futuro (Alegra,
- * Plemsi, u otro para México/Perú) es: crear su carpeta en providers/,
- * implementar IInvoiceProvider, y registrarlo en el switch de abajo. Ningún
- * otro archivo del sistema necesita cambiar.
+ * Punto único de resolución de proveedores de facturación electrónica.
  *
- * Mismo patrón que payments/PaymentFactory.ts, con una diferencia a
- * propósito: `resolve()` puede devolver `null`. Para pagos, todo negocio
- * SIEMPRE necesita un proveedor (no puede vender sin cobrar); para
- * facturación electrónica, `null` es el estado correcto y esperado para la
- * mayoría de los negocios de VIMDY — el resto del sistema (ReceiptEngine,
- * SalesEngine) debe tratar `null` como "sigue con el recibo normal, no
- * hagas nada más", nunca como un error.
+ * Regla arquitectónica:
+ * - La factoría NO conoce implementaciones concretas (FactusProvider/DianProvider).
+ * - Las implementaciones son construidas exclusivamente por CompositionRoot.
+ * - CompositionRoot inyecta un resolver lazy mediante configureInvoiceProviderResolver().
+ * - Los resultados expuestos por esta factoría al frontend pasan por una whitelist DTO
+ *   que elimina cualquier dato crudo del proveedor (`raw`, `raw_response`, etc.).
  */
 
-import type { IInvoiceProvider } from "./interfaces/IInvoiceProvider";
-import type { InvoiceProviderName } from "./types/invoice.types";
 import type { CountryCode } from "../config/globalization";
-import { FactusProvider } from "./providers/factus/FactusProvider";
-import { DianProvider } from "./providers/dian/DianProvider";
+import { companyConfigStore } from "../store/companyConfigStore";
+import type { IInvoiceProvider } from "./interfaces/IInvoiceProvider";
+import type { InvoiceResult } from "./models/InvoiceModels";
+import type { InvoiceProviderName } from "./types/invoice.types";
 
-/** Proveedores reales, es decir, todo InvoiceProviderName salvo "none". */
 type RealInvoiceProviderName = Exclude<InvoiceProviderName, "none">;
+
+type RuntimeElectronicInvoicing = {
+  enabled: boolean;
+  provider?: unknown;
+};
+
+export type FrontendInvoiceDTO = Omit<InvoiceResult, "raw">;
+
+export type InvoiceProviderResolver = (
+  provider: RealInvoiceProviderName
+) => IInvoiceProvider;
 
 const PROVIDER_COUNTRIES: Record<RealInvoiceProviderName, CountryCode[]> = {
   factus: ["CO"],
   dian: ["CO"]
 };
 
-export class InvoiceFactory {
-  private static instances: Partial<Record<RealInvoiceProviderName, IInvoiceProvider>> = {};
+let providerResolver: InvoiceProviderResolver | null = null;
 
+function normalizeCountry(country: CountryCode): CountryCode {
+  return country.trim().toUpperCase() as CountryCode;
+}
+
+function normalizeProvider(value: unknown): InvoiceProviderName {
+  if (value === "factus" || value === "dian") {
+    return value;
+  }
+
+  return "none";
+}
+
+function optionalText(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  return normalized ? normalized : undefined;
+}
+
+/**
+ * CompositionRoot llama esta función durante su inicialización para inyectar
+ * el resolver que conoce las implementaciones reales. La construcción queda
+ * fuera de esta capa y permanece lazy.
+ */
+export function configureInvoiceProviderResolver(
+  resolver: InvoiceProviderResolver
+): void {
+  providerResolver = resolver;
+}
+
+function requireProviderResolver(): InvoiceProviderResolver {
+  if (!providerResolver) {
+    throw new Error(
+      "INVOICE_FACTORY_NOT_CONFIGURED: CompositionRoot aún no registró el resolver fiscal."
+    );
+  }
+
+  return providerResolver;
+}
+
+/**
+ * Whitelist estricta de datos autorizados a cruzar hacia el frontend.
+ *
+ * Nunca se hace spread de InvoiceResult porque ese objeto puede contener `raw`
+ * con la respuesta original del proveedor fiscal. Todo campo retornado se
+ * enumera explícitamente en este DTO.
+ */
+export function frontendInvoice(
+  result: InvoiceResult
+): FrontendInvoiceDTO {
+  const id = result.id.trim();
+
+  if (!id) {
+    throw new Error("INVOICE_FRONTEND_DTO_ID_REQUIRED");
+  }
+
+  const createdAt = result.createdAt.trim();
+
+  if (!createdAt) {
+    throw new Error("INVOICE_FRONTEND_DTO_CREATED_AT_REQUIRED");
+  }
+
+  return {
+    id,
+    provider: result.provider,
+    status: result.status,
+    number: optionalText(result.number),
+    trackingCode: optionalText(result.trackingCode),
+    pdfUrl: optionalText(result.pdfUrl),
+    xmlUrl: optionalText(result.xmlUrl),
+    qrCode: optionalText(result.qrCode),
+    createdAt,
+    errorMessage: optionalText(result.errorMessage)
+  };
+}
+
+/**
+ * Decorador local que garantiza que ningún InvoiceResult crudo se entregue al
+ * consumidor de la factoría. El provider real sigue siendo propiedad del
+ * CompositionRoot; este adaptador solo controla el DTO de salida.
+ */
+function frontendSafeProvider(
+  provider: IInvoiceProvider
+): IInvoiceProvider {
+  return {
+    name: provider.name,
+
+    async createInvoice(request) {
+      const result = await provider.createInvoice(request);
+      return frontendInvoice(result);
+    },
+
+    async getInvoice(invoiceId) {
+      const result = await provider.getInvoice(invoiceId);
+      return frontendInvoice(result);
+    },
+
+    async cancelInvoice(invoiceId, reason) {
+      const result = await provider.cancelInvoice(invoiceId, reason);
+      return frontendInvoice(result);
+    },
+
+    supportsCountry(country) {
+      return provider.supportsCountry(country);
+    },
+
+    validateResponse(payload, signature) {
+      return provider.validateResponse(payload, signature);
+    }
+  };
+}
+
+export class InvoiceFactory {
   /**
-   * Punto de entrada real: dado lo que el negocio configuró en
-   * companyConfigStore (electronicInvoicing), devuelve el proveedor a usar
-   * o `null` si el negocio no factura electrónicamente. Nadie debe llamar
-   * a `create()` directamente sin pasar antes por acá.
+   * Resuelve el proveedor usando la configuración viva actual.
+   *
+   * Los argumentos legacy permanecen por compatibilidad con callers existentes,
+   * pero no sustituyen la configuración del negocio almacenada en el store.
    */
   static resolve(
-    electronicInvoicing: { enabled: boolean; provider: InvoiceProviderName },
-    country: CountryCode
+    _electronicInvoicing?: {
+      enabled: boolean;
+      provider: InvoiceProviderName;
+    },
+    _country?: CountryCode
   ): IInvoiceProvider | null {
-    if (!electronicInvoicing.enabled || electronicInvoicing.provider === "none") {
+    const currentConfig = companyConfigStore.get();
+    const electronicInvoicing =
+      currentConfig.electronicInvoicing as RuntimeElectronicInvoicing;
+
+    if (!electronicInvoicing.enabled) {
       return null;
     }
-    const provider = electronicInvoicing.provider as RealInvoiceProviderName;
-    if (!PROVIDER_COUNTRIES[provider]?.includes(country)) {
+
+    const provider = normalizeProvider(electronicInvoicing.provider);
+
+    if (provider === "none") {
       return null;
     }
-    return this.create(provider);
+
+    const country = normalizeCountry(currentConfig.country);
+    const supportedCountries = PROVIDER_COUNTRIES[provider];
+
+    if (!supportedCountries.includes(country)) {
+      return null;
+    }
+
+    return InvoiceFactory.create(provider);
   }
 
-  /** Devuelve la instancia (singleton) del proveedor solicitado. */
+  /**
+   * Obtiene la implementación concreta exclusivamente a través del resolver
+   * inyectado por CompositionRoot. La construcción de Factus/Dian nunca ocurre
+   * dentro de esta factoría.
+   */
   static create(provider: RealInvoiceProviderName): IInvoiceProvider {
-    if (!this.instances[provider]) {
-      this.instances[provider] = this.build(provider);
-    }
-    return this.instances[provider] as IInvoiceProvider;
+    const resolver = requireProviderResolver();
+    return frontendSafeProvider(resolver(provider));
   }
 
-  private static build(provider: RealInvoiceProviderName): IInvoiceProvider {
-    switch (provider) {
-      case "factus":
-        return new FactusProvider();
-      case "dian":
-        return new DianProvider();
-      default: {
-        const exhaustiveCheck: never = provider;
-        throw new Error(`InvoiceFactory: proveedor no soportado (${exhaustiveCheck}).`);
-      }
-    }
+  /**
+   * Normaliza un resultado fiscal para cualquier superficie de frontend.
+   * Expuesto como método estático para conservar un punto único de uso en
+   * consumers existentes que ya trabajan con InvoiceFactory.
+   */
+  static frontendInvoice(result: InvoiceResult): FrontendInvoiceDTO {
+    return frontendInvoice(result);
   }
 }

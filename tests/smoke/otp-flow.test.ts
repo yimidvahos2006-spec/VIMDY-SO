@@ -269,7 +269,7 @@ describe("Smoke: flujo OTP de VIMDY", () => {
 
       expect(getPendingRegistration()).toBeNull();
       expect(supabase.functions.invoke).toHaveBeenCalledWith("register-business", {
-        body: { businessName: PENDING.businessName, ownerName: PENDING.ownerName, country: "CO", businessType: "restaurante" }
+        body: { businessName: PENDING.businessName, ownerName: PENDING.ownerName, country: "CO", businessType: "restaurante", registrationMode: "initial" }
       });
       expect(supabase.auth.getUser).toHaveBeenCalled();
       expect(session.businessId).toBe("biz-1");

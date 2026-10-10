@@ -496,6 +496,12 @@ function CustomerDetailModal({
               {customer.email}
             </div>
           )}
+          {customer.documentNumber && (
+            <div className="flex items-center gap-2 text-slate-300">
+              <Receipt size={14} className="text-slate-500" />
+              {customer.documentType ?? "Documento"}: {customer.documentNumber}
+            </div>
+          )}
           {customer.lastPurchaseAt && (
             <div className="flex items-center gap-2 text-slate-300">
               <Calendar size={14} className="text-slate-500" />
@@ -589,18 +595,26 @@ function CustomerFormModal({
 }: {
   customer: Customer | null;
   onClose: () => void;
-  onSubmit: (values: { name: string; email?: string; phone?: string }) => Promise<void>;
+  onSubmit: (values: {
+    name: string;
+    email?: string;
+    phone?: string;
+    documentType?: Customer["documentType"];
+    documentNumber?: string;
+  }) => Promise<void>;
 }) {
   const [name, setName] = useState(customer?.name ?? "");
   const [phone, setPhone] = useState(customer?.phone ?? "");
   const [email, setEmail] = useState(customer?.email ?? "");
+  const [documentType, setDocumentType] = useState<Customer["documentType"]>(customer?.documentType ?? "CC");
+  const [documentNumber, setDocumentNumber] = useState(customer?.documentNumber ?? "");
   const [saving, setSaving] = useState(false);
 
   async function handleSubmit() {
     if (!name.trim()) return;
     setSaving(true);
     try {
-      await onSubmit({ name, email, phone });
+      await onSubmit({ name, email, phone, documentType, documentNumber });
     } finally {
       setSaving(false);
     }
@@ -652,6 +666,32 @@ function CustomerFormModal({
               placeholder="cliente@correo.com"
               className="mt-1 w-full h-11 rounded-xl bg-slate-800 border border-slate-700 px-3 text-white text-sm outline-none focus:border-cyan-500"
             />
+          </div>
+          <div className="grid grid-cols-[110px_1fr] gap-2">
+            <div>
+              <label className="text-xs text-slate-400">Documento</label>
+              <select
+                value={documentType ?? "CC"}
+                onChange={(e) => setDocumentType(e.target.value as Customer["documentType"])}
+                className="mt-1 w-full h-11 rounded-xl bg-slate-800 border border-slate-700 px-2 text-white text-sm outline-none focus:border-cyan-500"
+              >
+                <option value="CC">CC</option>
+                <option value="CE">CE</option>
+                <option value="NIT">NIT</option>
+                <option value="PASSPORT">Pasaporte</option>
+                <option value="OTHER">Otro</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-slate-400">Número fiscal (opcional)</label>
+              <input
+                value={documentNumber}
+                onChange={(e) => setDocumentNumber(e.target.value)}
+                placeholder="Ej. 123456789"
+                inputMode="numeric"
+                className="mt-1 w-full h-11 rounded-xl bg-slate-800 border border-slate-700 px-3 text-white text-sm outline-none focus:border-cyan-500"
+              />
+            </div>
           </div>
           <div className="flex gap-2 pt-1">
             <button

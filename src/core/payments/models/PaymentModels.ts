@@ -28,7 +28,11 @@ export interface PaymentRoutingInput {
   country: CountryCode;
   businessType: BusinessType;
   plan: PlanCode;
-  amount: number;
+  /**
+   * El monto es canónico y se resuelve en servidor según negocio + plan + país.
+   * El frontend nunca debe autorizar o manipular el importe que se cobra.
+   */
+  amount?: number;
   /** Opcional: si no se envía, se resuelve automáticamente a partir del país. */
   currency?: CurrencyCode;
   method?: PaymentMethodCode;
@@ -93,7 +97,6 @@ export interface PaymentSession {
   branchId?: string | null;
   provider: PaymentProviderName;
   providerReference?: string | null;
-  country: CountryCode;
   currency: CurrencyCode;
   amount: number;
   status: PaymentStatus;

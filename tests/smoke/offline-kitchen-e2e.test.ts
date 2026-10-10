@@ -108,6 +108,7 @@ vi.mock("../../src/infrastructure/di/repositories/PendingKitchenOrderRepository"
 
 import { queueKitchenOrderOffline } from "../../src/core/offline/offlineKitchen";
 import { syncPendingKitchenOrders, startOfflineKitchenSync, stopOfflineKitchenSync } from "../../src/core/offline/syncPendingKitchenOrders";
+import { syncPendingKitchenOrders as legacySyncPendingKitchenOrders } from "../../src/core/services/syncPendingKitchenOrders";
 import { pendingKitchenOrdersStore } from "../../src/core/offline/pendingKitchenOrdersStore";
 
 const KITCHEN_ORDER: KitchenOrder = {
@@ -161,6 +162,10 @@ describe("Smoke: cocina offline (cola local + sincronización)", () => {
     expect(saved).not.toBeNull();
     expect(saved!.id).toBe(KITCHEN_ORDER.id);
     expect(saved!.status).toBe("PENDIENTE");
+  });
+
+  it("el entrypoint legacy de services reutiliza la implementación offline canónica", () => {
+    expect(legacySyncPendingKitchenOrders).toBe(syncPendingKitchenOrders);
   });
 
   it("startOfflineKitchenSync / stopOfflineKitchenSync no lanzan error", () => {

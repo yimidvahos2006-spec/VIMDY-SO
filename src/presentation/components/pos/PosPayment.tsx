@@ -64,7 +64,9 @@ export function PosPayment() {
     mixedCard,
     mixedTransfer,
     setMixedAmount,
-    mixedReceived
+    mixedReceived,
+    useWompiCheckout,
+    setUseWompiCheckout
   } = usePayment();
 
   const money = (value: number) => formatMoney(value, companyConfigStore.get().currency, language);
@@ -203,20 +205,40 @@ export function PosPayment() {
 
       {(method === "card" || method === "transfer") && (
         <div>
-          <label className="text-vimdy-micro text-vimdy-text-secondary">
-            {method === "card" ? t("pos.payment.cardReference") : t("pos.payment.transferReference")}
-          </label>
-          <input
-            value={reference}
-            onChange={(e) => setReference(e.target.value)}
-            placeholder={method === "card" ? t("pos.payment.cardRefPlaceholder") : t("pos.payment.transferRefPlaceholder")}
-            className="mt-1 w-full h-12 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border px-4 text-vimdy-text outline-none focus:border-vimdy-accent"
-          />
-          {referenceMissing && (
-            <p className="mt-2 text-vimdy-danger text-vimdy-small">
-              {t("pos.payment.referenceRequired")}
-            </p>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-vimdy-micro text-vimdy-text-secondary">
+              {method === "card" ? t("pos.payment.cardReference") : t("pos.payment.transferReference")}
+            </label>
+            <button
+              type="button"
+              onClick={() => setUseWompiCheckout(!useWompiCheckout)}
+              aria-pressed={useWompiCheckout}
+              className={`px-2 py-1 rounded text-vimdy-micro font-semibold transition ${
+                useWompiCheckout
+                  ? "bg-vimdy-accent text-vimdy-background"
+                  : "bg-vimdy-surface text-vimdy-text-secondary border border-vimdy-border hover:border-vimdy-accent"
+              }`}
+            >
+              Pagar con Wompi
+            </button>
+          </div>
+
+          {!useWompiCheckout && (
+            <>
+              <input
+                value={reference}
+                onChange={(e) => setReference(e.target.value)}
+                placeholder={method === "card" ? t("pos.payment.cardRefPlaceholder") : t("pos.payment.transferRefPlaceholder")}
+                className="mt-1 w-full h-12 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border px-4 text-vimdy-text outline-none focus:border-vimdy-accent"
+              />
+              {referenceMissing && (
+                <p className="mt-2 text-vimdy-danger text-vimdy-small">
+                  {t("pos.payment.referenceRequired")}
+                </p>
+              )}
+            </>
           )}
+
           <p className="mt-2 text-vimdy-micro text-vimdy-text-tertiary">
             {t("pos.payment.amountToCharge")} <span className="text-vimdy-text font-semibold">{money(total)}</span>
           </p>
@@ -266,17 +288,37 @@ export function PosPayment() {
 
           {(mixedCard > 0 || mixedTransfer > 0) && (
             <>
-              <input
-                value={reference}
-                onChange={(e) => setReference(e.target.value)}
-                placeholder={t("pos.payment.mixedRefPlaceholder")}
-                className="w-full h-11 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border px-4 text-vimdy-text text-vimdy-small outline-none focus:border-vimdy-accent"
-              />
-              {referenceMissing && (
-                <p className="mt-2 text-vimdy-danger text-vimdy-small">
-                  {t("pos.payment.referenceRequired")}
-                </p>
+              {!useWompiCheckout && (
+                <>
+                  <input
+                    value={reference}
+                    onChange={(e) => setReference(e.target.value)}
+                    placeholder={t("pos.payment.mixedRefPlaceholder")}
+                    className="w-full h-11 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border px-4 text-vimdy-text text-vimdy-small outline-none focus:border-vimdy-accent"
+                  />
+                  {referenceMissing && (
+                    <p className="mt-2 text-vimdy-danger text-vimdy-small">
+                      {t("pos.payment.referenceRequired")}
+                    </p>
+                  )}
+                </>
               )}
+
+              <div className="flex items-center justify-between">
+                <span className="text-vimdy-micro text-vimdy-text-tertiary">Pagar parte digital con Wompi</span>
+                <button
+                  type="button"
+                  onClick={() => setUseWompiCheckout(!useWompiCheckout)}
+                  aria-pressed={useWompiCheckout}
+                  className={`px-2 py-1 rounded text-vimdy-micro font-semibold transition ${
+                    useWompiCheckout
+                      ? "bg-vimdy-accent text-vimdy-background"
+                      : "bg-vimdy-surface text-vimdy-text-secondary border border-vimdy-border hover:border-vimdy-accent"
+                  }`}
+                >
+                  {useWompiCheckout ? "Activado" : "Activar"}
+                </button>
+              </div>
             </>
           )}
           <div

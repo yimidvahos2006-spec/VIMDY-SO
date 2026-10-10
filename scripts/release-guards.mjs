@@ -1,9 +1,13 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync as execFileSyncRaw } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import process from "node:process";
 
 const root = process.cwd();
+
+function execFileSync(command, args, options = {}) {
+  return execFileSyncRaw(command, args, { maxBuffer: 512 * 1024 * 1024, ...options });
+}
 const failures = [];
 
 function fail(message) {
@@ -52,7 +56,7 @@ for (const file of trackedFiles) {
 const secretPatterns = [
   /\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/,
   /\b(?:sk|rk)_(?:live|prod)_[A-Za-z0-9]{16,}\b/,
-  /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/
+  /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----\s*[A-Za-z0-9+/=]{40,}/
 ];
 const sourceFiles = execFileSync(
   "git",

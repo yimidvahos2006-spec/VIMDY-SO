@@ -149,65 +149,153 @@ Deno.serve(async (req: Request) => {
       return json({ error: "AMOUNT_EXCEEDS_ORIGINAL" }, 400);
     }
 
-    const mpResponse = await fetch(`${resolveMercadoPagoApiBase()}/v1/payments/${encodeURIComponent(mpPaymentId)}/refunds`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${MERCADOPAGO_ACCESS_TOKEN}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        amount: refundAmount,
-        ...(payload.reason ? { metadata: { reason: payload.reason.slice(0, 255) } } : {})
-      }),
-      signal: (() => { const c = new AbortController(); setTimeout(() => c.abort(), 15_000); return c.signal; })()
-    });
+    // A6.9: la idempotency key la envia el caller y se conserva entre reintentos
+    // del MISMO intento. No se deriva de payment+amount porque dos refunds
+    // legitimos sobre el mismo saldo colisionarian y el segundo devolveria
+    // silenciosamente el refund anterior (fallo de dinero sin error).
+    // Mismo criterio que valida la RPC (1..200 chars).
+    const idempotencyKey = typeof payload.idempotencyKey === "string"
+      ? payload.idempotencyKey.trim()
+      : "";
+    if (idempotencyKey.length < 1 || idempotencyKey.length > 200) {
+      return json({
+        error: "IDEMPOTENCY_KEY_REQUIRED: envia idempotencyKey estable para este intento de reembolso (1..200 chars) y reusala en los reintentos."
+      }, 400);
+    }
+
+    // Paso 1: reservar saldo en server (request_*). Valida tenant, rol ADMIN,
+    // status refundable y saldo restante bajo FOR UPDATE, y deja el refund en
+    // 'pending'. Esto DEBE ocurrir antes de llamar al proveedor: si el proveedor
+    // rechaza, hay que cerrar el refund como 'failed' para liberar la reserva.
+    const { data: refundRequest, error: refundRequestError } = await admin.rpc(
+      "request_subscription_refund_atomic",
+      {
+        p_subscription_payment_id: paymentRow.id,
+        p_amount: refundAmount,
+        p_idempotency_key: idempotencyKey,
+        p_reason: payload.reason ?? "Refund solicitado por admin",
+        p_actor_id: authUser.id
+      }
+    );
+
+    if (refundRequestError) {
+      return json({ error: "REFUND_REQUEST_FAILED", detail: refundRequestError.message }, 400);
+    }
+
+    const requestResult = refundRequest as {
+      success?: boolean;
+      idempotent?: boolean;
+      refund?: { id?: string; status?: string };
+    };
+
+    // Si el refund ya fue confirmado, el proveedor no debe volver a invocarse.
+    if (requestResult.idempotent && requestResult.refund?.status === "confirmed") {
+      return json({
+        ok: true,
+        idempotent: true,
+        refund: {
+          id: requestResult.refund.id,
+          status: requestResult.refund.status
+        }
+      });
+    }
+
+    const refundId = requestResult.refund?.id;
+    if (!refundId) {
+      return json({ error: "REFUND_REQUEST_FAILED", detail: "no se obtuvo refundId" }, 500);
+    }
+
+    let mpResponse: Response;
+    try {
+      mpResponse = await fetch(`${resolveMercadoPagoApiBase()}/v1/payments/${encodeURIComponent(mpPaymentId)}/refunds`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${MERCADOPAGO_ACCESS_TOKEN}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          amount: refundAmount,
+          ...(payload.reason ? { metadata: { reason: payload.reason.slice(0, 255) } } : {})
+        }),
+        signal: (() => { const c = new AbortController(); setTimeout(() => c.abort(), 15_000); return c.signal; })()
+      });
+    } catch (providerError) {
+      // Timeout / error de red: el proveedor pudo haber procesado el refund.
+      // NO se marca 'failed' a ciegas: el refund queda 'pending' para
+      // reconciliacion posterior.
+      return json({
+        error: "MERCADOPAGO_REFUND_UNKNOWN",
+        detail: "No se pudo confirmar el resultado con MercadoPago. El refund queda pendiente de reconciliacion.",
+        refundId,
+        idempotencyKey
+      }, 502);
+    }
 
     const mpBody = (await mpResponse.json()) as MercadoPagoRefundResponse;
 
     if (!mpResponse.ok || mpBody.error) {
       const detail = (mpBody.error as any)?.message ?? `MercadoPago respondió HTTP ${mpResponse.status}.`;
+      // Rechazo explicito del proveedor: se cierra el refund y se libera la reserva.
+      await admin.rpc("settle_subscription_refund_atomic", {
+        p_refund_id: refundId,
+        p_status: "failed",
+        p_provider_reference: mpBody.id != null ? String(mpBody.id) : null,
+        p_now: new Date().toISOString()
+      });
       return json({ error: "MERCADOPAGO_REFUND_REJECTED", detail, status: mpResponse.status }, mpResponse.status);
     }
 
     const refundStatus = mpBody.status ?? "pending";
     if (refundStatus === "approved" || refundStatus === "completed") {
-      const { data: refundResult, error: refundError } = await admin.rpc(
-        "refund_subscription_payment_server_side",
+      const { data: settleResult, error: settleError } = await admin.rpc(
+        "settle_subscription_refund_atomic",
         {
-          p_payment_id: paymentRow.id,
-          p_refund_amount: refundAmount,
-          p_provider_refund_id: String(mpBody.id ?? ""),
+          p_refund_id: refundId,
+          p_status: "confirmed",
+          p_provider_reference: mpBody.id != null ? String(mpBody.id) : null,
           p_now: new Date().toISOString()
         }
       );
 
-      if (refundError) {
-        return json({ error: "REFUND_UPDATE_FAILED", detail: refundError.message }, 500);
+      if (settleError) {
+        return json({ error: "REFUND_SETTLE_FAILED", detail: settleError.message, refundId }, 500);
       }
 
-      const result = refundResult as {
-        ok: boolean;
-        is_total_refund: boolean;
-        new_payment_status: string;
+      const settled = settleResult as {
+        status?: string;
+        paymentStatus?: string;
+        refundedAmount?: number;
       };
 
       return json({
         ok: true,
-        isTotalRefund: result.is_total_refund,
+        isTotalRefund: settled.paymentStatus === "refunded",
         refund: {
-          id: mpBody.id,
-          status: refundStatus,
+          id: refundId,
+          providerReference: mpBody.id != null ? String(mpBody.id) : null,
+          status: "confirmed",
           amount: mpBody.amount ?? refundAmount,
-          source: mpBody.source
+          source: mpBody.source,
+          paymentStatus: settled.paymentStatus,
+          refundedAmount: settled.refundedAmount
         }
       });
     }
 
+    // PENDING en MercadoPago: no se confirma; queda 'pending' para webhook/reconciliacion.
+    await admin.rpc("settle_subscription_refund_atomic", {
+      p_refund_id: refundId,
+      p_status: "pending",
+      p_provider_reference: mpBody.id != null ? String(mpBody.id) : null,
+      p_now: new Date().toISOString()
+    });
+
     return json({
       ok: true,
       refund: {
-        id: mpBody.id,
-        status: refundStatus,
+        id: refundId,
+        providerReference: mpBody.id != null ? String(mpBody.id) : null,
+        status: "pending",
         amount: mpBody.amount ?? refundAmount,
         source: mpBody.source
       }

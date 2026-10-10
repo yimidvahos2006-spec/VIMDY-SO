@@ -124,6 +124,49 @@ async function buildAndSign(
 }
 
 /* ──────────────────────────────────────────────────────────
+   PHASE 46 REGRESSION GUARDS — authoritative source / idempotency
+   ────────────────────────────────────────────────────────── */
+describe("PHASE 46 REGRESSION GUARDS: DIAN handler invariants", () => {
+  const HANDLER_PATH = join(__dirname, "../../supabase/functions/dian-invoice/index.ts");
+  const handlerSource = readFileSync(HANDLER_PATH, "utf-8").replace(/\r\n/g, "\n");
+
+  it("builds authoritative sale data before taking a pending lease", () => {
+    const saleData = handlerSource.indexOf("const saleData =");
+    const authoritativeRequest = handlerSource.indexOf("const authoritativeRequest:");
+    const recoveryClaim = handlerSource.indexOf("if (pendingRecoveryId)");
+    expect(saleData).toBeGreaterThan(-1);
+    expect(authoritativeRequest).toBeGreaterThan(saleData);
+    expect(recoveryClaim).toBeGreaterThan(authoritativeRequest);
+  });
+
+  it("never uses the Customer UUID as a fiscal document number", () => {
+    expect(handlerSource).not.toContain("documentNumber: customerId");
+    expect(handlerSource).toContain("CUSTOMER_NOT_INVOICE_READY");
+    expect(handlerSource).toContain("CUSTOMER_NOT_FOUND_FOR_INVOICE");
+    expect(handlerSource).toContain("customerData.documentNumber");
+  });
+
+  it("requires product existence before generating fiscal XML", () => {
+    expect(handlerSource).toContain("SALE_PRODUCTS_NOT_READY");
+    expect(handlerSource).toContain("missingProductIds");
+  });
+
+  it("recovers a pending invoice without inserting a duplicate claim", () => {
+    const recovery = handlerSource.indexOf("if (pendingRecoveryId)");
+    const insert = handlerSource.indexOf('.from("electronic_invoices")\n          .insert(claimRow)');
+    expect(recovery).toBeGreaterThan(-1);
+    expect(insert).toBeGreaterThan(recovery);
+    expect(handlerSource).toContain("if (!recoveredInvoice)");
+  });
+
+  it("records failed signing by updating the claimed deterministic row", () => {
+    expect(handlerSource).toContain('status: "error"');
+    expect(handlerSource).toContain('SIGNING_FAILED: ${errorMessage}');
+    expect(handlerSource).not.toContain(".insert({ id: invoiceId");
+  });
+});
+
+/* ──────────────────────────────────────────────────────────
    1. XML UBL 2.1 Structure — Invoice, CreditNote, DebitNote
    ────────────────────────────────────────────────────────── */
 describe("PRE-FLIGHT 1: XML UBL 2.1 Structure", () => {
@@ -741,7 +784,8 @@ describe("PRE-FLIGHT 5: Certificate Information", () => {
 describe("PRE-FLIGHT 6: Business Rules", () => {
   it("PRODUCTION_BLOCKED prevents production transmission", () => {
     const env = "development" as string;
-    const PRODUCTION_BLOCKED = env !== "production";
+    const DIAN_PRODUCTION_ALLOWED = false;
+    const PRODUCTION_BLOCKED = env !== "production" || !DIAN_PRODUCTION_ALLOWED;
 
     const prodBusiness = { ...BUSINESS, environment: "production" as DianEnvironment };
 
@@ -754,9 +798,21 @@ describe("PRE-FLIGHT 6: Business Rules", () => {
     }
   });
 
+  it("production requires an explicit DIAN_PRODUCTION_ALLOWED opt-in", () => {
+    const env = "production";
+    const DIAN_PRODUCTION_ALLOWED = false;
+    const PRODUCTION_BLOCKED = env !== "production" || !DIAN_PRODUCTION_ALLOWED;
+
+    expect(PRODUCTION_BLOCKED).toBe(true);
+
+    const explicitlyAllowed = true;
+    expect(env !== "production" || !explicitlyAllowed).toBe(false);
+  });
+
   it("SANDBOX environment is allowed when PRODUCTION_BLOCKED", () => {
     const env = "development" as string;
-    const PRODUCTION_BLOCKED = env !== "production";
+    const DIAN_PRODUCTION_ALLOWED = false;
+    const PRODUCTION_BLOCKED = env !== "production" || !DIAN_PRODUCTION_ALLOWED;
 
     const sandboxBusiness = { ...BUSINESS, environment: "habilantation" };
 

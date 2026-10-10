@@ -60,7 +60,7 @@ describe("Smoke: cierre de caja", () => {
 
     // Venta con tarjeta: cuenta como ingreso total, pero NO como efectivo
     // físico del cajón.
-    await ctx.cash.registerIncome(80000, "Venta RAP-000003", "CARD");
+    await ctx.cash.registerIncome(80000, "Venta RAP-000003", "CARD", 0, undefined, undefined, "EXTERNAL_TERMINAL");
 
     // Un retiro: sale del efectivo físico.
     await ctx.cash.registerExpense(10000, "Retiro para cambio");

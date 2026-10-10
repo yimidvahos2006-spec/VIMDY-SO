@@ -132,13 +132,21 @@ export function useCustomers() {
     return productNameById.get(productId) ?? "Producto eliminado";
   }
 
-  async function createCustomer(input: { name: string; email?: string; phone?: string }) {
+  async function createCustomer(input: {
+    name: string;
+    email?: string;
+    phone?: string;
+    documentType?: Customer["documentType"];
+    documentNumber?: string;
+  }) {
     setError(null);
 
     const customer: Customer = {
       id: crypto.randomUUID(),
       name: input.name.trim(),
       email: input.email?.trim() ?? "",
+      documentType: input.documentType,
+      documentNumber: input.documentNumber?.trim() || undefined,
       phone: input.phone?.trim() || undefined,
       points: 0,
       createdAt: new Date(),

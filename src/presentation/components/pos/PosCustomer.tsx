@@ -50,6 +50,8 @@ export function PosCustomer({ compact = false }: PosCustomerProps = {}) {
   const [saving, setSaving] = useState(false);
   const [newName, setNewName] = useState("");
   const [newPhone, setNewPhone] = useState("");
+  const [newDocumentType, setNewDocumentType] = useState<Customer["documentType"]>("CC");
+  const [newDocumentNumber, setNewDocumentNumber] = useState("");
   const [selectedProfile, setSelectedProfile] = useState<Customer | null>(null);
 
   // Carga real desde CustomerEngine (no un store local desconectado).
@@ -117,6 +119,8 @@ export function PosCustomer({ compact = false }: PosCustomerProps = {}) {
       name: newName.trim(),
       email: "",
       phone: newPhone.trim() || undefined,
+      documentType: newDocumentType,
+      documentNumber: newDocumentNumber.trim() || undefined,
       points: 0,
       createdAt: new Date()
     };
@@ -137,6 +141,8 @@ export function PosCustomer({ compact = false }: PosCustomerProps = {}) {
       setCreating(false);
       setNewName("");
       setNewPhone("");
+      setNewDocumentNumber("");
+      setNewDocumentType("CC");
     } finally {
       setSaving(false);
     }
@@ -289,6 +295,32 @@ export function PosCustomer({ compact = false }: PosCustomerProps = {}) {
                     placeholder="300 000 0000"
                     className="mt-1 w-full h-11 rounded-vimdy-md bg-vimdy-surface-active border border-vimdy-border px-3 text-vimdy-text text-vimdy-small outline-none focus:border-vimdy-accent transition-colors"
                   />
+                </div>
+                <div className="grid grid-cols-[96px_1fr] gap-2">
+                  <div>
+                    <label className="text-vimdy-micro text-vimdy-text-secondary">Documento</label>
+                    <select
+                      value={newDocumentType ?? "CC"}
+                      onChange={(event) => setNewDocumentType(event.target.value as Customer["documentType"])}
+                      className="mt-1 w-full h-11 rounded-vimdy-md bg-vimdy-surface-active border border-vimdy-border px-2 text-vimdy-text text-vimdy-small outline-none focus:border-vimdy-accent transition-colors"
+                    >
+                      <option value="CC">CC</option>
+                      <option value="CE">CE</option>
+                      <option value="NIT">NIT</option>
+                      <option value="PASSPORT">Pasaporte</option>
+                      <option value="OTHER">Otro</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-vimdy-micro text-vimdy-text-secondary">Número fiscal (opcional)</label>
+                    <input
+                      value={newDocumentNumber}
+                      onChange={(event) => setNewDocumentNumber(event.target.value)}
+                      placeholder="123456789"
+                      inputMode="numeric"
+                      className="mt-1 w-full h-11 rounded-vimdy-md bg-vimdy-surface-active border border-vimdy-border px-3 text-vimdy-text text-vimdy-small outline-none focus:border-vimdy-accent transition-colors"
+                    />
+                  </div>
                 </div>
                 <div className="flex gap-2 pt-1">
                   <div className="flex-1">

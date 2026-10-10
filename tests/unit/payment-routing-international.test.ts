@@ -114,26 +114,26 @@ describe("PaymentValidator — países permitidos", () => {
 
 describe("Subscription prices — por país (server-side)", () => {
   it("getPlanPrice usa país, no moneda", () => {
-    expect(getPlanPrice("monthly", "CO")).toBe(79000);
-    expect(getPlanPrice("yearly", "CO")).toBe(799000);
+    expect(getPlanPrice("monthly", "CO")).toBe(59900);
+    expect(getPlanPrice("yearly", "CO")).toBe(718800);
     expect(getPlanPrice("monthly", "US")).toBe(89);
-    expect(getPlanPrice("yearly", "US")).toBe(899);
+    expect(getPlanPrice("yearly", "US")).toBe(1068);
     expect(getPlanPrice("monthly", "MX")).toBe(1499);
-    expect(getPlanPrice("yearly", "MX")).toBe(14990);
+    expect(getPlanPrice("yearly", "MX")).toBe(17988);
     expect(getPlanPrice("monthly", "PE")).toBe(149);
-    expect(getPlanPrice("yearly", "PE")).toBe(1490);
+    expect(getPlanPrice("yearly", "PE")).toBe(1788);
     expect(getPlanPrice("monthly", "CL")).toBe(14990);
-    expect(getPlanPrice("yearly", "CL")).toBe(149900);
+    expect(getPlanPrice("yearly", "CL")).toBe(179880);
     expect(getPlanPrice("monthly", "AR")).toBe(89999);
-    expect(getPlanPrice("yearly", "AR")).toBe(899999);
+    expect(getPlanPrice("yearly", "AR")).toBe(1079988);
     expect(getPlanPrice("monthly", "EC")).toBe(59);
-    expect(getPlanPrice("yearly", "EC")).toBe(599);
+    expect(getPlanPrice("yearly", "EC")).toBe(708);
     expect(getPlanPrice("monthly", "PA")).toBe(69);
-    expect(getPlanPrice("yearly", "PA")).toBe(699);
+    expect(getPlanPrice("yearly", "PA")).toBe(828);
     expect(getPlanPrice("monthly", "VE")).toBe(49);
-    expect(getPlanPrice("yearly", "VE")).toBe(499);
+    expect(getPlanPrice("yearly", "VE")).toBe(588);
     expect(getPlanPrice("monthly", "ES")).toBe(69);
-    expect(getPlanPrice("yearly", "ES")).toBe(699);
+    expect(getPlanPrice("yearly", "ES")).toBe(828);
   });
 
   it("getPlanCurrency devuelve la moneda correcta por país", () => {
@@ -149,13 +149,13 @@ describe("Subscription prices — por país (server-side)", () => {
     expect(getPlanCurrency("monthly", "ES")).toBe("EUR");
   });
 
-  it("plan base USD es 89/899", () => {
+  it("plan base COP es 59.900/718.800", () => {
     const monthly = SUBSCRIPTION_PLANS.find((p) => p.id === "monthly");
     const yearly = SUBSCRIPTION_PLANS.find((p) => p.id === "yearly");
-    expect(monthly!.price).toBe(89);
-    expect(yearly!.price).toBe(899);
-    expect(monthly!.currency).toBe("USD");
-    expect(yearly!.currency).toBe("USD");
+    expect(monthly!.price).toBe(59900);
+    expect(yearly!.price).toBe(718800);
+    expect(monthly!.currency).toBe("COP");
+    expect(yearly!.currency).toBe("COP");
   });
 });
 

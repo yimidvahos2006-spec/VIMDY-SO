@@ -237,10 +237,20 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // 7) Cualquier estado que no sea APPROVED (DECLINED, VOIDED, ERROR) se
-    //    registra como declinado. El plan/fechas actuales del negocio NO
-    //    se tocan — solo se refleja el intento fallido para que la UI
-    //    pueda avisarle al usuario y ofrecerle reintentar.
+    // 7) Solo los estados finales fallidos (DECLINED, VOIDED, ERROR) se registran
+    //    como declinados. Un estado intermedio (p. ej. PENDING) NO es un rechazo:
+    //    el pago queda en 'pending' para que un APPROVED posterior sí se procese
+    //    (si se marcara 'declined' aquí, la idempotencia de arriba lo descartaría).
+    //    El plan/fechas actuales del negocio NO se tocan — solo se refleja el
+    //    intento fallido para que la UI pueda avisarle al usuario y ofrecerle
+    //    reintentar. Que un intento fallido NO suspenda una prueba o suscripción
+    //    vigente lo garantiza expire_subscription_server_side (ver migración
+    //    20261024000001).
+    const terminalFailures = new Set(["DECLINED", "VOIDED", "ERROR"]);
+    if (!terminalFailures.has(status)) {
+      return json({ ok: true, activated: false, pending: true, status });
+    }
+
     const { error: declineUpdateError } = await admin
       .from("subscription_payments")
       .update({ status: "declined", payment_method: paymentMethod })

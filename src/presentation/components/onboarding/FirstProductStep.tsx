@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Loader2, Package } from "lucide-react";
 
 import { VimdyCard } from "../ui/VimdyCard";
@@ -22,9 +22,30 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
   const [price, setPrice] = useState("");
   const [cost, setCost] = useState("");
   const [stock, setStock] = useState("");
-  const [categoryId, setCategoryId] = useState(categories[0]?.id ?? "");
+  const [categoryId, setCategoryId] = useState(categories[0]?.id ?? (categories.length === 0 ? "uncategorized" : ""));
   const [saving, setSaving] = useState(false);
+  const [checkingProducts, setCheckingProducts] = useState(true);
+  const [hasActiveProduct, setHasActiveProduct] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    void container.inventoryEngine.get().listAll()
+      .then((products) => {
+        if (mounted) setHasActiveProduct(products.some((product) => product.active !== false));
+      })
+      .catch(() => {
+        if (mounted) setError("No se pudo comprobar el inventario. Intenta de nuevo.");
+      })
+      .finally(() => {
+        if (mounted) setCheckingProducts(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -70,6 +91,7 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
         },
         user?.id
       );
+      setHasActiveProduct(true);
       onSaved();
     } catch (err) {
       const message = translateBusinessError(err, "No se pudo crear el producto.");
@@ -79,10 +101,26 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
     }
   }
 
+  async function handleSkip() {
+    if (saving || checkingProducts) return;
+
+    try {
+      const products = await container.inventoryEngine.get().listAll();
+      if (!products.some((product) => product.active !== false)) {
+        setError("Crea al menos un producto activo antes de continuar.");
+        return;
+      }
+      setHasActiveProduct(true);
+      onSaved();
+    } catch {
+      setError("No se pudo comprobar el inventario. Intenta de nuevo.");
+    }
+  }
+
   return (
     <div className="w-full max-w-3xl mx-auto">
       <div className="text-center mb-10">
-        <p className="text-vimdy-micro uppercase tracking-widest text-vimdy-accent font-semibold mb-3">Paso 7 de 7</p>
+        <p className="text-vimdy-micro uppercase tracking-widest text-vimdy-accent font-semibold mb-3">Paso 6 de 7</p>
         <h2 className="text-vimdy-h2 text-vimdy-text mb-2">Agrega tu primer producto o servicio</h2>
         <p className="text-vimdy-small text-vimdy-text-secondary max-w-md mx-auto">
           Así podrás comenzar a registrar ventas apenas termines la configuración.
@@ -113,9 +151,9 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
             label="Categoría *"
             value={categoryId}
             onChange={(e) => setCategoryId(e.target.value)}
-            disabled={saving || categories.length === 0}
+            disabled={saving}
           >
-            {categories.length === 0 && <option value="">Sin categorías</option>}
+            {categories.length === 0 && <option value="uncategorized">Sin categoría</option>}
             {categories.map((category) => (
               <option key={category.id} value={category.id}>
                 {category.name}
@@ -165,7 +203,7 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
           )}
 
           <div className="flex flex-col sm:flex-row justify-center gap-3 pt-2">
-            <VimdyButton type="submit" disabled={saving} className="min-w-[200px]">
+            <VimdyButton type="submit" disabled={saving || checkingProducts} className="min-w-[200px]">
               {saving ? (
                 <span className="flex items-center gap-2">
                   <Loader2 size={18} className="animate-spin" />
@@ -175,10 +213,20 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
                 "Crear producto"
               )}
             </VimdyButton>
-            <VimdyButton variant="ghost" type="button" onClick={onSaved} disabled={saving}>
+            <VimdyButton
+              variant="ghost"
+              type="button"
+              onClick={() => void handleSkip()}
+              disabled={saving || checkingProducts || !hasActiveProduct}
+            >
               Omitir
             </VimdyButton>
           </div>
+          {!checkingProducts && !hasActiveProduct && (
+            <p className="text-center text-vimdy-small text-vimdy-text-secondary">
+              Crea al menos un producto activo para continuar.
+            </p>
+          )}
         </form>
       </VimdyCard>
     </div>

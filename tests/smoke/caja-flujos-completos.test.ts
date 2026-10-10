@@ -361,7 +361,7 @@ describe("Smoke: caja, pagos, turnos y conciliacion (FASE 4)", () => {
       const shift = await ctx.shiftEngine.openShift(CASHIER_ID, 100000);
 
       await ctx.cash.registerIncome(70000, "Venta RAP-001", "CASH");
-      await ctx.cash.registerIncome(30000, "Venta RAP-002", "CARD");
+      await ctx.cash.registerIncome(30000, "Venta RAP-002", "CARD", 0, undefined, undefined, "EXTERNAL_TERMINAL");
       await ctx.cash.registerExpense(10000, "Retiro");
       await ctx.cash.registerIncome(5000, "Ingreso extra", "CASH");
 

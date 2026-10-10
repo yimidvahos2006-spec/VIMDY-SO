@@ -67,7 +67,6 @@ export function UpgradeModal({ onClose }: Props) {
     if (!businessId) return;
 
     try {
-      const displayPrice = getPlanPrice(plan.id, country);
       const displayCurrency = getPlanCurrency(plan.id, country);
 
       const result = await VimdyPayments.pay({
@@ -75,7 +74,6 @@ export function UpgradeModal({ onClose }: Props) {
         country,
         businessType: "suscripcion_vimdy",
         plan: plan.id,
-        amount: displayPrice,
         currency: displayCurrency
       });
 

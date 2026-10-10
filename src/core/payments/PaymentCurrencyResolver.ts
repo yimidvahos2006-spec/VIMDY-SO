@@ -1,8 +1,12 @@
 /**
  * PaymentCurrencyResolver.ts
  * ---------------------------------------------------------------------------
- * Resuelve automáticamente la moneda a partir del país. Única fuente de
- * verdad país → moneda dentro del motor de pagos.
+ * Única fuente de verdad país -> moneda dentro de VIMDY Payments.
+ *
+ * Este resolver solo determina la moneda de cobro del motor de pagos.
+ * Los impuestos no se calculan aquí: para suscripciones el importe canónico
+ * ya proviene de SubscriptionTypes.getPlanPrice(); para ventas POS los
+ * impuestos pertenecen al SalesEngine / configuración fiscal de VIMDY.
  */
 
 import type { CountryCode, CurrencyCode } from "./types/payment.types";
@@ -20,11 +24,11 @@ const COUNTRY_CURRENCY_MAP: Record<string, CurrencyCode> = {
   ES: "EUR"
 };
 
-/** Moneda usada cuando el país no tiene una regla explícita. */
 const DEFAULT_CURRENCY: CurrencyCode = "USD";
 
 export class PaymentCurrencyResolver {
   static resolve(country: CountryCode): CurrencyCode {
-    return COUNTRY_CURRENCY_MAP[country] ?? DEFAULT_CURRENCY;
+    const normalizedCountry = String(country ?? "").trim().toUpperCase();
+    return COUNTRY_CURRENCY_MAP[normalizedCountry] ?? DEFAULT_CURRENCY;
   }
 }

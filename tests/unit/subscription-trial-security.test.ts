@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { parseRegistrationPayload } from "../../supabase/functions/register-business/registrationPayload";
 
 const MIGRATIONS_DIR = join(process.cwd(), "supabase", "migrations");
 const FNS_DIR = join(process.cwd(), "supabase", "functions");
@@ -160,15 +161,20 @@ describe("FASE 4-BIS: Seguridad del trial — migrations consolidadas", () => {
 
   describe("Edge Function register-business valida JWT", () => {
     let content: string;
+    let payloadContent: string;
     beforeAll(() => {
       content = readFileSync(
         join(FNS_DIR, "register-business", "index.ts"),
         "utf-8"
       );
+      payloadContent = readFileSync(
+        join(FNS_DIR, "register-business", "registrationPayload.ts"),
+        "utf-8"
+      );
     });
 
     it("RequestPayload del body NO incluye p_user_id", () => {
-      const match = content.match(/interface RequestPayload\s*{([\s\S]*?)}/);
+      const match = payloadContent.match(/export interface RegistrationPayload\s*{([\s\S]*?)}/);
       expect(match).toBeTruthy();
       const payloadBody = match![1];
       expect(payloadBody).not.toMatch(/p_user_id/);
@@ -183,12 +189,70 @@ describe("FASE 4-BIS: Seguridad del trial — migrations consolidadas", () => {
       expect(content).toMatch(/admin\.auth\.getUser\(accessToken\)/);
     });
 
-    it("usa authUser.id (del JWT) para has_user_used_trial", () => {
-      expect(content).toMatch(/has_user_used_trial.*authUser\.id/);
+    it("usa authUser.id (del JWT) para register_business_atomic", () => {
+      expect(content).toMatch(/register_business_atomic[\s\S]*p_user_id:\s*authUser\.id/);
     });
 
-    it("usa authUser.id para record_trial_usage", () => {
-      expect(content).toMatch(/record_trial_usage[\s\S]*authUser\.id/);
+    it("delega negocio, membresía, sucursal y trial a la RPC atómica", () => {
+      expect(content).toMatch(/admin\.rpc\("register_business_atomic"/);
+      expect(content).not.toMatch(/admin\.from\("businesses"\)\s*\.insert/);
+      expect(content).not.toMatch(/admin\.from\("business_members"\)\s*\.insert/);
+      expect(content).not.toMatch(/admin\.from\("branches"\)\s*\.insert/);
+      expect(content).not.toMatch(/admin\.rpc\("record_trial_usage"/);
+    });
+
+    it("rechaza tipos de negocio no catalogados antes de crear el negocio", () => {
+      expect(content).toMatch(/if \(!isBusinessTypeId\(businessType\)\)/);
+      expect(content).toMatch(/BUSINESS_TYPE_INVALID/);
+      expect(content).toMatch(/return json\(\{ error: "BUSINESS_TYPE_INVALID/);
+    });
+
+    it("valida el body JSON antes de invocar el registro atómico", () => {
+      const parseIndex = content.indexOf("parseRegistrationPayload(rawPayload)");
+      const lookupIndex = content.indexOf('admin.rpc("register_business_atomic"');
+      expect(parseIndex).toBeGreaterThan(-1);
+      expect(parseIndex).toBeLessThan(lookupIndex);
+    });
+  });
+
+  describe("parseRegistrationPayload", () => {
+    it.each([null, [], "body", 42])("rechaza bodies que no son objetos (%s)", (body) => {
+      expect(parseRegistrationPayload(body)).toEqual({ ok: false, error: "INVALID_BODY" });
+    });
+
+    it.each([
+      { businessName: 42 },
+      { ownerName: null },
+      { country: false },
+      { businessType: [] }
+    ])("rechaza campos de texto con tipo inválido (%s)", (body) => {
+      expect(parseRegistrationPayload(body)).toEqual({ ok: false, error: "INVALID_FIELD_TYPE" });
+    });
+
+    it("rechaza modos de registro desconocidos", () => {
+      expect(parseRegistrationPayload({ registrationMode: "unexpected" })).toEqual({
+        ok: false,
+        error: "REGISTRATION_MODE_INVALID"
+      });
+    });
+
+    it("normaliza espacios y conserva un body válido", () => {
+      expect(parseRegistrationPayload({
+        businessName: "  Cafe  ",
+        ownerName: "  Ana  ",
+        country: " CO ",
+        businessType: " cafeteria ",
+        registrationMode: "initial"
+      })).toEqual({
+        ok: true,
+        payload: {
+          businessName: "Cafe",
+          ownerName: "Ana",
+          country: "CO",
+          businessType: "cafeteria",
+          registrationMode: "initial"
+        }
+      });
     });
   });
 

@@ -37,8 +37,8 @@ import { FakeProductRepository } from "../fakes/FakeProductRepository";
 import { InMemoryMovementRepository } from "../fakes/InMemoryMovementRepository";
 
 function buildInventory() {
-  const products = new FakeProductRepository();
   const movements = new InMemoryMovementRepository();
+  const products = new FakeProductRepository(movements);
   const kardex = new KardexEngine(movements);
   const inventory = new InventoryEngine(products, kardex);
   return { inventory, products, movements };

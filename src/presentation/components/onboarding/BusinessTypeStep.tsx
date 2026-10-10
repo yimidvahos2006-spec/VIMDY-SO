@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   UtensilsCrossed,
   Coffee,
@@ -46,6 +46,7 @@ export function BusinessTypeStep({ businessId, onSaved }: BusinessTypeStepProps)
   const [selected, setSelected] = useState<BusinessTypeId | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const saveInFlight = useRef(false);
 
   function handleCardClick(businessType: BusinessTypeId) {
     if (saving) return;
@@ -54,8 +55,9 @@ export function BusinessTypeStep({ businessId, onSaved }: BusinessTypeStepProps)
   }
 
   async function handleContinue() {
-    if (saving || !selected) return;
+    if (saving || saveInFlight.current || !selected) return;
 
+    saveInFlight.current = true;
     setSaving(true);
     setError(null);
 
@@ -66,6 +68,7 @@ export function BusinessTypeStep({ businessId, onSaved }: BusinessTypeStepProps)
       const message = err instanceof Error ? err.message : "No se pudo guardar el tipo de negocio.";
       setError(message);
     } finally {
+      saveInFlight.current = false;
       setSaving(false);
     }
   }
@@ -73,7 +76,7 @@ export function BusinessTypeStep({ businessId, onSaved }: BusinessTypeStepProps)
   return (
     <div className="w-full max-w-3xl mx-auto">
       <div className="text-center mb-10">
-        <p className="text-vimdy-micro uppercase tracking-widest text-vimdy-accent font-semibold mb-3">Paso 1 de 7</p>
+        <p className="text-vimdy-micro uppercase tracking-widest text-vimdy-accent font-semibold mb-3">Paso 2 de 7</p>
         <h2 className="text-vimdy-h2 text-vimdy-text mb-2">¿Qué tipo de negocio tienes?</h2>
         <p className="text-vimdy-small text-vimdy-text-secondary max-w-md mx-auto">
           Personalizaremos VIMDY según tu operación. Puedes cambiar esto después en Configuración.

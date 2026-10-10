@@ -102,10 +102,6 @@ export function startRealtimeSync(businessId: string): void {
   }
 
   builder.subscribe((status) => {
-    if (status === "SUBSCRIBED") {
-      console.info(`[realtimeSync] conectado (negocio ${businessId})`);
-    }
-
     // Si se cae la conexión (wifi inestable en la tablet, celular con datos
     // móviles, etc), reintentamos solos en 3s en vez de dejar el dispositivo
     // sordo hasta que el usuario recargue manualmente.

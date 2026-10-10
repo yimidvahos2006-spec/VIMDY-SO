@@ -1,4 +1,5 @@
 import { CountryCode, CurrencyCode, LanguageCode } from "../config/globalization";
+import type { InvoiceProviderName } from "../invoicing/types/invoice.types";
 
 export interface CompanyConfig {
   /** País operativo del negocio — dispara los valores por defecto de moneda/idioma/zona horaria. */
@@ -50,7 +51,7 @@ export interface CompanyConfig {
   electronicInvoicing: {
     enabled: boolean;
     /** Proveedor tecnológico elegido. "none" cuando enabled es false. */
-    provider: "factus" | "none";
+    provider: InvoiceProviderName;
   };
 }
 

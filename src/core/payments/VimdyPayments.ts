@@ -37,9 +37,8 @@ export class VimdyPayments {
   static async pay(input: PaymentRoutingInput): Promise<PaymentResult> {
     const { providerInstance, request } = GlobalPaymentRouter.route(input);
 
-    await PaymentSessionManager.create({
+     await PaymentSessionManager.create({
       provider: request.provider,
-      country: request.country,
       currency: request.currency,
       amount: request.amount,
       businessId: request.businessId,

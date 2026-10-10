@@ -3,7 +3,10 @@ import {
   ONBOARDING_STEPS_BUILT,
   type OnboardingStepId
 } from "./onboardingSteps";
-import type { BusinessTypeId } from "../../../core/config/businessTypes";
+import {
+  isStoredBusinessTypeId,
+  type BusinessTypeId
+} from "../../../core/config/businessTypes";
 import type { ModuleId } from "../../../core/config/modules";
 
 export interface OnboardingDraft {
@@ -24,8 +27,8 @@ const LEGACY_KEYS = [
 
 const memory = new Map<string, OnboardingDraft>();
 
-function keyFor(businessId: string): string {
-  return `${STORAGE_PREFIX}${businessId}`;
+function keyFor(userId: string, businessId: string): string {
+  return `${STORAGE_PREFIX}${encodeURIComponent(userId)}:${encodeURIComponent(businessId)}`;
 }
 
 function isValidStep(value: unknown): value is OnboardingStepId {
@@ -39,16 +42,17 @@ function isValidDraft(value: unknown): value is OnboardingDraft {
 
   return (
     isValidStep(candidate.step) &&
-    (candidate.businessType === null || typeof candidate.businessType === "string") &&
+    (candidate.businessType === null ||
+      (typeof candidate.businessType === "string" && isStoredBusinessTypeId(candidate.businessType))) &&
     Array.isArray(candidate.enabledModules) &&
     Array.isArray(candidate.categories) &&
     typeof candidate.savedAt === "string"
   );
 }
 
-function readStorage(businessId: string): OnboardingDraft | null {
+function readStorage(userId: string, businessId: string): OnboardingDraft | null {
   try {
-    const raw = window.localStorage.getItem(keyFor(businessId));
+    const raw = window.localStorage.getItem(keyFor(userId, businessId));
     if (!raw) return null;
 
     const parsed: unknown = JSON.parse(raw);
@@ -58,11 +62,12 @@ function readStorage(businessId: string): OnboardingDraft | null {
   }
 }
 
-function writeStorage(businessId: string, draft: OnboardingDraft): void {
-  memory.set(businessId, draft);
+function writeStorage(userId: string, businessId: string, draft: OnboardingDraft): void {
+  const key = keyFor(userId, businessId);
+  memory.set(key, draft);
 
   try {
-    window.localStorage.setItem(keyFor(businessId), JSON.stringify(draft));
+    window.localStorage.setItem(key, JSON.stringify(draft));
   } catch {
     // El almacenamiento local puede estar bloqueado; la memoria de esta
     // sesión sigue permitiendo que el onboarding continúe.
@@ -70,37 +75,46 @@ function writeStorage(businessId: string, draft: OnboardingDraft): void {
 }
 
 export const onboardingDraftStore = {
-  get(businessId: string): OnboardingDraft | null {
-    if (!businessId) return null;
+  get(userId: string, businessId: string): OnboardingDraft | null {
+    if (!userId || !businessId) return null;
 
-    const stored = readStorage(businessId);
+    const key = keyFor(userId, businessId);
+    const stored = readStorage(userId, businessId);
     if (stored) {
-      memory.set(businessId, stored);
+      memory.set(key, stored);
       return stored;
     }
 
-    return memory.get(businessId) ?? null;
+    return memory.get(key) ?? null;
   },
 
   save(
+    userId: string,
     businessId: string,
     draft: Omit<OnboardingDraft, "savedAt">
   ): void {
-    if (!businessId) return;
+    if (!userId || !businessId) return;
 
-    writeStorage(businessId, {
+    const businessType =
+      typeof draft.businessType === "string" && isStoredBusinessTypeId(draft.businessType)
+        ? draft.businessType
+        : null;
+
+    writeStorage(userId, businessId, {
       ...draft,
+      businessType,
       savedAt: new Date().toISOString()
     });
   },
 
-  clear(businessId: string | null | undefined): void {
-    if (!businessId) return;
+  clear(userId: string | null | undefined, businessId: string | null | undefined): void {
+    if (!userId || !businessId) return;
 
-    memory.delete(businessId);
+    const key = keyFor(userId, businessId);
+    memory.delete(key);
 
     try {
-      window.localStorage.removeItem(keyFor(businessId));
+      window.localStorage.removeItem(key);
     } catch {
       // No-op.
     }

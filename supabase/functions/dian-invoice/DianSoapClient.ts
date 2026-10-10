@@ -27,7 +27,7 @@
 // La autenticación es 100% basada en certificado digital.
 // ============================================================================
 
-import { parseDerCertificate, pemToPrivateKey, uint8ArrayToBase64, base64ToUint8Array, computeSha256, exclusiveCanonicalize } from "./DianSigner";
+import { parseDerCertificate, pemToPrivateKey, uint8ArrayToBase64, base64ToUint8Array, computeSha256, exclusiveCanonicalize } from "./DianSigner.ts";
 
 export type DianEnvironment = "habilantation" | "production";
 

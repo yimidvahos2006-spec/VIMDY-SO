@@ -1,13 +1,18 @@
 /**
  * PayPalProvider.ts
  * ---------------------------------------------------------------------------
- * Implementación de IPaymentProvider para PayPal. Es el proveedor por
- * defecto para "todo lo demás" (cualquier país sin regla explícita).
+ * Adaptador cliente de PayPal para VIMDY Payments.
  *
- * createPayment ya llama de verdad a paypal-checkout (Edge Function) —
- * mismo patrón que WompiProvider/MercadoPagoProvider. getPayment /
- * cancelPayment / refundPayment siguen en TODO: no fueron pedidos en esta
- * fase (solo checkout + webhook).
+ * Las credenciales OAuth y las llamadas REST protegidas viven en Supabase
+ * Edge Functions. El navegador solo recibe checkoutUrl/reference y consulta
+ * resultados a través de funciones server-side autorizadas.
+ *
+ * Flujo:
+ *   createPayment -> paypal-checkout -> PayPal Orders v2 -> aprobación del
+ *   comprador -> paypal-webhook -> capture -> activación de suscripción.
+ *
+ * PayPal-Request-Id y la verificación de webhooks se mantienen del lado
+ * servidor, donde también viven PAYPAL_CLIENT_SECRET y PAYPAL_WEBHOOK_ID.
  */
 
 import { supabase } from "../../../../infrastructure/supabase/supabaseClient";
@@ -27,68 +32,212 @@ import type {
 } from "../../models/PaymentModels";
 import { generatePaymentId, nowIso } from "../../utils/paymentUtils";
 
+const SUPPORTED_COUNTRIES = new Set([
+  "CO",
+  "MX",
+  "PE",
+  "CL",
+  "AR",
+  "ES",
+  "EC",
+  "PA",
+  "US",
+  "VE"
+]);
+
 interface PayPalCheckoutFunctionResponse {
   ok: true;
   checkoutUrl: string;
   reference: string;
+  orderId?: string;
+  existing?: boolean;
 }
 
 interface PayPalOrderApiResponse {
   id: string;
   status: string;
   create_time?: string;
-  purchase_units?: {
-    amount?: { currency_code?: string; value?: string };
-    payments?: { captures?: { id?: string; amount?: { currency_code?: string; value?: string } }[] };
-  }[];
+  purchase_units?: Array<{
+    amount?: {
+      currency_code?: string;
+      value?: string;
+    };
+    payments?: {
+      captures?: Array<{
+        id?: string;
+        status?: string;
+        amount?: {
+          currency_code?: string;
+          value?: string;
+        };
+      }>;
+    };
+  }>;
 }
 
 interface PayPalRefundApiResponse {
   id?: string;
   status?: string;
-  amount?: { currency_code?: string; value?: string };
+  amount?: {
+    currency_code?: string;
+    value?: string;
+  };
 }
 
-/** Igual que en WompiProvider/MercadoPagoProvider: mensaje detallado de un error de Edge Function. */
-async function extractFunctionErrorMessage(fnError: unknown, fallback: string): Promise<string> {
-  const context = (fnError as { context?: Response })?.context;
+interface FunctionErrorContext {
+  context?: Response;
+  message?: string;
+}
+
+async function extractFunctionErrorMessage(
+  fnError: unknown,
+  fallback: string
+): Promise<string> {
+  const candidate = fnError as FunctionErrorContext | null;
+  const context = candidate?.context;
+
   if (context && typeof context.json === "function") {
     try {
-      const body = await context.json();
-      if (body?.error) return body.error as string;
+      const body = (await context.json()) as {
+        error?: unknown;
+        detail?: unknown;
+      };
+
+      if (typeof body.error === "string" && body.error.trim()) {
+        return typeof body.detail === "string" && body.detail.trim()
+          ? `${body.error}: ${body.detail}`
+          : body.error;
+      }
     } catch {
-      // El body no era JSON válido; nos quedamos con el mensaje genérico.
+      // La respuesta de error puede no ser JSON.
     }
   }
-  return (fnError as { message?: string })?.message ?? fallback;
+
+  if (typeof candidate?.message === "string" && candidate.message.trim()) {
+    return candidate.message;
+  }
+
+  return fallback;
+}
+
+function assertHttpsUrl(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(
+      "PAYPAL_INVALID_RESPONSE: checkoutUrl es obligatorio."
+    );
+  }
+
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(
+      "PAYPAL_INVALID_RESPONSE: checkoutUrl no es una URL válida."
+    );
+  }
+
+  if (url.protocol !== "https:") {
+    throw new Error(
+      "PAYPAL_INVALID_RESPONSE: checkoutUrl debe usar HTTPS."
+    );
+  }
+
+  return url.toString();
+}
+
+function assertPositiveAmount(
+  value: number,
+  field = "amount"
+): void {
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(
+      `PAYPAL_INVALID_${field.toUpperCase()}`
+    );
+  }
+}
+
+function assertCurrency(value: string): CurrencyCode {
+  if (
+    value === "COP" ||
+    value === "MXN" ||
+    value === "ARS" ||
+    value === "CLP" ||
+    value === "PEN" ||
+    value === "USD" ||
+    value === "EUR"
+  ) {
+    return value;
+  }
+
+  throw new Error(
+    `PAYPAL_INVALID_CURRENCY: ${value}`
+  );
 }
 
 export class PayPalProvider implements IPaymentProvider {
   readonly name: PaymentProviderName = "paypal";
 
-  /**
-   * Crea la orden real en PayPal (Orders API v2). paypal-checkout es quien
-   * decide el monto real y arma el link de aprobación; quien llame a
-   * VimdyPayments.pay() (UpgradeModal.tsx) debe redirigir el navegador ahí.
-   * El cobro de verdad (captura) ocurre después, en paypal-webhook, cuando
-   * el comprador ya aprobó — nunca en este método.
-   */
   async createPayment(request: PaymentRequest): Promise<PaymentResult> {
-    if (request.plan !== "monthly" && request.plan !== "yearly") {
-      throw new Error(`PayPalProvider: plan no facturable por PayPal ("${request.plan}").`);
+    const country = request.country.trim().toUpperCase();
+
+    if (!SUPPORTED_COUNTRIES.has(country)) {
+      throw new Error(
+        `PAYPAL_COUNTRY_NOT_SUPPORTED: ${country}.`
+      );
     }
 
-    const { data, error } = await supabase.functions.invoke<PayPalCheckoutFunctionResponse>(
-      "paypal-checkout",
-      { body: { businessId: request.businessId, plan: request.plan } }
-    );
+    if (!request.businessId?.trim()) {
+      throw new Error("PAYPAL_BUSINESS_ID_REQUIRED");
+    }
+
+    if (request.plan !== "monthly" && request.plan !== "yearly") {
+      throw new Error(
+        `PayPalProvider: plan no facturable por PayPal ("${request.plan}").`
+      );
+    }
+
+    assertPositiveAmount(request.amount);
+
+    const expectedCurrency = this.getCurrency(country);
+    if (request.currency !== expectedCurrency) {
+      throw new Error(
+        `PAYPAL_CURRENCY_MISMATCH: para ${country} se esperaba ${expectedCurrency} y se recibió ${request.currency}.`
+      );
+    }
+
+    if (
+      request.method &&
+      !this.getAvailableMethods(country).includes(request.method)
+    ) {
+      throw new Error(
+        `PAYPAL_METHOD_NOT_SUPPORTED: ${request.method}.`
+      );
+    }
+
+    const { data, error } =
+      await supabase.functions.invoke<PayPalCheckoutFunctionResponse>(
+        "paypal-checkout",
+        {
+          body: {
+            businessId: request.businessId,
+            plan: request.plan
+          }
+        }
+      );
 
     if (error) {
-      throw new Error(await extractFunctionErrorMessage(error, "No se pudo iniciar el pago con PayPal."));
+      throw new Error(
+        await extractFunctionErrorMessage(
+          error,
+          "No se pudo iniciar el pago con PayPal."
+        )
+      );
     }
 
     if (!data?.checkoutUrl || !data.reference) {
-      throw new Error("PayPalProvider: la Edge Function no devolvió una sesión de pago válida.");
+      throw new Error(
+        "PAYPAL_INVALID_CHECKOUT_RESPONSE: faltan checkoutUrl o reference."
+      );
     }
 
     return {
@@ -98,99 +247,145 @@ export class PayPalProvider implements IPaymentProvider {
       amount: request.amount,
       currency: request.currency,
       createdAt: nowIso(),
-      checkoutUrl: data.checkoutUrl,
-      reference: data.reference
+      checkoutUrl: assertHttpsUrl(data.checkoutUrl),
+      reference: data.reference.trim(),
+      raw: {
+        orderId: data.orderId ?? null,
+        existing: data.existing ?? false,
+        method: request.method ?? null
+      }
     };
   }
 
-  /**
-   * Consulta el estado real de una orden en PayPal. A diferencia de Wompi
-   * (que sí expone una API pública de consulta), PayPal exige un access
-   * token OAuth que solo se puede sacar con el client secret — por eso esto
-   * delega en paypal-get-order en vez de llamar a PayPal directo.
-   */
   async getPayment(paymentId: string): Promise<PaymentResult> {
-    const { data, error } = await supabase.functions.invoke<{ ok: true; order: PayPalOrderApiResponse }>(
-      "paypal-get-order",
-      { body: { orderId: paymentId } }
-    );
+    const normalizedPaymentId = paymentId?.trim();
+
+    if (!normalizedPaymentId) {
+      throw new Error("PAYPAL_PAYMENT_ID_REQUIRED");
+    }
+
+    const { data, error } = await supabase.functions.invoke<{
+      ok: true;
+      order: PayPalOrderApiResponse;
+    }>("paypal-get-order", {
+      body: {
+        orderId: normalizedPaymentId
+      }
+    });
 
     if (error) {
-      throw new Error(await extractFunctionErrorMessage(error, "No se pudo consultar el pago en PayPal."));
+      throw new Error(
+        await extractFunctionErrorMessage(
+          error,
+          "No se pudo consultar el pago en PayPal."
+        )
+      );
     }
-    if (!data?.order) {
-      throw new Error("PayPalProvider: la Edge Function no devolvió la orden consultada.");
+
+    if (!data?.order?.id) {
+      throw new Error(
+        "PAYPAL_INVALID_ORDER_RESPONSE"
+      );
     }
 
     const order = data.order;
-    const capture = order.purchase_units?.[0]?.payments?.captures?.[0];
-    const amountInfo = capture?.amount ?? order.purchase_units?.[0]?.amount;
+    const capture =
+      order.purchase_units?.[0]?.payments?.captures?.[0];
+    const amountInfo =
+      capture?.amount ??
+      order.purchase_units?.[0]?.amount;
+
+    const amount = amountInfo
+      ? Number(amountInfo.value)
+      : 0;
+
+    if (!Number.isFinite(amount) || amount < 0) {
+      throw new Error(
+        "PAYPAL_INVALID_ORDER_AMOUNT"
+      );
+    }
+
+    const currency = amountInfo?.currency_code
+      ? assertCurrency(amountInfo.currency_code)
+      : "USD";
 
     return {
       id: order.id,
       provider: this.name,
       status: this.getStatus(order.status),
-      amount: amountInfo ? Number(amountInfo.value) : 0,
-      currency: (amountInfo?.currency_code as CurrencyCode) ?? "USD",
+      amount,
+      currency,
       createdAt: order.create_time ?? nowIso(),
       reference: order.id,
       raw: order
     };
   }
 
-  /**
-   * PayPal, a diferencia de Wompi, NO tiene un endpoint de "anular/cancelar"
-   * una orden ya creada — la Orders API v2 no lo ofrece: una orden que nunca
-   * se captura simplemente expira sola del lado de PayPal a las pocas horas.
-   * Por eso este método NO finge cancelar algo en PayPal (eso sería
-   * mostrarle al dueño del negocio un "cancelado" que en realidad nunca
-   * ocurrió del lado de PayPal). En vez de eso:
-   *   - Si el pago sigue 'pending' (nunca se capturó), no hay nada que
-   *     cancelar en PayPal: se lanza un error explicando que solo hace
-   *     falta esperar a que expire, o usar refundPayment si ya se capturó.
-   *   - Si ya se capturó (approved), lo correcto es reembolsar, no
-   *     "cancelar" — se lanza un error dirigiendo a refundPayment().
-   */
   async cancelPayment(_paymentId: string): Promise<PaymentResult> {
     throw new Error(
-      "PayPalProvider: PayPal no ofrece una API para cancelar una orden. " +
-        "Si el pago aún no se capturó, no hace falta hacer nada (expira solo). " +
-        "Si ya se capturó, usa refundPayment() para devolver el dinero."
+      "PAYPAL_CANCEL_NOT_SUPPORTED: PayPal no ofrece una operación genérica de cancelación de una orden ya creada. Las órdenes no capturadas expiran; las capturadas se gestionan mediante refundPayment()."
     );
   }
 
-  /**
-   * Reembolsa un pago YA capturado (POST /v2/payments/captures/:id/refund).
-   * Exige el client secret, así que delega en paypal-refund-transaction.
-   */
-  async refundPayment(request: RefundRequest): Promise<RefundResult> {
-    const { data, error } = await supabase.functions.invoke<{ ok: true; refund: PayPalRefundApiResponse }>(
-      "paypal-refund-transaction",
-      { body: { paymentId: request.paymentId, amount: request.amount, reason: request.reason } }
-    );
+  async refundPayment(
+    request: RefundRequest
+  ): Promise<RefundResult> {
+    const paymentId = request.paymentId?.trim();
+
+    if (!paymentId) {
+      throw new Error("PAYPAL_PAYMENT_ID_REQUIRED");
+    }
+
+    if (
+      request.amount !== undefined &&
+      (!Number.isFinite(request.amount) || request.amount <= 0)
+    ) {
+      throw new Error("PAYPAL_REFUND_AMOUNT_INVALID");
+    }
+
+    const { data, error } = await supabase.functions.invoke<{
+      ok: true;
+      refund: PayPalRefundApiResponse;
+    }>("paypal-refund-transaction", {
+      body: {
+        paymentId,
+        amount: request.amount,
+        reason: request.reason
+      }
+    });
 
     if (error) {
-      throw new Error(await extractFunctionErrorMessage(error, "No se pudo reembolsar el pago en PayPal."));
-    }
-    if (!data?.refund) {
-      throw new Error("PayPalProvider: la Edge Function no devolvió el reembolso.");
+      throw new Error(
+        await extractFunctionErrorMessage(
+          error,
+          "No se pudo reembolsar el pago en PayPal."
+        )
+      );
     }
 
-    // OJO: no se reutiliza getStatus() acá a propósito — esa tabla mapea
-    // estados de ORDEN (donde "COMPLETED" significa "ya se cobró"), pero
-    // un reembolso tiene su propio vocabulario de estados donde
-    // "COMPLETED" significa "ya se devolvió el dinero". Mezclarlos haría
-    // que un reembolso completado se reportara como "approved" en vez de
-    // "refunded".
+    if (!data?.refund) {
+      throw new Error(
+        "PAYPAL_INVALID_REFUND_RESPONSE"
+      );
+    }
+
     const refund = data.refund;
-    const refundStatus: PaymentStatus = refund.status === "PENDING" ? "pending" : "refunded";
+    const amount = refund.amount?.value !== undefined
+      ? Number(refund.amount.value)
+      : request.amount ?? 0;
+
+    if (!Number.isFinite(amount) || amount < 0) {
+      throw new Error(
+        "PAYPAL_INVALID_REFUND_AMOUNT"
+      );
+    }
 
     return {
       id: refund.id ?? generatePaymentId("pp_refund"),
-      paymentId: request.paymentId,
+      paymentId,
       provider: this.name,
-      status: refundStatus,
-      amount: refund.amount ? Number(refund.amount.value) : request.amount ?? 0,
+      status: this.getRefundStatus(refund.status),
+      amount,
       createdAt: nowIso(),
       raw: refund
     };
@@ -213,27 +408,55 @@ export class PayPalProvider implements IPaymentProvider {
       US: "USD",
       VE: "USD"
     };
-    return map[country] ?? "USD";
+
+    return map[country.trim().toUpperCase()] ?? "USD";
   }
 
   getStatus(providerStatus: string): PaymentStatus {
+    const normalized = providerStatus?.trim().toUpperCase();
+
     const map: Record<string, PaymentStatus> = {
       CREATED: "pending",
       SAVED: "pending",
-      APPROVED: "approved",
+      APPROVED: "pending",
+      PAYER_ACTION_REQUIRED: "pending",
       COMPLETED: "approved",
       VOIDED: "cancelled",
-      DECLINED: "declined"
+      DECLINED: "declined",
+      FAILED: "error"
     };
-    return map[providerStatus] ?? "error";
+
+    return map[normalized] ?? "error";
+  }
+
+  private getRefundStatus(
+    providerStatus?: string
+  ): PaymentStatus {
+    const normalized = providerStatus?.trim().toUpperCase();
+
+    if (normalized === "PENDING") {
+      return "pending";
+    }
+
+    if (normalized === "COMPLETED") {
+      return "refunded";
+    }
+
+    if (normalized === "CANCELLED" || normalized === "CANCELED") {
+      return "cancelled";
+    }
+
+    if (normalized === "FAILED") {
+      return "error";
+    }
+
+    return "error";
   }
 
   /**
-   * Valida la firma del webhook de PayPal.
-   * Por seguridad y diseño, la verificación asíncrona de firmas (que requiere consultar
-   * la API oficial de PayPal /v1/notifications/verify-webhook-signature) se ejecuta
-   * en la Edge Function (paypal-webhook). Este método en el cliente retorna false por
-   * defecto (fail closed) para evitar el procesamiento de eventos no autorizados.
+   * La verificación auténtica de webhooks de PayPal exige los headers del
+   * webhook, el webhook_id y la verificación server-side. No se puede hacer
+   * de forma segura con un booleano local en el bundle del navegador.
    */
   validateResponse(_payload: unknown, _signature?: string): boolean {
     return false;

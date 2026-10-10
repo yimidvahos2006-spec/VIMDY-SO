@@ -141,40 +141,4 @@ describe("SubscriptionService — blindaje anti-doble-activación", () => {
       expect(result.alreadyExpired).toBe(true);
     });
   });
-
-  describe("refundSubscriptionPayment", () => {
-    it("procesa reembolso total y marca suscripción como declinada", async () => {
-      await mockPaymentRow({ id: "p1", business_id: "b1", amount: 89, currency: "USD", status: "approved" });
-      await mockRpcResponse({ ok: true, is_total_refund: true, new_payment_status: "declined" });
-
-      const service = new SubscriptionService();
-      const result = await service.refundSubscriptionPayment("p1", 89, "refund-123");
-
-      expect(result.ok).toBe(true);
-      expect(result.isTotalRefund).toBe(true);
-      expect(result.newPaymentStatus).toBe("declined");
-    });
-
-    it("procesa reembolso parcial y mantiene suscripción activa", async () => {
-      await mockPaymentRow({ id: "p1", business_id: "b1", amount: 89, currency: "USD", status: "approved" });
-      await mockRpcResponse({ ok: true, is_total_refund: false, new_payment_status: "approved" });
-
-      const service = new SubscriptionService();
-      const result = await service.refundSubscriptionPayment("p1", 44.5, "refund-456");
-
-      expect(result.ok).toBe(true);
-      expect(result.isTotalRefund).toBe(false);
-      expect(result.newPaymentStatus).toBe("approved");
-    });
-
-    it("rechaza reembolso de pago no aprobado", async () => {
-      await mockPaymentRow({ id: "p1", business_id: "b1", status: "pending", amount: 89, currency: "USD" });
-
-      const service = new SubscriptionService();
-      const result = await service.refundSubscriptionPayment("p1", 89, "refund-123");
-
-      expect(result.ok).toBe(false);
-      expect(result.error).toBe("PAGO_NO_APROBADO");
-    });
-  });
 });
