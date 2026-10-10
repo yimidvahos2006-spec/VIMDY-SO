@@ -1,5 +1,5 @@
 // tests/fakes/FakeProductRepository.ts
-import { Product } from "../../src/core/entities/Entities";
+import { InventoryMovement, Product } from "../../src/core/entities/Entities";
 import { IProductRepository } from "../../src/infrastructure/di/repositories/IProductRepository";
 import { InMemoryRepository } from "./InMemoryRepository";
 import { companyConfigStore } from "../../src/core/store/companyConfigStore";
@@ -19,8 +19,40 @@ export class FakeProductRepository
   extends InMemoryRepository<Product>
   implements IProductRepository
 {
-  constructor() {
+  /**
+   * @param movementLog Repositorio donde `produceBatch` escribe el Kardex.
+   * En producción esa escritura la hace el RPC `produce_batch_atomic`
+   * (vía `apply_inventory_operation_delta`), no el engine. Se inyecta para
+   * que los tests lean el Kardex que el RPC real dejaría.
+   */
+  constructor(private readonly movementLog?: InMemoryRepository<InventoryMovement>) {
     super("products");
+  }
+
+  private async logProductionMovement(
+    product: Product,
+    quantity: number,
+    type: "INCREASE" | "DECREASE",
+    reason: "PRODUCTION_CONSUMPTION" | "BATCH_PRODUCTION",
+    operationId: string,
+    performedBy?: string
+  ): Promise<void> {
+    if (!this.movementLog) return;
+
+    // Mismos campos que escribe apply_inventory_operation_delta: sin
+    // stockBefore/stockAfter y con `reason` fijo (sin referencia de tanda).
+    await this.movementLog.save({
+      id: crypto.randomUUID(),
+      productId: product.id,
+      productName: product.name,
+      quantity: Math.abs(quantity),
+      date: new Date(),
+      type,
+      reason,
+      performedBy: performedBy ?? "Sistema",
+      branchId: product.branchId,
+      operationId
+    } as InventoryMovement);
   }
 
   public async adjustStock(
@@ -142,6 +174,9 @@ export class FakeProductRepository
     for (const { productId: ingId, totalNeeded } of consumptionPlan) {
       const updated = await this.adjustStock(ingId, -totalNeeded, {}, allowNegative);
       results.push(updated);
+      await this.logProductionMovement(
+        updated, totalNeeded, "DECREASE", "PRODUCTION_CONSUMPTION", input.operationId, input.performedBy
+      );
     }
 
     const updatedProduct: Product = {
@@ -151,6 +186,9 @@ export class FakeProductRepository
     };
     await this.update(updatedProduct);
     results.push(updatedProduct);
+    await this.logProductionMovement(
+      updatedProduct, input.quantity, "INCREASE", "BATCH_PRODUCTION", input.operationId, input.performedBy
+    );
 
     return results;
   }

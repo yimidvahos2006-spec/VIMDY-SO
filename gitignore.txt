@@ -52,3 +52,6 @@ Thumbs.db
 .vercel/
 # TypeScript
 *.tsbuildinfo
+
+# Legacy config sample file; .env.example is the only supported template
+env.example.txt

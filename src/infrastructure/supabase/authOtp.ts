@@ -187,7 +187,6 @@ export async function verifyRegistrationOtp(code: string): Promise<void> {
  */
 export async function resendRegistrationOtp(): Promise<void> {
   const email = requirePendingEmail();
-  console.log("[VIMDY-AUTH] resendRegistrationOtp called for email:", email.replace(/(.).*?(.)@/, "$1***$2@"));
 
   const now = Date.now();
   const storedResendAt = readStoredResendAt(email);
@@ -200,12 +199,6 @@ export async function resendRegistrationOtp(): Promise<void> {
   const { error } = await supabase.auth.resend({
     type: "signup",
     email
-  });
-
-  console.log("[VIMDY-AUTH] resend() response:", {
-    hasError: !!error,
-    errorMessage: error?.message,
-    errorStatus: error?.status
   });
 
   if (error) {

@@ -12,12 +12,15 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["tests/**/*.test.ts"],
+    // Gate 1 exige un Supabase real y fixtures reales; falla cerrado
+    // (BLOCKED_ENVIRONMENT) sin ellos. Se ejecuta con `npm run test:integration`.
+    exclude: ["**/node_modules/**", "tests/integration/**"],
     globals: false,
     env: {
       VITE_SUPABASE_URL: "https://test.supabase.co",
       VITE_SUPABASE_ANON_KEY: "test-anon-key",
       VITE_APP_URL: "https://app.vimdy.co"
     },
-    setupFiles: ["tests/setup/cashContext.ts"]
+    setupFiles: ["tests/setup/cashContext.ts", "tests/setup/invoicing.ts"]
   }
 });

@@ -282,9 +282,10 @@ describe("FASE 5 — Cierre definitivo: cocina multi-tenant, envío sin duplicad
 
       await ctx.tableEngine.openTable({ tableId: "table-1", peopleCount: 2, waiterId: "w1" });
       await ctx.tableEngine.addItem({ tableId: "table-1", product: BURGER, quantity: 1 });
-      await ctx.tableEngine.sendToKitchen("table-1");
+      const firstResult = await ctx.tableEngine.sendToKitchen("table-1");
       const secondResult = await ctx.tableEngine.sendToKitchen("table-1");
-      expect(secondResult).toBeNull();
+      // Idempotente: el reenvío devuelve la comanda ya persistida, no una nueva ni null.
+      expect(secondResult?.id).toBe(firstResult?.id);
 
       const orders = await ctx.kitchenOrders.findAll();
       expect(orders).toHaveLength(1);

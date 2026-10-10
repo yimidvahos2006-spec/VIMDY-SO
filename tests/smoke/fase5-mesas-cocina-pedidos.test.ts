@@ -284,9 +284,10 @@ describe("FASE 5 — Mesas + Cocina + Pedidos", () => {
       quantity: 1
     });
 
-    await ctx.tableEngine.sendToKitchen("table-1");
+    const firstResult = await ctx.tableEngine.sendToKitchen("table-1");
     const secondResult = await ctx.tableEngine.sendToKitchen("table-1");
-    expect(secondResult).toBeNull();
+    // Idempotente: el reenvío devuelve la comanda ya persistida, no una nueva ni null.
+    expect(secondResult?.id).toBe(firstResult?.id);
 
     const kitchenOrders = await ctx.kitchenOrders.findAll();
     expect(kitchenOrders).toHaveLength(1);
@@ -583,7 +584,7 @@ describe("FASE 5 — Mesas + Cocina + Pedidos", () => {
     await ctx.tableEngine.sendToKitchen("table-1");
 
     const freshTable = await ctx.tableEngine.getTable("table-1");
-    expect(freshTable.status).toBe("CUENTA_SOLICITADA");
+    expect(freshTable.status).toBe("WAITING_FOOD");
     expect(freshTable.items).toHaveLength(1);
     expect(freshTable.items[0].productId).toBe(BURGER.id);
     expect(freshTable.items[0].quantity).toBe(2);

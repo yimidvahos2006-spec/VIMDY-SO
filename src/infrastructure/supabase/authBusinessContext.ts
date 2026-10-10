@@ -419,9 +419,6 @@ export async function beginRegistration(input: RegisterBusinessInput): Promise<v
     throw new Error("La contraseña debe tener al menos 8 caracteres.");
   }
 
-  const startTime = Date.now();
-  console.log("[VIMDY-AUTH] beginRegistration: signUp called for email:", normalizedEmail.replace(/(.).*?(.)@/, "$1***$2@"));
-
   let data: { user: { id?: string; identities?: unknown[]; email_confirmed_at?: string | null } | null } | undefined;
   let error: { message: string; status?: number } | null = null;
 
@@ -439,22 +436,9 @@ export async function beginRegistration(input: RegisterBusinessInput): Promise<v
     error = { message: err instanceof Error ? err.message : String(err) };
   }
 
-  const elapsed = Date.now() - startTime;
-  console.log("[VIMDY-AUTH] signUp response:", {
-    elapsedMs: elapsed,
-    hasError: !!error,
-    hasUser: !!data?.user,
-    userId: data?.user?.id,
-    identitiesCount: data?.user?.identities?.length,
-    emailConfirmed: data?.user?.email_confirmed_at,
-    errorMessage: error?.message,
-    errorStatus: error?.status
-  });
-
   if (error) {
     const msg = error.message.toLowerCase();
     if (msg.includes("user already registered") || msg.includes("already registered")) {
-      console.log("[VIMDY-AUTH] signUp returned 'user already registered' — calling resendRegistrationOtp");
       savePendingRegistration({
         businessName,
         ownerName,
@@ -469,7 +453,6 @@ export async function beginRegistration(input: RegisterBusinessInput): Promise<v
   }
 
   if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
-    console.log("[VIMDY-AUTH] signUp returned existing unconfirmed user (identities=[]), calling resendRegistrationOtp");
     savePendingRegistration({
       businessName,
       ownerName,
@@ -480,7 +463,6 @@ export async function beginRegistration(input: RegisterBusinessInput): Promise<v
     return;
   }
 
-  console.log("[VIMDY-AUTH] signUp succeeded for new user — email should have been sent by Supabase");
   // El servidor limita nuevas solicitudes de confirmación a un intervalo
   // mínimo; VIMDY inicia el contador desde el primer OTP y lo conserva
   // aunque la página se recargue.

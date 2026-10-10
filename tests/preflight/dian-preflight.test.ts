@@ -128,7 +128,7 @@ async function buildAndSign(
    ────────────────────────────────────────────────────────── */
 describe("PHASE 46 REGRESSION GUARDS: DIAN handler invariants", () => {
   const HANDLER_PATH = join(__dirname, "../../supabase/functions/dian-invoice/index.ts");
-  const handlerSource = readFileSync(HANDLER_PATH, "utf-8");
+  const handlerSource = readFileSync(HANDLER_PATH, "utf-8").replace(/\r\n/g, "\n");
 
   it("builds authoritative sale data before taking a pending lease", () => {
     const saleData = handlerSource.indexOf("const saleData =");

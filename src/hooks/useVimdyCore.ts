@@ -7,7 +7,7 @@ import { vimdyCore, EventType } from "../core/VimdyCore";
  *
  * Ejemplo:
  *   useVimdyEvent("sale", (payload) => {
- *     console.log("Nueva venta:", payload);
+ *     setLastSale(payload);
  *   });
  */
 export function useVimdyEvent(event: EventType, handler: (payload: any) => void) {
