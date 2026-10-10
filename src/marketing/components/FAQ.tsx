@@ -28,11 +28,6 @@ const faqs = [
       "Sí. VIMDY incluye control de inventario con alertas de stock bajo, recetas para productos elaborados y trazabilidad completa.",
   },
   {
-    question: "¿Puedo trabajar sin internet?",
-    answer:
-      "Sí. VIMDY funciona offline y sincroniza automáticamente cuando recuperas la conexión.",
-  },
-  {
     question: "¿Cuánto cuesta?",
     answer:
       "Plan mensual: $59.900 COP/mes. Plan anual: $718.800 COP/año, sin descuento implícito.",

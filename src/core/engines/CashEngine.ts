@@ -393,11 +393,15 @@ export class CashEngine {
       ? `Venta ${saleIdentifier} - ${reference}`
       : `Venta ${saleIdentifier}`;
 
+      // En CASH el ingreso guarda el efectivo realmente recibido (billete
+      // completo): el cambio se registra aparte como egreso, así que el
+      // cuadre de caja (apertura + ingresos en efectivo - egresos) cierra.
+      // La venta conserva cashAmount = total. Igual que la RPC server-side.
       income = await this.registerIncome(
         total,
         incomeDescription,
         paymentMethod as CashMovement["paymentMethod"],
-        cashAmount,
+        paymentMethod === "CASH" ? resolvedReceived : cashAmount,
         paymentId,
         cashRegisterId,
         verificationSource

@@ -6,7 +6,6 @@ import {
   Package,
   Wallet,
   BarChart3,
-  WifiOff,
   ChevronRight,
   ChevronLeft
 } from "lucide-react";
@@ -29,8 +28,7 @@ const features = [
   { icon: <TrendingUp size={18} />, label: "Ventas rápidas" },
   { icon: <Package size={18} />, label: "Inventario inteligente" },
   { icon: <Wallet size={18} />, label: "Caja y pagos" },
-  { icon: <BarChart3 size={18} />, label: "Cocina y mesas" },
-  { icon: <WifiOff size={18} />, label: "Funciona sin internet" }
+  { icon: <BarChart3 size={18} />, label: "Cocina y mesas" }
 ];
 
 const metrics = [

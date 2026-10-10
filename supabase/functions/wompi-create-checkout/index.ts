@@ -206,6 +206,13 @@ Deno.serve(async (req: Request) => {
     //    dos pestañas o tras un refresh.
     const signature = await buildIntegritySignature(reference, amountInCents, currency, WOMPI_INTEGRITY_SECRET);
 
+    // Referencia/clave/firma del intento que realmente se usará. Por defecto son
+    // las deterministas de la ventana de 5 min; solo cambian si el intento
+    // anterior de esa ventana ya fue rechazado (ver más abajo).
+    let paymentReference = reference;
+    let paymentIdempotencyKey = idempotencyKey;
+    let paymentSignature = signature;
+
     // 4) La clave determinista permite reutilizar el mismo checkout en la misma
     //    ventana. Si dos peticiones concurrentes llegaran antes de que la primera
     //    inserción sea visible, la restricción única de la base de datos es la
@@ -221,19 +228,29 @@ Deno.serve(async (req: Request) => {
     }
 
     if (existingPayment) {
-      const existingSignature = await buildIntegritySignature(
-        existingPayment.wompi_reference,
-        amountInCents,
-        currency,
-        WOMPI_INTEGRITY_SECRET
-      );
+      if (existingPayment.status === "declined") {
+        // Un intento rechazado ya está finalizado: reutilizar su referencia haría que
+        // un pago aprobado posterior se ignorara por idempotencia en el webhook.
+        // Se crea una referencia y una clave nuevas para este reintento.
+        const retryId = Date.now().toString(36);
+        paymentReference = `${reference}_r${retryId}`;
+        paymentIdempotencyKey = `${idempotencyKey}:r${retryId}`;
+        paymentSignature = await buildIntegritySignature(paymentReference, amountInCents, currency, WOMPI_INTEGRITY_SECRET);
+      } else {
+        const existingSignature = await buildIntegritySignature(
+          existingPayment.wompi_reference,
+          amountInCents,
+          currency,
+          WOMPI_INTEGRITY_SECRET
+        );
 
-      return json({
-        ok: true,
-        checkoutUrl: buildCheckoutUrl(existingPayment.wompi_reference, amountInCents, currency, existingSignature),
-        reference: existingPayment.wompi_reference,
-        existing: true
-      });
+        return json({
+          ok: true,
+          checkoutUrl: buildCheckoutUrl(existingPayment.wompi_reference, amountInCents, currency, existingSignature),
+          reference: existingPayment.wompi_reference,
+          existing: true
+        });
+      }
     }
 
     // 5) Se deja el intento en 'pending' ANTES de armar la URL de Wompi —
@@ -247,15 +264,15 @@ Deno.serve(async (req: Request) => {
       amount,
       currency,
       status: "pending",
-      wompi_reference: reference,
-      idempotency_key: idempotencyKey
+      wompi_reference: paymentReference,
+      idempotency_key: paymentIdempotencyKey
     });
 
     if (insertError) {
       const { data: conflictedPayment, error: conflictedPaymentError } = await admin
         .from("subscription_payments")
         .select("wompi_reference")
-        .eq("wompi_reference", reference)
+        .eq("wompi_reference", paymentReference)
         .maybeSingle();
 
       if (conflictedPaymentError) {
@@ -286,9 +303,9 @@ Deno.serve(async (req: Request) => {
     //    el Web Checkout se arma como una URL con querystring firmada — Wompi
     //    valida esa firma al cargar la página, no hace falta llamar a su API
     //    acá.
-    const checkoutUrl = buildCheckoutUrl(reference, amountInCents, currency, signature);
+    const checkoutUrl = buildCheckoutUrl(paymentReference, amountInCents, currency, paymentSignature);
 
-    return json({ ok: true, checkoutUrl, reference });
+    return json({ ok: true, checkoutUrl, reference: paymentReference });
   } catch (error) {
     return json({ error: "WOMPI_CHECKOUT_FAILED", detail: String(error) }, 500);
   }
