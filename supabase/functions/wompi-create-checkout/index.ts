@@ -44,7 +44,7 @@ type Plan = "monthly" | "yearly";
 // y de COUNTRY_PRICE_MAP en mercadopago-checkout — misma fuente de verdad,
 // una copia por Edge Function porque cada una corre aislada.
 const PLAN_PRICE_BY_COUNTRY: Record<string, Record<Plan, number>> = {
-  CO: { monthly: 59900, yearly: 718800 }
+  CO: { monthly: 59900, yearly: 599000 }
 };
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");

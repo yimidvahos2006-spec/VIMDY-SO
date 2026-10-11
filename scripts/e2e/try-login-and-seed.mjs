@@ -1,7 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL = "https://upoztxlcudrqhnjwjgho.supabase.co";
-const ANON_KEY = "sb_publishable_zUHiDR00FbET1qisM11DCw_iWJ82nDT";
+import { resolveE2eTarget } from "./targetGuard.mjs";
+
+const { url: SUPABASE_URL, anonKey: ANON_KEY } = resolveE2eTarget();
 
 async function main() {
   const supabase = createClient(SUPABASE_URL, ANON_KEY);

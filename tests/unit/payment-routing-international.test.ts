@@ -115,7 +115,7 @@ describe("PaymentValidator — países permitidos", () => {
 describe("Subscription prices — por país (server-side)", () => {
   it("getPlanPrice usa país, no moneda", () => {
     expect(getPlanPrice("monthly", "CO")).toBe(59900);
-    expect(getPlanPrice("yearly", "CO")).toBe(718800);
+    expect(getPlanPrice("yearly", "CO")).toBe(599000);
     expect(getPlanPrice("monthly", "US")).toBe(89);
     expect(getPlanPrice("yearly", "US")).toBe(1068);
     expect(getPlanPrice("monthly", "MX")).toBe(1499);
@@ -149,11 +149,11 @@ describe("Subscription prices — por país (server-side)", () => {
     expect(getPlanCurrency("monthly", "ES")).toBe("EUR");
   });
 
-  it("plan base COP es 59.900/718.800", () => {
+  it("plan base COP es 59.900/599.000", () => {
     const monthly = SUBSCRIPTION_PLANS.find((p) => p.id === "monthly");
     const yearly = SUBSCRIPTION_PLANS.find((p) => p.id === "yearly");
     expect(monthly!.price).toBe(59900);
-    expect(yearly!.price).toBe(718800);
+    expect(yearly!.price).toBe(599000);
     expect(monthly!.currency).toBe("COP");
     expect(yearly!.currency).toBe("COP");
   });

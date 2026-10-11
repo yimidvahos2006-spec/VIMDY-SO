@@ -45,7 +45,7 @@ type Plan = "monthly" | "yearly";
 // Espejo server-side de SUBSCRIPTION_PLANS (src/core/entities/SubscriptionTypes.ts)
 // Precios reales por país para los 10 países soportados.
 const PLAN_PRICE_BY_COUNTRY: Record<string, Record<Plan, number>> = {
-  CO: { monthly: 59900, yearly: 718800 },
+  CO: { monthly: 59900, yearly: 599000 },
   US: { monthly: 89, yearly: 1068 },
   MX: { monthly: 1499, yearly: 17988 },
   PE: { monthly: 149, yearly: 1788 },

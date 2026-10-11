@@ -7,7 +7,7 @@ import { getPlanPrice, getPlanCurrency } from "../../src/core/entities/Subscript
 describe("subscription price canonical source", () => {
   it("usa el precio de lanzamiento VIMDY en COP sin descuento implícito", () => {
     expect(getPlanPrice("monthly", "CO")).toBe(59900);
-    expect(getPlanPrice("yearly", "CO")).toBe(718800);
+    expect(getPlanPrice("yearly", "CO")).toBe(599000);
     expect(getPlanCurrency("monthly", "CO")).toBe("COP");
   });
 
