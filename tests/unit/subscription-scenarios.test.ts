@@ -73,24 +73,24 @@ describe("SubscriptionEngine — escenarios completos", () => {
   });
 
   describe("flujo anual 12+2", () => {
-    it("plan anual proporciona 420 días (14 meses)", () => {
-      expect(subscriptionEngine.getPlanPeriodDays("yearly")).toBe(420);
+    it("plan anual proporciona 365 días (12 meses)", () => {
+      expect(subscriptionEngine.getPlanPeriodDays("yearly")).toBe(365);
     });
 
-    it("activa plan anual con fecha de renovación a 14 meses", () => {
+    it("activa plan anual con fecha de renovación a 12 meses", () => {
       const baseDate = new Date("2024-06-15T00:00:00Z");
       const renewalDate = subscriptionEngine.calculateRenewalDate(baseDate, "yearly");
       const diffDays = Math.round((renewalDate.getTime() - baseDate.getTime()) / (24 * 60 * 60 * 1000));
-      expect(diffDays).toBe(420);
+      expect(diffDays).toBe(365);
     });
   });
 
   describe("renovación", () => {
-    it("al renovar anual, se extiende 14 meses", () => {
+    it("al renovar anual, se extiende 12 meses", () => {
       const baseDate = new Date("2025-06-10T00:00:00Z");
       const renewalDate = subscriptionEngine.calculateRenewalDate(baseDate, "yearly");
       const diffDays = Math.round((renewalDate.getTime() - baseDate.getTime()) / (24 * 60 * 60 * 1000));
-      expect(diffDays).toBe(420);
+      expect(diffDays).toBe(365);
     });
 
     it("al renovar mensual, se extiende 30 días", () => {

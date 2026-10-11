@@ -88,10 +88,10 @@ export class SubscriptionEngine {
   /**
    * Días de acceso que otorga un plan.
    * mensual = 30 días
-   * anual = 14 meses = 420 días (12 pagados + 2 gratis)
+   * anual = 12 meses = 365 días (se pagan 10 meses, 2 son gratis)
    */
   getPlanPeriodDays(plan: "monthly" | "yearly"): number {
-    return plan === "yearly" ? 30 * 14 : 30;
+    return plan === "yearly" ? 365 : 30;
   }
 
   /**
