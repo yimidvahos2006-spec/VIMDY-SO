@@ -201,8 +201,8 @@ describe("SubscriptionEngine", () => {
       expect(engine.getPlanPeriodDays("monthly")).toBe(30);
     });
 
-    it("returns 420 for yearly (14 months)", () => {
-      expect(engine.getPlanPeriodDays("yearly")).toBe(420);
+    it("returns 365 for yearly (12 months)", () => {
+      expect(engine.getPlanPeriodDays("yearly")).toBe(365);
     });
   });
 
@@ -258,7 +258,7 @@ describe("SubscriptionEngine", () => {
       expect(result.getUTCMonth()).toBe(1); // February
     });
 
-    it("adds 420 days for yearly", () => {
+    it("adds 365 days for yearly", () => {
       const base = new Date(Date.UTC(2024, 0, 15)); // Jan 15, 2024
       const result = engine.calculateRenewalDate(base, "yearly");
       expect(result.getUTCMonth()).toBe(2); // March

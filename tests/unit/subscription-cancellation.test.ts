@@ -58,7 +58,7 @@ describe("SubscriptionEngine - cancelación", () => {
     expect(renewal.toISOString()).toBe("2026-09-15T00:00:00.000Z");
   });
 
-  it("calculateRenewalDate suma 420 días para anual", () => {
+  it("calculateRenewalDate suma 365 días para anual", () => {
     const base = new Date("2026-08-16T00:00:00Z");
     const renewal = engine.calculateRenewalDate(base, "yearly");
     expect(renewal.toISOString()).toBe("2027-10-10T00:00:00.000Z");
