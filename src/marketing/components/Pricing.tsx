@@ -13,11 +13,11 @@ const plans = [
   {
     id: "yearly",
     name: "Anual",
-    price: "$718.800",
+    price: "$599.000",
     period: "/ año",
     cta: "Comenzar",
     highlighted: true,
-    description: "Pago anual sin descuento implícito: 12 × precio mensual.",
+    description: "Ahorras 2 meses: pagas 10 y usas 12.",
   },
 ];
 

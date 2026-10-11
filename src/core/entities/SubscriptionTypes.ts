@@ -106,7 +106,7 @@ export const SUBSCRIPTION_PLANS: PlanDefinition[] = [
   {
     id: "yearly",
     name: "Plan Anual",
-    price: 718800,
+    price: 599000,
     currency: "COP",
     billingLabel: "Facturación anual",
     features: [
@@ -114,13 +114,13 @@ export const SUBSCRIPTION_PLANS: PlanDefinition[] = [
       "Soporte prioritario por WhatsApp",
       "Actualizaciones automáticas",
       "Acceso completo a POS, inventario, reportes y más",
-      "Cobro anual sin descuento implícito: 12 × precio mensual"
+      "Ahorras 2 meses: pagas 10 y usas 12"
     ]
   }
 ];
 
 const COUNTRY_PRICE_MAP: Record<string, Record<"monthly" | "yearly", number>> = {
-  CO: { monthly: 59900, yearly: 718800 },
+  CO: { monthly: 59900, yearly: 599000 },
   US: { monthly: 89, yearly: 1068 },
   MX: { monthly: 1499, yearly: 17988 },
   PE: { monthly: 149, yearly: 1788 },

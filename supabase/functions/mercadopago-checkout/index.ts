@@ -45,7 +45,7 @@ type Plan = "monthly" | "yearly";
 // Espejo de COUNTRY_PRICE_MAP en src/core/entities/SubscriptionTypes.ts
 // para los 5 países donde Mercado Pago está habilitado (CO, AR, CL, MX, PE).
 const PLAN_PRICE_BY_COUNTRY: Record<string, Record<Plan, number>> = {
-  CO: { monthly: 59900, yearly: 718800 },
+  CO: { monthly: 59900, yearly: 599000 },
   AR: { monthly: 89999, yearly: 1079988 },
   CL: { monthly: 14990, yearly: 179880 },
   MX: { monthly: 1499, yearly: 17988 },

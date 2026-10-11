@@ -1,7 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL = "https://upoztxlcudrqhnjwjgho.supabase.co";
-const ANON_KEY = "sb_publishable_zUHiDR00FbET1qisM11DCw_iWJ82nDT";
+// @ts-ignore módulo .mjs sin tipos
+import { resolveE2eTarget } from "../../../scripts/e2e/targetGuard.mjs";
+
+const { url: SUPABASE_URL, anonKey: ANON_KEY } = resolveE2eTarget() as { url: string; anonKey: string };
 
 const supabase = createClient(SUPABASE_URL, ANON_KEY);
 

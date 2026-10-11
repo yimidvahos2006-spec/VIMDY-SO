@@ -1,8 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
+// @ts-ignore módulo .mjs sin tipos
+import { resolveE2eTarget } from "./targetGuard.mjs";
 
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "https://upoztxlcudrqhnjwjgho.supabase.co";
+const { url: SUPABASE_URL, anonKey: ANON_KEY } = resolveE2eTarget() as { url: string; anonKey: string };
+
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "sb_publishable_zUHiDR00FbET1qisM11DCw_iWJ82nDT";
 
 const TEST_EMAIL = "test.e2e.run@vimdy.dev";
 const TEST_PASSWORD = "Test123456!";

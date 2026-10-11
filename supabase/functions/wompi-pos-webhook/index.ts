@@ -176,7 +176,7 @@ Deno.serve(async (req: Request) => {
 
       const paymentId = `sale-payment-${saleId}`;
 
-      await admin.from("payment_verifications").insert({
+      const { error: verificationError } = await admin.from("payment_verifications").insert({
         business_id: session.business_id,
         branch_id: session.branch_id,
         sale_id: saleId,
@@ -193,11 +193,24 @@ Deno.serve(async (req: Request) => {
         },
       }, { ignore: true });
 
+      // Si no se pudo guardar el rechazo, NO responder 200: Wompi reintentará
+      // el webhook y el rechazo no se pierde.
+      // 23505 = ya existía (reintento del webhook): es válido, se sigue.
+      if (verificationError && verificationError.code !== "23505") {
+        console.error("[wompi-pos-webhook] payment_verifications insert failed:", verificationError.message);
+        return json({ error: "REJECTION_PERSIST_FAILED" }, 500);
+      }
+
       const targetStatus = status === "VOIDED" ? "cancelled" : "declined";
-      await admin
+      const { error: sessionUpdateError } = await admin
         .from("payment_sessions")
         .update({ status: targetStatus, updated_at: new Date().toISOString() })
         .eq("id", session.id);
+
+      if (sessionUpdateError) {
+        console.error("[wompi-pos-webhook] payment_sessions update failed:", sessionUpdateError.message);
+        return json({ error: "SESSION_STATUS_UPDATE_FAILED" }, 500);
+      }
 
       return json({ ok: true, status: targetStatus, saleId });
     }
