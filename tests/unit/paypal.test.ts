@@ -98,7 +98,7 @@ describe("PayPalProvider", () => {
     it("no finge cancelar en PayPal: lanza un error explicando que no existe esa API", async () => {
       const provider = new PayPalProvider();
 
-      await expect(provider.cancelPayment("ORDER-1")).rejects.toThrow(/no ofrece una API para cancelar/);
+      await expect(provider.cancelPayment("ORDER-1")).rejects.toThrow(/PAYPAL_CANCEL_NOT_SUPPORTED/);
       expect(invokeMock).not.toHaveBeenCalled();
     });
   });
@@ -137,7 +137,9 @@ describe("PayPalProvider", () => {
       const provider = new PayPalProvider();
 
       expect(provider.getStatus("COMPLETED")).toBe("approved");
-      expect(provider.getStatus("APPROVED")).toBe("approved");
+      // APPROVED = el comprador aceptó pero aún NO se capturó el dinero:
+      // sigue pendiente. Solo COMPLETED cuenta como pagado.
+      expect(provider.getStatus("APPROVED")).toBe("pending");
       expect(provider.getStatus("VOIDED")).toBe("cancelled");
       expect(provider.getStatus("DECLINED")).toBe("declined");
       expect(provider.getStatus("algo-desconocido")).toBe("error");

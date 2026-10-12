@@ -7,20 +7,25 @@ import { logWarning } from "../../logging/opsLogger";
 /**
  * CategoryRepository
  * ---------------------------------------------------------------------------
- * Migrado de IndexedDbRepository a SupabaseRepository (Fase 1 — Blindar
- * VIMDY): los datos de "categories" ya no viven solo en el navegador, viven
- * en la tabla `categories` de Supabase (ver supabase/schema.sql), aislados
- * por negocio mediante Row Level Security y disponibles en cualquier
- * dispositivo donde el mismo negocio inicie sesión.
+ * Las categorías viven en la tabla `categories` de Supabase, aisladas por
+ * negocio mediante Row Level Security, y se guardan en IndexedDB solo como
+ * respaldo para trabajar sin internet.
  *
- * PASO 1.3 (Catálogo sin internet) — mismo patrón que ProductRepository
- * (Pasos 1.1+1.2), aplicado aquí a Categorías: `findAll()` lee primero del
- * caché local en IndexedDB y responde de inmediato; en paralelo, si hay
- * señal, refresca contra Supabase y guarda ese resultado fresco en
- * IndexedDB para que el próximo `findAll()` ya lo tenga.
+ * Las categorías son del NEGOCIO completo (todas las sucursales ven las
+ * mismas): por eso `scopeByBranch = false` — se filtran solo por negocio y
+ * se guardan con branch_id = null. Antes se filtraban también por sucursal,
+ * y las categorías creadas durante el onboarding (cuando aún no había
+ * sucursal activa) quedaban con branch_id = null y la app dejaba de verlas.
+ *
+ * Lectura: con internet, `findAll()` espera la respuesta de Supabase (dato
+ * fresco, son pocas filas) y actualiza el caché. Sin internet, o si Supabase
+ * falla, responde con el caché local. Así una categoría borrada, renombrada
+ * o creada en otro dispositivo se ve de inmediato y la revisión de nombre
+ * repetido de CategoryEngine ya no usa datos viejos.
  */
 export class CategoryRepository extends SupabaseRepository<Category> {
   protected tableName = "categories" as const;
+  protected readonly scopeByBranch = false;
 
   /** Caché local en IndexedDB — ver CategoryLocalRepository. */
   private readonly local = new CategoryLocalRepository();
@@ -37,30 +42,57 @@ export class CategoryRepository extends SupabaseRepository<Category> {
     }
   }
 
-  public async findAll(): Promise<Category[]> {
-    const cached = await this.local.findAll();
+  public async update(category: Category): Promise<void> {
+    await super.update(category);
+    try {
+      await this.local.save(category);
+    } catch (error) {
+      logWarning("[CategoryRepository] No se pudo actualizar la categoría en caché local", {
+        category: "offline",
+        context: { error: String(error) }
+      });
+    }
+  }
 
+  public async delete(id: string): Promise<void> {
+    await super.delete(id);
+    try {
+      await this.local.delete(id);
+    } catch (error) {
+      logWarning("[CategoryRepository] No se pudo borrar la categoría del caché local", {
+        category: "offline",
+        context: { error: String(error) }
+      });
+    }
+  }
+
+  public async findAll(): Promise<Category[]> {
     if (connectionStore.isOnline()) {
-      // Fire-and-forget a propósito: no bloquea la respuesta local, y un
-      // error de red acá no debe tumbar la pantalla de Categorías (que ya
-      // tiene el catálogo local para mostrar).
-      void super
-        .findAll()
-        .then((fresh) => this.local.replaceAll(fresh))
-        .catch((error) => {
-          logWarning("[CategoryRepository] No se pudo refrescar las categorías desde Supabase", { category: "offline", context: { error: String(error) } });
+      try {
+        const fresh = await super.findAll();
+        try {
+          await this.local.replaceAll(fresh);
+        } catch (error) {
+          logWarning("[CategoryRepository] No se pudo guardar el caché local de categorías", {
+            category: "offline",
+            context: { error: String(error) }
+          });
+        }
+        return fresh;
+      } catch (error) {
+        logWarning("[CategoryRepository] No se pudo leer las categorías de Supabase, se usa caché local", {
+          category: "offline",
+          context: { error: String(error) }
         });
+      }
     }
 
-    return cached;
+    return this.local.findAll();
   }
 
   /**
-   * Ver el mismo hueco documentado en ProductRepository.findById(): sin
-   * este override, `CategoryEngine.getById` (ej. abrir el detalle de una
-   * categoría) se quedaba esperando red indefinidamente sin internet.
-   * Espera la red cuando hay señal (dato fresco), cae a caché local solo
-   * si está offline o si Supabase falla.
+   * Con internet espera el dato fresco; cae al caché local solo si está
+   * offline o si Supabase falla (ver el mismo patrón en ProductRepository).
    */
   public async findById(id: string): Promise<Category | null> {
     if (connectionStore.isOnline()) {

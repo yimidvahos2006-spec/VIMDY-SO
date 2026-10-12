@@ -49,13 +49,21 @@ export abstract class SupabaseRepository<T extends { id: string; version?: numbe
 {
   protected abstract readonly tableName: string;
 
+  /**
+   * Por defecto cada tabla se filtra por negocio Y sucursal. Las tablas que
+   * son del negocio completo (ej. categorías) lo ponen en false: se filtran
+   * solo por negocio y se guardan sin sucursal (branch_id = null), así no
+   * "desaparecen" si la sucursal activa cambia o aún no estaba definida.
+   */
+  protected readonly scopeByBranch: boolean = true;
+
   private table() {
     return supabase.from(this.tableName);
   }
 
   private applyScope(query: any) {
     const businessId = getCurrentBusinessId();
-    const branchId = getCurrentBranchId();
+    const branchId = this.scopeByBranch ? getCurrentBranchId() : undefined;
     if (!businessId || typeof businessId !== "string" || businessId.trim() === "") return query;
     let scoped = query.eq("business_id", businessId);
 
@@ -74,6 +82,12 @@ export abstract class SupabaseRepository<T extends { id: string; version?: numbe
   private stripVersion(item: T): Record<string, unknown> {
     const { version: _version, ...rest } = item as unknown as Record<string, unknown>;
     return rest;
+  }
+
+  /** Sucursal con la que se guarda la fila (null si la tabla es del negocio completo). */
+  private resolveBranchId(item: T): string | null | undefined {
+    if (!this.scopeByBranch) return null;
+    return (item as unknown as { branchId?: string | null }).branchId ?? getCurrentBranchId();
   }
 
   /** Reconstruye la entidad tipada a partir de una fila `{ data, version }`. */
@@ -128,7 +142,7 @@ export abstract class SupabaseRepository<T extends { id: string; version?: numbe
       throw new Error("NO_BUSINESS_CONTEXT: no hay un negocio activo. No se puede guardar.");
     }
 
-    const scopeBranchId = (item as unknown as { branchId?: string | null }).branchId ?? getCurrentBranchId();
+    const scopeBranchId = this.resolveBranchId(item);
 
     const { error } = await this.table().upsert({
       id: item.id,
@@ -165,7 +179,7 @@ export abstract class SupabaseRepository<T extends { id: string; version?: numbe
     const rows = items.map((item) => ({
       id: item.id,
       business_id: businessId,
-      branch_id: (item as unknown as { branchId?: string | null }).branchId ?? getCurrentBranchId(),
+      branch_id: this.resolveBranchId(item),
       data: this.stripVersion(item),
       version: item.version ?? 1,
       updated_at: new Date().toISOString()

@@ -34,6 +34,14 @@ describe("InventoryEngine", () => {
     const repository = new FakeProductRepository();
     const produceBatch = vi.fn(async () => []);
     repository.produceBatch = produceBatch;
+    // El engine valida producto, receta e ingredientes ANTES de llamar al RPC.
+    await repository.save({
+      id: "ing-1", name: "Harina", price: 0, stock: 100, minStock: 0, active: true, branchId: "branch-a"
+    } as any);
+    await repository.save({
+      id: "product-1", name: "Pastel", price: 8000, stock: 0, minStock: 0, active: true, branchId: "branch-a",
+      productionMode: "BATCH", recipe: [{ productId: "ing-1", quantity: 2 }]
+    } as any);
     const engine = new InventoryEngine(repository);
     setCurrentBranchId("branch-a");
 

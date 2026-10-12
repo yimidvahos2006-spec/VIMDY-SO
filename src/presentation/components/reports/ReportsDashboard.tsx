@@ -18,11 +18,14 @@ import { VimdyButton } from "../ui/VimdyButton";
 
 import { useReports, RANGE_LABEL, ReportRange } from "../../../core/store/useReports";
 import { useTranslation } from "../../../core/i18n/useTranslation";
+import { useAuth } from "../../context/AuthContext";
 
 const RANGES: ReportRange[] = ["hoy", "7d", "30d", "mes", "todo"];
 
 export function ReportsDashboard() {
   const { money } = useTranslation();
+  const { can } = useAuth();
+  const canExport = can("reports.export");
 
   const {
     loading,
@@ -76,15 +79,17 @@ export function ReportsDashboard() {
             Ventas, productos y clientes, calculados sobre datos reales del negocio.
           </p>
         </div>
-        <VimdyButton
-          onClick={exportCsv}
-          disabled={sales.length === 0}
-          variant="primary"
-          icon={<Download size={18} />}
-          className="self-start sm:self-auto"
-        >
-          Exportar CSV
-        </VimdyButton>
+        {canExport && (
+          <VimdyButton
+            onClick={exportCsv}
+            disabled={sales.length === 0}
+            variant="primary"
+            icon={<Download size={18} />}
+            className="self-start sm:self-auto"
+          >
+            Exportar CSV
+          </VimdyButton>
+        )}
       </div>
 
       {error && (

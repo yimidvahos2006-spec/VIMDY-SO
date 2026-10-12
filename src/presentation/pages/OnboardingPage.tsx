@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
 
 import { useAuth } from "../context/AuthContext";
 import { VimdyBackground } from "../components/ui/VimdyBackground";
 import { GlassCard } from "../components/ui/GlassCard";
+import { VimdyButton } from "../components/ui/VimdyButton";
 import { WelcomeStep } from "../components/onboarding/WelcomeStep";
 import { BusinessTypeStep } from "../components/onboarding/BusinessTypeStep";
 import { ModulesStep } from "../components/onboarding/ModulesStep";
@@ -16,7 +18,9 @@ import { FinalStep } from "../components/onboarding/FinalStep";
 import { OnboardingProgress } from "../components/onboarding/OnboardingProgress";
 import {
   ONBOARDING_STEPS_BUILT,
+  canGoBackFromStep,
   nextOnboardingStep,
+  prevOnboardingStep,
   resolveAfterModules,
   type OnboardingStepId
 } from "../components/onboarding/onboardingSteps";
@@ -208,6 +212,20 @@ export function OnboardingPage() {
 
         {stepIsBuilt && step === "final" && (
           <FinalStep onAddProduct={() => setStep("first_product")} />
+        )}
+
+        {stepIsBuilt && canGoBackFromStep(step) && (
+          <VimdyButton
+            variant="ghost"
+            type="button"
+            onClick={() => setStep(prevOnboardingStep(step))}
+            className="mt-6"
+          >
+            <span className="flex items-center gap-2">
+              <ArrowLeft size={16} />
+              Atrás
+            </span>
+          </VimdyButton>
         )}
 
         {!stepIsBuilt && (

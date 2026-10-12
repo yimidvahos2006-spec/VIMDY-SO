@@ -49,9 +49,32 @@ export const ONBOARDING_PROGRESS_STEPS: OnboardingStepId[] = [
   "cash_opening"
 ];
 
+export const ONBOARDING_BACK_ENABLED_STEPS: OnboardingStepId[] = [
+  "business_type",
+  "modules",
+  "employees",
+  "categories",
+  "first_product",
+  "cash_opening"
+];
+
 export function nextOnboardingStep(current: OnboardingStepId): OnboardingStepId {
   const index = ONBOARDING_STEP_ORDER.indexOf(current);
   return ONBOARDING_STEP_ORDER[index + 1] ?? current;
+}
+
+/**
+ * Paso anterior al actual. Welcome no tiene anterior; loading y final son
+ * pantallas de cierre (ya se guardó todo), por eso no se puede volver desde ahí.
+ */
+export function prevOnboardingStep(current: OnboardingStepId): OnboardingStepId {
+  if (!canGoBackFromStep(current)) return current;
+  const index = ONBOARDING_STEP_ORDER.indexOf(current);
+  return ONBOARDING_STEP_ORDER[index - 1] ?? current;
+}
+
+export function canGoBackFromStep(current: OnboardingStepId): boolean {
+  return ONBOARDING_BACK_ENABLED_STEPS.includes(current);
 }
 
 export function resolveAfterModules(): OnboardingStepId {

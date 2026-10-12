@@ -32,6 +32,7 @@
 // ============================================================================
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { getSupabaseAdminKey } from "../_shared/supabaseAdminKey.ts";
 
 const VIMDY_APP_URL = Deno.env.get("VIMDY_APP_URL") ?? "*";
 
@@ -48,7 +49,7 @@ function json(body: unknown, status = 200) {
 }
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
-const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+const SUPABASE_ADMIN_KEY = getSupabaseAdminKey();
 const OPS_SECRET = Deno.env.get("OPS_SECRET");
 const OPS_WEBHOOK_URL = Deno.env.get("OPS_WEBHOOK_URL");
 
@@ -178,10 +179,8 @@ async function collectDbMetrics(admin: ReturnType<typeof createClient>): Promise
   const dbSizeQuery = await admin.rpc("get_db_size_bytes").single();
   const dbSizeBytes = (dbSizeQuery.data as number) ?? 0;
 
-  const connectionsQuery = await admin
-    .from("pg_stat_activity")
-    .select("id", { count: "exact", head: true });
-  const activeConnections = connectionsQuery.count ?? 0;
+  const connectionsQuery = await admin.rpc("get_active_connections").single();
+  const activeConnections = Number(connectionsQuery.data ?? 0);
 
   const cacheQuery = await admin.rpc("get_cache_hit_ratio").single();
   const cacheHitRatio = (cacheQuery.data as number) ?? 99;
@@ -195,6 +194,18 @@ async function collectDbMetrics(admin: ReturnType<typeof createClient>): Promise
     transactions_committed: 0,
     transactions_rolled_back: 0
   };
+}
+
+async function collectGrantGaps(admin: ReturnType<typeof createClient>): Promise<string[]> {
+  // Tablas con política RLS pero sin permiso de tabla para usuarios logueados:
+  // la app falla con "permission denied for table ...". Ver get_grant_gaps().
+  const { data, error } = await admin.rpc("get_grant_gaps");
+  if (error) {
+    return [`no se pudo revisar permisos de tablas (${error.message})`];
+  }
+  return ((data ?? []) as { table_name: string; missing_privileges: string }[]).map(
+    (row) => `${row.table_name} (${row.missing_privileges})`
+  );
 }
 
 async function collectBusinessMetrics(admin: ReturnType<typeof createClient>): Promise<BusinessMetrics> {
@@ -247,16 +258,14 @@ async function collectBusinessMetrics(admin: ReturnType<typeof createClient>): P
 }
 
 async function collectUserMetrics(admin: ReturnType<typeof createClient>): Promise<UserMetrics> {
-  const usersQuery = await admin
-    .from("auth.users")
-    .select("id", { count: "exact", head: true });
+  const usersQuery = await admin.rpc("get_auth_users_count").single();
 
   const membershipsQuery = await admin
     .from("business_members")
     .select("user_id", { count: "exact", head: true });
 
   return {
-    total_users: usersQuery.count ?? 0,
+    total_users: Number(usersQuery.data ?? 0),
     total_memberships: membershipsQuery.count ?? 0
   };
 }
@@ -265,7 +274,11 @@ async function collectPaymentMetrics(admin: ReturnType<typeof createClient>): Pr
   const now = new Date();
   const sixHoursAgo = new Date(now.getTime() - 6 * 60 * 60 * 1000).toISOString();
   const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
-  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+  // "Hoy" = día calendario de Colombia (UTC-5), no el del servidor (UTC).
+  const bogota = new Date(now.getTime() - 5 * 60 * 60 * 1000);
+  const startOfDay = new Date(
+    Date.UTC(bogota.getUTCFullYear(), bogota.getUTCMonth(), bogota.getUTCDate(), 5)
+  ).toISOString();
 
   const pendingQuery = await admin
     .from("subscription_payments")
@@ -348,7 +361,8 @@ function evaluateHealth(
   db: DbMetrics,
   business: BusinessMetrics,
   payments: PaymentMetrics,
-  errors: ErrorMetrics
+  errors: ErrorMetrics,
+  grantGaps: string[] = []
 ): SystemHealth {
   const alerts: string[] = [];
   const recommendations: string[] = [];
@@ -414,6 +428,13 @@ function evaluateHealth(
     alerts.push(`🟠 ${payments.pending_old_6h} pago(s) pendientes más de 6h`);
     recommendations.push("Verificar estado de webhooks de Wompi/MercadoPago/PayPal");
     updateStatus("critical");
+  }
+
+  // Evaluar permisos de tablas (el error "permission denied for table")
+  if (grantGaps.length > 0) {
+    alerts.push(`🔴 Tablas sin permiso para usuarios: ${grantGaps.join(", ")} — la app falla al guardar/leer ahí`);
+    recommendations.push("Agregar el GRANT que falta (ver supabase/migrations 20261025000006)");
+    updateStatus("emergency");
   }
 
   // Evaluar suscripciones suspendidas
@@ -482,7 +503,8 @@ function formatDailySummary(
   business: BusinessMetrics,
   users: UserMetrics,
   payments: PaymentMetrics,
-  errors: ErrorMetrics
+  errors: ErrorMetrics,
+  grantGaps: string[] = []
 ): string {
   const lines: string[] = [];
 
@@ -524,6 +546,10 @@ function formatDailySummary(
   lines.push(`• Cache hit ratio: ${db.cache_hit_ratio.toFixed(1)}%`);
   lines.push("");
 
+  lines.push("**🔐 PERMISOS DE TABLAS**");
+  lines.push(grantGaps.length === 0 ? "• 🟢 Todo en orden" : `• 🔴 Faltan permisos en: ${grantGaps.join(", ")}`);
+  lines.push("");
+
   lines.push("**⚠️ ERRORES**");
   lines.push(`• Última hora: ${errors.errors_last_hour > 0 ? `🟡 ${errors.errors_last_hour}` : "🟢 0"}`);
   lines.push(`• Últimas 24h: ${errors.errors_last_24h > 0 ? `🟡 ${errors.errors_last_24h}` : "🟢 0"}`);
@@ -551,7 +577,7 @@ Deno.serve(async (req: Request) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !OPS_SECRET) {
+  if (!SUPABASE_URL || !SUPABASE_ADMIN_KEY || !OPS_SECRET) {
     return json({ error: "SERVER_CONFIG_MISSING" }, 500);
   }
 
@@ -563,21 +589,34 @@ Deno.serve(async (req: Request) => {
   const url = new URL(req.url);
   const mode = url.searchParams.get("mode") ?? "check";
 
-  const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+  // Las claves sb_secret_* van solo en el header `apikey` (no como Bearer JWT).
+  const admin = createClient(SUPABASE_URL, SUPABASE_ADMIN_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    global: {
+      fetch: (input: RequestInfo | URL, init?: RequestInit) => {
+        const inputHeaders = input instanceof Request ? input.headers : undefined;
+        const headers = new Headers(init?.headers ?? inputHeaders);
+        headers.set("apikey", SUPABASE_ADMIN_KEY);
+        headers.delete("authorization");
+        return fetch(input, { ...init, headers });
+      }
+    }
+  });
 
   try {
-    const [db, business, users, payments, errors] = await Promise.all([
+    const [db, business, users, payments, errors, grantGaps] = await Promise.all([
       collectDbMetrics(admin),
       collectBusinessMetrics(admin),
       collectUserMetrics(admin),
       collectPaymentMetrics(admin),
-      collectErrorMetrics(admin)
+      collectErrorMetrics(admin),
+      collectGrantGaps(admin)
     ]);
 
-    const health = evaluateHealth(db, business, payments, errors);
+    const health = evaluateHealth(db, business, payments, errors, grantGaps);
 
     if (mode === "daily") {
-      const summary = formatDailySummary(db, business, users, payments, errors);
+      const summary = formatDailySummary(db, business, users, payments, errors, grantGaps);
       await notify(summary);
       return json({
         ok: true,

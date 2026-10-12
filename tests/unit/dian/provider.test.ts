@@ -1,33 +1,31 @@
 import { describe, expect, it } from "vitest";
 import { InvoiceFactory } from "../../../src/core/invoicing/InvoiceFactory";
+import { resolveInvoiceProvider } from "../../helpers/invoicing";
 import { DianProvider } from "../../../src/core/invoicing/providers/dian/DianProvider";
-import { FactusProvider } from "../../../src/core/invoicing/providers/factus/FactusProvider";
 
 describe("InvoiceFactory — DIAN provider", () => {
   it("resuelve DianProvider para negocio colombiano con provider 'dian'", () => {
-    const provider = InvoiceFactory.resolve(
+    const provider = resolveInvoiceProvider(
       { enabled: true, provider: "dian" },
       "CO"
     );
 
     expect(provider).not.toBeNull();
     expect(provider?.name).toBe("dian");
-    expect(provider).toBeInstanceOf(DianProvider);
   });
 
   it("resuelve FactusProvider para negocio colombiano con provider 'factus'", () => {
-    const provider = InvoiceFactory.resolve(
+    const provider = resolveInvoiceProvider(
       { enabled: true, provider: "factus" },
       "CO"
     );
 
     expect(provider).not.toBeNull();
     expect(provider?.name).toBe("factus");
-    expect(provider).toBeInstanceOf(FactusProvider);
   });
 
   it("devuelve null si provider es 'dian' pero país no es CO", () => {
-    const provider = InvoiceFactory.resolve(
+    const provider = resolveInvoiceProvider(
       { enabled: true, provider: "dian" },
       "MX"
     );

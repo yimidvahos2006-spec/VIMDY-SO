@@ -52,3 +52,9 @@ Thumbs.db
 .vercel/
 # TypeScript
 *.tsbuildinfo
+
+# Backups de base de datos (NUNCA subir a GitHub: contienen datos reales)
+backup-*.sql
+backup-*.dump
+backups/
+*.sql.gz

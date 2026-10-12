@@ -36,8 +36,10 @@ import { FakeProductRepository } from "../fakes/FakeProductRepository";
 import { InMemoryMovementRepository } from "../fakes/InMemoryMovementRepository";
 
 function buildInventory() {
-  const products = new FakeProductRepository();
   const movements = new InMemoryMovementRepository();
+  // El Kardex de la producción lo escribe el RPC en producción; el fake lo
+  // imita escribiendo en este mismo repositorio de movimientos.
+  const products = new FakeProductRepository(movements);
   const kardex = new KardexEngine(movements);
   const inventory = new InventoryEngine(products, kardex);
   return { inventory, products, movements };

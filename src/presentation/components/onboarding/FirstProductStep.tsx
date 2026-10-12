@@ -80,10 +80,22 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
     setError(null);
 
     try {
+      // Si no hay categorías (se omitió el paso 5) NO se guarda el id falso
+      // "uncategorized": se usa (o se crea) una categoría real "General".
+      let finalCategoryId = categoryId;
+      if (finalCategoryId === "uncategorized") {
+        const engine = container.categoryEngine.get();
+        const all = await engine.listAll();
+        const general =
+          all.find((c) => c.name.trim().toLowerCase() === "general") ??
+          (await engine.create({ name: "General" }));
+        finalCategoryId = general.id;
+      }
+
       await container.inventoryEngine.get().createProduct(
         {
           name: name.trim(),
-          categoryId,
+          categoryId: finalCategoryId,
           price: priceValue,
           stock: stockValue,
           minStock: 0,

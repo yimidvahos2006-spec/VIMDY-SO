@@ -4,6 +4,7 @@ import { toast } from "../../../core/store/toastStore";
 import { EmptyState } from "../ui/EmptyState";
 import { ConfirmModal } from "../ui/ConfirmModal";
 import { VimdyButton } from "../ui/VimdyButton";
+import { CategoriesManagerModal } from "./CategoriesManagerModal";
 import { SkeletonCards, SkeletonRows, Skeleton } from "../ui/Skeleton";
 import {
   Search,
@@ -31,7 +32,8 @@ import {
   Download,
   ArrowLeftRight,
   UserPlus,
-  RefreshCw
+  RefreshCw,
+  Tag
 } from "lucide-react";
 
 import { useInventory, getStockStatus, StockStatus } from "../../../core/store/useInventory";
@@ -133,6 +135,7 @@ export function InventoryDashboard() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [selected, setSelected] = useState<Product | null>(null);
   const [showNewProduct, setShowNewProduct] = useState(false);
+  const [showCategories, setShowCategories] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [showAiImport, setShowAiImport] = useState(false);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
@@ -430,6 +433,13 @@ export function InventoryDashboard() {
               Producir tanda
             </button>
           )}
+          <button
+            onClick={() => setShowCategories(true)}
+            className="h-10 px-4 rounded-vimdy-md border border-vimdy-border bg-vimdy-surface text-vimdy-text-secondary font-bold hover:border-vimdy-accent hover:text-vimdy-text flex items-center gap-2 text-sm"
+          >
+            <Tag size={16} />
+            Categorías
+          </button>
           <button
             onClick={() => setShowAiImport(true)}
             className="h-10 px-4 rounded-vimdy-md border border-vimdy-ai/40 bg-vimdy-ai/10 text-vimdy-ai font-bold hover:bg-vimdy-ai/20 flex items-center gap-2 text-sm"
@@ -792,6 +802,10 @@ export function InventoryDashboard() {
           }}
           onDelete={() => handleDeleteProduct(selected)}
         />
+      )}
+
+      {showCategories && (
+        <CategoriesManagerModal onClose={() => setShowCategories(false)} />
       )}
 
       {showNewProduct && (
