@@ -261,8 +261,10 @@ describe("SubscriptionEngine", () => {
     it("adds 365 days for yearly", () => {
       const base = new Date(Date.UTC(2024, 0, 15)); // Jan 15, 2024
       const result = engine.calculateRenewalDate(base, "yearly");
-      expect(result.getUTCMonth()).toBe(2); // March
-      expect(result.getUTCDate()).toBe(10);
+      // 2024 es bisiesto: 15-ene-2024 + 365 días = 14-ene-2025.
+      expect(result.getUTCFullYear()).toBe(2025);
+      expect(result.getUTCMonth()).toBe(0); // enero
+      expect(result.getUTCDate()).toBe(14);
     });
   });
 

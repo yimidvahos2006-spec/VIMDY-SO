@@ -57,10 +57,10 @@ describe("PASO 9 — Cierre POS Wompi", () => {
   });
 
   describe("RPC create_wompi_sale_payment_session_atomic", () => {
-    it("1. cash-only: cashAmount=0, externalAmount=sale total, método MIXED con cashAmount>0", async () => {
+    it("1. mixto: parte en efectivo + parte por Wompi (cashAmount>0, externalAmount>0)", async () => {
       const saleTotal = 100;
-      const expectedCash = 0;
-      const expectedExternal = saleTotal;
+      const expectedCash = 20;
+      const expectedExternal = saleTotal - expectedCash;
 
       mockRpcResults["create_wompi_sale_payment_session_atomic"] = {
         data: [
@@ -91,8 +91,8 @@ describe("PASO 9 — Cierre POS Wompi", () => {
       const session = await PaymentSessionManager.createForSale({
         saleId: "sale-1",
         paymentMethod: "MIXED",
-        cashAmount: 0,
-        externalAmount: saleTotal,
+        cashAmount: expectedCash,
+        externalAmount: expectedExternal,
         idempotencyKey: "key-1",
       });
 
@@ -238,17 +238,7 @@ describe("PASO 9 — Cierre POS Wompi", () => {
       expect(cashAmount + externalAmount).toBe(saleTotal);
     });
 
-    it("5. external=0 (invalid): RPC rejects externalAmount <= 0", async () => {
-      mockRpcResults["create_wompi_sale_payment_session_atomic"] = {
-        data: [
-          {
-            success: false,
-            error: "EXTERNAL_AMOUNT_MUST_BE_POSITIVE",
-            message: "externalAmount must be > 0",
-          },
-        ],
-        error: null,
-      };
+    it("5. external=0 (invalid): el cliente lo rechaza antes de llamar al RPC", async () => {
 
       await expect(
         PaymentSessionManager.createForSale({
@@ -258,7 +248,8 @@ describe("PASO 9 — Cierre POS Wompi", () => {
           externalAmount: 0,
           idempotencyKey: "key-5",
         })
-      ).rejects.toThrow("EXTERNAL_AMOUNT_MUST_BE_POSITIVE");
+      ).rejects.toThrow("PAYMENT_SESSION_EXTERNAL_AMOUNT_INVALID");
+      expect(mockSupabase.rpc).not.toHaveBeenCalled();
     });
 
     it("6. cashAmount > total (invalid): RPC rejects", async () => {

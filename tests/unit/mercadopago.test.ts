@@ -182,7 +182,8 @@ describe("MercadoPagoProvider", () => {
       expect(invokeMock).toHaveBeenCalledWith("mercadopago-refund", {
         body: { paymentId: "12345", amount: 1000, reason: "Cliente canceló" }
       });
-      expect(result.status).toBe("approved");
+      // Un reembolso aprobado se normaliza como "refunded".
+      expect(result.status).toBe("refunded");
       expect(result.amount).toBe(1000);
     });
 
@@ -206,7 +207,7 @@ describe("MercadoPagoProvider", () => {
       expect(invokeMock).toHaveBeenCalledWith("mercadopago-refund", {
         body: { paymentId: "12345" }
       });
-      expect(result.status).toBe("approved");
+      expect(result.status).toBe("refunded");
     });
 
     it("propaga error si Mercado Pago rechaza el reembolso", async () => {

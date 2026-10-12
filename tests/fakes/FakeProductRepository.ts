@@ -39,8 +39,18 @@ export class FakeProductRepository
   ): Promise<void> {
     if (!this.movementLog) return;
 
-    // Mismos campos que escribe apply_inventory_operation_delta: sin
-    // stockBefore/stockAfter y con `reason` fijo (sin referencia de tanda).
+    // Mismos campos que escribe apply_inventory_operation_delta
+    // (migración 20261026000000): motivo legible con la referencia de la
+    // tanda (PROD- + 8 primeros caracteres del operationId) y stock
+    // anterior / posterior. `product` ya trae el stock final.
+    const reference = `PROD-${operationId.slice(0, 8).toUpperCase()}`;
+    const stockAfter = product.stock;
+    const stockBefore = type === "DECREASE" ? stockAfter + quantity : stockAfter - quantity;
+    const readableReason =
+      reason === "BATCH_PRODUCTION"
+        ? `Producción por tanda ${reference}`
+        : `Producción por tanda ${reference} (consumo de ingrediente)`;
+
     await this.movementLog.save({
       id: crypto.randomUUID(),
       productId: product.id,
@@ -48,10 +58,12 @@ export class FakeProductRepository
       quantity: Math.abs(quantity),
       date: new Date(),
       type,
-      reason,
+      reason: readableReason,
       performedBy: performedBy ?? "Sistema",
       branchId: product.branchId,
-      operationId
+      operationId,
+      stockBefore,
+      stockAfter
     } as InventoryMovement);
   }
 

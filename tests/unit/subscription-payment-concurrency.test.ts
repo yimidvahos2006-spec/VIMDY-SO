@@ -22,7 +22,7 @@ describe("subscription payment concurrency hardening", () => {
 
   it("serializes activation for each business with a transaction advisory lock", () => {
     expect(activationMigration).toContain("perform pg_advisory_xact_lock(v_lock_key);");
-    expect(activationMigration).toContain("v_lock_key := hashtext('subscription-activation', p_business_id::text);");
+    expect(activationMigration).toContain("v_lock_key := pg_catalog.hashtextextended('subscription-activation:' || p_business_id::text, 0);");
     expect(activationMigration).toContain("if v_payment.status = 'approved' then");
     expect(activationMigration).toContain("update public.subscription_payments");
   });

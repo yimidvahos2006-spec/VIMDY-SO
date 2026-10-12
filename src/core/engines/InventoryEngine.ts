@@ -111,10 +111,44 @@ export class InventoryEngine {
       createdAt: input.createdAt ?? now,
     };
 
-     await this.getRepository().save(product);
+     const repository = this.getRepository();
+     const branchId = getCurrentBranchId() ?? undefined;
+
+     // El kardex (inventory_movements) es de SOLO LECTURA para el navegador:
+     // las escrituras van por funciones del servidor (ver migración
+     // 20261005000000). Por eso, si el repositorio lo soporta, el producto se
+     // guarda con stock 0 y el stock inicial se aplica con el RPC atómico, que
+     // actualiza el stock Y escribe el movimiento "Stock inicial" juntos.
+     if (product.stock > 0 && repository.adjustStockWithKardex) {
+       const initialStock = product.stock;
+       await repository.save({ ...product, stock: 0 });
+       try {
+         const updated = await repository.adjustStockWithKardex({
+           productId: product.id,
+           delta: initialStock,
+           reason: "Stock inicial",
+           type: "INCREASE",
+           performedBy: performedBy ?? undefined,
+           movementId: crypto.randomUUID(),
+           branchId,
+           allowNegative: false
+         });
+         return { ...product, ...updated, stock: updated?.stock ?? initialStock };
+       } catch (error) {
+         // No dejar un producto a medias (sin stock ni historial): se deshace
+         // para que el usuario pueda reintentar sin chocar con "nombre duplicado".
+         try {
+           await repository.delete(product.id);
+         } catch {
+           /* si el rollback falla, el error original es el importante */
+         }
+         throw error;
+       }
+     }
+
+     await repository.save(product);
 
      if (product.stock > 0) {
-       const branchId = getCurrentBranchId() ?? undefined;
        await this.getKardex().record(
          product.id,
          product.stock,

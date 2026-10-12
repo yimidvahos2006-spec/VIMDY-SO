@@ -110,6 +110,15 @@ import { queueKitchenOrderOffline } from "../../src/core/offline/offlineKitchen"
 import { syncPendingKitchenOrders, startOfflineKitchenSync, stopOfflineKitchenSync } from "../../src/core/offline/syncPendingKitchenOrders";
 import { syncPendingKitchenOrders as legacySyncPendingKitchenOrders } from "../../src/core/services/syncPendingKitchenOrders";
 import { pendingKitchenOrdersStore } from "../../src/core/offline/pendingKitchenOrdersStore";
+import {
+  PendingKitchenOrdersStore,
+  registerPendingKitchenOrdersStoreResolver
+} from "../../src/core/store/pendingKitchenOrdersStore";
+import { PendingKitchenOrderRepository } from "../../src/infrastructure/di/repositories/PendingKitchenOrderRepository";
+
+// CompositionRoot está simulado arriba, así que aquí hacemos lo mismo que hace
+// el real: registrar cómo se crea el store (con el repositorio en memoria).
+registerPendingKitchenOrdersStoreResolver(() => new PendingKitchenOrdersStore(new PendingKitchenOrderRepository() as any));
 
 const KITCHEN_ORDER: KitchenOrder = {
   id: "kitchen-order-e2e-1",

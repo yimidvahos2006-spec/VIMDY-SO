@@ -87,10 +87,17 @@ export function ModulesStep({ businessId, businessType, onSaved }: ModulesStepPr
         setCreatedTables(0);
         let created = 0;
         for (let i = 1; i <= count; i++) {
-          await container.tableEngine.get().createTable({
-            name: `Mesa ${i}`,
-            capacity: DEFAULT_TABLE_CAPACITY
-          });
+          try {
+            await container.tableEngine.get().createTable({
+              name: `Mesa ${i}`,
+              capacity: DEFAULT_TABLE_CAPACITY
+            });
+          } catch (tableError) {
+            // Si el usuario volvió con "Atrás" y esa mesa ya existe, no es un error.
+            if (!(tableError instanceof Error && tableError.message.includes("TABLE_NAME_DUPLICATE"))) {
+              throw tableError;
+            }
+          }
           created = i;
           setCreatedTables(i);
         }
