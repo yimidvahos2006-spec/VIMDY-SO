@@ -101,7 +101,7 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
     }
   }
 
-  async function handleSkip() {
+  async function handleContinue() {
     if (saving || checkingProducts) return;
 
     try {
@@ -213,18 +213,20 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
                 "Crear producto"
               )}
             </VimdyButton>
-            <VimdyButton
-              variant="ghost"
-              type="button"
-              onClick={() => void handleSkip()}
-              disabled={saving || checkingProducts || !hasActiveProduct}
-            >
-              Omitir
-            </VimdyButton>
+            {hasActiveProduct && (
+              <VimdyButton
+                variant="ghost"
+                type="button"
+                onClick={() => void handleContinue()}
+                disabled={saving || checkingProducts}
+              >
+                Continuar
+              </VimdyButton>
+            )}
           </div>
           {!checkingProducts && !hasActiveProduct && (
             <p className="text-center text-vimdy-small text-vimdy-text-secondary">
-              Crea al menos un producto activo para continuar.
+              Este paso es obligatorio. Necesitas al menos un producto para empezar a vender.
             </p>
           )}
         </form>
