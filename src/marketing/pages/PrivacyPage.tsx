@@ -42,8 +42,9 @@ export function PrivacyPage() {
                 </h1>
 
                 <p className="mt-4 text-sm leading-6 text-zinc-500">
-                  Información sobre los datos que VIMDY declara recopilar, usar
-                  y proteger según esta política.
+                  Qué datos recopilamos, para qué los usamos y cómo puedes
+                  ejercer tus derechos. Última actualización: 13 de octubre
+                  de 2026.
                 </p>
               </div>
             </aside>

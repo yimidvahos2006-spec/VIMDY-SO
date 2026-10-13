@@ -78,3 +78,48 @@ describe("importHelpers", () => {
     expect(input.stock).toBe(5);
   });
 });
+
+describe("importHelpers - formatos colombianos", () => {
+  const row = {
+    id: "row-co",
+    name: "Gaseosa",
+    price: "3.500",
+    requiresReview: false,
+    categoryId: "cat-bebidas",
+    requiresKitchen: false,
+    stock: "1.000",
+    recipeRows: [],
+    taxRate: "19",
+    unit: "unidad",
+    productionMode: "NONE" as const,
+    isIngredient: false,
+    pendingReview: false,
+    tipo: "producto_simple" as const
+  };
+
+  it("interpreta 3.500 como 3500 pesos y 1.000 de stock como 1000", () => {
+    const input = buildProductInputFromImportRow(row, "");
+    expect(input.price).toBe(3500);
+    expect(input.stock).toBe(1000);
+    expect(input.taxRate).toBe(19);
+  });
+
+  it("interpreta 35.000 y 90.000 correctamente", () => {
+    expect(buildProductInputFromImportRow({ ...row, price: "35.000" }, "").price).toBe(35000);
+    expect(buildProductInputFromImportRow({ ...row, price: "90.000" }, "").price).toBe(90000);
+  });
+
+  it("deja el precio inválido como NaN para que la fila se rechace y no se guarde", () => {
+    expect(Number.isNaN(buildProductInputFromImportRow({ ...row, price: "abc" }, "").price)).toBe(true);
+  });
+
+  it("acepta coma decimal en cantidades de receta (0,12 kg)", () => {
+    const input = buildProductInputFromImportRow({
+      ...row,
+      requiresKitchen: true,
+      recipeRows: [{ rowId: "i1", productId: "harina", quantity: "0,12" }],
+      productionMode: "ON_DEMAND"
+    }, "");
+    expect(input.recipe).toEqual([{ productId: "harina", quantity: 0.12 }]);
+  });
+});

@@ -1,5 +1,6 @@
 import { ProductInput } from "../../../core/engines/InventoryEngine";
 import { RecipeItem } from "../../../core/entities/Entities";
+import { parseMoneyInput } from "../../../core/utils/parseMoneyInput";
 
 export type ImportedRecipeRow = {
   rowId: string;
@@ -43,25 +44,31 @@ export function inferUnitFromProductName(name: string): string {
   return "unidad";
 }
 
+/** Decimal simple (porcentajes y cantidades de receta): acepta coma o punto como decimal. "0,12" y "0.12" -> 0.12. */
+export function parseDecimalInput(raw: string): number {
+  const text = String(raw ?? "").replace(/\s/g, "").replace(",", ".");
+  return /^-?\d*\.?\d+$/.test(text) ? Number(text) : Number.NaN;
+}
+
 export function buildProductInputFromImportRow(
   row: ImportedProductRow,
   batchTax: string
 ): ProductInput {
-  const price = Number(row.price);
+  const price = parseMoneyInput(row.price);
   const taxRate = row.taxRate.trim()
-    ? Number(row.taxRate)
+    ? parseDecimalInput(row.taxRate)
     : batchTax.trim()
-      ? Number(batchTax)
+      ? parseDecimalInput(batchTax)
       : undefined;
 
   const validIngredientRows = row.recipeRows.filter(
-    (ing) => ing.productId && ing.quantity?.trim() && Number(ing.quantity) > 0
+    (ing) => ing.productId && ing.quantity?.trim() && parseDecimalInput(ing.quantity) > 0
   );
 
   const recipe: RecipeItem[] | undefined = validIngredientRows.length > 0
     ? validIngredientRows.map((ing) => ({
         productId: ing.productId,
-        quantity: Number(ing.quantity)
+        quantity: parseDecimalInput(ing.quantity)
       }))
     : undefined;
 
@@ -72,7 +79,7 @@ export function buildProductInputFromImportRow(
   const trackStock = !row.requiresKitchen || (productionMode === "BATCH");
   const stock = trackStock
     ? row.stock.trim()
-      ? Number(row.stock)
+      ? parseMoneyInput(row.stock)
       : 0
     : 0;
 

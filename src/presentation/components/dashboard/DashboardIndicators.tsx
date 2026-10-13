@@ -7,9 +7,10 @@ import { getVisibleDashboardIndicators, type DashboardIndicatorId } from "../../
 import { TrendBadge } from "../ui/TrendBadge";
 import { healthColorClass, healthLabel } from "./managerPriorities";
 import type { BusinessSnapshot } from "../../../core/types/CopilotTypes";
+import { formatMoney } from "../../../core/utils/formatMoney";
 
 function money(value: number, currency: string): string {
-  return `${Math.round(value).toLocaleString("es-CO")} ${currency}`;
+  return formatMoney(value, currency);
 }
 
 export const DashboardIndicators = React.memo(function DashboardIndicators({ snapshot, hasEnoughData }: { snapshot: BusinessSnapshot | null; hasEnoughData: boolean }) {

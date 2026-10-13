@@ -2,6 +2,7 @@ import type { BusinessSnapshot } from "../../../core/types/CopilotTypes";
 import type { TranslationKey } from "../../../core/i18n/dictionaries";
 import { getBusinessHour } from "../../../core/utils/businessTime";
 import { companyConfigStore } from "../../../core/store/companyConfigStore";
+import { formatMoney } from "../../../core/utils/formatMoney";
 
 type TFunction = (key: TranslationKey, vars?: Record<string, string | number>) => string;
 
@@ -36,7 +37,7 @@ export const PRIORITY_COLOR_CLASS: Record<PriorityColor, { text: string; bg: str
 };
 
 function money(value: number, currency: string): string {
-  return `${Math.round(value).toLocaleString("es-CO")} ${currency}`;
+  return formatMoney(value, currency);
 }
 
 /**

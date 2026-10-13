@@ -1,0 +1,75 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Background gradient -->
+    <linearGradient id="bg-gradient" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0A0A0C"/>
+      <stop offset="100%" stop-color="#050505"/>
+    </linearGradient>
+
+    <!-- Logo background gradient -->
+    <linearGradient id="logo-bg-gradient" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#141417"/>
+      <stop offset="100%" stop-color="#0A0A0C"/>
+    </linearGradient>
+
+    <!-- V stroke gradient - VIMDY brand colors -->
+    <linearGradient id="v-stroke-gradient" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#38BDF8"/>
+      <stop offset="100%" stop-color="#2563EB"/>
+    </linearGradient>
+
+    <!-- Text gradient for accent -->
+    <linearGradient id="text-gradient" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#38BDF8"/>
+      <stop offset="100%" stop-color="#2563EB"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bg-gradient)"/>
+
+  <!-- Subtle grid pattern -->
+  <g opacity="0.03">
+    <line x1="0" y1="150" x2="1200" y2="150" stroke="white" stroke-width="1"/>
+    <line x1="0" y1="315" x2="1200" y2="315" stroke="white" stroke-width="1"/>
+    <line x1="0" y1="480" x2="1200" y2="480" stroke="white" stroke-width="1"/>
+    <line x1="400" y1="0" x2="400" y2="630" stroke="white" stroke-width="1"/>
+    <line x1="800" y1="0" x2="800" y2="630" stroke="white" stroke-width="1"/>
+  </g>
+
+  <!-- Logo (centered, larger) -->
+  <g transform="translate(600, 200)">
+    <!-- Logo background square -->
+    <rect x="-80" y="-80" width="160" height="160" rx="36" fill="url(#logo-bg-gradient)" stroke="#27272F" stroke-width="2"/>
+    <!-- V shape -->
+    <path d="M-45 -35 L0 55 L45 -35" fill="none" stroke="url(#v-stroke-gradient)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- VIMDY text -->
+  <text x="600" y="340" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-weight="700" font-size="86" fill="white" letter-spacing="-2">VIMDY</text>
+
+  <!-- Tagline -->
+  <text x="600" y="420" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-weight="500" font-size="34" fill="#A1A1AA">Plataforma de gestión para restaurantes</text>
+
+  <!-- Feature pills -->
+  <g transform="translate(600, 490)">
+    <!-- Ventas pill -->
+    <rect x="-260" y="-22" width="100" height="44" rx="22" fill="#1E3A5F" opacity="0.6"/>
+    <text x="-210" y="8" text-anchor="middle" font-family="Inter, sans-serif" font-weight="500" font-size="18" fill="#60A5FA">ventas</text>
+
+    <!-- Caja pill -->
+    <rect x="-140" y="-22" width="80" height="44" rx="22" fill="#1E3A5F" opacity="0.6"/>
+    <text x="-100" y="8" text-anchor="middle" font-family="Inter, sans-serif" font-weight="500" font-size="18" fill="#60A5FA">caja</text>
+
+    <!-- Inventario pill -->
+    <rect x="-40" y="-22" width="120" height="44" rx="22" fill="#1E3A5F" opacity="0.6"/>
+    <text x="20" y="8" text-anchor="middle" font-family="Inter, sans-serif" font-weight="500" font-size="18" fill="#60A5FA">inventario</text>
+
+    <!-- Operación pill -->
+    <rect x="100" y="-22" width="120" height="44" rx="22" fill="#1E3A5F" opacity="0.6"/>
+    <text x="160" y="8" text-anchor="middle" font-family="Inter, sans-serif" font-weight="500" font-size="18" fill="#60A5FA">operación</text>
+  </g>
+
+  <!-- URL -->
+  <text x="600" y="570" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-weight="600" font-size="22" fill="url(#text-gradient)">vimdy.co</text>
+</svg>

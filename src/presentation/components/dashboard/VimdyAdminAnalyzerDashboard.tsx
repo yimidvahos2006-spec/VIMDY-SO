@@ -25,6 +25,7 @@ import type { Shift } from "../../../core/entities/Entities";
 import { vimdyCore } from "../../../core/VimdyCore";
 import { companyConfigStore } from "../../../core/store/companyConfigStore";
 import { container } from "../../../infrastructure/di/CompositionRoot";
+import { formatMoney } from "../../../core/utils/formatMoney";
 
 interface MetricCardProps {
   readonly label: string;
@@ -43,19 +44,7 @@ function toSafeNumber(value: unknown): number {
 }
 
 function formatCurrency(value: unknown, currency: string): string {
-  const amount = toSafeNumber(value);
-  const safeCurrency = currency || "COP";
-
-  try {
-    return new Intl.NumberFormat("es-CO", {
-      style: "currency",
-      currency: safeCurrency,
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount);
-  } catch {
-    return `${Math.round(amount).toLocaleString("es-CO")} ${safeCurrency}`;
-  }
+  return formatMoney(toSafeNumber(value), currency || "COP");
 }
 
 function formatPercentage(value: unknown): string {

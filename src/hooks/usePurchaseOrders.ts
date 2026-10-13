@@ -26,7 +26,7 @@ import { toast } from "../core/store/toastStore";
 
 export interface UsePurchaseOrdersResult {
   orders: PurchaseOrder[];
-  /** Órdenes abiertas: PENDIENTE o POSPUESTO — lo que hay que gestionar hoy. */
+  /** Órdenes abiertas: PENDIENTE, PARCIAL o POSPUESTO — lo que hay que gestionar hoy. */
   openOrders: PurchaseOrder[];
   /** Historial: COMPRADO o CANCELADO — nunca se borra nada. */
   history: PurchaseOrder[];
@@ -43,7 +43,7 @@ export interface UsePurchaseOrdersResult {
   /** Marca como comprado y actualiza inventario. Devuelve los mensajes del Gerente Inteligente. */
   markAsPurchased: (
     orderId: string,
-    adjustedItems?: PurchaseOrderItem[]
+    receivedNow?: PurchaseOrderItem[]
   ) => Promise<string[] | null>;
 
   postponeOrder: (orderId: string, newExpectedDate: Date, note?: string) => Promise<boolean>;
@@ -56,6 +56,30 @@ function friendlyError(message: string): string {
   }
   if (message.startsWith("INVALID_ITEM")) {
     return message.replace("INVALID_ITEM: ", "");
+  }
+  if (message.includes("PURCHASE_RECEIVED_EXCEEDS_ORDERED")) {
+    return "Esa cantidad es mayor a lo que falta por recibir de esta orden.";
+  }
+  if (message.includes("PURCHASE_ITEM_NOT_IN_ORDER")) {
+    return "Uno de los productos no pertenece a esta orden.";
+  }
+  if (message.includes("PURCHASE_ITEMS_INVALID") || message.includes("PURCHASE_ITEM_INVALID")) {
+    return "Indica una cantidad válida mayor a 0 para recibir.";
+  }
+  if (message.includes("PURCHASE_RECEIVE_FORBIDDEN") || message.includes("PURCHASE_BRANCH_FORBIDDEN")) {
+    return "No tienes permiso para recibir compras en este negocio o sucursal.";
+  }
+  if (message.includes("PURCHASE_SUBSCRIPTION_INACTIVE")) {
+    return "Tu suscripción no está activa. Renuévala para registrar compras.";
+  }
+  if (message.includes("PURCHASE_ORDER_UPDATE_CONFLICT")) {
+    return "Otra persona modificó esta orden al mismo tiempo. Recarga e intenta de nuevo.";
+  }
+  if (message.includes("PURCHASE_RECEIVE_UNAVAILABLE")) {
+    return "Esta versión no puede recibir compras. Recarga la página.";
+  }
+  if (/failed to fetch|network|load failed/i.test(message)) {
+    return "Necesitas internet para recibir una compra. El inventario no se modificó.";
   }
   switch (message) {
     case "SUPPLIER_REQUIRED":
@@ -78,7 +102,11 @@ function buildManagerMessages(
   capacityImproved: readonly { productName: string; beforeMaxUnits: number; afterMaxUnits: number }[],
   stockoutResolved: readonly string[]
 ): string[] {
-  const messages: string[] = ["✅ Inventario actualizado."];
+  const messages: string[] = [
+    order.status === "PARCIAL"
+      ? "✅ Inventario actualizado. La orden sigue abierta: aún falta mercancía por recibir."
+      : "✅ Inventario actualizado."
+  ];
 
   for (const item of capacityImproved) {
     messages.push(`✅ Ya puedes preparar ${item.afterMaxUnits} ${item.productName}.`);
@@ -142,14 +170,14 @@ export function usePurchaseOrders(): UsePurchaseOrdersResult {
   );
 
   const markAsPurchased = useCallback(
-    async (orderId: string, adjustedItems?: PurchaseOrderItem[]): Promise<string[] | null> => {
+    async (orderId: string, receivedNow?: PurchaseOrderItem[]): Promise<string[] | null> => {
       setError(null);
       try {
         const session = userSessionStore.get();
         const result = await container.purchaseOrderEngine.get().markAsPurchased(
           orderId,
           session.logged ? session.name : undefined,
-          adjustedItems
+          receivedNow
         );
         await reload();
         // Toda compra debe actualizar automáticamente el inventario: avisa
@@ -205,7 +233,7 @@ export function usePurchaseOrders(): UsePurchaseOrdersResult {
     [reload]
   );
 
-  const OPEN = new Set(["PENDIENTE", "POSPUESTO"]);
+  const OPEN = new Set(["PENDIENTE", "POSPUESTO", "PARCIAL"]);
 
   return {
     orders,

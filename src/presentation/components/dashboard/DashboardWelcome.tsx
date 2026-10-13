@@ -13,9 +13,10 @@ import {
   PRIORITY_COLOR_CLASS
 } from "./managerPriorities";
 import type { BusinessSnapshot } from "../../../core/types/CopilotTypes";
+import { formatMoney } from "../../../core/utils/formatMoney";
 
 function money(value: number, currency: string): string {
-  return `${Math.round(value).toLocaleString("es-CO")} ${currency}`;
+  return formatMoney(value, currency);
 }
 
 /**

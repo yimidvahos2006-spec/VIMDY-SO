@@ -96,14 +96,9 @@ export function TermsPage() {
               ))}
             </div>
 
-            <div className="mt-8 rounded-[22px] border border-cyan-300/[0.1] bg-cyan-300/[0.025] px-6 py-5 sm:px-7">
-              <p className="text-xs leading-6 text-zinc-500">
-                Estos términos forman parte de la información legal publicada
-                por VIMDY. Antes de realizar cambios comerciales o legales,
-                actualiza el contenido oficial correspondiente para mantener
-                toda la información consistente.
-              </p>
-            </div>
+            <p className="mt-8 text-xs leading-6 text-zinc-500">
+              Última actualización: 13 de octubre de 2026.
+            </p>
           </div>
         </div>
       </section>

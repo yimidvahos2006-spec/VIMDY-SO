@@ -3,9 +3,11 @@ import { ArrowRightLeft, Loader2, ShieldCheck } from "lucide-react";
 import type { CashRegister, Shift } from "../../../core/entities/Entities";
 import { enterpriseCashService } from "../../../infrastructure/caja/enterpriseCashService";
 import { translateBusinessError } from "../../../core/errors/translateBusinessError";
+import { formatMoney } from "../../../core/utils/formatMoney";
+import { companyConfigStore } from "../../../core/store/companyConfigStore";
 
 function formatCOP(amount: number): string {
-  return `$${Math.round(amount).toLocaleString("es-CO")}`;
+  return formatMoney(amount, companyConfigStore.get().currency);
 }
 
 export function CashRegisterTransferCard(props: {
