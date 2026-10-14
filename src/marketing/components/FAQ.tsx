@@ -25,7 +25,12 @@ const faqs = [
   {
     question: "¿Puedo controlar inventario?",
     answer:
-      "Sí. VIMDY incluye control de inventario con alertas de stock bajo, recetas para productos elaborados y trazabilidad completa.",
+      "Sí. VIMDY incluye control de inventario con alertas de stock bajo, recetas para productos elaborados y historial de movimientos.",
+  },
+  {
+    question: "¿Hay prueba gratis?",
+    answer:
+      "Sí. Tienes 14 días de prueba, sin tarjeta de crédito. Al terminar eliges un plan para seguir usando VIMDY.",
   },
   {
     question: "¿Cuánto cuesta?",
@@ -34,12 +39,13 @@ const faqs = [
   },
   {
     question: "¿Qué métodos de pago acepta?",
-    answer: "En Colombia: Wompi. Internacional: PayPal.",
+    answer:
+      "Los pagos se procesan con Wompi, en pesos colombianos. No hacemos cobros automáticos: tú renuevas tu plan cuando quieras.",
   },
   {
     question: "¿Puedo cancelar?",
     answer:
-      "Sí. Puedes cancelar tu suscripción en cualquier momento desde Configuración.",
+      "Sí. No hay cobro automático: si no renuevas, tu plan termina al final del período pagado. Y si pagas y en los primeros 7 días no te sirve, te devolvemos lo pagado.",
   },
   {
     question: "¿Cómo puedo recibir soporte?",

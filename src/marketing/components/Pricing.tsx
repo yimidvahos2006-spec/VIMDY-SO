@@ -6,7 +6,7 @@ const plans = [
     name: "Mensual",
     price: "$59.900",
     period: "/ mes",
-    cta: "Comenzar",
+    cta: "Probar 14 días gratis",
     highlighted: false,
     description: "Flexibilidad para empezar y operar mes a mes.",
   },
@@ -15,17 +15,17 @@ const plans = [
     name: "Anual",
     price: "$599.000",
     period: "/ año",
-    cta: "Comenzar",
+    cta: "Probar 14 días gratis",
     highlighted: true,
     description: "Ahorras 2 meses: pagas 10 y usas 12.",
   },
 ];
 
 const included = [
-  "Acceso a la plataforma VIMDY",
-  "Operación centralizada del negocio",
-  "Sin contratos largos",
-  "Sin sorpresas en el precio mostrado",
+  "14 días de prueba gratis, sin tarjeta de crédito",
+  "Devolución de tu dinero dentro de los primeros 7 días",
+  "Sin contratos largos ni permanencia",
+  "Tú decides cuándo renovar: no hay cobros automáticos",
 ];
 
 export function Pricing() {
@@ -57,8 +57,8 @@ export function Pricing() {
           </h2>
 
           <p className="mx-auto mt-6 max-w-2xl text-base leading-7 text-zinc-400 sm:text-lg">
-            Los precios que ya existen en VIMDY, presentados con claridad para
-            que puedas decidir sin ruido.
+            Prueba VIMDY 14 días gratis, sin tarjeta. Si decides pagar y no te
+            convence, te devolvemos tu dinero dentro de los primeros 7 días.
           </p>
         </div>
 
@@ -113,7 +113,7 @@ export function Pricing() {
 
                 <a
                   href="/registro"
-                  aria-label={`Comenzar con el plan ${plan.name.toLowerCase()}`}
+                  aria-label={`Probar 14 días gratis con el plan ${plan.name.toLowerCase()}`}
                   className={[
                     "group mt-8 inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-sm font-semibold",
                     "transition-[transform,background-color,border-color,color] duration-300",
@@ -161,9 +161,15 @@ export function Pricing() {
             aria-hidden="true"
           />
           <p className="text-xs leading-5 text-zinc-500">
-            Los precios mostrados corresponden a la información actualmente
-            definida en esta página. Cualquier cambio comercial debe actualizarse
-            también en la fuente de precios de VIMDY.
+            Precios en pesos colombianos (COP). Los pagos se procesan con Wompi.
+            Conoce las condiciones de renovación y devolución en los{" "}
+            <a
+              href="/terminos"
+              className="text-zinc-300 underline underline-offset-2 hover:text-white"
+            >
+              Términos y condiciones
+            </a>
+            .
           </p>
         </div>
       </div>

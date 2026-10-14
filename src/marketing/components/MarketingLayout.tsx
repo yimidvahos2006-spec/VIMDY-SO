@@ -1,5 +1,4 @@
 import { Outlet } from "react-router-dom";
-import { VimdyWaveBackground } from "../animations/VimdyWaveBackground";
 import { Navbar } from "./Navbar";
 import { Footer } from "./Footer";
 
@@ -12,8 +11,6 @@ export function MarketingLayout() {
       >
         Ir al contenido principal
       </a>
-
-      <VimdyWaveBackground />
 
       <div className="relative z-10 min-h-screen">
         <Navbar />

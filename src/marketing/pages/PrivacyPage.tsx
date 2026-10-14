@@ -1,11 +1,143 @@
 import { ArrowLeft, ShieldCheck } from "lucide-react";
+import { LEGAL_INFO } from "../legal/legalInfo";
 
-const collectedInformation = [
-  "Información de cuenta (nombre, email, contraseña)",
-  "Información del negocio (nombre, dirección, teléfono)",
-  "Datos de operación (ventas, caja, inventario, clientes)",
-  "Datos de empleados (nombres, roles, permisos)",
-  "Información de pagos (procesada por proveedores externos)",
+type PrivacySection = {
+  readonly id: string;
+  readonly title: string;
+  readonly paragraphs?: readonly string[];
+  readonly items?: readonly string[];
+  readonly after?: readonly string[];
+};
+
+const sections: readonly PrivacySection[] = [
+  {
+    id: "responsable",
+    title: "Quién es el responsable",
+    paragraphs: [
+      `El responsable del tratamiento de tus datos personales es ${LEGAL_INFO.responsable}, ${LEGAL_INFO.calidad}, con domicilio en ${LEGAL_INFO.domicilio}. Correo: ${LEGAL_INFO.email}. WhatsApp: ${LEGAL_INFO.whatsapp}.`,
+      "Esta política aplica a los datos de las personas que usan VIMDY (dueños y empleados). Para los datos de los clientes de tu negocio que registras en VIMDY, tú eres el responsable y VIMDY actúa como encargado que los guarda en tu nombre.",
+    ],
+  },
+  {
+    id: "datos",
+    title: "Qué datos recopilamos",
+    items: [
+      "De tu cuenta: nombre, correo electrónico, contraseña (guardada de forma protegida) y teléfono si lo das.",
+      "De tu negocio: nombre, dirección, teléfono, país y configuración.",
+      "De la operación: ventas, caja, inventario, productos, proveedores y reportes.",
+      "De tus empleados: nombre, rol y permisos.",
+      "De tus clientes finales, si los registras: nombre, contacto y compras.",
+      "De pagos: los procesa Wompi; VIMDY no guarda el número de tu tarjeta.",
+      "Técnicos mínimos: los necesarios para mantener tu sesión iniciada y proteger la cuenta.",
+    ],
+    after: [
+      "No necesitamos datos sensibles (salud, orientación sexual, religión, etc.). Te pedimos no registrarlos en VIMDY.",
+    ],
+  },
+  {
+    id: "finalidades",
+    title: "Para qué usamos tus datos",
+    items: [
+      "Crear tu cuenta y prestarte el servicio (ventas, caja, inventario, reportes).",
+      "Mantener la seguridad de la plataforma y evitar fraudes.",
+      "Procesar pagos de tu suscripción y atender devoluciones.",
+      "Enviarte avisos del servicio (verificación, vencimiento del plan, reportes que actives).",
+      "Darte soporte y responder tus consultas.",
+      "Corregir errores y mejorar VIMDY.",
+      "Cumplir obligaciones legales.",
+    ],
+    after: [
+      "No vendemos tus datos ni los usamos para publicidad de terceros.",
+    ],
+  },
+  {
+    id: "ia",
+    title: "VIMDY IA",
+    paragraphs: [
+      "Cuando le haces una pregunta a VIMDY IA, enviamos a nuestro proveedor de inteligencia artificial tu pregunta junto con el resumen de tu negocio que necesita para responder (por ejemplo ventas, inventario, caja y, si existen, nombres de tus clientes frecuentes). Usamos esta información solo para generar la respuesta.",
+    ],
+  },
+  {
+    id: "terceros",
+    title: "Con quién compartimos datos",
+    paragraphs: [
+      "Para operar VIMDY usamos proveedores que tratan datos en nuestro nombre:",
+    ],
+    items: [
+      "Supabase: base de datos y autenticación.",
+      "Vercel: alojamiento de la aplicación y la página web.",
+      "Anthropic: inteligencia artificial de VIMDY IA.",
+      "Resend: envío de correos del servicio.",
+      "Wompi: procesamiento de pagos en Colombia.",
+      "Meta (WhatsApp): solo si activas reportes por WhatsApp.",
+      "Factus: solo si activas facturación electrónica.",
+    ],
+    after: [
+      "Algunos de estos proveedores tienen sus servidores fuera de Colombia (por ejemplo, en Estados Unidos). Al aceptar esta política autorizas esa transferencia y transmisión internacional de datos, que hacemos solo para prestar el servicio. También podemos compartir datos si una autoridad competente lo exige.",
+    ],
+  },
+  {
+    id: "derechos",
+    title: "Tus derechos",
+    paragraphs: ["Como titular de datos personales tienes derecho a:"],
+    items: [
+      "Conocer, actualizar y rectificar tus datos.",
+      "Pedir prueba de la autorización que nos diste.",
+      "Que te informemos para qué hemos usado tus datos.",
+      "Presentar quejas ante la Superintendencia de Industria y Comercio (SIC).",
+      "Revocar tu autorización y pedir que eliminemos tus datos, cuando la ley lo permita.",
+      "Acceder gratis a tus datos.",
+    ],
+  },
+  {
+    id: "ejercer",
+    title: "Cómo ejercer tus derechos",
+    paragraphs: [
+      `Escríbenos a ${LEGAL_INFO.email} con el asunto «Datos personales», indicando tu nombre, el correo de tu cuenta y lo que necesitas. Respondemos las consultas en máximo 10 días hábiles y los reclamos en máximo 15 días hábiles; si necesitamos más tiempo te lo avisaremos con el motivo, como lo permite la ley.`,
+    ],
+  },
+  {
+    id: "conservacion",
+    title: "Cuánto tiempo guardamos tus datos",
+    paragraphs: [
+      "Mientras tu cuenta esté activa. Si cancelas o tu plan vence, podemos conservarlos hasta 90 días por si decides volver y luego eliminarlos o anonimizarlos. Podemos guardar por más tiempo lo que la ley nos obligue a conservar (por ejemplo, registros de pagos).",
+    ],
+  },
+  {
+    id: "seguridad",
+    title: "Seguridad",
+    paragraphs: [
+      "Usamos conexión cifrada (HTTPS), control de acceso por roles y separación entre los datos de cada negocio, entre otras medidas técnicas y organizativas. Ningún sistema es 100% infalible, pero trabajamos para proteger tus datos contra acceso no autorizado, pérdida o alteración.",
+    ],
+  },
+  {
+    id: "menores",
+    title: "Menores de edad",
+    paragraphs: [
+      "VIMDY es para personas mayores de edad. No recopilamos a propósito datos de menores.",
+    ],
+  },
+  {
+    id: "cookies",
+    title: "Cookies",
+    paragraphs: [
+      "Puedes ver cómo usamos las cookies en nuestra Política de Cookies.",
+    ],
+  },
+  {
+    id: "cambios",
+    title: "Cambios en esta política",
+    paragraphs: [
+      "Si cambiamos esta política de forma importante, te avisaremos por correo o dentro de la app. La fecha de la última actualización aparece arriba.",
+    ],
+  },
+  {
+    id: "contacto",
+    title: "Contacto",
+    paragraphs: [
+      `Para cualquier consulta sobre privacidad, escríbenos a ${LEGAL_INFO.email}.`,
+    ],
+  },
 ];
 
 export function PrivacyPage() {
@@ -43,8 +175,8 @@ export function PrivacyPage() {
 
                 <p className="mt-4 text-sm leading-6 text-zinc-500">
                   Qué datos recopilamos, para qué los usamos y cómo puedes
-                  ejercer tus derechos. Última actualización: 13 de octubre
-                  de 2026.
+                  ejercer tus derechos. Última actualización:{" "}
+                  {LEGAL_INFO.ultimaActualizacion}.
                 </p>
               </div>
             </aside>
@@ -57,87 +189,39 @@ export function PrivacyPage() {
                   tu información.
                 </p>
 
-                <section aria-labelledby="privacy-collected">
-                  <h2
-                    id="privacy-collected"
-                    className="text-xl font-semibold tracking-[-0.02em] text-white"
-                  >
-                    Información que recopilamos
-                  </h2>
-                  <ul className="mt-4 space-y-3">
-                    {collectedInformation.map((item) => (
-                      <li key={item} className="flex gap-3">
-                        <span
-                          aria-hidden="true"
-                          className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-300/70"
-                        />
-                        <span>{item}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-
-                <section aria-labelledby="privacy-use">
-                  <h2
-                    id="privacy-use"
-                    className="text-xl font-semibold tracking-[-0.02em] text-white"
-                  >
-                    Uso de la información
-                  </h2>
-                  <p className="mt-4">
-                    Utilizamos tu información para operar la plataforma,
-                    procesar pagos, enviar notificaciones relevantes y mejorar
-                    el servicio.
-                  </p>
-                </section>
-
-                <section aria-labelledby="privacy-security">
-                  <h2
-                    id="privacy-security"
-                    className="text-xl font-semibold tracking-[-0.02em] text-white"
-                  >
-                    Seguridad
-                  </h2>
-                  <p className="mt-4">
-                    Implementamos medidas de seguridad técnicas y organizativas
-                    para proteger tus datos contra acceso no autorizado,
-                    pérdida o alteración.
-                  </p>
-                </section>
-
-                <section aria-labelledby="privacy-rights">
-                  <h2
-                    id="privacy-rights"
-                    className="text-xl font-semibold tracking-[-0.02em] text-white"
-                  >
-                    Tus derechos
-                  </h2>
-                  <p className="mt-4">
-                    Puedes acceder, corregir o eliminar tu información en
-                    cualquier momento desde la configuración de tu cuenta.
-                    También puedes solicitar la eliminación completa de tu
-                    cuenta contactándonos.
-                  </p>
-                </section>
-
-                <section aria-labelledby="privacy-contact">
-                  <h2
-                    id="privacy-contact"
-                    className="text-xl font-semibold tracking-[-0.02em] text-white"
-                  >
-                    Contacto
-                  </h2>
-                  <p className="mt-4">
-                    Para cualquier consulta sobre privacidad, escríbenos a{" "}
-                    <a
-                      href="mailto:hola@vimdy.co"
-                      className="font-medium text-cyan-200 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/45"
+                {sections.map((section) => (
+                  <section key={section.id} aria-labelledby={`privacy-${section.id}`}>
+                    <h2
+                      id={`privacy-${section.id}`}
+                      className="text-xl font-semibold tracking-[-0.02em] text-white"
                     >
-                      hola@vimdy.co
-                    </a>
-                    .
-                  </p>
-                </section>
+                      {section.title}
+                    </h2>
+                    {section.paragraphs?.map((paragraph) => (
+                      <p key={paragraph} className="mt-4">
+                        {paragraph}
+                      </p>
+                    ))}
+                    {section.items && (
+                      <ul className="mt-4 space-y-3">
+                        {section.items.map((item) => (
+                          <li key={item} className="flex gap-3">
+                            <span
+                              aria-hidden="true"
+                              className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-300/70"
+                            />
+                            <span>{item}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {section.after?.map((paragraph) => (
+                      <p key={paragraph} className="mt-4">
+                        {paragraph}
+                      </p>
+                    ))}
+                  </section>
+                ))}
               </div>
             </article>
           </div>

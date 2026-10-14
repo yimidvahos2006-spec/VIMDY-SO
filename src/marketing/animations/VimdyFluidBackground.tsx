@@ -261,7 +261,8 @@ export function VimdyFluidBackground({ className = "" }: VimdyFluidBackgroundPro
       resizeObserver?.disconnect();
       intersectionObserver?.disconnect();
       dispose();
-      gl.getExtension("WEBGL_lose_context")?.loseContext();
+      // No se pierde el contexto a propósito: en desarrollo React monta el componente
+      // dos veces sobre el mismo canvas y un contexto perdido dejaría el fondo apagado.
     };
   }, []);
 

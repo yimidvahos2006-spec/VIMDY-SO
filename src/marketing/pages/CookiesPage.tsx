@@ -31,7 +31,7 @@ export function CookiesPage() {
               </p>
               <h2 className="text-xl font-semibold text-white">Contacto</h2>
               <p>
-                 Para consultas sobre cookies, contáctanos en hola@vimdy.co.
+                 Para consultas sobre cookies, contáctanos en hola@vimdy.co. Última actualización: 13 de octubre de 2026.
               </p>
             </div>
           </div>
