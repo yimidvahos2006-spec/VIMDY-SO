@@ -8,6 +8,7 @@ import { VimdySelect } from "../ui/VimdySelect";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { useAuth } from "../../context/AuthContext";
 import { translateBusinessError } from "../../../core/errors/translateBusinessError";
+import { parseMoneyInput } from "../../../core/utils/parseMoneyInput";
 import type { Category } from "../../../core/entities/Entities";
 
 interface FirstProductStepProps {
@@ -51,9 +52,9 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
     event.preventDefault();
     if (saving) return;
 
-    const priceValue = Number(price);
+    const priceValue = parseMoneyInput(price);
     const stockValue = Number(stock);
-    const costValue = cost.trim() ? Number(cost) : undefined;
+    const costValue = cost.trim() ? parseMoneyInput(cost) : undefined;
 
     if (!name.trim()) {
       setError("El nombre del producto es obligatorio.");
@@ -175,9 +176,8 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <VimdyInput
-              type="number"
-              min={0}
-              step="0.01"
+              type="text"
+              inputMode="decimal"
               label="Precio de venta *"
               placeholder="0"
               value={price}
@@ -185,9 +185,8 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
               disabled={saving}
             />
             <VimdyInput
-              type="number"
-              min={0}
-              step="0.01"
+              type="text"
+              inputMode="decimal"
               label="Costo (opcional)"
               placeholder="0"
               value={cost}

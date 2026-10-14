@@ -5,9 +5,11 @@ import type { CashMovementReasonCode } from "../../../core/caja/CajaEnterpriseTy
 import { enterpriseCashService } from "../../../infrastructure/caja/enterpriseCashService";
 import { CashDenominationCounter } from "./CashDenominationCounter";
 import { translateBusinessError } from "../../../core/errors/translateBusinessError";
+import { formatMoney } from "../../../core/utils/formatMoney";
+import { companyConfigStore } from "../../../core/store/companyConfigStore";
 
 function formatCOP(amount: number): string {
-  return `$${Math.round(amount).toLocaleString("es-CO")}`;
+  return formatMoney(amount, companyConfigStore.get().currency);
 }
 
 const IN_REASONS: Array<{ code: CashMovementReasonCode; label: string }> = [

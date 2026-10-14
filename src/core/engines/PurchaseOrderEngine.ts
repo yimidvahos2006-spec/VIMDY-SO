@@ -3,7 +3,6 @@ import { Product, PurchaseOrder, PurchaseOrderItem, PurchaseOrderStatus } from "
 import { IRepository } from "../../infrastructure/di/repositories/IRepository";
 import { InventoryEngine } from "./InventoryEngine";
 import { RecipeEngine } from "./RecipeEngine";
-import { getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
 
 /** Productos con receta cuya capacidad real de producción mejoró al recibir una compra. */
 export interface CapacityImprovement {
@@ -21,7 +20,34 @@ export interface PurchaseReceiptResult {
   readonly stockoutResolved: readonly string[];
 }
 
-const OPEN_STATUSES: readonly PurchaseOrderStatus[] = ["PENDIENTE", "POSPUESTO"];
+const OPEN_STATUSES: readonly PurchaseOrderStatus[] = ["PENDIENTE", "POSPUESTO", "PARCIAL"];
+
+/** Lo que llegó de un producto en una recepción (el repositorio lo manda al servidor). */
+export interface PurchaseReceiptInput {
+  readonly productId: string;
+  readonly quantity: number;
+  readonly unitPrice?: number;
+}
+
+/**
+ * Recibir mercancía de verdad ocurre en el servidor, en una sola operación
+ * atómica (stock + kardex + estado de la orden). El motor solo la pide.
+ */
+export interface PurchaseOrderReceiver {
+  receive(params: {
+    purchaseOrderId: string;
+    operationId: string;
+    items?: readonly PurchaseReceiptInput[];
+    note?: string;
+    performedBy?: string;
+  }): Promise<{ status: string; idempotent: boolean }>;
+}
+
+/** Cuánto falta por recibir de un item de la orden. */
+export function remainingQuantity(order: PurchaseOrder, item: PurchaseOrderItem): number {
+  const received = order.receivedQuantities?.[item.productId] ?? 0;
+  return Math.max(0, Math.round((item.quantity - received) * 1e6) / 1e6);
+}
 
 /**
  * PurchaseOrderEngine — PASO 2.7 (Compras Inteligentes, ejecución).
@@ -34,8 +60,16 @@ const OPEN_STATUSES: readonly PurchaseOrderStatus[] = ["PENDIENTE", "POSPUESTO"]
  * posponer solo cambian `status`, preservando el historial completo.
  */
 export class PurchaseOrderEngine {
+  /**
+   * Operaciones de recepción en curso. Si un intento falla por la red y la
+   * persona vuelve a pulsar "Recibir" con las mismas cantidades, se reutiliza
+   * el MISMO identificador: así, si el servidor sí alcanzó a guardar, el
+   * reintento no vuelve a sumar el stock.
+   */
+  private readonly pendingReceipts = new Map<string, string>();
+
   constructor(
-    private readonly repository: IRepository<PurchaseOrder>,
+    private readonly repository: IRepository<PurchaseOrder> & Partial<PurchaseOrderReceiver>,
     private readonly inventoryEngine: InventoryEngine,
     private readonly recipeEngine: RecipeEngine
   ) {}
@@ -108,20 +142,20 @@ export class PurchaseOrderEngine {
   }
 
   /**
-   * Marca una orden como comprada: descarga cada item al inventario real
-   * (vía InventoryEngine.increaseStock, con proveedor y precio) y calcula
-   * qué mejoró (capacidad de producción, riesgo de desabastecimiento) para
-   * que la UI pueda mostrar los mensajes del Gerente Inteligente.
+   * Recibe mercancía de una orden y la lleva al inventario real. Todo el
+   * trabajo importante (sumar stock, escribir el kardex y actualizar la
+   * orden) lo hace el servidor en UNA sola transacción: o entra todo o no
+   * entra nada, y repetir la misma operación no duplica el stock.
    *
-   * @param adjustedItems Si lo recibido difiere de lo pedido (cantidad o
-   * precio reales), se pasa aquí; se guarda como la versión final de la
-   * orden sin perder que originalmente se pidió otra cosa (queda en el
-   * historial de todas formas, solo se reemplaza `items`).
+   * @param receivedNow Lo que llegó ahora. Si no se indica, se recibe todo
+   * lo que falta de la orden. Si llega menos de lo pedido, la orden queda
+   * PARCIAL y se puede seguir recibiendo hasta completarla (COMPRADO). No se
+   * puede recibir más de lo que falta.
    */
   public async markAsPurchased(
     orderId: string,
     performedBy?: string,
-    adjustedItems?: PurchaseOrderItem[]
+    receivedNow?: PurchaseOrderItem[]
   ): Promise<PurchaseReceiptResult> {
     const order = await this.repository.findById(orderId);
     if (!order) {
@@ -130,15 +164,27 @@ export class PurchaseOrderEngine {
     if (!OPEN_STATUSES.includes(order.status)) {
       throw new Error(`PURCHASE_ORDER_NOT_OPEN: la orden ya está en estado ${order.status}.`);
     }
+    if (typeof this.repository.receive !== "function") {
+      throw new Error("PURCHASE_RECEIVE_UNAVAILABLE");
+    }
 
-    const finalItems = adjustedItems && adjustedItems.length > 0 ? adjustedItems : order.items;
+    const itemsNow: PurchaseOrderItem[] =
+      receivedNow && receivedNow.length > 0
+        ? receivedNow.filter((i) => i.quantity > 0)
+        : order.items
+            .map((item) => ({ ...item, quantity: remainingQuantity(order, item) }))
+            .filter((item) => item.quantity > 0);
+
+    if (itemsNow.length === 0) {
+      throw new Error("PURCHASE_ITEMS_INVALID");
+    }
 
     // Foto ANTES de recibir: capacidad de producción de todo producto con
     // receta que use alguno de los ingredientes comprados, y quiénes de los
     // productos comprados estaban agotados/bajo mínimo.
     const productsBefore = await this.inventoryEngine.listAll();
     const productMapBefore = new Map(productsBefore.map((p) => [p.id, p]));
-    const purchasedIds = new Set(finalItems.map((i) => i.productId));
+    const purchasedIds = new Set(itemsNow.map((i) => i.productId));
 
     const dependentProducts = productsBefore.filter(
       (p) => p.recipe && p.recipe.some((ing) => purchasedIds.has(ing.productId))
@@ -148,26 +194,28 @@ export class PurchaseOrderEngine {
     );
 
     const wasAtRisk = new Set(
-      finalItems
+      itemsNow
         .map((item) => productMapBefore.get(item.productId))
         .filter((p): p is Product => !!p && (p.stock <= 0 || p.stock <= p.minStock))
         .map((p) => p.id)
     );
 
-    // Recibir de verdad: reutiliza InventoryEngine, nunca reimplementa el
-    // aumento de stock.
-    for (const item of finalItems) {
-      await this.inventoryEngine.increaseStock(
-        item.productId,
-        item.quantity,
-        `Compra recibida (orden ${order.id})`,
-        performedBy,
-        order.supplierId,
-        item.unitPrice,
-        undefined,
-        getCurrentBranchId()
-      );
-    }
+    // Mismo identificador mientras sean las mismas cantidades y no haya
+    // terminado bien: protege contra el doble clic y contra reintentos tras
+    // un corte de internet.
+    const receiptKey = `${orderId}|${JSON.stringify(
+      itemsNow.map((i) => [i.productId, i.quantity, i.unitPrice]).sort()
+    )}`;
+    const operationId = this.pendingReceipts.get(receiptKey) ?? crypto.randomUUID();
+    this.pendingReceipts.set(receiptKey, operationId);
+
+    await this.repository.receive({
+      purchaseOrderId: orderId,
+      operationId,
+      items: itemsNow.map((i) => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice })),
+      performedBy
+    });
+    this.pendingReceipts.delete(receiptKey);
 
     // Foto DESPUÉS: mismo cálculo, con inventario ya actualizado.
     const productsAfter = await this.inventoryEngine.listAll();
@@ -189,7 +237,7 @@ export class PurchaseOrderEngine {
     }
 
     const stockoutResolved: string[] = [];
-    for (const item of finalItems) {
+    for (const item of itemsNow) {
       if (!wasAtRisk.has(item.productId)) continue;
       const productAfter = productMapAfter.get(item.productId);
       if (productAfter && productAfter.stock > productAfter.minStock && productAfter.stock > 0) {
@@ -197,13 +245,8 @@ export class PurchaseOrderEngine {
       }
     }
 
-    const updatedOrder: PurchaseOrder = {
-      ...order,
-      items: finalItems,
-      status: "COMPRADO",
-      receivedAt: new Date()
-    };
-    await this.repository.update(updatedOrder);
+    // El estado final (PARCIAL o COMPRADO) lo decidió el servidor: se lee de vuelta.
+    const updatedOrder = (await this.repository.findById(orderId)) ?? order;
 
     return { order: updatedOrder, capacityImproved, stockoutResolved };
   }

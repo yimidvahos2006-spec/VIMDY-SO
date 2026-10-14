@@ -33,7 +33,9 @@ export interface UseCategoriesResult {
   deleteCategory: (id: string) => Promise<boolean>;
 }
 
-function friendlyError(code: string): string {
+function friendlyError(rawCode: string): string {
+  // El servidor también protege el borrado: su mensaje trae el código dentro del texto.
+  const code = rawCode.includes("CATEGORY_IN_USE") ? "CATEGORY_IN_USE" : rawCode;
   switch (code) {
     case "CATEGORY_NAME_REQUIRED":
       return "El nombre de la categoría es obligatorio.";

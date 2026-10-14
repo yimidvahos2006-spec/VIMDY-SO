@@ -1,3 +1,4 @@
+import { LEGAL_INFO } from "../legal/legalInfo";
 import { ArrowUpRight, Mail, MessageCircle } from "lucide-react";
 import { VimdyLogo } from "../../presentation/components/ui/VimdyLogo";
 import { VIMDY_CONTACT } from "../../core/config/contact";
@@ -22,6 +23,7 @@ const footerLinks: Record<string, FooterLink[]> = {
     { href: "/privacidad", label: "Privacidad" },
     { href: "/terminos", label: "Términos" },
     { href: "/cookies", label: "Cookies" },
+    { href: "https://www.sic.gov.co", label: "Superintendencia de Industria y Comercio", external: true },
   ],
 };
 
@@ -117,6 +119,15 @@ export function Footer() {
               <p>© {new Date().getFullYear()} VIMDY. Todos los derechos reservados.</p>
               <p className="text-zinc-700">
                 Tecnología para la operación de negocios de alimentos y bebidas.
+              </p>
+              <p className="text-zinc-700">
+                VIMDY · {LEGAL_INFO.domicilio} ·{" "}
+                <a
+                  href="/terminos"
+                  className="underline underline-offset-2 transition-colors hover:text-zinc-400"
+                >
+                  Información legal
+                </a>
               </p>
             </div>
 

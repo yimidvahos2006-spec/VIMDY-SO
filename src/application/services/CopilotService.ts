@@ -160,8 +160,12 @@ function snapshotToPrompt(snapshot: CopilotContextSnapshot): string {
 
   lines.push("");
   lines.push("=== CAJA ===");
-  lines.push(`Saldo total de caja: ${formatMoney(snapshot.cash.balance, snapshot.currency)}`);
-  lines.push(`Saldo generado hoy: ${formatMoney(snapshot.cash.todayBalance, snapshot.currency)}`);
+  if (snapshot.cash.openShifts === 0) {
+    lines.push("No hay ninguna caja abierta en este momento.");
+  } else {
+    lines.push(`Efectivo esperado en caja ahora (fondo inicial + ventas en efectivo − salidas): ${formatMoney(snapshot.cash.balance, snapshot.currency)}`);
+  }
+  lines.push(`Movimiento de caja de hoy (entradas − salidas, incluye tarjeta/transferencia): ${formatMoney(snapshot.cash.todayBalance, snapshot.currency)}`);
 
   lines.push("");
   lines.push("=== MESAS (estado en vivo) ===");

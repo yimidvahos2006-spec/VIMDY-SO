@@ -278,7 +278,7 @@ export function RegisterPage() {
                         <label htmlFor="acceptTerms" className="text-xs sm:text-sm text-slate-300">
                           Al crear tu cuenta aceptas nuestros{" "}
                           <Link to="/terminos" className="text-cyan-400 hover:text-cyan-300">Términos y Condiciones</Link>
-                          {" "}y{" "}
+                          {" "}y autorizas el tratamiento de tus datos personales según nuestra{" "}
                           <Link to="/privacidad" className="text-cyan-400 hover:text-cyan-300">Política de Privacidad</Link>.
                         </label>
                       </div>

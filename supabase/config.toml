@@ -430,3 +430,28 @@ verify_jwt = false
 
 [functions.whatsapp-webhook]
 verify_jwt = false
+
+# Webhooks y tareas programadas: validan su propia firma/secreto (checksum de
+# Wompi, HMAC de PayPal/Mercado Pago, secreto del worker). Si se redespliega
+# sin esto, el gateway exige JWT y rechaza los callbacks de pago.
+
+[functions.wompi-webhook]
+verify_jwt = false
+
+[functions.wompi-pos-webhook]
+verify_jwt = false
+
+[functions.paypal-webhook]
+verify_jwt = false
+
+[functions.mercadopago-webhook]
+verify_jwt = false
+
+[functions.payments-reconcile]
+verify_jwt = false
+
+[functions.ops-health-check]
+verify_jwt = false
+
+[functions.ops-monitor]
+verify_jwt = false

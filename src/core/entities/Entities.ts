@@ -197,6 +197,14 @@ export interface RecipeItem {
    * para que cocina y el mesero sepan que se puede personalizar.
    */
   readonly optional?: boolean;
+  /**
+   * Cantidad y unidad tal como las escribió la persona (ej. 120 "g"). Solo
+   * sirven para volver a mostrar la receta igual en el formulario: el motor
+   * de stock y el servidor usan siempre `quantity`, que ya está convertida a
+   * la unidad del ingrediente (ej. 0,12 kg).
+   */
+  readonly entryQuantity?: number;
+  readonly entryUnit?: string;
 }
 
 /**
@@ -875,7 +883,7 @@ export interface Supplier {
  * de compra. COMPRADO y CANCELADO son finales: una vez ahí, la orden ya no
  * se puede modificar (se preserva como historial).
  */
-export type PurchaseOrderStatus = "PENDIENTE" | "COMPRADO" | "POSPUESTO" | "CANCELADO";
+export type PurchaseOrderStatus = "PENDIENTE" | "PARCIAL" | "COMPRADO" | "POSPUESTO" | "CANCELADO";
 
 /** Una línea de una orden de compra: cuánto se pide de un producto/ingrediente y a qué precio. */
 export interface PurchaseOrderItem {
@@ -910,8 +918,16 @@ export interface PurchaseOrder {
   readonly createdBy?: string;
   readonly createdAt: Date;
   readonly expectedDeliveryDate?: Date;
-  /** Solo se llena al marcar COMPRADO: cuándo entró de verdad al inventario. */
+  /** Solo se llena al completar la orden (COMPRADO): cuándo entró de verdad al inventario lo último. */
   readonly receivedAt?: Date;
+  /**
+   * Cuánto se ha recibido de cada producto (productId -> cantidad). Lo escribe
+   * el servidor al recibir mercancía. Si falta por recibir, la orden queda
+   * PARCIAL; lo que falta = quantity del item - lo recibido.
+   */
+  readonly receivedQuantities?: Readonly<Record<string, number>>;
+  /** Fecha de la última recepción (parcial o completa). */
+  readonly lastReceivedAt?: Date;
   /** Motivo al posponer o cancelar (auditoría, igual que reason en InventoryMovement). */
   readonly statusNote?: string;
 }

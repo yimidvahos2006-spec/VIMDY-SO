@@ -217,14 +217,20 @@ function stopLocalBusinessSyncs(): void {
   stopOfflineCustomerSync();
   stopOfflineKitchenSync();
 
-  void pendingSalesStore.clear();
-  void pendingCustomerOperationsStore.clear();
-  void pendingTableOperationsStore.clear();
-  void pendingInventoryAdjustmentsStore.clear();
-  void pendingKitchenOrdersStore.clear();
-
   setCurrentBusinessId(null);
   setCurrentBranchId(null);
+
+  // NUNCA borramos las colas offline aquí: son ventas/operaciones que el
+  // negocio hizo sin internet y todavía no llegaron al servidor. Borrarlas
+  // (antes se hacía con clear(), y solo "funcionaba" por una carrera de
+  // tiempos) perdería dinero real. Cada registro guarda su businessId/branchId,
+  // así que otro negocio en el mismo equipo no los ve; solo se refresca la
+  // vista en memoria y se sincronizan cuando ese negocio vuelva a abrirse.
+  void pendingSalesStore.refresh();
+  void pendingCustomerOperationsStore.refresh();
+  void pendingTableOperationsStore.refresh();
+  void pendingInventoryAdjustmentsStore.refresh();
+  void pendingKitchenOrdersStore.refresh();
   enabledModulesStore.clear();
   subscriptionStore.clear();
   kitchenOutputModeStore.clear();

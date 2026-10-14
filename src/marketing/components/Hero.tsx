@@ -1,6 +1,7 @@
 import { ArrowRight, ChevronDown, Sparkles } from "lucide-react";
 import { Link } from "react-router-dom";
 import { VimdyLogo } from "../../presentation/components/ui/VimdyLogo";
+import { VimdyFluidBackground } from "../animations/VimdyFluidBackground";
 
 const operatingAreas = [
   "Ventas",
@@ -18,14 +19,13 @@ export default function Hero() {
       aria-labelledby="hero-title"
       className="relative isolate min-h-[92vh] overflow-hidden bg-transparent text-white"
     >
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute left-1/2 top-[-22rem] h-[42rem] w-[42rem] -translate-x-1/2 rounded-full bg-cyan-500/[0.10] blur-[120px]" />
-        <div className="absolute right-[-14rem] top-[18%] h-[34rem] w-[34rem] rounded-full bg-blue-600/[0.08] blur-[120px]" />
-        <div className="absolute bottom-[-20rem] left-[-10rem] h-[34rem] w-[34rem] rounded-full bg-indigo-600/[0.07] blur-[120px]" />
+      <VimdyFluidBackground />
 
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(5,5,7,0.15)_45%,rgba(5,5,7,0.97)_100%)]" />
-
-      </div>
+      {/* Oscurece un poco el centro para que el texto se lea sobre la mancha azul. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(5,7,10,0.45)_0%,rgba(5,7,10,0.15)_55%,rgba(5,7,10,0.55)_100%)]"
+      />
 
       <div className="relative mx-auto flex min-h-[92vh] max-w-7xl flex-col justify-center px-6 pb-20 pt-28 sm:px-8 lg:px-12">
         <div className="mx-auto w-full max-w-6xl">

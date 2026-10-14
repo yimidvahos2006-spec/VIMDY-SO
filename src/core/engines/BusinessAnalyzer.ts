@@ -214,7 +214,8 @@ export class BusinessAnalyzer {
     private readonly kardexEngine: KardexEngine,
     private readonly forecastEngine: ForecastEngine,
     private readonly purchaseIntelligenceEngine: PurchaseIntelligenceEngine,
-    private readonly auditEngine: AuditEngine
+    private readonly auditEngine: AuditEngine,
+    private readonly shiftRepository?: IRepository<Shift>
   ) {}
 
   public async buildSnapshot(
@@ -252,6 +253,8 @@ export class BusinessAnalyzer {
       this.purchaseIntelligenceEngine.getRecommendations(),
       this.auditEngine.getByActions(SALE_REVERSAL_ACTIONS)
     ]);
+
+    const openShiftCash = await this.computeOpenShiftCash(cashMovements);
 
     // ProductCatalogStore es una proyección reactiva del mismo InventoryEngine.
     // BusinessAnalyzer consume ese mismo snapshot mediante DI para no crear un
@@ -866,8 +869,9 @@ export class BusinessAnalyzer {
       tableTurnover,
       weeklyForecast,
       cash: {
-        balance: cashBalance,
-        todayBalance: cashToday
+        balance: openShiftCash.balance,
+        todayBalance: cashToday,
+        openShifts: openShiftCash.openShifts
       },
       tableStatus: tableStatusCounts,
       delayedOrders,
@@ -1297,6 +1301,38 @@ export class BusinessAnalyzer {
         products
       )
     });
+  }
+
+  /**
+   * Efectivo esperado ahora en las cajas abiertas: fondo inicial + ventas en
+   * efectivo − salidas de cada turno OPEN. Mismo cálculo que ShiftEngine usa
+   * para el cierre, así el Copiloto y la pantalla de Caja dicen lo mismo.
+   * Sin turno abierto → balance 0 y openShifts 0.
+   */
+  private async computeOpenShiftCash(
+    movements: readonly CashMovement[]
+  ): Promise<{ balance: number; openShifts: number }> {
+    if (!this.shiftRepository) return { balance: 0, openShifts: 0 };
+    const shifts = (await this.shiftRepository.findAll()).filter(
+      (shift) => shift.status === "OPEN"
+    );
+    let balance = 0;
+    for (const shift of shifts) {
+      let cashIn = 0;
+      let out = 0;
+      for (const movement of movements) {
+        if (movement.shiftId !== shift.id) continue;
+        if (movement.type === "IN") {
+          cashIn +=
+            movement.cashAmount ??
+            (movement.paymentMethod === "CASH" || !movement.paymentMethod ? movement.amount : 0);
+        } else {
+          out += movement.amount;
+        }
+      }
+      balance += shift.openingAmount + cashIn - out;
+    }
+    return { balance: fixed2(balance), openShifts: shifts.length };
   }
 
   /**

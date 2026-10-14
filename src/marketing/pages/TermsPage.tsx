@@ -1,39 +1,73 @@
+import { LEGAL_INFO } from "../legal/legalInfo";
+
 const sections = [
   {
-    title: "Cuenta",
-    body: "Eres responsable de mantener la confidencialidad de tu cuenta y contraseña. Debes notificarnos inmediatamente cualquier uso no autorizado.",
+    title: "Quién ofrece VIMDY",
+    body: `VIMDY es ofrecido por ${LEGAL_INFO.responsable}, ${LEGAL_INFO.calidad}, con domicilio en ${LEGAL_INFO.domicilio}. Puedes escribirnos a ${LEGAL_INFO.email} o por WhatsApp al ${LEGAL_INFO.whatsapp}.`,
   },
   {
-    title: "Suscripción y pagos",
-    body: "VIMDY se ofrece bajo suscripción mensual o anual. Los pagos se procesan de forma segura a través de nuestros proveedores de pago. Las suscripciones se renuevan automáticamente.",
+    title: "Qué es VIMDY y qué no es",
+    body: "VIMDY es un software en línea para gestionar ventas, caja, inventario, cocina y reportes de tu negocio. No es asesoría contable, tributaria ni legal. Las cifras, alertas y respuestas de VIMDY IA son una ayuda y pueden contener errores: revísalas antes de tomar decisiones. Tú sigues siendo responsable de tus impuestos, de tu facturación y de lo que registras.",
   },
   {
-    title: "Cancelación",
-    body: "Puedes cancelar tu suscripción en cualquier momento desde Configuración. El acceso continuará hasta el final del período pagado.",
+    title: "Tu cuenta",
+    body: "Debes ser mayor de edad y dar información veraz. Eres responsable de la confidencialidad de tu contraseña y de las personas a las que das acceso (por ejemplo, tus empleados). Avísanos de inmediato si crees que alguien usó tu cuenta sin permiso.",
+  },
+  {
+    title: "Prueba gratuita",
+    body: "Al crear tu cuenta tienes 14 días de prueba, sin tarjeta de crédito y sin cobro. Al terminar la prueba, para seguir usando VIMDY debes elegir un plan de pago. Si no lo haces, tu cuenta queda inactiva.",
+  },
+  {
+    title: "Planes y precios",
+    body: "Plan mensual: $59.900 COP por mes. Plan anual: $599.000 COP por año (12 meses de acceso, equivalente a pagar 10). Los precios están en pesos colombianos. Si en algún momento debemos cobrar IVA, te lo informaremos antes de aplicarlo. Si cambiamos los precios, te avisaremos con al menos 30 días y el cambio no afectará el período que ya pagaste.",
+  },
+  {
+    title: "Pagos y renovación",
+    body: "Los pagos se procesan a través de Wompi u otros proveedores de pago habilitados; VIMDY no guarda los datos de tu tarjeta. No hacemos cobros automáticos: cuando tu plan está por vencer te avisamos y tú decides si lo renuevas desde Configuración.",
+  },
+  {
+    title: "Cancelación y devoluciones",
+    body: "Como no hay cobro automático, puedes dejar de usar VIMDY cuando quieras simplemente no renovando; tu acceso continúa hasta el final del período pagado. Si pagaste un plan y en los primeros 7 días calendario sientes que VIMDY no te sirve, escríbenos a hola@vimdy.co y te devolvemos lo pagado, al mismo medio de pago, en un máximo de 15 días calendario. Pasados esos 7 días no devolvemos el tiempo no usado, salvo que el servicio haya fallado gravemente por causa nuestra. Esto no limita los derechos que la ley te reconozca como consumidor.",
   },
   {
     title: "Uso permitido",
-    body: "Debes usar VIMDY solo para fines legales y de acuerdo con estos términos. No está permitido usar la plataforma para actividades fraudulentas o ilegales.",
+    body: "Usa VIMDY solo para fines legales y de acuerdo con estos términos. No está permitido usar la plataforma para actividades fraudulentas o ilegales, intentar acceder a datos de otros negocios, ni dañar o sobrecargar el servicio.",
+  },
+  {
+    title: "Tus datos y los de tus clientes",
+    body: "La información de tu negocio (ventas, productos, clientes, empleados) es tuya. Nos autorizas a guardarla y procesarla para prestarte el servicio. Si registras datos personales de tus clientes o empleados, tú eres quien responde ante ellos por su tratamiento (por ejemplo, avisarles y pedir su autorización cuando corresponda) y VIMDY actúa como encargado que los guarda en tu nombre. Más detalles en la Política de Privacidad. Si dejas de ser cliente, puedes pedirnos eliminar tus datos escribiendo a hola@vimdy.co; si no lo pides, podremos conservarlos hasta 90 días y luego eliminarlos o anonimizarlos.",
   },
   {
     title: "Disponibilidad",
-    body: "Esforzamos por mantener VIMDY disponible, pero no garantizamos un tiempo de actividad del 100%. Realizaremos mantenimiento programado cuando sea necesario.",
+    body: "Trabajamos para que VIMDY esté disponible, pero no garantizamos un servicio sin interrupciones. Pueden ocurrir fallas o mantenimientos, y VIMDY puede depender de proveedores externos. Te recomendamos conservar tus propios respaldos de los reportes importantes.",
   },
   {
     title: "Propiedad intelectual",
-    body: "VIMDY y su contenido son propiedad de VIMDY. No puedes copiar, modificar o distribuir el software sin autorización.",
+    body: "VIMDY, su software, marca y diseño pertenecen a su titular. Te damos una licencia de uso mientras tengas un plan activo o una prueba vigente; no puedes copiar, modificar, revender ni distribuir el software sin autorización.",
   },
   {
-    title: "Soporte",
-    body: "Ofrecemos soporte por email y WhatsApp durante horarios laborales. El soporte no incluye personalización o desarrollo a medida.",
+    title: "Límite de responsabilidad",
+    body: "VIMDY se ofrece tal como está. No respondemos por pérdidas indirectas, como ventas dejadas de recibir o decisiones de negocio tomadas con base en la información o en VIMDY IA. Salvo dolo o culpa grave, nuestra responsabilidad total por cualquier reclamo se limita a lo que pagaste por VIMDY en los 3 meses anteriores. Esto no limita lo que la ley no permita limitar.",
   },
   {
     title: "Suspensión y terminación",
-    body: "Podemos suspender o terminar tu cuenta si violas estos términos, sin previo aviso.",
+    body: "Si incumples estos términos, te avisaremos por correo y tendrás 5 días hábiles para corregirlo antes de suspender tu cuenta. Podemos suspenderla de inmediato, sin aviso previo, solo en casos de fraude, uso ilegal o riesgo para otros usuarios o para el servicio.",
   },
   {
-    title: "Contacto",
-    body: "Para consultas sobre estos términos, contáctanos en hola@vimdy.co.",
+    title: "Cambios en estos términos",
+    body: "Podemos actualizar estos términos. Si el cambio es importante, te avisaremos por correo o dentro de la app con al menos 15 días de anticipación. Si sigues usando VIMDY después, entendemos que aceptas la nueva versión.",
+  },
+  {
+    title: "Peticiones, quejas y reclamos",
+    body: "Puedes presentar cualquier petición, queja o reclamo escribiendo a hola@vimdy.co o por WhatsApp. Cada solicitud recibe un número de radicado y la respondemos en un máximo de 15 días hábiles. Si no quedas conforme con la respuesta, puedes acudir a la Superintendencia de Industria y Comercio (www.sic.gov.co).",
+  },
+  {
+    title: "Ley aplicable",
+    body: "Estos términos se rigen por las leyes de Colombia. Si tienes un problema, escríbenos primero a hola@vimdy.co para resolverlo de buena fe; si no hay acuerdo, se acudirá a las autoridades colombianas competentes.",
+  },
+  {
+    title: "Soporte y contacto",
+    body: "Ofrecemos soporte por correo (hola@vimdy.co) y WhatsApp en horario laboral. El soporte no incluye personalización ni desarrollo a medida.",
   },
 ] as const;
 
@@ -96,14 +130,9 @@ export function TermsPage() {
               ))}
             </div>
 
-            <div className="mt-8 rounded-[22px] border border-cyan-300/[0.1] bg-cyan-300/[0.025] px-6 py-5 sm:px-7">
-              <p className="text-xs leading-6 text-zinc-500">
-                Estos términos forman parte de la información legal publicada
-                por VIMDY. Antes de realizar cambios comerciales o legales,
-                actualiza el contenido oficial correspondiente para mantener
-                toda la información consistente.
-              </p>
-            </div>
+            <p className="mt-8 text-xs leading-6 text-zinc-500">
+              Última actualización: {LEGAL_INFO.ultimaActualizacion}.
+            </p>
           </div>
         </div>
       </section>

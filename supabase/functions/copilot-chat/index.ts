@@ -49,7 +49,7 @@ interface RequestPayload {
 }
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
-const ANTHROPIC_MODEL = "claude-sonnet-5";
+const ANTHROPIC_MODEL = Deno.env.get("ANTHROPIC_MODEL") ?? "claude-sonnet-5-5";
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {

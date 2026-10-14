@@ -171,10 +171,12 @@ const HANDLERS: QuestionHandler[] = [
     name: "CAJA",
     test: (t) => /cuanto( dinero)? hay en caja|saldo de caja|como esta la caja|cuanta plata hay en caja/.test(t),
     build: (s) =>
-      `Saldo total de caja: ${formatMoney(s.cash.balance, s.currency)}. Generado hoy: ${formatMoney(
-        s.cash.todayBalance,
-        s.currency
-      )}.`
+      s.cash.openShifts === 0
+        ? "No hay ninguna caja abierta en este momento, así que no hay efectivo para contar. Abre un turno en Caja para empezar."
+        : `Efectivo esperado en caja ahora: ${formatMoney(s.cash.balance, s.currency)} (fondo inicial + ventas en efectivo − salidas). Movimiento de caja de hoy: ${formatMoney(
+            s.cash.todayBalance,
+            s.currency
+          )}.`
   },
 
   // ¿Qué pedidos están retrasados?

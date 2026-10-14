@@ -1,9 +1,11 @@
 import type { ElementType } from "react";
 import { Banknote, Coins, RotateCcw } from "lucide-react";
 import { COP_BILL_DENOMINATIONS, COP_COIN_DENOMINATIONS, calculateDenominationTotal, normalizeDenominationCounts } from "../../../core/caja/cashDenominations";
+import { formatMoney } from "../../../core/utils/formatMoney";
+import { companyConfigStore } from "../../../core/store/companyConfigStore";
 
 function formatCOP(amount: number): string {
-  return `$${Math.round(amount).toLocaleString("es-CO")}`;
+  return formatMoney(amount, companyConfigStore.get().currency);
 }
 
 export function CashDenominationCounter(props: {

@@ -158,8 +158,11 @@ export interface CopilotLearnedPattern {
 }
 
 export interface CopilotCashStatus {
+  /** Efectivo que debería haber ahora en las cajas abiertas (fondo inicial + ventas en efectivo − salidas). 0 si no hay caja abierta. */
   readonly balance: number;
   readonly todayBalance: number;
+  /** Cantidad de turnos de caja abiertos ahora mismo. */
+  readonly openShifts?: number;
 }
 
 export interface CopilotTableStatusCounts {

@@ -15,10 +15,12 @@ export function CookiesPage() {
               </p>
               <h2 className="text-xl font-semibold text-white">Cookies que utilizamos</h2>
               <ul className="list-disc pl-5 space-y-2">
-                <li><strong>Esenciales:</strong> necesarias para el funcionamiento de la aplicación (autenticación, sesión).</li>
-                <li><strong>Analíticas:</strong> nos ayudan a entender cómo usas la plataforma (Google Analytics).</li>
-                <li><strong>Funcionales:</strong> recuerdan tus preferencias (idioma, tema).</li>
+                <li><strong>Esenciales:</strong> necesarias para que la aplicación funcione (inicio de sesión y sesión activa).</li>
+                <li><strong>Funcionales:</strong> recuerdan tus preferencias (por ejemplo idioma y país).</li>
               </ul>
+              <p>
+                Hoy VIMDY <strong>no usa cookies de publicidad ni de analítica de terceros</strong>. Si en el futuro las incorporamos, te pediremos tu autorización antes de activarlas y actualizaremos esta política.
+              </p>
               <h2 className="text-xl font-semibold text-white">Cómo gestionar las cookies</h2>
               <p>
                 Puedes configurar tu navegador para rechazar cookies. Ten en cuenta que algunas funciones de VIMDY pueden no funcionar correctamente sin cookies esenciales.
@@ -29,7 +31,7 @@ export function CookiesPage() {
               </p>
               <h2 className="text-xl font-semibold text-white">Contacto</h2>
               <p>
-                 Para consultas sobre cookies, contáctanos en hola@vimdy.co.
+                 Para consultas sobre cookies, contáctanos en hola@vimdy.co. Última actualización: 13 de octubre de 2026.
               </p>
             </div>
           </div>

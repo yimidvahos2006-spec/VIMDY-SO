@@ -398,7 +398,8 @@ function ensureBusinessAnalyzer(): BusinessAnalyzer {
       ensureKardexEngine(),
       ensureForecastEngine(),
       ensurePurchaseIntelligenceEngine(),
-      ensureAuditEngine()
+      ensureAuditEngine(),
+      shiftRepo
     );
   }
   return businessAnalyzer;

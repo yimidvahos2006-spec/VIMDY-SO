@@ -17,9 +17,11 @@ import { CashRegisterManagementCard } from "./CashRegisterManagementCard";
 import { EnterpriseCashControls } from "./EnterpriseCashControls";
 import { CashRegisterTransferCard } from "./CashRegisterTransferCard";
 import { SalesHistoryPanel } from "./SalesHistoryPanel";
+import { formatMoney } from "../../../core/utils/formatMoney";
+import { companyConfigStore } from "../../../core/store/companyConfigStore";
 
 function formatCOP(amount: number): string {
-  return `$${Math.round(amount).toLocaleString("es-CO")}`;
+  return formatMoney(amount, companyConfigStore.get().currency);
 }
 
 type ShiftSummary = {

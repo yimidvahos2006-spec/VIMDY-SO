@@ -34,8 +34,8 @@ export function PricingPage() {
             </h1>
 
             <p className="mx-auto mt-6 max-w-2xl text-base leading-7 text-zinc-400 sm:text-lg">
-              Consulta los planes publicados actualmente y elige la modalidad
-              que mejor se adapte a tu forma de comenzar.
+              Empieza con 14 días gratis, sin tarjeta. Después elige el plan
+              mensual o anual. No hay contratos ni permanencia.
             </p>
 
             <a
@@ -66,9 +66,8 @@ export function PricingPage() {
             aria-hidden="true"
           />
           <p className="text-xs leading-5 text-zinc-600">
-            Verifica que los precios y condiciones comerciales publicados en
-            esta página coincidan con la información oficial vigente de VIMDY
-            antes de utilizarlos en material publicitario.
+            ¿Dudas antes de empezar? Escríbenos a hola@vimdy.co y te ayudamos a
+            elegir el plan que mejor se ajusta a tu negocio.
           </p>
         </div>
       </section>
