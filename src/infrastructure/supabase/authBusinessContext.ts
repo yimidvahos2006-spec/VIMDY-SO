@@ -395,6 +395,9 @@ export function clearPendingRegistration(): void {
   }
 }
 
+/** Versión de Términos y Privacidad vigente (coincide con "Última actualización"). */
+const LEGAL_DOCS_VERSION = "2026-10-13";
+
 /**
  * Paso 1 del registro seguro: crea el usuario en Supabase Auth (sin
  * confirmar todavía) y deja guardados los datos del negocio para el paso 3.
@@ -421,13 +424,21 @@ export async function beginRegistration(input: RegisterBusinessInput): Promise<v
 
   let data: { user: { id?: string; identities?: unknown[]; email_confirmed_at?: string | null } | null } | undefined;
   let error: { message: string; status?: number } | null = null;
+  const acceptedAt = new Date().toISOString();
 
   try {
     const result = await supabase.auth.signUp({
       email: normalizedEmail,
       password,
       options: {
-        data: { full_name: ownerName }
+        data: {
+          full_name: ownerName,
+          // Constancia de aceptación legal: este flujo solo se ejecuta después de
+          // que la persona marcó las dos casillas en /registro.
+          terms_accepted_at: acceptedAt,
+          privacy_accepted_at: acceptedAt,
+          legal_version: LEGAL_DOCS_VERSION
+        }
       }
     });
     data = result.data as typeof data;
