@@ -76,7 +76,6 @@ export function ModuleConnections() {
         <div className="absolute -left-24 top-1/3 h-72 w-72 rounded-full bg-blue-500/[0.018] blur-[110px]" />
         <div className="absolute -right-24 bottom-1/3 h-72 w-72 rounded-full bg-cyan-300/[0.018] blur-[110px]" />
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(56,189,248,0.04),transparent_34%)]" />
-        <div className="absolute inset-0 opacity-[0.12] [background-image:linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px)] [background-size:64px_64px] [mask-image:radial-gradient(circle_at_center,black,transparent_74%)]" />
       </div>
 
       <div className="relative mx-auto max-w-[1440px] px-5 sm:px-8 lg:px-10">

@@ -68,7 +68,6 @@ export function FAQ() {
         <div className="absolute left-1/2 top-0 h-80 w-[44rem] -translate-x-1/2 rounded-full bg-cyan-300/[0.035] blur-[120px]" />
         <div className="absolute bottom-0 right-[8%] h-72 w-72 rounded-full bg-blue-500/[0.02] blur-[110px]" />
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(56,189,248,0.035),transparent_40%)]" />
-        <div className="absolute inset-0 opacity-[0.08] [background-image:linear-gradient(rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.04)_1px,transparent_1px)] [background-size:64px_64px] [mask-image:linear-gradient(to_bottom,transparent,black_18%,black_82%,transparent)]" />
       </div>
 
       <div className="relative mx-auto max-w-[1440px] px-5 sm:px-8 lg:px-10">
