@@ -69,7 +69,6 @@ const sections: readonly PrivacySection[] = [
       "Anthropic: inteligencia artificial de VIMDY IA.",
       "Resend: envío de correos del servicio.",
       "Wompi: procesamiento de pagos en Colombia.",
-      "Meta (WhatsApp): solo si activas reportes por WhatsApp.",
       "Factus: solo si activas facturación electrónica.",
     ],
     after: [

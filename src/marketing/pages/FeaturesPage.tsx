@@ -49,7 +49,7 @@ const features = [
   {
     title: "Reportes",
     description:
-      "Convierte la información operativa en una vista más clara para revisar lo que está sucediendo.",
+      "Revisa ventas, caja y ganancias en una vista clara, y recibe en tu correo el resumen del día al cerrar caja.",
     icon: BarChart3,
   },
 ] as const;
@@ -68,7 +68,6 @@ export function FeaturesPage() {
           >
             <div className="absolute left-1/2 top-0 h-[30rem] w-[44rem] -translate-x-1/2 rounded-full bg-cyan-300/[0.045] blur-[130px]" />
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(56,189,248,0.055),transparent_45%)]" />
-            <div className="absolute inset-0 opacity-[0.09] [background-image:linear-gradient(rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.04)_1px,transparent_1px)] [background-size:72px_72px] [mask-image:linear-gradient(to_bottom,black,transparent_86%)]" />
           </div>
 
           <div className="relative mx-auto max-w-[1440px]">

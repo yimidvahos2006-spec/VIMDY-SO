@@ -56,7 +56,6 @@ export function BusinessTypes() {
       <div aria-hidden="true" className="pointer-events-none absolute inset-0">
         <div className="absolute left-[15%] top-[20%] h-72 w-72 rounded-full bg-cyan-400/[0.035] blur-[100px]" />
         <div className="absolute bottom-[10%] right-[10%] h-80 w-80 rounded-full bg-blue-500/[0.025] blur-[110px]" />
-        <div className="absolute inset-0 opacity-[0.1] [background-image:linear-gradient(rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.04)_1px,transparent_1px)] [background-size:64px_64px] [mask-image:linear-gradient(to_bottom,transparent,black_20%,black_80%,transparent)]" />
       </div>
 
       <div className="relative mx-auto max-w-[1440px] px-5 sm:px-8 lg:px-10">

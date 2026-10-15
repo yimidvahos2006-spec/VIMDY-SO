@@ -36,7 +36,6 @@ export function ContactPage() {
           >
             <div className="absolute left-1/2 top-0 h-[34rem] w-[42rem] -translate-x-1/2 rounded-full bg-cyan-300/[0.05] blur-[130px]" />
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_8%,rgba(56,189,248,0.055),transparent_42%)]" />
-            <div className="absolute inset-0 opacity-[0.09] [background-image:linear-gradient(rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.04)_1px,transparent_1px)] [background-size:72px_72px] [mask-image:radial-gradient(circle_at_center,black,transparent_74%)]" />
           </div>
 
           <div className="relative mx-auto max-w-[1440px] px-5 sm:px-8 lg:px-10">

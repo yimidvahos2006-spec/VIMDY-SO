@@ -51,6 +51,7 @@ export function RegisterPage() {
   const [localError, setLocalError] = useState<string | null>(null);
   const [step, setStep] = useState<Step>(0);
   const [acceptTerms, setAcceptTerms] = useState(false);
+  const [acceptPrivacy, setAcceptPrivacy] = useState(false);
 
   const selectedCountry = AVAILABLE_COUNTRIES.find((c) => c.code === country);
   const currency = selectedCountry ? getCountryName(selectedCountry.currency, language) : "";
@@ -78,7 +79,11 @@ export function RegisterPage() {
       return false;
     }
     if (!acceptTerms) {
-      setLocalError("Debes aceptar los Términos y la Política de Privacidad.");
+      setLocalError("Debes aceptar los Términos y Condiciones.");
+      return false;
+    }
+    if (!acceptPrivacy) {
+      setLocalError("Debes autorizar el tratamiento de tus datos según la Política de Privacidad.");
       return false;
     }
     setLocalError(null);
@@ -276,9 +281,22 @@ export function RegisterPage() {
                           className="mt-0.5 rounded border-slate-600 bg-slate-950 text-cyan-500 focus:ring-cyan-500/50"
                         />
                         <label htmlFor="acceptTerms" className="text-xs sm:text-sm text-slate-300">
-                          Al crear tu cuenta aceptas nuestros{" "}
-                          <Link to="/terminos" className="text-cyan-400 hover:text-cyan-300">Términos y Condiciones</Link>
-                          {" "}y autorizas el tratamiento de tus datos personales según nuestra{" "}
+                          Acepto los{" "}
+                          <Link to="/terminos" className="text-cyan-400 hover:text-cyan-300">Términos y Condiciones</Link>.
+                        </label>
+                      </div>
+
+                      <div className="flex items-start gap-2.5 sm:gap-3">
+                        <input
+                          id="acceptPrivacy"
+                          type="checkbox"
+                          checked={acceptPrivacy}
+                          onChange={(e) => setAcceptPrivacy(e.target.checked)}
+                          disabled={!isReady || isLoading}
+                          className="mt-0.5 rounded border-slate-600 bg-slate-950 text-cyan-500 focus:ring-cyan-500/50"
+                        />
+                        <label htmlFor="acceptPrivacy" className="text-xs sm:text-sm text-slate-300">
+                          Autorizo el tratamiento de mis datos personales según la{" "}
                           <Link to="/privacidad" className="text-cyan-400 hover:text-cyan-300">Política de Privacidad</Link>.
                         </label>
                       </div>
