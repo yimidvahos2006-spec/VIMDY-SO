@@ -188,6 +188,108 @@ export class KitchenEngine {
   }
 
   /**
+   * Re-apunta las comandas YA enviadas de una cuenta a otra mesa (al unir o
+   * transferir). Sin esto, la mesa destino no sabe qué se mandó ya a cocina y
+   * lo vuelve a enviar todo. Cocina además pasa a mostrar el nombre nuevo.
+   *
+   * Solo se mueven las comandas de la cuenta activa de `from` (mismo pedido o
+   * misma sesión). Las canceladas se quedan como historial de la mesa vieja.
+   * Devuelve una función para deshacer el movimiento si un paso posterior falla.
+   */
+  public async moveTableOrders(input: {
+    from: { id: string; orderId?: string; openOperationId?: string; openedAt?: Date | string };
+    to: { id: string; name: string; orderId?: string; openOperationId?: string };
+  }): Promise<{ moved: number; undo: () => Promise<void> }> {
+    const { from, to } = input;
+    const fromSession = from.openOperationId ?? from.orderId ?? from.id;
+    const toSession = to.openOperationId ?? to.orderId ?? to.id;
+    const openedAt = from.openedAt ? new Date(from.openedAt).getTime() : null;
+
+    const candidates = (await this.getByTableId(from.id)).filter((order) => {
+      if (order.status === 'CANCELADO') return false;
+      const extended = order as KitchenOrder & { tableSessionId?: string };
+      if (from.orderId && order.orderId) return order.orderId === from.orderId;
+      if (extended.tableSessionId) return extended.tableSessionId === fromSession;
+      if (openedAt !== null) return new Date(order.createdAt).getTime() >= openedAt;
+      return false;
+    });
+
+    const originals: KitchenOrder[] = [];
+    try {
+      for (const order of candidates) {
+        const updated = {
+          ...order,
+          tableId: to.id,
+          orderId: to.orderId ?? order.orderId,
+          origin: to.name,
+          tableSessionId: toSession
+        } as KitchenOrder;
+        await this.repository.update(updated);
+        originals.push(order);
+        this.emit('kitchen.status_updated', updated);
+      }
+    } catch (error) {
+      await this.restoreMoved(originals);
+      throw error;
+    }
+
+    return {
+      moved: originals.length,
+      undo: () => this.restoreMoved(originals)
+    };
+  }
+
+  private async restoreMoved(originals: KitchenOrder[]): Promise<void> {
+    for (const original of originals) {
+      try {
+        const current = await this.repository.findById(original.id);
+        await this.repository.update({ ...original, version: current?.version ?? original.version } as KitchenOrder);
+        this.emit('kitchen.status_updated', original);
+      } catch {
+        // Mejor esfuerzo: el llamador ya está manejando un fallo mayor.
+      }
+    }
+  }
+
+  /**
+   * Cancela las comandas de cocina de una cuenta que todavía no se entregó.
+   * Se usa al cancelar el pedido de una mesa para que cocina deje de preparar.
+   */
+  public async cancelOpenOrdersForTable(
+    tableId: string,
+    reason: string,
+    actorId: string,
+    scope: { orderId?: string; openedAt?: Date | string } = {}
+  ): Promise<number> {
+    const openedAt = scope.openedAt ? new Date(scope.openedAt).getTime() : null;
+    const orders = (await this.getByTableId(tableId)).filter((order) => {
+      if (order.status === 'ENTREGADO' || order.status === 'CANCELADO') return false;
+      if (scope.orderId && order.orderId) return order.orderId === scope.orderId;
+      if (openedAt !== null) return new Date(order.createdAt).getTime() >= openedAt;
+      return true;
+    });
+
+    for (const order of orders) {
+      await this.cancelOrder(order.id, reason, actorId);
+    }
+    return orders.length;
+  }
+
+  /** ¿Ya salió comida entregada de esta cuenta? Se usa para proteger la cancelación. */
+  public async hasDeliveredOrders(
+    tableId: string,
+    scope: { orderId?: string; openedAt?: Date | string } = {}
+  ): Promise<boolean> {
+    const openedAt = scope.openedAt ? new Date(scope.openedAt).getTime() : null;
+    return (await this.getByTableId(tableId)).some((order) => {
+      if (order.status !== 'ENTREGADO') return false;
+      if (scope.orderId && order.orderId) return order.orderId === scope.orderId;
+      if (openedAt !== null) return new Date(order.createdAt).getTime() >= openedAt;
+      return true;
+    });
+  }
+
+  /**
    * Notifica al bus global de VIMDY. Cualquier componente puede
    * suscribirse con `useVimdyEvent("kitchen", handler)` para reaccionar
    * de inmediato cuando Caja, Meseros o Pedidos envían o actualizan una

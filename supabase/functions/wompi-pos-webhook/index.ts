@@ -249,7 +249,8 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const finalizeResult = (finalizeData as any)?.[0];
+    // finalize_wompi_sale_payment_atomic devuelve un jsonb (objeto), no un arreglo.
+    const finalizeResult = Array.isArray(finalizeData) ? (finalizeData as any)[0] : (finalizeData as any);
     if (!finalizeResult?.success) {
       return json(
         { error: "FINALIZE_FAILED", detail: finalizeResult?.message ?? "Error desconocido" },

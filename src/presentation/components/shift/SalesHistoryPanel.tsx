@@ -61,7 +61,7 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
  * motor:
  *   - "Reembolsar todo" -> SalesEngine.refundSale() (venta completa,
  *     como siempre).
- *   - "Reembolso parcial" -> SalesEngine.partialRefundSale() (elegís
+ *   - "Reembolso parcial" -> SalesEngine.partialRefundSale() (eliges
  *     cantidad por producto; prorratea impuesto/descuento y solo repone
  *     al inventario lo que efectivamente se devuelve). Se puede repetir
  *     varias veces sobre la misma venta mientras queden unidades sin
@@ -191,7 +191,7 @@ export function SalesHistoryPanel() {
       .map(([productId, quantity]) => ({ productId, quantity }));
 
     if (items.length === 0) {
-      toast.error("Elegí al menos un producto y una cantidad para devolver.");
+      toast.error("Elige al menos un producto y una cantidad para devolver.");
       return;
     }
 
@@ -478,7 +478,7 @@ export function SalesHistoryPanel() {
               Reembolso parcial — {partialTarget.code ?? partialTarget.id}
             </h2>
             <p className="text-slate-400 text-sm mb-4">
-              Elegí cuántas unidades de cada producto se devuelven. El monto
+              Elige cuántas unidades de cada producto se devuelven. El monto
               se calcula proporcional a esas unidades (impuesto y descuento
               incluidos) y se repone solo esa cantidad al inventario.
             </p>

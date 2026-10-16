@@ -163,6 +163,8 @@ export interface PaymentOptions {
   /** Turno/caja física de origen. El servidor vuelve a validar ambos. */
   readonly shiftId?: string;
   readonly cashRegisterId?: string;
+  /** Nombre de quien cobra; se imprime en el campo "Cajero" del recibo. */
+  readonly cashierName?: string;
 }
 
 export interface ProductSalesRanking {
@@ -1284,7 +1286,7 @@ export class SalesEngine {
     const cleanItems = itemsToRefund.filter(line => line.quantity > 0);
 
     if (cleanItems.length === 0) {
-      throw new Error("REFUND_EMPTY: seleccioná al menos un producto para devolver.");
+      throw new Error("REFUND_EMPTY: selecciona al menos un producto para devolver.");
     }
 
     const refundable = this.getRefundableQuantities(sale);
@@ -1652,7 +1654,7 @@ export class SalesEngine {
       await this.generateReceipt(
         sale,
         sale.customerId ?? "Cliente General",
-        sale.cashierId ?? "Administrador",
+        options.cashierName?.trim() || "—",
         method,
         options.received ?? sale.total,
         sale.discount ?? 0

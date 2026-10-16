@@ -215,7 +215,7 @@ export function InsumosPanel() {
                   description={
                     search.trim() || statusFilter !== "todos" || categoryFilter !== "todos"
                       ? "No se encontraron insumos con ese filtro."
-                      : "Agregá tu primer insumo para comenzar a gestionar tu inventario."
+                      : "Agrega tu primer insumo para comenzar a gestionar tu inventario."
                   }
                   action={
                     !search.trim() && statusFilter === "todos" && categoryFilter === "todos"
@@ -345,13 +345,18 @@ export function InsumosPanel() {
             setEditingInsumo(null);
           }}
           onSave={async (input) => {
-            if (editingInsumo) {
-              await updateProduct(editingInsumo.id, input);
-              toast.success("Insumo actualizado.");
-            } else {
-              await createProduct(input);
-              toast.success("Insumo creado.");
+            // createProduct/updateProduct NO lanzan error: devuelven false si
+            // algo falla (nombre repetido, etc.). Antes se ignoraba ese valor y
+            // se mostraba "Insumo creado" aunque no se hubiera guardado nada.
+            const saved = editingInsumo
+              ? await updateProduct(editingInsumo.id, input)
+              : await createProduct(input);
+            if (!saved) {
+              throw new Error(
+                "No se pudo guardar el insumo. Revisa que el nombre, el SKU o el código de barras no estén repetidos."
+              );
             }
+            toast.success(editingInsumo ? "Insumo actualizado." : "Insumo creado.");
             setShowNewInsumo(false);
             setEditingInsumo(null);
             return true;

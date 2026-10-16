@@ -129,7 +129,7 @@ export function OpenTableDialog({ table, waiterId, onClose, onOpened }: Props) {
 
           {mode === "reserve" && (
             <div className="rounded-xl border border-slate-700 bg-slate-800 p-4 text-sm text-slate-300">
-              Se reservará <strong className="text-white">{table.name}</strong> para el turno actual. Podés abrirla desde la pantalla Mesas cuando llegue el cliente.
+              Se reservará <strong className="text-white">{table.name}</strong> para el turno actual. Puedes abrirla desde la pantalla Mesas cuando llegue el cliente.
             </div>
           )}
 

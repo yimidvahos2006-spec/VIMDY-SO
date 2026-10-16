@@ -9,19 +9,19 @@
 
 const es = {
   "settings.title": "Configuración",
-  "settings.subtitle": "Datos del negocio, impuestos, operación y usuarios.",
+  "settings.subtitle": "Aquí configuras tu negocio. Elige una sección y toca Guardar al terminar.",
 
   "settings.business.title": "Datos del negocio",
-  "settings.business.description": "Aparecen en el recibo impreso y en reportes.",
+  "settings.business.description": "Nombre, NIT y contacto. Salen en el ticket y en los reportes.",
 
-  "settings.globalization.title": "Globalización",
-  "settings.globalization.description": "País, idioma, moneda y zona horaria del negocio.",
+  "settings.globalization.title": "País, idioma y hora",
+  "settings.globalization.description": "Para que las fechas, la hora y el dinero se vean como en tu país.",
 
   "settings.taxCurrency.title": "Impuestos y moneda",
-  "settings.taxCurrency.description": "Se aplican de inmediato en la próxima venta de Caja.",
+  "settings.taxCurrency.description": "IVA, propina o servicio y meta diaria. Se usan desde la próxima venta.",
 
   "settings.operation.title": "Operación",
-  "settings.operation.description": "Enciende o apaga módulos y comportamientos del sistema.",
+  "settings.operation.description": "Enciende solo lo que usas: mesas, cocina, domicilios. Lo demás se oculta.",
 
   "settings.field.country": "País",
   "settings.field.currency": "Moneda",
@@ -34,7 +34,7 @@ const es = {
   "settings.save.taxes": "Guardar impuestos",
   "settings.save.business": "Guardar datos del negocio",
   "settings.save.operation": "Guardar operación",
-  "settings.save.globalization": "Guardar globalización",
+  "settings.save.globalization": "Guardar",
   "settings.saved": "Guardado",
 
   "country.title": "Elige tu país",
@@ -433,7 +433,7 @@ const es = {
   "waiter.detail.splitBillDescription": "La cuenta se divide en partes iguales entre la cantidad de personas.",
   "waiter.detail.splitButton": "Dividir",
   "waiter.detail.mergeTitle": "Unir mesa",
-  "waiter.detail.mergeDescription": "Selecciona la mesa que querés unir a esta.",
+  "waiter.detail.mergeDescription": "Selecciona la mesa que quieres unir a esta.",
   "waiter.detail.noFreeTables": "No hay mesas libres disponibles.",
   "waiter.detail.mergeButton": "Unir",
   "waiter.detail.transferTitle": "Transferir mesa",
@@ -447,7 +447,7 @@ const es = {
   "waiter.open.titleReserve": "Reservar {name}",
   "waiter.open.peopleLabel": "Personas",
   "waiter.open.exceedsCapacity": "Supera capacidad ({capacity})",
-  "waiter.open.reserveNotice": "Se reservará <strong>{name}</strong> para el turno actual. Podés abrirla desde la pantalla Mesas cuando llegue el cliente.",
+  "waiter.open.reserveNotice": "Se reservará <strong>{name}</strong> para el turno actual. Puedes abrirla desde la pantalla Mesas cuando llegue el cliente.",
   "waiter.open.openingLabel": "Abriendo...",
   "waiter.open.reservingLabel": "Reservando...",
   "waiter.open.openButton": "Abrir mesa",

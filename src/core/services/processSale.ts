@@ -439,7 +439,8 @@ export async function chargeSale(
               : sale.total,
           reference:
             payment.reference || undefined,
-          mixed
+          mixed,
+          cashierName: params.cashierName
         }
       );
 

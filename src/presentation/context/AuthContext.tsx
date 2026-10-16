@@ -13,6 +13,7 @@ import type { Session } from "@supabase/supabase-js";
 import {
   supabase,
   setCurrentBusinessId,
+  getCurrentBusinessId,
   setCurrentBranchId
 } from "../../infrastructure/supabase/supabaseClient";
 import { startRealtimeSync, stopRealtimeSync } from "../../infrastructure/supabase/realtimeSync";
@@ -77,6 +78,7 @@ import { subscriptionStore } from "../../core/store/subscriptionStore";
 import { businessOperatingProfileStore } from "../../core/store/businessOperatingProfileStore";
 import { operationConfigStore } from "../../core/store/operationConfigStore";
 import { userSessionStore } from "../../core/store/userSessionStore";
+import { fetchBusinessSettings } from "../../infrastructure/supabase/businessSettings";
 import { hydrateBusinessOperatingProfile } from "../../core/bootstrap/businessOperatingProfileBootstrap";
 import {
   CountryCode,
@@ -194,6 +196,20 @@ function hydrateBusinessConfig(session: BusinessSession): void {
   enabledModulesStore.set(session.enabledModules as ModuleId[]);
 }
 
+/**
+ * Carga lo que el dueño guardó en Ajustes (NIT, WhatsApp de pedidos, meta
+ * diaria, impresión automática...). Si falla no bloquea el acceso: la app
+ * queda con los valores por defecto.
+ */
+async function hydrateBusinessExtraSettings(businessId: string): Promise<void> {
+  const saved = await fetchBusinessSettings(businessId);
+  if (!saved) return;
+  // Si mientras tanto se cerró sesión o se cambió de negocio, no pisar nada.
+  if (getCurrentBusinessId() !== businessId) return;
+  businessStore.update(saved.business);
+  companyConfigStore.update(saved.config);
+}
+
 async function hydrateSubscription(businessId: string): Promise<void> {
   try {
     const subscription = await fetchSubscription(businessId);
@@ -289,6 +305,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         void hydrateBusinessOperatingProfile(businessSession.businessId);
         hydrateBusinessConfig(businessSession);
+        void hydrateBusinessExtraSettings(businessSession.businessId);
         void hydrateSubscription(businessSession.businessId);
         void ensureIdentity(
           container.permissionEngine.get(),

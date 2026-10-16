@@ -40,6 +40,7 @@ const TABLE_EVENT_MAP: Record<string, EventType> = {
   receipts: "receipt",
   cash_movements: "payment",
   tables: "table",
+  waiters: "waiter",
   orders: "order",
   shifts: "shift",
   roles: "access",
@@ -78,10 +79,39 @@ function emitDebounced(event: EventType) {
 export function startRealtimeSync(businessId: string): void {
   if (channel && activeBusinessId === businessId) return;
 
+  try {
+    openRealtimeChannel(businessId);
+  } catch (error) {
+    // La sincronización en vivo es un extra: si falla, la app debe seguir
+    // abriendo (antes un error aquí dejaba la pantalla "No pudimos cargar
+    // tu negocio" y Reintentar fallaba igual, en bucle).
+    console.error("[realtimeSync] No se pudo abrir el canal en vivo", error);
+    channel = null;
+    scheduleReconnect(businessId);
+  }
+}
+
+let channelSeq = 0;
+
+function scheduleReconnect(businessId: string) {
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(() => {
+    if (activeBusinessId === businessId) {
+      startRealtimeSync(businessId);
+    }
+  }, 3000);
+}
+
+function openRealtimeChannel(businessId: string): void {
   stopRealtimeSync();
   activeBusinessId = businessId;
 
-  let builder = supabase.channel(`business-sync-${businessId}`);
+  // Nombre único por intento: supabase-js devuelve el MISMO canal si el nombre
+  // se repite y el anterior aún se está cerrando; y a un canal ya suscrito no
+  // se le pueden agregar listeners ("cannot add postgres_changes callbacks
+  // after subscribe()"). Con un nombre nuevo siempre se arma un canal limpio.
+  channelSeq += 1;
+  let builder = supabase.channel(`business-sync-${businessId}-${Date.now()}-${channelSeq}`);
 
   for (const table of Object.keys(TABLE_EVENT_MAP)) {
     const filter =
@@ -106,13 +136,11 @@ export function startRealtimeSync(businessId: string): void {
     // móviles, etc), reintentamos solos en 3s en vez de dejar el dispositivo
     // sordo hasta que el usuario recargue manualmente.
     if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      reconnectTimer = setTimeout(() => {
-        if (activeBusinessId === businessId) {
-          channel = null;
-          startRealtimeSync(businessId);
-        }
-      }, 3000);
+      // Ignora avisos de un canal viejo que ya reemplazamos o cerramos a propósito.
+      if (channel !== builder || activeBusinessId !== businessId) return;
+      channel = null;
+      void supabase.removeChannel(builder);
+      scheduleReconnect(businessId);
     }
   });
 

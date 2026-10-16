@@ -11,6 +11,8 @@ import { InfoBox } from "./InventoryWidgets";
 
 export function ProductDetailModal({
   product,
+  categoryName,
+  saveError,
   allProducts,
   onClose,
   getHistory,
@@ -22,6 +24,10 @@ export function ProductDetailModal({
   onDelete
 }: {
   product: Product;
+  /** Nombre visible de la categoría (product.categoryId es un id interno). */
+  categoryName?: string;
+  /** Último error del inventario: se muestra aquí porque este modal tapa el banner de la página. */
+  saveError?: string | null;
   allProducts: Product[];
   onClose: () => void;
   getHistory: (id: string) => Promise<InventoryMovement[]>;
@@ -40,6 +46,13 @@ export function ProductDetailModal({
   const [lossCategory, setLossCategory] = useState<LossCategory | "">("");
   const [newStock, setNewStock] = useState("");
   const [saving, setSaving] = useState(false);
+  const [opFailed, setOpFailed] = useState(false);
+
+  // getHistory llega como función nueva en cada render del padre; si fuera
+  // dependencia del efecto, el Kardex se volvería a pedir (y parpadearía en
+  // "Cargando historial...") cada vez que Inventario se recarga.
+  const getHistoryRef = React.useRef(getHistory);
+  getHistoryRef.current = getHistory;
 
   // PASO 2 (Motor de Producción): costo real, rentabilidad y capacidad de
   // producción, calculados por la misma fuente de verdad que usa el resto
@@ -62,14 +75,27 @@ export function ProductDetailModal({
   );
 
   React.useEffect(() => {
+    let cancelled = false;
     setLoadingHistory(true);
-    getHistory(product.id)
-      .then(setHistory)
-      .finally(() => setLoadingHistory(false));
-  }, [product.id, getHistory]);
+    getHistoryRef
+      .current(product.id)
+      .then((h) => {
+        if (!cancelled) setHistory(h);
+      })
+      .catch(() => {
+        if (!cancelled) setHistory([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingHistory(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [product.id]);
 
   async function handleConfirm() {
     setSaving(true);
+    setOpFailed(false);
 
     try {
       let ok = false;
@@ -115,6 +141,10 @@ export function ProductDetailModal({
         }
       }
 
+      if (!ok) {
+        setOpFailed(true);
+      }
+
       if (ok) {
         setMode(null);
         setQuantity("");
@@ -141,7 +171,7 @@ export function ProductDetailModal({
         <div className="flex items-start justify-between mb-4">
           <div>
             <h2 className="text-xl font-bold text-vimdy-text">{product.name}</h2>
-            <p className="text-vimdy-text-secondary text-sm">{product.categoryId}</p>
+            <p className="text-vimdy-text-secondary text-sm">{categoryName ?? product.categoryId}</p>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -355,6 +385,11 @@ export function ProductDetailModal({
               </select>
             )}
 
+            {opFailed && (
+              <p className="text-vimdy-danger text-sm">
+                {saveError ?? "No se pudo registrar el movimiento. Intenta de nuevo."}
+              </p>
+            )}
             <input
               value={reason}
               onChange={(e) => setReason(e.target.value)}
@@ -381,6 +416,7 @@ export function ProductDetailModal({
                 disabled={saving}
                 onClick={() => {
                   setMode(null);
+                  setOpFailed(false);
                   setLossCategory("");
                   setQuantity("");
                   setNewStock("");
