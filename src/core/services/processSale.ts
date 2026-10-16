@@ -42,6 +42,9 @@ const PAYMENT_METHOD_LABEL: Record<string, string> = {
 const OFFLINE_ORDER_MESSAGE =
   "Sin conexión: el pedido quedó guardado en este dispositivo y se sincronizará solo cuando vuelva internet.";
 
+const PENDING_PAYMENT_MESSAGE =
+  "El pago NO quedó confirmado: la venta no se cobró y no entró dinero a la caja. La comanda ya pudo enviarse a Cocina. No entregues el pedido como pagado; confirma el pago o cobra en efectivo.";
+
 const OFFLINE_CHARGE_MESSAGE =
   "Sin conexión: el cobro quedó guardado en este dispositivo y se sincronizará solo cuando vuelva internet.";
 
@@ -228,7 +231,7 @@ async function chargeSaleOffline(
   method: PaymentMethod,
   mixed: MixedPayment | undefined,
   itemNames: Map<string, string>
-): Promise<{ success: boolean; invoiceError?: string }> {
+): Promise<{ success: boolean; invoiceError?: string; pendingPayment?: boolean }> {
   const payment = paymentStore.get();
 
   if (method === "CASH") {
@@ -330,7 +333,7 @@ export async function chargeSale(
   sale: Sale,
   params: ProcessSaleParams,
   precomputedItemNames?: Map<string, string>
-): Promise<{ success: boolean; invoiceError?: string }> {
+): Promise<{ success: boolean; invoiceError?: string; pendingPayment?: boolean }> {
   /*
    * Los nombres de producto no forman parte necesariamente de SaleItem.
    *
@@ -443,6 +446,21 @@ export async function chargeSale(
           cashierName: params.cashierName
         }
       );
+
+    /*
+     * Tarjeta, transferencia, QR y pago mixto quedan "pendientes de
+     * verificación" si nadie confirmó el dinero. En ese caso la venta NO
+     * está pagada: no se imprime recibo, no se vacía el carrito y no se
+     * muestra "Venta exitosa".
+     */
+    if (!paymentResult.success) {
+      toast.warning(PENDING_PAYMENT_MESSAGE, 12000);
+
+      return {
+        success: false,
+        pendingPayment: true
+      };
+    }
 
     const receipt =
       await container.salesEngine
@@ -575,6 +593,7 @@ export async function processSale(
 ): Promise<{
   success: boolean;
   invoiceError?: string;
+  pendingPayment?: boolean;
 }> {
   /*
    * Se capturan antes de sendOrderToKitchen() porque el camino offline

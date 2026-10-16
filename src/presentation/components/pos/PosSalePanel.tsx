@@ -150,7 +150,9 @@ export function PosSalePanel() {
         if (result.invoiceError) {
           toast.warning(result.invoiceError);
         }
-      } else {
+      } else if (!result.pendingPayment) {
+        // Si el pago quedó pendiente, processSale ya mostró su propio aviso
+        // y el carrito se conserva para poder cobrar de nuevo.
         toast.error(t("pos.sale.genericError"));
       }
     } catch (error) {
