@@ -233,9 +233,12 @@ export function useReports() {
       s.paymentMethod ?? "",
       s.status ?? ""
     ]);
-    const csv = [header, ...rows]
-      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
-      .join("\n");
+    // Excel en español necesita "sep=;", separador ";" y BOM para abrir bien las columnas y las tildes.
+    const csv =
+      "sep=;\r\n" +
+      [header, ...rows]
+        .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(";"))
+        .join("\r\n");
     const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -253,6 +256,10 @@ export function useReports() {
     range,
     setRange,
     sales: filteredSales,
+    // Para "Reportes por mes": TODAS las ventas (sin filtrar por rango), los productos y la zona horaria del negocio.
+    allSales: sales,
+    products,
+    tz,
     summary,
     topProducts,
     topCustomers,

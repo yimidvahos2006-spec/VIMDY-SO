@@ -4,30 +4,11 @@ import { X, ShieldCheck, Check } from "lucide-react";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { Permission } from "../../../core/entities/Entities";
 import { VimdyButton } from "../ui/VimdyButton";
-
-const MODULE_LABELS: Record<string, string> = {
-  sales: "Ventas",
-  inventory: "Inventario",
-  kitchen: "Cocina",
-  reports: "Reportes",
-  config: "Configuración",
-  users: "Usuarios",
-  customers: "Clientes",
-  tables: "Mesas",
-  cash: "Caja"
-};
-
-const MODULE_ORDER = [
-  "sales",
-  "inventory",
-  "kitchen",
-  "tables",
-  "cash",
-  "customers",
-  "reports",
-  "users",
-  "config"
-];
+import {
+  PERMISSION_MODULE_LABELS as MODULE_LABELS,
+  PERMISSION_MODULE_ORDER as MODULE_ORDER,
+  permissionLabel
+} from "../../../core/services/roleLabels";
 
 interface PermissionEditorProps {
   roleId: string;
@@ -43,6 +24,7 @@ export function PermissionEditor({ roleId, roleName, onClose, onSaved }: Permiss
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [locked, setLocked] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -53,9 +35,14 @@ export function PermissionEditor({ roleId, roleName, onClose, onSaved }: Permiss
         setPermissions(all);
 
         const role = await container.roleEngine.get().getRole(roleId);
+        if (role.permissions.includes("*")) {
+          setError("Este rol puede hacerlo todo y no se puede cambiar, para que nunca te quedes sin acceso.");
+          setLocked(true);
+          return;
+        }
         setSelected(new Set(role.permissions.filter((p) => p !== "*")));
       } catch (err) {
-        setError(err instanceof Error ? err.message : "No se pudieron cargar los permisos.");
+        setError(err instanceof Error ? err.message : "No se pudo cargar la lista. Intenta de nuevo.");
       } finally {
         setLoading(false);
       }
@@ -77,6 +64,7 @@ export function PermissionEditor({ roleId, roleName, onClose, onSaved }: Permiss
   }
 
   async function handleSave() {
+    if (locked) return;
     setSaving(true);
     setError(null);
     try {
@@ -85,7 +73,7 @@ export function PermissionEditor({ roleId, roleName, onClose, onSaved }: Permiss
       setTimeout(() => setSaved(false), 2000);
       onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudieron guardar los permisos.");
+      setError(err instanceof Error ? err.message : "No se pudieron guardar los cambios. Intenta de nuevo.");
     } finally {
       setSaving(false);
     }
@@ -116,7 +104,7 @@ export function PermissionEditor({ roleId, roleName, onClose, onSaved }: Permiss
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-white font-bold flex items-center gap-2">
             <ShieldCheck size={18} className="text-cyan-400" />
-            Permisos de &ldquo;{roleName}&rdquo;
+            Qué puede hacer &ldquo;{roleName}&rdquo;
           </h3>
           <button onClick={onClose} aria-label="Cerrar" className="text-slate-400 hover:text-white">
             <X size={18} />
@@ -130,9 +118,12 @@ export function PermissionEditor({ roleId, roleName, onClose, onSaved }: Permiss
         )}
 
         {loading ? (
-          <p className="text-slate-500 text-sm text-center py-8">Cargando permisos...</p>
-        ) : (
+          <p className="text-slate-500 text-sm text-center py-8">Cargando...</p>
+        ) : locked ? null : (
           <div className="space-y-4">
+            <p className="text-slate-400 text-xs">
+              Marca lo que esta persona SÍ puede hacer. Lo que dejes sin marcar, no lo podrá usar.
+            </p>
             {Object.entries(grouped).map(([module, perms]) => (
               <div key={module} className="space-y-2">
                 <h4 className="text-white text-sm font-semibold">
@@ -165,7 +156,7 @@ export function PermissionEditor({ roleId, roleName, onClose, onSaved }: Permiss
                         >
                           {checked && <Check size={12} className="text-vimdy-background" />}
                         </span>
-                        <span className="text-xs text-slate-300">{perm.description}</span>
+                        <span className="text-xs text-slate-300">{permissionLabel(perm.id, perm.description)}</span>
                       </label>
                     );
                   })}
@@ -176,14 +167,14 @@ export function PermissionEditor({ roleId, roleName, onClose, onSaved }: Permiss
         )}
 
         <div className="flex items-center justify-between mt-5">
-          <SavedToast show={saved} label="Permisos guardados" />
+          <SavedToast show={saved} label="Cambios guardados" />
           <div className="flex gap-2 ml-auto">
             <VimdyButton onClick={onClose} variant="secondary" size="sm">
               Cancelar
             </VimdyButton>
             <VimdyButton
               onClick={handleSave}
-              disabled={saving || loading}
+              disabled={saving || loading || locked}
               loading={saving}
               variant="primary"
               size="sm"

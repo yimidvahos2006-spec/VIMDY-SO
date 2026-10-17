@@ -19,6 +19,7 @@ import {
   monthReportToCsv,
   weekReportFileName,
   weekReportToCsv,
+  type MonthListItem,
   type MonthReport
 } from "./monthlyReports";
 
@@ -98,4 +99,20 @@ export function buildMonthDownload(
   currency: string
 ): CsvDownload {
   return monthDownloadFromReport(buildMonthReport(sales, products, tz, monthKey), businessName, currency);
+}
+
+/** Años que tienen meses para mostrar, del más reciente al más antiguo. */
+export function reportYears(months: readonly MonthListItem[]): number[] {
+  return [...new Set(months.map((m) => m.year))].sort((a, b) => b - a);
+}
+
+/** Meses de un año, del más reciente al más antiguo (la lista completa ya viene ordenada). */
+export function monthsOfYear(months: readonly MonthListItem[], year: number | null): MonthListItem[] {
+  return year === null ? [] : months.filter((m) => m.year === year);
+}
+
+/** Año a mostrar: el elegido si existe; si no, el más reciente. null si no hay meses. */
+export function pickYear(years: readonly number[], selected: number | null): number | null {
+  if (selected !== null && years.includes(selected)) return selected;
+  return years.length > 0 ? years[0] : null;
 }

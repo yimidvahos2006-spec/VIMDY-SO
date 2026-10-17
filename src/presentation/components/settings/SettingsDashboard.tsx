@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { roleHelp, roleSummary, userStatusLabel } from "../../../core/services/roleLabels";
 import {
   Building2,
   Percent,
@@ -759,8 +760,11 @@ export function SettingsDashboard() {
           <SectionCard
             icon={<Users size={18} className="text-green-400" />}
             title="Usuarios y roles"
-            description={`${users.length} usuario${users.length === 1 ? "" : "s"} registrado${users.length === 1 ? "" : "s"}.`}
+            description={`Aquí decides quién puede entrar a tu negocio y qué puede hacer. Ahora hay ${users.length} persona${users.length === 1 ? "" : "s"} con acceso.`}
           >
+            <p className="text-slate-400 text-xs mb-3">
+              Cada persona tiene un rol. El rol dice qué puede ver y hacer en VIMDY. Tú, como dueño, siempre puedes todo.
+            </p>
             {can("users.create") && (
               <VimdyButton
                 onClick={() => setCreatingUser(true)}
@@ -769,7 +773,7 @@ export function SettingsDashboard() {
                 fullWidth
                 className="mb-3 border-dashed"
               >
-                Nuevo usuario
+                Agregar persona
               </VimdyButton>
             )}
 
@@ -795,12 +799,12 @@ export function SettingsDashboard() {
                           : "text-red-400 bg-red-500/10 border-red-500/30"
                       }`}
                     >
-                      {u.status}
+                      {userStatusLabel(u.status)}
                     </span>
                     {can("users.edit") && u.id !== user?.id && (
                       <button
-                        title={u.status === "ACTIVE" ? "Suspender" : "Reactivar"}
-                        aria-label={u.status === "ACTIVE" ? "Suspender usuario" : "Reactivar usuario"}
+                        title={u.status === "ACTIVE" ? "Quitarle el acceso" : "Devolverle el acceso"}
+                        aria-label={u.status === "ACTIVE" ? "Quitarle el acceso a esta persona" : "Devolverle el acceso a esta persona"}
                         onClick={() =>
                           setUserStatus(
                             user?.id ?? "SYSTEM",
@@ -820,7 +824,7 @@ export function SettingsDashboard() {
 
             <div className="mt-4 pt-4 border-t border-slate-700/60">
               <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                Roles y permisos
+                ¿Qué puede hacer cada rol?
               </h4>
               <div className="space-y-2">
                 {roles.map((r) => (
@@ -830,20 +834,19 @@ export function SettingsDashboard() {
                   >
                     <div className="min-w-0">
                       <p className="text-white text-sm font-semibold truncate">{r.name}</p>
-                      <p className="text-slate-500 text-xs truncate">
-                        {r.permissions.includes("*")
-                          ? "Acceso total"
-                          : `${r.permissions.length} permiso${r.permissions.length === 1 ? "" : "s"}`}
-                      </p>
+                      <p className="text-slate-400 text-xs">{roleHelp(r.id, r.permissions)}</p>
+                      <p className="text-slate-500 text-xs">{roleSummary(r.permissions)}</p>
                     </div>
-                    <VimdyButton
-                      onClick={() => setEditingRole({ id: r.id, name: r.name })}
-                      variant="ghost"
-                      size="sm"
-                      className="flex-shrink-0"
-                    >
-                      Editar permisos
-                    </VimdyButton>
+                    {!r.permissions.includes("*") && (
+                      <VimdyButton
+                        onClick={() => setEditingRole({ id: r.id, name: r.name })}
+                        variant="ghost"
+                        size="sm"
+                        className="flex-shrink-0"
+                      >
+                        Cambiar qué puede hacer
+                      </VimdyButton>
+                    )}
                   </div>
                 ))}
               </div>
@@ -947,7 +950,7 @@ function CreateUserModal({
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-white font-bold flex items-center gap-2">
             <ShieldCheck size={16} className="text-cyan-400" />
-            Nuevo usuario
+            Agregar persona
           </h3>
           <button onClick={onClose} aria-label="Cerrar" className="text-slate-400 hover:text-white">
             <X size={18} />
@@ -955,13 +958,13 @@ function CreateUserModal({
         </div>
 
         <div className="space-y-3">
-          <Field label="Nombre">
+          <Field label="Nombre de la persona">
             <input autoFocus className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
-          <Field label="Correo">
+          <Field label="Correo (con este correo va a entrar)">
             <input className={inputClass} value={email} onChange={(e) => setEmail(e.target.value)} />
           </Field>
-          <Field label="Contraseña (mínimo 6 caracteres)">
+          <Field label="Contraseña para entrar (mínimo 6 caracteres)">
             <div className="relative">
               <input
                 type={showPassword ? "text" : "password"}
@@ -980,7 +983,7 @@ function CreateUserModal({
               </button>
             </div>
           </Field>
-          <Field label="Rol">
+          <Field label="¿Qué va a hacer en el negocio?">
             <select className={inputClass} value={roleId} onChange={(e) => setRoleId(e.target.value)}>
               {roles.map((r) => (
                 <option key={r.id} value={r.id}>
@@ -988,6 +991,7 @@ function CreateUserModal({
                 </option>
               ))}
             </select>
+            <p className="text-slate-500 text-xs mt-1">{roleHelp(roleId)}</p>
           </Field>
 
           <div className="flex gap-2 pt-1">
@@ -1005,7 +1009,7 @@ function CreateUserModal({
               variant="primary"
               fullWidth
             >
-              Crear usuario
+              Agregar persona
             </VimdyButton>
           </div>
         </div>
