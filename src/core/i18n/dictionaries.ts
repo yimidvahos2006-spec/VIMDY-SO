@@ -141,6 +141,7 @@ const es = {
 
   "pos.status.cashier": "Cajero",
   "pos.status.administrator": "Administrador",
+  "pos.status.owner": "Dueño",
   "pos.status.connected": "Conectado",
   "pos.status.synced": "Sincronizado",
   "pos.status.offline": "Sin conexión — vendiendo en modo local",
@@ -629,6 +630,7 @@ const en: Record<TranslationKey, string> = {
 
   "pos.status.cashier": "Cashier",
   "pos.status.administrator": "Administrator",
+  "pos.status.owner": "Owner",
   "pos.status.connected": "Connected",
   "pos.status.synced": "Synced",
   "pos.status.offline": "Offline — selling in local mode",
@@ -1115,6 +1117,7 @@ const pt: Record<TranslationKey, string> = {
 
   "pos.status.cashier": "Operador",
   "pos.status.administrator": "Administrador",
+  "pos.status.owner": "Proprietário",
   "pos.status.connected": "Conectado",
   "pos.status.synced": "Sincronizado",
   "pos.status.offline": "Sem conexão — vendendo em modo local",

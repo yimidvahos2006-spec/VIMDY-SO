@@ -145,7 +145,7 @@ function authUserFromSupabase(user: {
   const name =
     typeof metadata.full_name === "string" && metadata.full_name.trim()
       ? metadata.full_name.trim()
-      : email.split("@")[0] || "Usuario";
+      : "Dueño";
 
   const avatar =
     typeof metadata.avatar_url === "string" && metadata.avatar_url.trim()
@@ -167,7 +167,7 @@ function toAuthState(
   return {
     user: {
       id: session.userId,
-      name: session.ownerName || email.split("@")[0],
+      name: session.ownerName?.trim() || "Dueño",
       email
     },
     role: {

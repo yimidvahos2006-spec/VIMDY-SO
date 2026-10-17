@@ -83,7 +83,7 @@ export function PosStatusBar() {
       </div>
 
       <span className="text-vimdy-text-secondary">
-        {t("pos.status.cashier")}: <span className="text-vimdy-text font-semibold">{user?.name ?? t("pos.status.administrator")}</span>
+        {t("pos.status.cashier")}: <span className="text-vimdy-text font-semibold">{user?.name?.trim() || t("pos.status.owner")}</span>
       </span>
 
       <div className="flex items-center gap-5">
