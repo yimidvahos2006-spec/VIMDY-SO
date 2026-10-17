@@ -8,9 +8,12 @@ import { OrderEngine } from "./OrderEngine";
 import { companyConfigStore } from "../store/companyConfigStore";
 import { getEffectiveKitchenOutputMode as resolveKitchenOutputMode } from "../services/effectiveKitchenOutputMode";
 import { createKitchenOutput } from "../services/KitchenOutputFactory";
+import { logWarning } from "../../infrastructure/logging/opsLogger";
+import { assessMerge, mergeSaleItems, subtractSaleItems } from "../utils/tableMerge";
 import type { PaymentMethod, PaymentResult } from "./PaymentEngine";
 import type { Receipt } from "./ReceiptEngine";
 import { getCurrentBusinessId, getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
+import { userSessionStore } from "../store/userSessionStore";
 
 async function deterministicUuid(seed: string): Promise<string> {
   const digest = await crypto.subtle.digest(
@@ -126,11 +129,13 @@ export class TableEngine {
 
   private async mutateItems(
     tableId: string,
-    mutate: (cart: CartEngine) => void
+    mutate: (cart: CartEngine) => void,
+    precheck?: (table: Table) => void
   ): Promise<Table> {
     for (let attempt = 1; attempt <= TableEngine.MAX_CONFLICT_RETRIES; attempt++) {
       const table = await this.getTable(tableId);
       if (!table) throw new Error("TABLE_NOT_FOUND");
+      precheck?.(table);
 
       const cart = new CartEngine();
       cart.loadItems(table.items);
@@ -203,6 +208,34 @@ export class TableEngine {
 
   public async getTable(id: string): Promise<Table | null> {
     return this.getRepository().findById(id);
+  }
+
+  /**
+   * Como mutateItems(), pero la función de armado puede cambiar también otros
+   * campos de la mesa (personas, descuento) en el mismo guardado. Reintenta
+   * ante conflicto de versión releyendo la mesa fresca.
+   */
+  private async mutateTable(
+    tableId: string,
+    build: (table: Table) => { table: Table; items: SaleItem[] }
+  ): Promise<Table> {
+    for (let attempt = 1; attempt <= TableEngine.MAX_CONFLICT_RETRIES; attempt++) {
+      const table = await this.getTable(tableId);
+      if (!table) throw new Error("TABLE_NOT_FOUND");
+
+      const next = build(table);
+
+      try {
+        return await this.persist(next.table, next.items);
+      } catch (error) {
+        if (isOptimisticLockError(error) && attempt < TableEngine.MAX_CONFLICT_RETRIES) {
+          await new Promise((resolve) => setTimeout(resolve, 25 * attempt));
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw new Error("TABLE_UPDATE_CONFLICT");
   }
 
   public async openTable(tableOrInput: string | OpenTableInput, input: OpenTableInput = {}): Promise<any> {
@@ -346,29 +379,59 @@ export class TableEngine {
     return (await this.getRepository().findById(table.id)) ?? opened;
   }
 
-  public async closeTable(tableOrInput: string | CloseTableInput, input: CloseTableInput = {}): Promise<{ sale: Sale; payment: PaymentResult; receipt: Receipt }> {
-    const resolvedInput = typeof tableOrInput === "string" ? input : tableOrInput;
-    const tableId =
-      typeof tableOrInput === "string"
-        ? tableOrInput
-        : (resolvedInput.tableId ?? (tableOrInput as any).tableId);
+  /**
+   * Una venta de mesa que sigue pendiente de pago debe corresponder EXACTO a
+   * lo que hay hoy en la mesa. Si alguien agregó o quitó productos después de
+   * crear la venta (por ejemplo, un cobro con Wompi que el cliente abandonó),
+   * reutilizar esa venta cobraría una cuenta vieja. Se bloquea en vez de
+   * cobrar un monto incorrecto.
+   */
+  private assertPendingSaleMatchesTable(sale: Sale, table: Table): void {
+    const status = String(sale.status ?? "");
+    if (status !== "PENDING_PAYMENT" && status !== "OPEN") return;
 
+    const totals = (items: ReadonlyArray<{ productId: string; quantity: number }>) => {
+      const map = new Map<string, number>();
+      for (const item of items) {
+        map.set(item.productId, (map.get(item.productId) ?? 0) + Number(item.quantity));
+      }
+      return map;
+    };
+
+    const saleTotals = totals(sale.items);
+    const tableTotals = totals(table.items);
+
+    let same = saleTotals.size === tableTotals.size;
+    if (same) {
+      for (const [productId, quantity] of tableTotals) {
+        if (Math.abs((saleTotals.get(productId) ?? -1) - quantity) > 0.0001) {
+          same = false;
+          break;
+        }
+      }
+    }
+
+    if (!same) {
+      throw new Error(
+        "TABLE_SALE_STALE: la cuenta de la mesa cambió después de iniciar un cobro que quedó pendiente."
+      );
+    }
+  }
+
+  /**
+   * Devuelve la venta de esta mesa (la crea si todavía no existe). Es el
+   * primer paso de cualquier cobro de mesa, en efectivo o digital, y es
+   * idempotente: el mismo saleId siempre devuelve la misma venta.
+   */
+  private async resolveTableSale(
+    table: Table,
+    saleIdInput: string | undefined,
+    cashierId: string | undefined
+  ): Promise<Sale> {
     if (!this.sales) throw new Error("SALES_ENGINE_REQUIRED");
 
-    const method =
-      resolvedInput.method ??
-      (resolvedInput.paymentMethod as PaymentMethod | undefined);
-
-    if (!method) throw new Error("PAYMENT_METHOD_REQUIRED");
-
-    let table = tableId
-      ? await this.getRepository().findById(tableId)
-      : null;
-
-    if (!table) throw new Error("TABLE_NOT_FOUND");
-
     const stableSaleId =
-      resolvedInput.saleId?.trim() ||
+      saleIdInput?.trim() ||
       (table.openOperationId
         ? await deterministicUuid(
             `vimdy:table-sale:${table.openOperationId}`
@@ -398,32 +461,66 @@ export class TableEngine {
       }
     }
 
-    if (!sale) {
-      if (table.items.length === 0) throw new Error("EMPTY_TABLE");
-
-      sale = await this.sales.tableSale({
-        id: stableSaleId,
-        tableId: table.id,
-        source: table.items,
-        cashierId: resolvedInput.cashierId,
-        waiterId: table.waiterId,
-        skipKitchen: true
-      });
+    if (sale) {
+      if (table.status !== "FREE") {
+        this.assertPendingSaleMatchesTable(sale, table);
+      }
+      return sale;
     }
 
-    const { sale: paidSale, payment } =
-      await this.sales.registerPayment(
-        sale,
-        method,
-        {
-          received: resolvedInput.received,
-          reference: resolvedInput.reference
-        }
+    if (table.items.length === 0) throw new Error("EMPTY_TABLE");
+
+    return this.sales.tableSale({
+      id: stableSaleId,
+      tableId: table.id,
+      source: table.items,
+      cashierId,
+      waiterId: table.waiterId,
+      skipKitchen: true
+    });
+  }
+
+  /**
+   * Paso 1 del cobro digital (Wompi): deja la venta creada y pendiente de
+   * pago, SIN cobrarla. El monto oficial es el de la venta (lo calcula el
+   * servidor), no el que se ve en la tarjeta de la mesa.
+   */
+  public async prepareTableSaleForPayment(input: {
+    tableId: string;
+    saleId?: string;
+    cashierId?: string;
+  }): Promise<Sale> {
+    const table = await this.getRepository().findById(input.tableId);
+    if (!table) throw new Error("TABLE_NOT_FOUND");
+
+    const sale = await this.resolveTableSale(table, input.saleId, input.cashierId);
+
+    const status = String(sale.status ?? "");
+    if (status === "CANCELLED" || status === "REFUNDED") {
+      throw new Error(
+        `SALE_CANNOT_BE_CANCELLED: la venta de esta mesa está en estado "${status}" y no se puede cobrar.`
       );
-
-    if (!payment.success) {
-      throw new Error("TABLE_PAYMENT_PENDING_VERIFICATION");
     }
+
+    return sale;
+  }
+
+  /**
+   * Cierra la mesa DESPUÉS de que el cobro ya quedó registrado: recibo,
+   * mesa libre y pedido completado. Lo usan el cobro en efectivo y el cobro
+   * digital confirmado por el proveedor.
+   */
+  private async finishPaidTable(
+    tableId: string,
+    paidSale: Sale,
+    method: PaymentMethod,
+    options: {
+      customerName?: string;
+      cashier?: string;
+      received?: number;
+    }
+  ): Promise<Receipt> {
+    if (!this.sales) throw new Error("SALES_ENGINE_REQUIRED");
 
     const existingReceipt =
       await this.sales.getReceiptBySaleId(paidSale.id);
@@ -432,10 +529,10 @@ export class TableEngine {
       existingReceipt ??
       (await this.sales.generateReceipt(
         paidSale,
-        resolvedInput.customerName ?? "Cliente General",
-        resolvedInput.cashier ?? "Administrador",
+        options.customerName ?? "Cliente General",
+        options.cashier ?? "—",
         method,
-        resolvedInput.received ?? paidSale.total,
+        options.received ?? paidSale.total,
         paidSale.discount ?? 0
       ));
 
@@ -448,7 +545,7 @@ export class TableEngine {
     // al detectar ese cambio, completa el Order y libera la Table dentro de
     // esa misma transacción. Aquí solo reconciliamos para instalaciones donde
     // la migration todavía no esté presente o para registros antiguos.
-    table = await this.getRepository().findById(table.id);
+    const table = await this.getRepository().findById(tableId);
 
     if (table && table.status !== "FREE") {
       try {
@@ -493,6 +590,90 @@ export class TableEngine {
       }
     }
 
+    return receipt;
+  }
+
+  /**
+   * Paso final del cobro digital: solo cierra la mesa si la venta YA figura
+   * como pagada en la base de datos (la confirma el webhook del proveedor).
+   * Nunca marca nada como cobrado por su cuenta.
+   */
+  public async confirmTableExternalPayment(input: {
+    tableId: string;
+    saleId: string;
+    method: PaymentMethod;
+    cashier?: string;
+    customerName?: string;
+  }): Promise<{ sale: Sale; receipt: Receipt }> {
+    if (!this.sales) throw new Error("SALES_ENGINE_REQUIRED");
+
+    const sale = await this.sales.getSale(input.saleId);
+    if (!sale) throw new Error("SALE_NOT_FOUND");
+
+    const status = String(sale.status ?? "");
+    if (status !== "PAID" && status !== "CLOSED") {
+      throw new Error(
+        "TABLE_PAYMENT_PENDING_VERIFICATION: el pago todavía no está confirmado."
+      );
+    }
+
+    const receipt = await this.finishPaidTable(input.tableId, sale, input.method, {
+      customerName: input.customerName,
+      cashier: input.cashier,
+      received: sale.total
+    });
+
+    return { sale, receipt };
+  }
+
+  public async closeTable(tableOrInput: string | CloseTableInput, input: CloseTableInput = {}): Promise<{ sale: Sale; payment: PaymentResult; receipt: Receipt }> {
+    const resolvedInput = typeof tableOrInput === "string" ? input : tableOrInput;
+    const tableId =
+      typeof tableOrInput === "string"
+        ? tableOrInput
+        : (resolvedInput.tableId ?? (tableOrInput as any).tableId);
+
+    if (!this.sales) throw new Error("SALES_ENGINE_REQUIRED");
+
+    const method =
+      resolvedInput.method ??
+      (resolvedInput.paymentMethod as PaymentMethod | undefined);
+
+    if (!method) throw new Error("PAYMENT_METHOD_REQUIRED");
+
+    const table = tableId
+      ? await this.getRepository().findById(tableId)
+      : null;
+
+    if (!table) throw new Error("TABLE_NOT_FOUND");
+
+    const sale = await this.resolveTableSale(
+      table,
+      resolvedInput.saleId,
+      resolvedInput.cashierId
+    );
+
+    const { sale: paidSale, payment } =
+      await this.sales.registerPayment(
+        sale,
+        method,
+        {
+          received: resolvedInput.received,
+          reference: resolvedInput.reference,
+          cashierName: resolvedInput.cashier
+        }
+      );
+
+    if (!payment.success) {
+      throw new Error("TABLE_PAYMENT_PENDING_VERIFICATION: el pago no quedó confirmado por el proveedor.");
+    }
+
+    const receipt = await this.finishPaidTable(table.id, paidSale, method, {
+      customerName: resolvedInput.customerName,
+      cashier: resolvedInput.cashier,
+      received: resolvedInput.received
+    });
+
     return {
       sale: paidSale,
       payment,
@@ -500,11 +681,24 @@ export class TableEngine {
     };
   }
 
+  /**
+   * Solo se puede agregar o subir productos en una mesa con cuenta abierta.
+   * Si otro dispositivo ya la cobró y la liberó mientras este panel seguía
+   * abierto, un producto agregado aquí quedaría guardado en una mesa libre y
+   * le aparecería al siguiente cliente que la ocupe.
+   */
+  private assertTableAcceptsItems(table: Table): void {
+    if (table.status === "FREE" || table.status === "CLOSED" || table.status === "RESERVED") {
+      throw new Error("TABLE_NOT_OPEN: la mesa ya no tiene una cuenta abierta (puede que otra persona la haya cobrado)");
+    }
+  }
+
   public async addItem(tableOrInput: string | AddProductInput, maybeInput?: AddProductInput): Promise<any> {
     const resolvedInput = typeof tableOrInput === 'string' ? (maybeInput ?? {}) : tableOrInput;
     const tableId = typeof tableOrInput === 'string' ? tableOrInput : (resolvedInput.tableId ?? (tableOrInput as any).tableId);
     const table = tableId ? await this.getRepository().findById(tableId) : null;
     if (!table) throw new Error('TABLE_NOT_FOUND');
+    this.assertTableAcceptsItems(table);
 
     const product = resolvedInput.product ?? { id: resolvedInput.productId, price: 0, requiresKitchen: true };
     const item = {
@@ -528,7 +722,7 @@ export class TableEngine {
   }
 
   public async updateItemQuantity(tableId: string, productId: string, quantity: number): Promise<any> {
-    return this.mutateItems(tableId, (cart) => cart.updateQuantity(productId, quantity));
+    return this.mutateItems(tableId, (cart) => cart.updateQuantity(productId, quantity), (table) => this.assertTableAcceptsItems(table));
   }
 
   public async updateTable(tableId: string, patch: Record<string, any>): Promise<any> {
@@ -555,14 +749,32 @@ export class TableEngine {
     return updated;
   }
 
+  /**
+   * Suma `count` personas a la mesa (NO es el total nuevo): con 4 personas y
+   * `addPeople(id, 1)` quedan 5. Antes el panel enviaba "personas + 1" y el
+   * motor volvía a sumar, dejando 9.
+   */
   public async addPeople(tableId: string, count: number): Promise<any> {
-    const table = await this.getRepository().findById(tableId);
-    if (!table) throw new Error('TABLE_NOT_FOUND');
+    const amount = Math.trunc(Number(count));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error("TABLE_PEOPLE_INVALID: indica cuántas personas se suman (1 o más)");
+    }
 
-    return this.updateTable(tableId, { peopleCount: (table.peopleCount ?? 0) + count });
+    return this.mutateTable(tableId, (current) => {
+      if (current.status === "FREE" || current.status === "CLOSED") {
+        throw new Error("TABLE_NOT_OPEN: abre la mesa antes de agregar personas");
+      }
+      return {
+        table: { ...current, peopleCount: (current.peopleCount ?? 0) + amount },
+        items: current.items
+      };
+    });
   }
 
   public async requestBill(tableId: string): Promise<any> {
+    const table = await this.getRepository().findById(tableId);
+    if (!table) throw new Error("TABLE_NOT_FOUND");
+    this.assertTableAcceptsItems(table);
     return this.updateTable(tableId, { status: "CUENTA_SOLICITADA" });
   }
 
@@ -592,94 +804,299 @@ export class TableEngine {
     });
   }
 
+  /**
+   * Cancela la cuenta de una mesa: cocina deja de preparar lo pendiente, el
+   * pedido queda CANCELADO y la mesa vuelve a quedar LIBRE y reutilizable.
+   *
+   * Protección: si ya se ENTREGÓ comida de esta cuenta no se puede cancelar
+   * (habría consumo sin cobrar); hay que cobrarla o resolverla con un gerente.
+   */
   public async cancelTableOrder(tableId: string, reason?: string): Promise<any> {
     const table = await this.getRepository().findById(tableId);
     if (!table) throw new Error("TABLE_NOT_FOUND");
+    if (table.status === "FREE" || table.status === "CLOSED") {
+      throw new Error("TABLE_NOT_OPEN: la mesa no tiene una cuenta abierta");
+    }
 
+    const cleanReason = reason?.trim() || "Pedido de mesa cancelado";
+    const scope = { orderId: table.orderId, openedAt: table.openedAt };
+
+    if (this.kitchen && (await this.kitchen.hasDeliveredOrders(table.id, scope))) {
+      throw new Error(
+        "TABLE_CANCEL_HAS_DELIVERED: ya se entregó comida de esta cuenta. Cóbrala o pide ayuda a un gerente"
+      );
+    }
+
+    // 1) Cocina deja de preparar lo que estaba pendiente.
+    if (this.kitchen) {
+      const actorId = userSessionStore.get().id || "system";
+      await this.kitchen.cancelOpenOrdersForTable(table.id, cleanReason, actorId, scope);
+    }
+
+    // 2) El pedido queda cancelado.
     if (table.orderId && this.orders) {
       const order = await this.orders.getOrder(table.orderId);
       if (order.status !== "COMPLETED" && order.status !== "CANCELLED") {
-        await this.orders.updateOrder(order.id, {
-          status: "CANCELLED",
-          cancelReason: reason?.trim() || "Pedido de mesa cancelado"
+        await this.orders.updateOrder(order.id, { status: "CANCELLED", cancelReason: cleanReason });
+      }
+    }
+
+    // 3) La mesa se libera (antes quedaba ocupada y vacía).
+    return this.updateTable(tableId, {
+      status: "FREE",
+      items: [],
+      subtotal: 0,
+      tax: 0,
+      discount: 0,
+      total: 0,
+      peopleCount: 0,
+      waiterId: undefined,
+      customerId: undefined,
+      openedAt: undefined,
+      orderId: undefined,
+      openOperationId: undefined,
+      notes: undefined
+    });
+  }
+
+  /**
+   * Une la cuenta de `fromId` dentro de la cuenta de `toId` (ambas mesas deben
+   * estar abiertas). Al terminar, `fromId` queda LIBRE y reutilizable y todo su
+   * consumo vive en `toId`.
+   *
+   * Orden de operaciones (nunca se pierde ni se duplica un producto):
+   *   1) se suman las líneas COMPLETAS, las personas y el descuento al destino;
+   *   2) se libera el origen usando la versión que se leyó al inicio: si
+   *      alguien tocó el origen mientras tanto, falla y se DESHACE el paso 1;
+   *   3) se cancela el pedido del origen (ya no tiene mesa que lo respalde).
+   */
+  public async mergeTables(fromId: string, toId: string): Promise<Table> {
+    const repository = this.getRepository();
+    const source = await repository.findById(fromId);
+    const target = await repository.findById(toId);
+    if (!source || !target) throw new Error("TABLE_NOT_FOUND");
+
+    const assessment = assessMerge(source, target);
+    if (!assessment.ok) {
+      throw new Error(`${assessment.code}: no se puede unir "${source.name}" con "${target.name}"`);
+    }
+
+    // 0) Las comandas ya enviadas pasan a la mesa destino: así sabe qué salió
+    //    ya a cocina y no lo vuelve a mandar. Si algo falla después, se deshace.
+    const kitchenMove = this.kitchen
+      ? await this.kitchen.moveTableOrders({
+          from: source,
+          to: {
+            id: target.id,
+            name: target.name,
+            orderId: target.orderId,
+            openOperationId: target.openOperationId
+          }
+        })
+      : null;
+
+    const moved = source.items.map((item) => ({ ...item }));
+    const movedPeople = source.peopleCount ?? 0;
+    const movedDiscount = source.discount ?? 0;
+    const roundMoney = (value: number) => Number(value.toFixed(2));
+
+    // 1) Sumar al destino.
+    let merged: Table;
+    try {
+      merged = await this.mutateTable(toId, (current) => {
+        if (assessMerge(source, current).code === "TABLE_MERGE_TARGET_NOT_OPEN") {
+          throw new Error(`TABLE_MERGE_TARGET_NOT_OPEN: "${current.name}" ya no tiene una cuenta abierta`);
+        }
+        return {
+          table: {
+            ...current,
+            peopleCount: (current.peopleCount ?? 0) + movedPeople,
+            discount: roundMoney((current.discount ?? 0) + movedDiscount)
+          },
+          items: mergeSaleItems(current.items, moved)
+        };
+      });
+    } catch (error) {
+      await kitchenMove?.undo();
+      throw error;
+    }
+
+    // 2) Liberar el origen con la versión leída al inicio.
+    try {
+      await repository.update({
+        ...source,
+        status: "FREE",
+        items: [],
+        subtotal: 0,
+        tax: 0,
+        discount: 0,
+        total: 0,
+        peopleCount: 0,
+        waiterId: undefined,
+        customerId: undefined,
+        openedAt: undefined,
+        orderId: undefined,
+        openOperationId: undefined,
+        notes: undefined,
+        updatedAt: new Date()
+      });
+    } catch (error) {
+      try {
+        await this.mutateTable(toId, (current) => ({
+          table: {
+            ...current,
+            peopleCount: Math.max((current.peopleCount ?? 0) - movedPeople, 0),
+            discount: Math.max(roundMoney((current.discount ?? 0) - movedDiscount), 0)
+          },
+          items: subtractSaleItems(current.items, moved)
+        }));
+        await kitchenMove?.undo();
+      } catch (rollbackError) {
+        logWarning("[TableEngine] La unión de mesas falló y no se pudo deshacer", {
+          category: "sales",
+          context: { fromId, toId, error: String(error), rollbackError: String(rollbackError) }
+        });
+        throw new Error(
+          `TABLE_MERGE_INCONSISTENT: revisa las mesas "${source.name}" y "${target.name}" antes de seguir`
+        );
+      }
+      throw error;
+    }
+
+    // 3) El pedido del origen ya no tiene mesa: se cancela (igual que al liberar una mesa).
+    if (source.orderId && this.orders) {
+      try {
+        const order = await this.orders.getOrder(source.orderId);
+        if (order.status !== "COMPLETED" && order.status !== "CANCELLED") {
+          await this.orders.updateOrder(order.id, {
+            status: "CANCELLED",
+            cancelReason: `Mesa unida a ${target.name}`
+          });
+        }
+      } catch (orderError) {
+        // La unión ya quedó correcta para el cliente: no se muestra como fallo.
+        logWarning("[TableEngine] No se pudo cancelar el pedido de la mesa unida", {
+          category: "sales",
+          context: { fromId, toId, orderId: source.orderId, error: String(orderError) }
         });
       }
     }
 
-    return this.updateTable(tableId, {
-      items: [],
-      subtotal: 0,
-      tax: 0,
-      total: 0,
-      notes: reason?.trim() || table.notes
-    });
-  }
-
-  public async mergeTables(fromId: string, toId: string): Promise<any> {
-    const fromTable = await this.getRepository().findById(fromId);
-    const toTable = await this.getRepository().findById(toId);
-    if (!fromTable || !toTable) throw new Error('TABLE_NOT_FOUND');
-
-    const merged = await this.mutateItems(toId, (cart) => {
-      fromTable.items.forEach((item) => cart.addItem({
-        id: item.productId,
-        name: item.productId,
-        price: item.price,
-        categoryId: "uncategorized",
-        stock: 0,
-        minStock: 0,
-        lastUpdated: new Date(),
-        requiresKitchen: item.requiresKitchen
-      }, item.quantity, item.note));
-    });
-    await this.updateTable(fromId, {
-      status: "CLOSED",
-      items: [],
-      subtotal: 0,
-      tax: 0,
-      total: 0,
-      orderId: undefined,
-      openOperationId: undefined
-    });
     return merged;
   }
 
+  /**
+   * Pasa la cuenta completa de `tableId` a una mesa LIBRE (`targetId`).
+   *
+   * Orden pensado para que nunca existan dos mesas abiertas con la misma
+   * sesión (la base de datos lo prohíbe) ni se pierda la cuenta:
+   *   0) las comandas de cocina y el pedido siguen a la mesa nueva;
+   *   1) se libera el origen;
+   *   2) se ocupa el destino con TODA la cuenta.
+   * Si un paso falla, los anteriores se deshacen.
+   */
   public async transferTable(tableId: string, targetId: string): Promise<any> {
-    const source = await this.getRepository().findById(tableId);
-    const target = await this.getRepository().findById(targetId);
-    if (!source || !target) throw new Error('TABLE_NOT_FOUND');
-
+    const repository = this.getRepository();
+    const source = await repository.findById(tableId);
+    const target = await repository.findById(targetId);
+    if (!source || !target) throw new Error("TABLE_NOT_FOUND");
+    if (source.id === target.id) {
+      throw new Error("TABLE_TRANSFER_SAME: elige una mesa distinta a la actual");
+    }
+    if (source.status === "FREE" || source.status === "CLOSED") {
+      throw new Error("TABLE_NOT_OPEN: la mesa no tiene una cuenta abierta para transferir");
+    }
     if (target.status !== "FREE") throw new Error("TABLE_NOT_AVAILABLE");
-    await this.updateTable(targetId, {
-      status: source.status,
-      waiterId: source.waiterId,
-      customerId: source.customerId,
-      peopleCount: source.peopleCount,
-      items: source.items,
-      subtotal: source.subtotal,
-      tax: source.tax,
-      discount: source.discount,
-      total: source.total,
-      orderId: source.orderId,
-      openOperationId: source.openOperationId,
-      openedAt: source.openedAt,
-      notes: source.notes
-    });
-    await this.updateTable(tableId, {
-      status: "FREE",
-      waiterId: undefined,
-      customerId: undefined,
-      peopleCount: 0,
-      items: [],
-      subtotal: 0,
-      tax: 0,
-      total: 0,
-      notes: undefined,
-      openedAt: undefined,
-      orderId: undefined,
-      openOperationId: undefined
-    });
-    return this.getRepository().findById(targetId);
+
+    const undo: Array<() => Promise<void>> = [];
+    const rollback = async () => {
+      for (const step of undo.reverse()) {
+        try { await step(); } catch { /* mejor esfuerzo */ }
+      }
+    };
+
+    try {
+      // 0a) Cocina: las comandas ya enviadas pasan a la mesa nueva.
+      if (this.kitchen) {
+        const move = await this.kitchen.moveTableOrders({
+          from: source,
+          to: {
+            id: target.id,
+            name: target.name,
+            orderId: source.orderId,
+            openOperationId: source.openOperationId
+          }
+        });
+        undo.push(move.undo);
+      }
+
+      // 0b) El pedido apunta a la mesa nueva.
+      if (source.orderId && this.orders) {
+        const order = await this.orders.getOrder(source.orderId);
+        if (order.status !== "COMPLETED" && order.status !== "CANCELLED") {
+          await this.orders.updateOrder(order.id, { tableId: target.id });
+          undo.push(async () => {
+            await this.orders!.updateOrder(order.id, { tableId: source.id });
+          });
+        }
+      }
+
+      // 1) Liberar el origen (así nunca hay dos mesas con la misma sesión).
+      await this.updateTable(source.id, {
+        status: "FREE",
+        waiterId: undefined,
+        customerId: undefined,
+        peopleCount: 0,
+        items: [],
+        subtotal: 0,
+        tax: 0,
+        discount: 0,
+        total: 0,
+        notes: undefined,
+        openedAt: undefined,
+        orderId: undefined,
+        openOperationId: undefined
+      });
+      undo.push(async () => {
+        await this.updateTable(source.id, {
+          status: source.status,
+          waiterId: source.waiterId,
+          customerId: source.customerId,
+          peopleCount: source.peopleCount,
+          items: source.items,
+          subtotal: source.subtotal,
+          tax: source.tax,
+          discount: source.discount,
+          total: source.total,
+          notes: source.notes,
+          openedAt: source.openedAt,
+          orderId: source.orderId,
+          openOperationId: source.openOperationId
+        });
+      });
+
+      // 2) Ocupar el destino con toda la cuenta.
+      await this.updateTable(target.id, {
+        status: source.status,
+        waiterId: source.waiterId,
+        customerId: source.customerId,
+        peopleCount: source.peopleCount,
+        items: source.items,
+        subtotal: source.subtotal,
+        tax: source.tax,
+        discount: source.discount,
+        total: source.total,
+        orderId: source.orderId,
+        openOperationId: source.openOperationId,
+        openedAt: source.openedAt,
+        notes: source.notes
+      });
+    } catch (error) {
+      await rollback();
+      throw error;
+    }
+
+    return repository.findById(target.id);
   }
 
   public splitBill(tableOrId: string | any, splitsOrCount?: any[] | number): { perPerson: number; total: number } {
@@ -697,6 +1114,7 @@ export class TableEngine {
   public async reserveTable(tableId: string, input: Record<string, any> = {}): Promise<any> {
     const table = await this.getRepository().findById(tableId);
     if (!table) throw new Error('TABLE_NOT_FOUND');
+    if (table.status !== 'FREE') throw new Error('TABLE_NOT_AVAILABLE');
 
     return this.updateTable(tableId, {
       status: 'RESERVED',
@@ -705,8 +1123,25 @@ export class TableEngine {
     });
   }
 
+  /**
+   * Duración típica de una mesa en este negocio (ms), con las cuentas cerradas
+   * de los últimos 30 días. Con menos de 5 cuentas no hay historial suficiente
+   * y se usa 45 min. Se descartan duraciones absurdas (<5 min o >6 h) y se usa
+   * la mediana para que una mesa olvidada abierta no distorsione el promedio.
+   */
   public async getAverageDuration(_businessId?: string): Promise<number> {
-    return 0;
+    const FALLBACK = 45 * 60 * 1000;
+    if (!this.orders) return FALLBACK;
+    try {
+      const durations = (await this.orders.getCompletedTableDurations())
+        .filter(ms => ms >= 5 * 60 * 1000 && ms <= 6 * 60 * 60 * 1000)
+        .sort((a, b) => a - b);
+      if (durations.length < 5) return FALLBACK;
+      const mid = Math.floor(durations.length / 2);
+      return durations.length % 2 ? durations[mid] : Math.round((durations[mid - 1] + durations[mid]) / 2);
+    } catch {
+      return FALLBACK;
+    }
   }
 
   public async sendToKitchen(
@@ -871,6 +1306,43 @@ export class TableEngine {
     }
 
     return kitchenOrder;
+  }
+
+  /**
+   * Cocina entregó una comanda: si TODO lo enviado de esta cuenta ya se
+   * entregó, la mesa pasa de "Esperando comida" a "Comiendo". Antes la mesa
+   * se quedaba en "Esperando comida" hasta el cobro y el tablero seguía
+   * pidiendo "Verificar con cocina" con la comida ya servida.
+   *
+   * No toca mesas que ya pidieron la cuenta ni mesas sin cuenta abierta.
+   */
+  public async markFoodServed(tableId: string): Promise<void> {
+    if (!this.kitchen) return;
+
+    const table = await this.getRepository().findById(tableId);
+    if (!table || table.status !== "WAITING_FOOD") return;
+
+    const activeOrderId = table.orderId;
+    const sessionIdentity = table.openOperationId ?? activeOrderId ?? table.id;
+
+    const sessionOrders = (await this.kitchen.getByTableId(table.id)).filter((order) => {
+      const extended = order as KitchenOrder & { tableSessionId?: string };
+      if (activeOrderId && order.orderId) return order.orderId === activeOrderId;
+      if (extended.tableSessionId) return extended.tableSessionId === sessionIdentity;
+      if (table.openedAt) {
+        return new Date(order.createdAt).getTime() >= new Date(table.openedAt).getTime();
+      }
+      return false;
+    });
+
+    const live = sessionOrders.filter((order) => order.status !== "CANCELADO");
+    if (live.length === 0 || live.some((order) => order.status !== "ENTREGADO")) return;
+
+    try {
+      await this.updateTable(table.id, { status: "EATING" });
+    } catch (error) {
+      if (!isOptimisticLockError(error)) throw error;
+    }
   }
 
   private async reconcileKitchenTableStatus(table: Table): Promise<void> {

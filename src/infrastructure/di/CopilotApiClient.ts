@@ -5,7 +5,7 @@ import { CopilotMessage } from "../../core/types/CopilotTypes";
 export class CopilotApiClient {
   public async sendMessage(system: string, history: CopilotMessage[]): Promise<string> {
     if (!connectionStore.isOnline()) {
-      return "Sin conexión: el Copiloto necesita internet para responder. Cuando vuelva la conexión, podés preguntarme lo que necesites.";
+      return "Sin conexión: el Copiloto necesita internet para responder. Cuando vuelva la conexión, puedes preguntarme lo que necesites.";
     }
 
     const messages = history.map((message) => ({

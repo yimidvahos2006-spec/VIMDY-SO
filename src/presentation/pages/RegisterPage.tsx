@@ -282,7 +282,7 @@ export function RegisterPage() {
                         />
                         <label htmlFor="acceptTerms" className="text-xs sm:text-sm text-slate-300">
                           Acepto los{" "}
-                          <Link to="/terminos" className="text-cyan-400 hover:text-cyan-300">Términos y Condiciones</Link>.
+                          <a href="https://vimdy.co/terminos" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:text-cyan-300">Términos y Condiciones</a>.
                         </label>
                       </div>
 
@@ -297,7 +297,7 @@ export function RegisterPage() {
                         />
                         <label htmlFor="acceptPrivacy" className="text-xs sm:text-sm text-slate-300">
                           Autorizo el tratamiento de mis datos personales según la{" "}
-                          <Link to="/privacidad" className="text-cyan-400 hover:text-cyan-300">Política de Privacidad</Link>.
+                          <a href="https://vimdy.co/privacidad" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:text-cyan-300">Política de Privacidad</a>.
                         </label>
                       </div>
 

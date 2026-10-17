@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useCommandIntent } from "../../../hooks/useCommandIntent";
 import { toast } from "../../../core/store/toastStore";
 import { ConfirmModal } from "../ui/ConfirmModal";
@@ -156,7 +156,8 @@ export function InventoryDashboard() {
    */
   async function handleDuplicateProduct(product: Product) {
     setDuplicating(product.id);
-    await createProduct({
+    try {
+      await createProduct({
       name: `${product.name} (copia)`,
       description: product.description,
       categoryId: product.categoryId,
@@ -184,8 +185,20 @@ export function InventoryDashboard() {
       trackStock: product.trackStock,
       isIngredient: product.isIngredient
     });
-    setDuplicating(null);
+    } finally {
+      setDuplicating(null);
+    }
   }
+
+  // Nombre visible de cada categoría dentro de la tabla (product.categoryId
+  // es un id interno; esto lo resuelve al nombre real sin tocar el motor).
+  const categoryNameById = useMemo(() => {
+    const map: Record<string, string> = {};
+    categories.forEach((c) => {
+      map[c.id] = c.name;
+    });
+    return map;
+  }, [categories]);
 
   const filtered = useMemo(() => {
     let list = products;
@@ -200,6 +213,7 @@ export function InventoryDashboard() {
         (p) =>
           p.name.toLowerCase().includes(value) ||
           p.categoryId.toLowerCase().includes(value) ||
+          (categoryNameById[p.categoryId] ?? "").toLowerCase().includes(value) ||
           (p.barcode ?? "").toLowerCase().includes(value) ||
           (p.sku ?? "").toLowerCase().includes(value)
       );
@@ -226,30 +240,52 @@ export function InventoryDashboard() {
     });
 
     return sorted;
-  }, [products, search, statusFilter, categoryFilter, sortKey, sortDir]);
-
-  // Nombre visible de cada categoría dentro de la tabla (product.categoryId
-  // es un id interno; esto lo resuelve al nombre real sin tocar el motor).
-  const categoryNameById = useMemo(() => {
-    const map: Record<string, string> = {};
-    categories.forEach((c) => {
-      map[c.id] = c.name;
-    });
-    return map;
-  }, [categories]);
+  }, [
+    products,
+    search,
+    statusFilter,
+    categoryFilter,
+    productTypeFilter,
+    showInactive,
+    sortKey,
+    sortDir,
+    categoryNameById
+  ]);
 
   // Solo mostramos como chip las categorías que de verdad tienen productos,
   // para no llenar la barra de filtros con categorías vacías.
   const categoryChips = useMemo(() => {
     const countByCategory: Record<string, number> = {};
     products.forEach((p) => {
-      if (p.active === false) return;
+      if (p.active === false && !showInactive) return;
       countByCategory[p.categoryId] = (countByCategory[p.categoryId] ?? 0) + 1;
     });
     return categories
       .filter((c) => countByCategory[c.id] > 0)
       .map((c) => ({ id: c.id, name: c.name, count: countByCategory[c.id] }));
-  }, [categories, products]);
+  }, [categories, products, showInactive]);
+
+  // Si el chip de la categoría seleccionada desaparece (se borró, se movió su
+  // último producto, se ocultó un desactivado...), el filtro quedaba "pegado"
+  // en una categoría invisible y la tabla se veía vacía sin explicación.
+  useEffect(() => {
+    if (categoryFilter !== "todos" && !categoryChips.some((c) => c.id === categoryFilter)) {
+      setCategoryFilter("todos");
+    }
+  }, [categoryChips, categoryFilter]);
+
+  const hasActiveFilters =
+    search.trim() !== "" ||
+    statusFilter !== "todos" ||
+    categoryFilter !== "todos" ||
+    productTypeFilter !== "todos";
+
+  function clearFilters() {
+    setSearch("");
+    setStatusFilter("todos");
+    setCategoryFilter("todos");
+    setProductTypeFilter("todos");
+  }
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -449,7 +485,7 @@ export function InventoryDashboard() {
                 </button>
                 <VimdyButton
                   onClick={confirmTransfer}
-                  disabled={!transferTargetBranchId || transferQuantity <= 0}
+                  disabled={!transferTargetBranchId || transferQuantity <= 0 || transferQuantity > transferProduct.stock}
                   variant="primary"
                 >
                   Confirmar transferencia
@@ -513,7 +549,10 @@ export function InventoryDashboard() {
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as StockStatus | "todos")}
-              className="h-10 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-accent"
+              aria-label="Filtrar por estado de stock"
+              className={`h-10 px-3 rounded-vimdy-md bg-vimdy-surface border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-accent ${
+                statusFilter !== "todos" ? "border-vimdy-accent" : "border-vimdy-border"
+              }`}
             >
               <option value="todos">Todos los estados</option>
               <option value="normal">Normal</option>
@@ -524,7 +563,10 @@ export function InventoryDashboard() {
             <select
               value={productTypeFilter}
               onChange={(e) => setProductTypeFilter(e.target.value as ProductType | "todos")}
-              className="h-10 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-accent"
+              aria-label="Filtrar por tipo de producto"
+              className={`h-10 px-3 rounded-vimdy-md bg-vimdy-surface border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-accent ${
+                productTypeFilter !== "todos" ? "border-vimdy-accent" : "border-vimdy-border"
+              }`}
             >
               <option value="todos">Todos los tipos</option>
               <option value="inventario">Producto para vender</option>
@@ -533,6 +575,17 @@ export function InventoryDashboard() {
               <option value="cocina_receta">Producto con receta</option>
               <option value="servicio">Servicio</option>
             </select>
+
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="h-10 px-3 rounded-vimdy-md border border-vimdy-accent/40 text-vimdy-accent text-sm font-semibold hover:bg-vimdy-accent/10 flex items-center gap-1.5 shrink-0"
+              >
+                <X size={14} />
+                Limpiar filtros
+              </button>
+            )}
           </div>
 
           {categoryChips.length > 0 && (
@@ -571,7 +624,20 @@ export function InventoryDashboard() {
                 {filtered.length === 0 && (
                   <tr>
                     <td colSpan={7} className="px-4 py-10 text-center text-vimdy-text-tertiary">
-                      No se encontraron productos.
+                      {hasActiveFilters ? (
+                        <div className="flex flex-col items-center gap-3">
+                          <span>Ningún producto coincide con los filtros activos.</span>
+                          <button
+                            type="button"
+                            onClick={clearFilters}
+                            className="h-9 px-4 rounded-vimdy-md border border-vimdy-accent/40 text-vimdy-accent text-sm font-semibold hover:bg-vimdy-accent/10"
+                          >
+                            Limpiar filtros
+                          </button>
+                        </div>
+                      ) : (
+                        "No se encontraron productos."
+                      )}
                     </td>
                   </tr>
                 )}
@@ -714,6 +780,8 @@ export function InventoryDashboard() {
       {selected && (
         <ProductDetailModal
           product={selected}
+          categoryName={categoryNameById[selected.categoryId]}
+          saveError={error}
           allProducts={products}
           onClose={() => setSelected(null)}
           getHistory={getHistory}
@@ -740,6 +808,7 @@ export function InventoryDashboard() {
         <ProductFormModal
           onClose={() => setShowNewProduct(false)}
           onSave={createProduct}
+          saveError={error}
           onBuyIngredient={(ingredientId) => {
             const ingredient = productMap.get(ingredientId);
             if (ingredient) {
@@ -755,6 +824,7 @@ export function InventoryDashboard() {
           product={editingProduct}
           onClose={() => setEditingProduct(null)}
           onSave={(input) => updateProduct(editingProduct.id, input)}
+          saveError={error}
           onBuyIngredient={(ingredientId) => {
             const ingredient = productMap.get(ingredientId);
             if (ingredient) {

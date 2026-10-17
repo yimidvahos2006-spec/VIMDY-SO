@@ -108,6 +108,19 @@ export function useKitchenOrders() {
 
   async function updateStatus(id: string, status: KitchenOrder["status"]) {
     await container.kitchenService.get().updateStatus(id, status);
+
+    // Si la comanda es de una mesa y ya salió todo lo enviado, la mesa pasa a
+    // "Comiendo". Es un mejor esfuerzo: si falla, la entrega ya quedó guardada.
+    if (status === "ENTREGADO") {
+      const tableId = orders.find((order) => order.id === id)?.tableId;
+      if (tableId) {
+        try {
+          await container.tableEngine.get().markFoodServed(tableId);
+        } catch {
+          /* la mesa se actualizará en la próxima acción */
+        }
+      }
+    }
     // No hace falta llamar a reload() aquí: KitchenEngine ya emite el
     // evento "kitchen" y el listener de arriba se encarga de refrescar.
   }

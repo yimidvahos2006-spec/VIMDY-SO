@@ -201,7 +201,9 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const rpcResult = (rpcData as any)?.[0];
+    // La RPC devuelve un jsonb (objeto). Se acepta también un arreglo de una fila
+    // por compatibilidad con versiones anteriores de la función.
+    const rpcResult = Array.isArray(rpcData) ? (rpcData as any)[0] : (rpcData as any);
     if (!rpcResult?.success) {
       return json(
         {

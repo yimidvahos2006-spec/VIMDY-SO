@@ -56,6 +56,22 @@ const CODE_MESSAGES: Record<string, (detail: string) => string> = {
       : "Esa mesa no está disponible en este momento.";
   },
   EMPTY_TABLE: () => "Esta mesa no tiene productos para cobrar todavía.",
+  TABLE_MERGE_SAME_TABLE: () => "Elige otra mesa: no se puede unir una mesa consigo misma.",
+  TABLE_MERGE_TARGET_NOT_OPEN: (detail) => {
+    const name = extractQuoted(detail);
+    return name
+      ? `La mesa "${name}" no tiene una cuenta abierta. Solo se pueden unir mesas con pedido en curso; si está libre, usa Transferir mesa.`
+      : "Esa mesa no tiene una cuenta abierta. Solo se pueden unir mesas con pedido en curso; si está libre, usa Transferir mesa.";
+  },
+  TABLE_TRANSFER_SAME: () => "Elige una mesa distinta a la actual.",
+  TABLE_PEOPLE_INVALID: () => "Indica cuántas personas se suman (1 o más).",
+  TABLE_CANCEL_HAS_DELIVERED: () =>
+    "Ya se entregó comida de esta cuenta, así que no se puede cancelar. Cóbrala o pide ayuda a un gerente.",
+  SPLIT_PEOPLE_INVALID: () => "Indica entre cuántas personas se divide (1 o más).",
+  TABLE_MERGE_INCONSISTENT: () =>
+    "La unión de mesas no se pudo completar y tampoco deshacer. No cobres todavía: revisa las dos mesas y avisa a un administrador.",
+  CONTEXT_MISMATCH: () =>
+    "Esa mesa pertenece a otra sucursal o negocio. Cambia de sucursal e inténtalo de nuevo.",
 
   // Pedidos
   EMPTY_ORDER: () => "Este pedido no tiene productos todavía.",
@@ -113,6 +129,53 @@ const CODE_MESSAGES: Record<string, (detail: string) => string> = {
   VALIDATION_ERROR: (detail) => detail || "Revisa los datos ingresados: algo no es válido.",
   PENDING_SALE_REQUIRES_ID: () =>
     "No se pudo guardar la venta para sincronizarla después. Intenta de nuevo con conexión a internet.",
+
+  // Cobro de mesas y pagos digitales (Wompi)
+  TABLE_ALREADY_CLOSED: () => "Esta mesa ya fue cobrada y cerrada.",
+  TABLE_SALE_STALE: () =>
+    "La cuenta de la mesa cambió después de iniciar un cobro que quedó pendiente. Un administrador debe cancelar esa venta pendiente en el Historial de ventas antes de volver a cobrar.",
+  TABLE_PAYMENT_PENDING_VERIFICATION: () =>
+    "El pago todavía no está confirmado. No se cerró la mesa ni se registró el cobro.",
+  PAYMENT_REFERENCE_REQUIRED: () =>
+    "Falta la referencia del pago. Usa el botón Pagar con Wompi para cobrar con tarjeta, transferencia o QR.",
+  PAYMENT_REJECTED: () => "El pago fue rechazado. No se registró ningún cobro.",
+  PAYMENT_SESSION_RPC_FAILED: (detail) => {
+    if (detail.includes("FORBIDDEN") || detail.includes("NOT_A_MEMBER")) {
+      return "Tu usuario no tiene permiso para iniciar cobros digitales. Pide ayuda a un administrador o cajero.";
+    }
+    if (detail.includes("SALE_STATE_INVALID")) {
+      return "Esta venta ya no está pendiente de pago.";
+    }
+    if (detail.includes("SALE_NOT_FOUND")) {
+      return "No se encontró la venta de esta mesa.";
+    }
+    return "No se pudo crear la sesión de pago. Intenta de nuevo.";
+  },
+  PAYMENT_SESSION_FORBIDDEN: () =>
+    "Tu usuario no tiene permiso para iniciar cobros digitales. Pide ayuda a un administrador o cajero.",
+  PAYMENT_SESSION_IDEMPOTENCY_KEY_REUSED: () =>
+    "Ya existe un intento de pago distinto para esta venta. Intenta de nuevo.",
+  WOMPI_CONFIG_MISSING: () =>
+    "Wompi no está configurado en el servidor. Avisa a soporte de VIMDY antes de cobrar con tarjeta, transferencia o QR.",
+  WOMPI_INVALID_CHECKOUT_RESPONSE: () =>
+    "Wompi devolvió una respuesta inválida. Intenta de nuevo.",
+  WOMPI_AMOUNT_MISMATCH: () =>
+    "El monto del pago no coincide con el total de la venta. No se cobró nada; avisa a un administrador.",
+  WOMPI_CHECKOUT_FAILED: () => "No se pudo iniciar el pago con Wompi. Intenta de nuevo.",
+  NO_AUTH: () => "Tu sesión venció. Inicia sesión de nuevo.",
+  NOT_A_MEMBER: () => "Tu usuario no pertenece a este negocio.",
+  CAJA_FORBIDDEN: () =>
+    "Tu rol no puede cobrar. Pide a un cajero, gerente o administrador que cobre esta cuenta.",
+  CAJA_NOT_A_MEMBER: () => "Tu usuario no pertenece a este negocio.",
+  CAJA_BRANCH_FORBIDDEN: () =>
+    "Tu usuario no tiene acceso a esta sucursal. Cambia de sucursal o pide acceso a un administrador.",
+  CAJA_SHIFT_OWNER_REQUIRED: () =>
+    "El turno de caja abierto pertenece a otro cajero. Pídele que cobre o que cierre su turno; un gerente o administrador sí puede cobrar sobre ese turno.",
+  SALE_FORBIDDEN: () =>
+    "Tu rol no puede crear ni cobrar ventas. Pide a un cajero, gerente o administrador que cobre esta cuenta.",
+  SALE_NOT_A_MEMBER: () => "Tu usuario no pertenece a este negocio.",
+  SALE_SUBSCRIPTION_INACTIVE: () =>
+    "El plan de este negocio no está activo, por eso no se puede cobrar. Renueva el plan desde Configuración.",
 
   // Usuarios, roles y permisos
   ACCESS_DENIED: () => "No tienes permiso para hacer esto. Pide ayuda a un administrador.",

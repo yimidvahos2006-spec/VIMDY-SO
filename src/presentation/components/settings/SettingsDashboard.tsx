@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { roleHelp, roleSummary, userStatusLabel } from "../../../core/services/roleLabels";
 import {
   Building2,
   Percent,
@@ -45,6 +46,19 @@ import { SubscriptionSettingsSection } from "../subscription/SubscriptionSetting
 import { SubscriptionCountdownBadge } from "../subscription/SubscriptionCountdownBadge";
 import { VimdyButton } from "../ui/VimdyButton";
 import { DailyReportSettingsCard } from "./DailyReportSettingsCard";
+import { OperationSettings } from "./OperationSettings";
+import { useOperationConfig } from "../../../core/store/useOperationConfig";
+
+type SettingsTab = "negocio" | "operacion" | "equipo" | "impresion" | "facturacion" | "datos";
+
+const SETTINGS_TABS: { id: SettingsTab; label: string; hint: string }[] = [
+  { id: "negocio", label: "Mi negocio", hint: "Nombre, país, moneda, impuestos y tu plan." },
+  { id: "operacion", label: "Operación", hint: "Qué módulos usas (mesas, cocina, domicilios) y tus sucursales." },
+  { id: "equipo", label: "Equipo", hint: "Quién entra al sistema, qué puede hacer y los meseros." },
+  { id: "impresion", label: "Tickets y reportes", hint: "Cómo se imprime el ticket y el reporte de cierre por correo." },
+  { id: "facturacion", label: "Facturación", hint: "Factura electrónica DIAN (solo Colombia)." },
+  { id: "datos", label: "Mis datos", hint: "Descarga una copia de seguridad de tu información." }
+];
 
 function SectionCard({
   icon,
@@ -143,8 +157,7 @@ export function SettingsDashboard() {
     roles,
     loading,
     error,
-    saveBusiness,
-    saveConfig,
+    persistAll,
     createUser,
     setUserStatus,
     roleName
@@ -161,6 +174,9 @@ export function SettingsDashboard() {
   const [businessSaved, setBusinessSaved] = useState(false);
   const [configDraft, setConfigDraft] = useState<CompanyConfig>(config);
   const [configSaved, setConfigSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [tab, setTab] = useState<SettingsTab>("negocio");
   const [creatingUser, setCreatingUser] = useState(false);
   const [backingUp, setBackingUp] = useState(false);
   const [backupDone, setBackupDone] = useState(false);
@@ -171,25 +187,60 @@ export function SettingsDashboard() {
   React.useEffect(() => setBusinessDraft(business), [business]);
   React.useEffect(() => setConfigDraft(config), [config]);
 
-  // El WhatsApp de pedidos solo es obligatorio si el negocio activó
-  // Domicilios (toggle en la tarjeta "Operación / módulos" de abajo). Se
-  // valida contra configDraft (no config) para que reaccione al toque,
-  // sin esperar a que se guarde el toggle primero.
-  const whatsappRequired = configDraft.enableDelivery;
+  // El WhatsApp de pedidos solo es obligatorio si el negocio vende por
+  // Domicilio. Eso se decide en la pestaña Operación ("Cómo trabaja tu
+  // negocio" > Canales de venta), que es la fuente real; antes había un
+  // interruptor "Domicilios" aparte que no conectaba con nada.
+  const operationConfig = useOperationConfig();
+  const whatsappRequired = operationConfig?.salesChannels?.includes("domicilio") ?? false;
   const whatsappMissing = whatsappRequired && !(businessDraft.whatsappOrders ?? "").trim();
 
-  function handleSaveBusiness() {
-    if (whatsappMissing) return;
-    saveBusiness(businessDraft);
-    setBusinessSaved(true);
-    setTimeout(() => setBusinessSaved(false), 2000);
+  const configDirty = JSON.stringify(configDraft) !== JSON.stringify(config);
+  const businessDirty = JSON.stringify(businessDraft) !== JSON.stringify(business);
+  const hasUnsaved = configDirty || businessDirty;
+
+  // Todos los botones "Guardar" guardan TODO junto en la base de datos
+  // (negocio + preferencias), para que no queden mitades guardadas.
+  async function handleSaveAll() {
+    if (saving) return;
+    if (whatsappMissing) {
+      setTab("negocio");
+      return;
+    }
+    setSaveError(null);
+    // El país vive en dos lugares (datos del negocio y globalización): el que
+    // el dueño acaba de cambiar manda sobre el otro.
+    const nextBusiness = { ...businessDraft };
+    const nextConfig = { ...configDraft };
+    if (nextBusiness.country !== business.country) {
+      nextConfig.country = nextBusiness.country as CompanyConfig["country"];
+    } else if (nextConfig.country !== config.country) {
+      nextBusiness.country = nextConfig.country as Business["country"];
+    }
+    setSaving(true);
+    try {
+      await persistAll(nextBusiness, nextConfig);
+      setBusinessSaved(true);
+      setConfigSaved(true);
+      setTimeout(() => {
+        setBusinessSaved(false);
+        setConfigSaved(false);
+      }, 2000);
+    } catch (e: any) {
+      setSaveError(e?.message ?? "No se pudieron guardar los cambios.");
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function handleSaveConfig() {
-    saveConfig(configDraft);
-    setConfigSaved(true);
-    setTimeout(() => setConfigSaved(false), 2000);
+  function handleDiscardAll() {
+    setSaveError(null);
+    setBusinessDraft(business);
+    setConfigDraft(config);
   }
+
+  const handleSaveBusiness = handleSaveAll;
+  const handleSaveConfig = handleSaveAll;
 
   /**
    * Al elegir un país se autocompletan moneda + idioma + zona horaria con
@@ -255,7 +306,30 @@ export function SettingsDashboard() {
         </div>
       )}
 
+      <div>
+        <div role="tablist" aria-label="Secciones de ajustes" className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+          {SETTINGS_TABS.filter((item) => item.id !== "facturacion" || config.country === "CO").map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === item.id}
+              onClick={() => setTab(item.id)}
+              className={`h-10 px-4 rounded-xl text-sm font-semibold whitespace-nowrap border transition ${
+                tab === item.id
+                  ? "bg-cyan-500 border-cyan-500 text-slate-950"
+                  : "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700"
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <p className="text-slate-400 text-sm mt-2">{SETTINGS_TABS.find((item) => item.id === tab)?.hint}</p>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className={tab === "negocio" ? "contents" : "hidden"}>
         {/* Datos del negocio */}
         <SectionCard
           icon={<Building2 size={18} className="text-cyan-400" />}
@@ -339,7 +413,7 @@ export function SettingsDashboard() {
               <Field
                 label={
                   whatsappRequired
-                    ? "WhatsApp de pedidos (obligatorio — tienes Domicilios activado)"
+                    ? "WhatsApp de pedidos (obligatorio — vendes por domicilio)"
                     : "WhatsApp de pedidos (opcional)"
                 }
               >
@@ -353,7 +427,7 @@ export function SettingsDashboard() {
               <p className={`text-xs mt-1 ${whatsappMissing ? "text-red-400" : "text-slate-500"}`}>
                 {whatsappMissing
                   ? "Falta el número — es donde te van a escribir los domicilios que escaneen el QR del ticket."
-                  : "Número real donde te llegan los pedidos. Es lo que codifica el QR del ticket (Configuración > Impresión)."}
+                  : "Número donde te llegan los pedidos por WhatsApp. Sale como QR en el ticket si tu plantilla lo incluye."}
               </p>
             </div>
           </div>
@@ -374,7 +448,9 @@ export function SettingsDashboard() {
 
         {/* Suscripción — VIMDY FASE 7, PASO 8 */}
         <SubscriptionSettingsSection />
+        </div>
 
+        <div className={tab === "negocio" ? "contents" : "hidden"}>
         {/* Globalización: país, idioma, moneda, zona horaria */}
         <SectionCard
           icon={<Globe2 size={18} className="text-cyan-400" />}
@@ -456,7 +532,9 @@ export function SettingsDashboard() {
             </VimdyButton>
           </div>
         </SectionCard>
+        </div>
 
+        <div className={tab === "negocio" ? "contents" : "hidden"}>
         {/* Impuestos */}
         <SectionCard
           icon={<Percent size={18} className="text-yellow-400" />}
@@ -472,16 +550,6 @@ export function SettingsDashboard() {
                 className={inputClass}
                 value={configDraft.tax}
                 onChange={(e) => setConfigDraft({ ...configDraft, tax: Number(e.target.value) })}
-              />
-            </Field>
-            <Field label={t("settings.field.serviceCharge")}>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                className={inputClass}
-                value={configDraft.serviceCharge}
-                onChange={(e) => setConfigDraft({ ...configDraft, serviceCharge: Number(e.target.value) })}
               />
             </Field>
             <div className="col-span-2">
@@ -511,45 +579,36 @@ export function SettingsDashboard() {
             </VimdyButton>
           </div>
         </SectionCard>
+        </div>
 
-        {/* Operación / módulos */}
+        <div className={tab === "operacion" ? "contents" : "hidden"}>
+        {/* Operación: la pantalla real de "Cómo trabaja tu negocio" (mesas, meseros, cocina, canales, inventario) */}
+        <div className="lg:col-span-2">
+          <OperationSettings />
+        </div>
+
+        {/* Preferencias de venta que sí usa el sistema (Caja, Inventario, IA) */}
         <SectionCard
           icon={<Sliders size={18} className="text-purple-400" />}
-          title={t("settings.operation.title")}
-          description={t("settings.operation.description")}
+          title="Reglas de venta"
+          description="Cómo se comporta Caja al vender y al imprimir."
         >
           <div className="divide-y divide-slate-700/60">
             <Toggle
-              label="Impresión automática de recibo"
-              description="Abre el diálogo de impresión al cobrar una venta."
+              label="Imprimir el recibo automáticamente"
+              description="Al cobrar una venta se abre solo la ventana para imprimir el ticket."
               checked={configDraft.autoPrintReceipt}
               onChange={(v) => setConfigDraft({ ...configDraft, autoPrintReceipt: v })}
             />
             <Toggle
-              label="Permitir stock negativo"
-              description="Deja vender productos aunque el inventario quede en negativo."
+              label="Vender aunque no quede stock"
+              description="Permite vender un producto aunque el inventario llegue a negativo. Apágalo si quieres que Caja te lo impida."
               checked={configDraft.allowNegativeStock}
               onChange={(v) => setConfigDraft({ ...configDraft, allowNegativeStock: v })}
             />
             <Toggle
-              label="Módulo de Cocina"
-              checked={configDraft.enableKitchen}
-              onChange={(v) => setConfigDraft({ ...configDraft, enableKitchen: v })}
-            />
-            <Toggle
-              label="Módulo de Mesas"
-              checked={configDraft.enableTables}
-              onChange={(v) => setConfigDraft({ ...configDraft, enableTables: v })}
-            />
-            <Toggle
-              label="Domicilios"
-              description="Exige un WhatsApp de pedidos en Datos del negocio y activa el QR de WhatsApp en el ticket."
-              checked={configDraft.enableDelivery}
-              onChange={(v) => setConfigDraft({ ...configDraft, enableDelivery: v })}
-            />
-            <Toggle
               label="Recomendaciones con IA"
-              description="Sugerencias en Dashboard e Inventario."
+              description="Muestra sugerencias en el Dashboard y en Inventario."
               checked={configDraft.enableAI}
               onChange={(v) => setConfigDraft({ ...configDraft, enableAI: v })}
             />
@@ -563,13 +622,17 @@ export function SettingsDashboard() {
               size="sm"
               className="ml-auto"
             >
-              {t("settings.save.operation")}
+              Guardar reglas
             </VimdyButton>
           </div>
         </SectionCard>
+        </div>
 
+        <div className={tab === "impresion" ? "contents" : "hidden"}>
         <DailyReportSettingsCard />
+        </div>
 
+        <div className={tab === "facturacion" ? "contents" : "hidden"}>
         {config.country === "CO" && (
           <SectionCard
             icon={<FileText size={18} className="text-orange-400" />}
@@ -630,10 +693,14 @@ export function SettingsDashboard() {
             </div>
           </SectionCard>
         )}
+        </div>
 
+        <div className={tab === "impresion" ? "contents" : "hidden"}>
         {/* Impresión — plantillas de ticket, toggles y vista previa en vivo */}
         <PrintSettingsSection business={businessDraft} />
+        </div>
 
+        <div className={tab === "datos" ? "contents" : "hidden"}>
         {/* Backup manual */}
         <SectionCard
           icon={<DownloadCloud size={18} className="text-cyan-400" />}
@@ -674,7 +741,9 @@ export function SettingsDashboard() {
             </VimdyButton>
           </div>
         </SectionCard>
+        </div>
 
+        <div className={tab === "operacion" ? "contents" : "hidden"}>
         {/* Sucursales */}
         <SectionCard
           icon={<Building2 size={18} className="text-cyan-400" />}
@@ -683,14 +752,19 @@ export function SettingsDashboard() {
         >
           <BranchManager />
         </SectionCard>
+        </div>
 
+        <div className={tab === "equipo" ? "contents" : "hidden"}>
         {/* Usuarios y roles */}
         {can("users.view") && (
           <SectionCard
             icon={<Users size={18} className="text-green-400" />}
             title="Usuarios y roles"
-            description={`${users.length} usuario${users.length === 1 ? "" : "s"} registrado${users.length === 1 ? "" : "s"}.`}
+            description={`Aquí decides quién puede entrar a tu negocio y qué puede hacer. Ahora hay ${users.length} persona${users.length === 1 ? "" : "s"} con acceso.`}
           >
+            <p className="text-slate-400 text-xs mb-3">
+              Cada persona tiene un rol. El rol dice qué puede ver y hacer en VIMDY. Tú, como dueño, siempre puedes todo.
+            </p>
             {can("users.create") && (
               <VimdyButton
                 onClick={() => setCreatingUser(true)}
@@ -699,7 +773,7 @@ export function SettingsDashboard() {
                 fullWidth
                 className="mb-3 border-dashed"
               >
-                Nuevo usuario
+                Agregar persona
               </VimdyButton>
             )}
 
@@ -725,12 +799,12 @@ export function SettingsDashboard() {
                           : "text-red-400 bg-red-500/10 border-red-500/30"
                       }`}
                     >
-                      {u.status}
+                      {userStatusLabel(u.status)}
                     </span>
                     {can("users.edit") && u.id !== user?.id && (
                       <button
-                        title={u.status === "ACTIVE" ? "Suspender" : "Reactivar"}
-                        aria-label={u.status === "ACTIVE" ? "Suspender usuario" : "Reactivar usuario"}
+                        title={u.status === "ACTIVE" ? "Quitarle el acceso" : "Devolverle el acceso"}
+                        aria-label={u.status === "ACTIVE" ? "Quitarle el acceso a esta persona" : "Devolverle el acceso a esta persona"}
                         onClick={() =>
                           setUserStatus(
                             user?.id ?? "SYSTEM",
@@ -750,7 +824,7 @@ export function SettingsDashboard() {
 
             <div className="mt-4 pt-4 border-t border-slate-700/60">
               <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                Roles y permisos
+                ¿Qué puede hacer cada rol?
               </h4>
               <div className="space-y-2">
                 {roles.map((r) => (
@@ -760,27 +834,28 @@ export function SettingsDashboard() {
                   >
                     <div className="min-w-0">
                       <p className="text-white text-sm font-semibold truncate">{r.name}</p>
-                      <p className="text-slate-500 text-xs truncate">
-                        {r.permissions.includes("*")
-                          ? "Acceso total"
-                          : `${r.permissions.length} permiso${r.permissions.length === 1 ? "" : "s"}`}
-                      </p>
+                      <p className="text-slate-400 text-xs">{roleHelp(r.id, r.permissions)}</p>
+                      <p className="text-slate-500 text-xs">{roleSummary(r.permissions)}</p>
                     </div>
-                    <VimdyButton
-                      onClick={() => setEditingRole({ id: r.id, name: r.name })}
-                      variant="ghost"
-                      size="sm"
-                      className="flex-shrink-0"
-                    >
-                      Editar permisos
-                    </VimdyButton>
+                    {!r.permissions.includes("*") && (
+                      <VimdyButton
+                        onClick={() => setEditingRole({ id: r.id, name: r.name })}
+                        variant="ghost"
+                        size="sm"
+                        className="flex-shrink-0"
+                      >
+                        Cambiar qué puede hacer
+                      </VimdyButton>
+                    )}
                   </div>
                 ))}
               </div>
             </div>
           </SectionCard>
         )}
+        </div>
 
+        <div className={tab === "equipo" ? "contents" : "hidden"}>
         {/* Meseros ligeros — sin login, solo nombre (pantalla Meseros) */}
         <SectionCard
           icon={<UserCircle2 size={18} className="text-cyan-400" />}
@@ -789,7 +864,28 @@ export function SettingsDashboard() {
         >
           <WaitersSettingsSection />
         </SectionCard>
+        </div>
       </div>
+
+      {hasUnsaved && (
+        <div className="sticky bottom-4 z-20 mx-auto w-full max-w-xl rounded-2xl border border-cyan-500/40 bg-slate-900/95 backdrop-blur px-4 py-3 shadow-2xl flex items-center justify-between gap-3">
+          <p className="text-sm text-white">
+            {saveError
+              ? saveError
+              : whatsappMissing
+                ? "Falta el WhatsApp de pedidos para guardar."
+                : "Tienes cambios sin guardar."}
+          </p>
+          <div className="flex gap-2">
+            <VimdyButton onClick={handleDiscardAll} variant="secondary" size="sm">
+              Descartar
+            </VimdyButton>
+            <VimdyButton onClick={handleSaveAll} variant="primary" size="sm">
+              {saving ? "Guardando..." : whatsappMissing ? "Ir a completarlo" : "Guardar todo"}
+            </VimdyButton>
+          </div>
+        </div>
+      )}
 
       {creatingUser && (
         <CreateUserModal
@@ -854,7 +950,7 @@ function CreateUserModal({
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-white font-bold flex items-center gap-2">
             <ShieldCheck size={16} className="text-cyan-400" />
-            Nuevo usuario
+            Agregar persona
           </h3>
           <button onClick={onClose} aria-label="Cerrar" className="text-slate-400 hover:text-white">
             <X size={18} />
@@ -862,13 +958,13 @@ function CreateUserModal({
         </div>
 
         <div className="space-y-3">
-          <Field label="Nombre">
+          <Field label="Nombre de la persona">
             <input autoFocus className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
-          <Field label="Correo">
+          <Field label="Correo (con este correo va a entrar)">
             <input className={inputClass} value={email} onChange={(e) => setEmail(e.target.value)} />
           </Field>
-          <Field label="Contraseña (mínimo 6 caracteres)">
+          <Field label="Contraseña para entrar (mínimo 6 caracteres)">
             <div className="relative">
               <input
                 type={showPassword ? "text" : "password"}
@@ -887,7 +983,7 @@ function CreateUserModal({
               </button>
             </div>
           </Field>
-          <Field label="Rol">
+          <Field label="¿Qué va a hacer en el negocio?">
             <select className={inputClass} value={roleId} onChange={(e) => setRoleId(e.target.value)}>
               {roles.map((r) => (
                 <option key={r.id} value={r.id}>
@@ -895,6 +991,7 @@ function CreateUserModal({
                 </option>
               ))}
             </select>
+            <p className="text-slate-500 text-xs mt-1">{roleHelp(roleId)}</p>
           </Field>
 
           <div className="flex gap-2 pt-1">
@@ -912,7 +1009,7 @@ function CreateUserModal({
               variant="primary"
               fullWidth
             >
-              Crear usuario
+              Agregar persona
             </VimdyButton>
           </div>
         </div>

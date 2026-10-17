@@ -205,7 +205,10 @@ export async function syncOne(
             pending.payment.shiftId,
 
           cashRegisterId:
-            pending.payment.cashRegisterId
+            pending.payment.cashRegisterId,
+
+          cashierName:
+            pending.cashierName
         }
       );
   }
