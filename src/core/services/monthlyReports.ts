@@ -13,7 +13,7 @@
 =========================================================================== */
 
 import type { Product, Sale } from "../entities/Entities";
-import { getSaleNetItems, getSaleNetTotal, getSaleRefundedTotal } from "../utils/saleRefunds";
+import { getSaleNetItems, getSaleNetTotal, getSaleRefundedTotal, isRevenueSaleStatus } from "../utils/saleRefunds";
 import { getBusinessDateKey, getBusinessMonthKey } from "../utils/businessTime";
 
 export interface MethodRow {
@@ -128,7 +128,27 @@ function shortDate(dateKey: string): string {
 
 /** Ventas que cuentan como ingreso real (misma regla que Reportes). */
 export function paidSalesOnly(sales: readonly Sale[]): Sale[] {
-  return sales.filter((s) => s.status === "PAID" || s.status === "CLOSED" || !s.status);
+  return sales.filter((sale) => isRevenueSaleStatus(sale.status));
+}
+
+/**
+ * Fecha contable para agrupar ingresos por mes: al existir, se usa la fecha
+ * real del cobro confirmado; las ventas históricas sin paidAt conservan
+ * createdAt como compatibilidad con los registros antiguos.
+ */
+function saleRevenueDate(sale: Sale): Date {
+  const paymentDate = sale.paidAt;
+  if (paymentDate instanceof Date && Number.isFinite(paymentDate.getTime())) {
+    return paymentDate;
+  }
+
+  const createdDate = sale.createdAt;
+  if (createdDate instanceof Date && Number.isFinite(createdDate.getTime())) {
+    return createdDate;
+  }
+
+  const parsed = new Date(createdDate as unknown as string);
+  return Number.isFinite(parsed.getTime()) ? parsed : new Date(0);
 }
 
 function summarize(sales: readonly Sale[], dayKeys: readonly string[], tz: string, productName: (id: string) => string): PeriodSummary {
@@ -158,7 +178,7 @@ function summarize(sales: readonly Sale[], dayKeys: readonly string[], tz: strin
       products.set(item.productId, p);
     }
 
-    const dayKey = getBusinessDateKey(new Date(sale.createdAt), tz);
+    const dayKey = getBusinessDateKey(saleRevenueDate(sale), tz);
     byDay.set(dayKey, (byDay.get(dayKey) ?? 0) + net);
   }
 
@@ -192,7 +212,7 @@ function summarize(sales: readonly Sale[], dayKeys: readonly string[], tz: strin
 }
 
 function salesOfMonth(sales: readonly Sale[], monthKey: string, tz: string): Sale[] {
-  return paidSalesOnly(sales).filter((s) => getBusinessMonthKey(new Date(s.createdAt), tz) === monthKey);
+  return paidSalesOnly(sales).filter((s) => getBusinessMonthKey(saleRevenueDate(s), tz) === monthKey);
 }
 
 function monthSales(sales: readonly Sale[], monthKey: string, tz: string): number {
@@ -209,11 +229,11 @@ export function listReportMonths(sales: readonly Sale[], tz: string, now: Date =
   const currentKey = getBusinessMonthKey(now, tz);
   const keys = new Set<string>([currentKey]);
   const paid = paidSalesOnly(sales);
-  for (const sale of paid) keys.add(getBusinessMonthKey(new Date(sale.createdAt), tz));
+  for (const sale of paid) keys.add(getBusinessMonthKey(saleRevenueDate(sale), tz));
 
   const totals = new Map<string, { sales: number; tickets: number }>();
   for (const sale of paid) {
-    const key = getBusinessMonthKey(new Date(sale.createdAt), tz);
+    const key = getBusinessMonthKey(saleRevenueDate(sale), tz);
     const t = totals.get(key) ?? { sales: 0, tickets: 0 };
     t.sales += getSaleNetTotal(sale);
     t.tickets += 1;
@@ -242,7 +262,7 @@ export function listReportMonths(sales: readonly Sale[], tz: string, now: Date =
 function dayRows(sales: readonly Sale[], dayKeys: readonly string[], tz: string): DayRow[] {
   const byDay = new Map<string, { sales: number; tickets: number }>();
   for (const sale of sales) {
-    const key = getBusinessDateKey(new Date(sale.createdAt), tz);
+    const key = getBusinessDateKey(saleRevenueDate(sale), tz);
     const d = byDay.get(key) ?? { sales: 0, tickets: 0 };
     d.sales += getSaleNetTotal(sale);
     d.tickets += 1;
