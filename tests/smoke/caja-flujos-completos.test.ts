@@ -303,6 +303,18 @@ describe("Smoke: caja, pagos, turnos y conciliacion (FASE 4)", () => {
       expect(summary.expectedAmount).toBe(38000);
       expect(summary.totalExpense).toBe(12000);
     });
+
+    it("rechaza importes no finitos en egresos sin persistir movimientos", async () => {
+      await ctx.shiftEngine.openShift(CASHIER_ID, 50000);
+
+      await expect(ctx.cash.registerExpense(Number.NaN, "Egreso inválido")).rejects.toThrow(
+        /INVALID_AMOUNT/
+      );
+      await expect(ctx.cash.registerExpense(Number.POSITIVE_INFINITY, "Egreso inválido")).rejects.toThrow(
+        /INVALID_AMOUNT/
+      );
+      expect(await ctx.cashMovements.findAll()).toHaveLength(0);
+    });
   });
 
   // =========================================================================

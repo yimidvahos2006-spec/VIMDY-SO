@@ -230,7 +230,7 @@ export class CashEngine {
     id?: string,
     cashRegisterId?: string
   ): Promise<CashMovement> {
-    if (amount <= 0) {
+    if (!Number.isFinite(amount) || amount <= 0) {
       throw new Error("INVALID_AMOUNT");
     }
 

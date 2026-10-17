@@ -269,13 +269,24 @@ export function ShiftPanel() {
               setCloseResult(result);
 
               if (businessId && branchId) {
-                // La creación del job ya ocurrió dentro de close_shift_atomic().
-                // Este kick solo acelera el envío cuando hay conexión.
-                await dailyReportDeliveryService.kick({
-                  businessId,
-                  branchId,
-                  shiftId: summary.shift.id,
-                });
+                // El cierre y el job de reporte ya se confirmaron en PostgreSQL.
+                // Este kick solo adelanta la entrega: si falla, NO se debe
+                // presentar el cierre como fallido ni bloquear la actualización.
+                try {
+                  await dailyReportDeliveryService.kick({
+                    businessId,
+                    branchId,
+                    shiftId: summary.shift.id,
+                  });
+                } catch {
+                  notificationStore.add(
+                    "Caja cerrada; reporte pendiente",
+                    "El turno quedó cerrado. No se pudo adelantar el envío del reporte; la entrega debe reintentarse.",
+                    "warning",
+                    `CAJA_REPORTE_KICK_FAILED:${summary.shift.id}`,
+                    "GENERAL",
+                  );
+                }
               }
             }}
             onRefresh={refresh}
