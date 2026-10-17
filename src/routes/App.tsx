@@ -24,7 +24,8 @@ import { APP_URL } from "../core/config/appUrl";
 function isAppSubdomain(): boolean {
   if (typeof window === "undefined") return false;
   const hostname = window.location.hostname.toLowerCase();
-  return hostname.startsWith("app.") || hostname === "localhost" && new URLSearchParams(window.location.search).get("app") === "1";
+  const previewAppEnabled = import.meta.env.VITE_ENABLE_PREVIEW_APP === "true";
+  return hostname.startsWith("app.") || previewAppEnabled || (hostname === "localhost" && new URLSearchParams(window.location.search).get("app") === "1");
 }
 
 // vimdy.co (la página web) y app.vimdy.co (la app) deben quedar separados:
