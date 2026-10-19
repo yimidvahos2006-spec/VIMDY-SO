@@ -86,8 +86,8 @@ const KITCHEN_OPTIONS: ReadonlyArray<{
   icon: React.ElementType;
 }> = [
   { id: "kds", label: "En pantalla", detail: "Los pedidos aparecen en una pantalla", icon: Monitor },
-  { id: "printer", label: "Impresos", detail: "Sale un ticket por la impresora", icon: Printer },
-  { id: "both", label: "Pantalla e impreso", detail: "Las dos cosas", icon: ChefHat },
+  { id: "printer", label: "Ticket impreso", detail: "Sale un ticket por la impresora", icon: Printer },
+  { id: "both", label: "Pantalla y ticket", detail: "Las dos cosas", icon: ChefHat },
 ];
 
 export function ModulesStep({ businessId, onSaved }: ModulesStepProps) {
@@ -190,11 +190,24 @@ export function ModulesStep({ businessId, onSaved }: ModulesStepProps) {
     key: "mesas" | "meseros" | "cocina" | "clientes";
     label: string;
     detail: string;
+    hint?: string;
     icon: React.ElementType;
   }> = [
-    { key: "mesas", label: "Mesas", detail: "Atiendes a los clientes sentados en mesas", icon: MODULE_ICONS.mesas },
-    { key: "meseros", label: "Meseros", detail: "Hay personas que toman los pedidos (con o sin mesas)", icon: UserRound },
-    { key: "cocina", label: "Cocina", detail: "Los pedidos llegan a la cocina", icon: MODULE_ICONS.cocina },
+    { key: "mesas", label: "Mesas", detail: "Atiendes en mesas", icon: MODULE_ICONS.mesas },
+    {
+      key: "meseros",
+      label: "Meseros",
+      detail: "Tienes meseros que toman los pedidos",
+      hint: "Si atiendes solo, déjalo sin marcar",
+      icon: UserRound,
+    },
+    {
+      key: "cocina",
+      label: "Cocina",
+      detail: "¿Los pedidos se preparan en una cocina aparte?",
+      hint: "Sirve para pantalla o ticket impreso",
+      icon: MODULE_ICONS.cocina,
+    },
     { key: "clientes", label: "Clientes", detail: "Guardas tus clientes y sus compras", icon: MODULE_ICONS.clientes },
   ];
 
@@ -248,6 +261,11 @@ export function ModulesStep({ businessId, onSaved }: ModulesStepProps) {
                 <span className="block text-vimdy-micro text-vimdy-text-tertiary mt-0.5">
                   {option.detail}
                 </span>
+                {option.hint && (
+                  <span className="block text-vimdy-micro text-vimdy-text-muted mt-0.5">
+                    {option.hint}
+                  </span>
+                )}
               </div>
 
               <div className={`
@@ -295,7 +313,7 @@ export function ModulesStep({ businessId, onSaved }: ModulesStepProps) {
       {choice.cocina && (
         <VimdyCard padding="lg" className="mt-6">
           <p className="text-sm font-semibold text-vimdy-text-secondary mb-3">
-            ¿Cómo ven los pedidos en la cocina?
+            ¿Cómo le llegan los pedidos a la cocina?
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {KITCHEN_OPTIONS.map((option) => {
