@@ -63,7 +63,7 @@ export interface BusinessTypeDefinition {
 
 export const BUSINESS_TYPES: readonly BusinessTypeDefinition[] = [
   { id: "restaurante", label: "Restaurante", emoji: "🍔" },
-  { id: "comida_rapida", label: "Restaurante rápido", emoji: "🍟" },
+  { id: "comida_rapida", label: "Comidas rápidas", emoji: "🍟" },
   { id: "cafeteria", label: "Cafetería", emoji: "☕" },
   { id: "pizzeria", label: "Pizzería", emoji: "🍕" },
   { id: "asadero", label: "Asadero", emoji: "🥩" },
