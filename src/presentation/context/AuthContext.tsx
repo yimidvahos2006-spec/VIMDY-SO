@@ -270,6 +270,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const bootstrapGeneration = useRef(0);
   const authOperationInFlight = useRef(0);
   const authCleanupInProgress = useRef(false);
+  // Espejo de la sesión ya cargada: Supabase vuelve a emitir SIGNED_IN cada vez
+  // que el usuario regresa a la pestaña; si ya está cargada NO se rehace el
+  // bootstrap (eso mostraba el spinner y desmontaba la pantalla).
+  const sessionLoadedRef = useRef<{ userId: string | null; ready: boolean; hasError: boolean }>({
+    userId: null,
+    ready: false,
+    hasError: false
+  });
 
   const clearAuthState = useCallback(() => {
     if (authCleanupInProgress.current) return;
@@ -453,6 +461,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   useEffect(() => {
+    sessionLoadedRef.current = {
+      userId: user?.id ?? null,
+      ready: isReady,
+      hasError: businessBootstrapError !== null
+    };
+  }, [user, isReady, businessBootstrapError]);
+
+  useEffect(() => {
     let cancelled = false;
 
     void supabase.auth.getSession().then(({ data, error: sessionError }) => {
@@ -483,6 +499,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // evitar carreras/deadlocks durante refresh o OAuth.
         if (event === "INITIAL_SESSION") {
           void hydrateAuthSession(session, false);
+          return;
+        }
+
+        if (
+          event === "SIGNED_IN" &&
+          sessionLoadedRef.current.ready &&
+          !sessionLoadedRef.current.hasError &&
+          sessionLoadedRef.current.userId === session.user.id
+        ) {
+          // Mismo usuario ya cargado (volvió a la pestaña): no recargar nada.
           return;
         }
 
