@@ -262,7 +262,7 @@ export function ModulesStep({ businessId, onSaved }: ModulesStepProps) {
                   {option.detail}
                 </span>
                 {option.hint && (
-                  <span className="block text-vimdy-micro text-vimdy-text-muted mt-0.5">
+                  <span className="block text-vimdy-micro text-vimdy-text-tertiary mt-0.5">
                     {option.hint}
                   </span>
                 )}
