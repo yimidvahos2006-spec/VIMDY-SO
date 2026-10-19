@@ -6,7 +6,18 @@ import { VimdyButton } from "../ui/VimdyButton";
 import { VimdyInput } from "../ui/VimdyInput";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { useAuth } from "../../context/AuthContext";
+import { translateBusinessError } from "../../../core/errors/translateBusinessError";
 import { useStepDraft } from "./useStepDraft";
+
+// Pesos colombianos sin decimales: 50000 -> "$ 50.000".
+const copFormatter = new Intl.NumberFormat("es-CO", {
+  style: "currency",
+  currency: "COP",
+  maximumFractionDigits: 0,
+});
+
+// Máximo 12 dígitos (999.999.999.999): evita montos absurdos por error de tecleo.
+const MAX_DIGITS = 12;
 
 interface CashOpeningStepProps {
   onSaved: () => void;
@@ -16,8 +27,9 @@ export function CashOpeningStep({ onSaved }: CashOpeningStepProps) {
   const { user } = useAuth();
 
   // El monto se guarda al instante y se recupera si el usuario sale o recarga.
+  // Se guardan SOLO los dígitos ("50000"); en pantalla se ve con puntos ("50.000").
   const [amount, setAmount] = useStepDraft<string>("cash_opening", "", (raw) =>
-    typeof raw === "string" ? raw.slice(0, 20) : null
+    typeof raw === "string" ? raw.replace(/\D/g, "").slice(0, MAX_DIGITS) : null
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,8 +43,14 @@ export function CashOpeningStep({ onSaved }: CashOpeningStepProps) {
       return;
     }
 
+    // Campo vacío NO es lo mismo que 0: se pide escribirlo para no abrir la
+    // caja con $0 por accidente. Si de verdad no hay dinero, se escribe 0.
+    if (amount === "") {
+      setError("Escribe cuánto dinero hay en caja. Si no hay nada, escribe 0.");
+      return;
+    }
     const amountValue = Number(amount);
-    if (Number.isNaN(amountValue) || amountValue < 0) {
+    if (!Number.isFinite(amountValue) || amountValue < 0) {
       setError("El monto debe ser un número válido.");
       return;
     }
@@ -48,8 +66,7 @@ export function CashOpeningStep({ onSaved }: CashOpeningStepProps) {
         onSaved();
         return;
       }
-      const message = err instanceof Error ? err.message : "No se pudo abrir la caja.";
-      setError(message);
+      setError(translateBusinessError(err, "No se pudo abrir la caja."));
     } finally {
       setSaving(false);
     }
@@ -78,13 +95,22 @@ export function CashOpeningStep({ onSaved }: CashOpeningStepProps) {
           </div>
 
           <VimdyInput
-            type="number"
-            min={0}
-            step="0.01"
-            label="Monto inicial"
-            placeholder="Ej. 100000"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
+            type="text"
+            inputMode="numeric"
+            autoComplete="off"
+            label="Monto inicial *"
+            placeholder="Ej. 100.000"
+            icon={<span className="text-vimdy-body">$</span>}
+            hint={
+              amount === ""
+                ? "Escribe el dinero en efectivo que hay ahora en la caja, en pesos."
+                : `Se abrirá la caja con ${copFormatter.format(Number(amount))}.`
+            }
+            value={amount === "" ? "" : Number(amount).toLocaleString("es-CO")}
+            onChange={(e) => {
+              setAmount(e.target.value.replace(/\D/g, "").slice(0, MAX_DIGITS));
+              if (error) setError(null);
+            }}
             disabled={saving}
             autoFocus
           />
