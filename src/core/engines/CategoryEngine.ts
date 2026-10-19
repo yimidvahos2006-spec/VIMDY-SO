@@ -2,6 +2,19 @@ import { Category, Product } from '../entities/Entities';
 import { IRepository } from '../../infrastructure/di/repositories/IRepository';
 import { isDuplicateNameError } from '../errors/DuplicateNameError';
 
+/**
+ * Para detectar repetidas: ignora mayúsculas, tildes y espacios de más
+ * ("Café", "cafe" y "  CAFÉ " son la misma categoría).
+ */
+function normalizeCategoryName(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
 /* ===========================================================================
    CategoryEngine
    ---------------------------------------------------------------------------
@@ -49,7 +62,7 @@ export class CategoryEngine {
 
     const existing = await this.repository.findAll();
     const duplicate = existing.some(
-      (c) => c.name.trim().toLowerCase() === name.toLowerCase()
+      (c) => normalizeCategoryName(c.name) === normalizeCategoryName(name)
     );
 
     if (duplicate) {
@@ -124,7 +137,7 @@ export class CategoryEngine {
 
       const existing = await this.repository.findAll();
       const duplicate = existing.some(
-        (c) => c.id !== id && c.name.trim().toLowerCase() === name.toLowerCase()
+        (c) => c.id !== id && normalizeCategoryName(c.name) === normalizeCategoryName(name)
       );
 
       if (duplicate) {
