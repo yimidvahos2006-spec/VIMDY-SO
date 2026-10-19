@@ -27,15 +27,16 @@ interface EmployeesStepProps {
 interface EmployeeRoleOption {
   roleId: "ADMIN" | "CAJERO" | "MESERO" | "COCINA";
   label: string;
+  description: string;
   emoji: string;
   requiresModule?: ModuleId;
 }
 
 const EMPLOYEE_ROLE_OPTIONS: EmployeeRoleOption[] = [
-  { roleId: "ADMIN", label: "Administrador", emoji: "🛡️" },
-  { roleId: "CAJERO", label: "Cajero", emoji: "💵" },
-  { roleId: "MESERO", label: "Mesero", emoji: "🧑‍🍳", requiresModule: "mesas" },
-  { roleId: "COCINA", label: "Cocina", emoji: "👨‍🍳", requiresModule: "cocina" }
+  { roleId: "ADMIN", label: "Administrador", description: "Acceso total al negocio", emoji: "🛡️" },
+  { roleId: "CAJERO", label: "Cajero", description: "Cobra y maneja la caja", emoji: "💵" },
+  { roleId: "MESERO", label: "Mesero", description: "Toma los pedidos", emoji: "🧑‍🍳", requiresModule: "mesas" },
+  { roleId: "COCINA", label: "Cocina", description: "Ve y prepara los pedidos", emoji: "👨‍🍳", requiresModule: "cocina" }
 ];
 
 const ROLE_ICONS: Record<string, React.ElementType> = {
@@ -109,8 +110,6 @@ export function EmployeesStep({ enabledModules, onDone }: EmployeesStepProps) {
     }
   }
 
-  const Icon = ROLE_ICONS[roleId];
-
   return (
     <div className="w-full max-w-3xl mx-auto">
       <div className="text-center mb-10">
@@ -167,29 +166,57 @@ export function EmployeesStep({ enabledModules, onDone }: EmployeesStepProps) {
             placeholder="Contraseña"
           />
 
-          <div className="relative">
-            <select
-              value={roleId}
-              onChange={(e) => setRoleId(e.target.value as EmployeeRoleOption["roleId"])}
-              disabled={saving}
-              className="w-full appearance-none rounded-vimdy-md border-2 border-vimdy-border bg-vimdy-surface px-4 py-3 pl-12 text-vimdy-text outline-none transition-all duration-200 focus:border-vimdy-accent focus:ring-4 focus:ring-vimdy-accent/10 disabled:opacity-50"
-            >
+          <div role="radiogroup" aria-label="Rol del empleado">
+            <p className="block text-sm font-semibold text-vimdy-text-secondary mb-2">Rol</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {availableRoles.map((option) => {
                 const RoleIcon = ROLE_ICONS[option.roleId];
+                const selected = roleId === option.roleId;
                 return (
-                  <option key={option.roleId} value={option.roleId}>
-                    {option.label}
-                  </option>
+                  <button
+                    key={option.roleId}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => setRoleId(option.roleId)}
+                    disabled={saving}
+                    className={`
+                      group flex items-center gap-3 rounded-vimdy-md border-2 px-4 py-3 text-left
+                      transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50
+                      ${
+                        selected
+                          ? "border-vimdy-accent bg-vimdy-accent/10"
+                          : "border-vimdy-border bg-vimdy-surface hover:border-vimdy-accent/60 hover:bg-vimdy-surface-hover"
+                      }
+                    `}
+                  >
+                    <div
+                      className={`
+                        w-10 h-10 rounded-vimdy-md flex items-center justify-center shrink-0 transition-colors
+                        ${selected ? "bg-vimdy-accent/15 text-vimdy-accent" : "bg-vimdy-background text-vimdy-text-secondary group-hover:text-vimdy-text"}
+                      `}
+                    >
+                      {RoleIcon && <RoleIcon size={20} strokeWidth={1.8} />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <span className={`block text-sm font-semibold ${selected ? "text-vimdy-text" : "text-vimdy-text-secondary group-hover:text-vimdy-text"}`}>
+                        {option.label}
+                      </span>
+                      <span className="block text-vimdy-micro text-vimdy-text-tertiary mt-0.5">
+                        {option.description}
+                      </span>
+                    </div>
+                    <div
+                      className={`
+                        w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all
+                        ${selected ? "bg-vimdy-accent border-vimdy-accent" : "border-vimdy-border bg-vimdy-surface"}
+                      `}
+                    >
+                      {selected && <CheckCircle2 size={14} className="text-white" />}
+                    </div>
+                  </button>
                 );
               })}
-            </select>
-            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-vimdy-text-secondary pointer-events-none">
-              {Icon && <Icon size={20} strokeWidth={1.8} />}
-            </div>
-            <div className="absolute right-3 top-1/2 -translate-y-1/2 text-vimdy-text-muted pointer-events-none">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
             </div>
           </div>
 
