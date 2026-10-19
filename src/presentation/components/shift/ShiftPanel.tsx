@@ -126,8 +126,19 @@ export function ShiftPanel() {
 
   useEffect(() => {
     void refresh();
-    const interval = window.setInterval(() => void refresh(), 4000);
-    return () => window.clearInterval(interval);
+    // Se refresca cada 8 s y solo si la pestaña está visible; al volver a
+    // verla se refresca de inmediato para no mostrar datos viejos.
+    const interval = window.setInterval(() => {
+      if (!document.hidden) void refresh();
+    }, 8000);
+    const onVisible = () => {
+      if (!document.hidden) void refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [refresh]);
 
   async function handleOpenShift(event: FormEvent) {
@@ -269,13 +280,24 @@ export function ShiftPanel() {
               setCloseResult(result);
 
               if (businessId && branchId) {
-                // La creación del job ya ocurrió dentro de close_shift_atomic().
-                // Este kick solo acelera el envío cuando hay conexión.
-                await dailyReportDeliveryService.kick({
-                  businessId,
-                  branchId,
-                  shiftId: summary.shift.id,
-                });
+                // El cierre y el job de reporte ya se confirmaron en PostgreSQL.
+                // Este kick solo adelanta la entrega: si falla, NO se debe
+                // presentar el cierre como fallido ni bloquear la actualización.
+                try {
+                  await dailyReportDeliveryService.kick({
+                    businessId,
+                    branchId,
+                    shiftId: summary.shift.id,
+                  });
+                } catch {
+                  notificationStore.add(
+                    "Caja cerrada; reporte pendiente",
+                    "El turno quedó cerrado. No se pudo adelantar el envío del reporte; la entrega debe reintentarse.",
+                    "warning",
+                    `CAJA_REPORTE_KICK_FAILED:${summary.shift.id}`,
+                    "GENERAL",
+                  );
+                }
               }
             }}
             onRefresh={refresh}

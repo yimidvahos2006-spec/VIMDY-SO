@@ -307,10 +307,18 @@ return { income, change: changeMovement };
       );
     }
 
+    // La fila devuelta por PostgreSQL es la fuente de verdad, especialmente
+    // en reintentos idempotentes: puede ser el movimiento original y no el
+    // payload del intento actual. No mezclar importes nuevos con IDs antiguos.
     return {
       ...movement,
       id: row.idempotency_key ?? movement.id,
+      type: row.type === "IN" || row.type === "OUT" ? row.type : movement.type,
+      amount: row.amount == null ? movement.amount : Number(row.amount),
+      description: row.description ?? movement.description,
       date: new Date(row.date ?? movement.date.toISOString()),
+      paymentMethod: row.payment_method ?? movement.paymentMethod,
+      cashAmount: row.cash_amount == null ? movement.cashAmount : Number(row.cash_amount),
       businessId: row.business_id ?? movement.businessId,
       branchId: row.branch_id ?? movement.branchId,
       cashRegisterId: row.cash_register_id ?? movement.cashRegisterId,

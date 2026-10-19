@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo, useState } from "react";
 import {
   DollarSign,
   ShoppingBag,
@@ -19,8 +19,19 @@ import { VimdyButton } from "../ui/VimdyButton";
 import { useReports, RANGE_LABEL, ReportRange } from "../../../core/store/useReports";
 import { useTranslation } from "../../../core/i18n/useTranslation";
 import { useAuth } from "../../context/AuthContext";
+import { businessStore } from "../../../core/store/businessStore";
+import { companyConfigStore } from "../../../core/store/companyConfigStore";
+import { buildMonthReport, downloadCsv, listReportMonths } from "../../../core/services/monthlyReports";
+import { monthDownloadFromReport } from "../../../core/services/monthlyReportsDownload";
+import { MonthlyReportsPanel } from "./MonthlyReportsPanel";
 
 const RANGES: ReportRange[] = ["hoy", "7d", "30d", "mes", "todo"];
+
+type ReportsTab = "resumen" | "mes";
+const TABS: { id: ReportsTab; label: string }[] = [
+  { id: "resumen", label: "Resumen" },
+  { id: "mes", label: "Por mes" }
+];
 
 export function ReportsDashboard() {
   const { money } = useTranslation();
@@ -33,6 +44,9 @@ export function ReportsDashboard() {
     range,
     setRange,
     sales,
+    allSales,
+    products,
+    tz,
     summary,
     topProducts,
     topCustomers,
@@ -41,6 +55,24 @@ export function ReportsDashboard() {
     paymentMethodBreakdown,
     exportCsv
   } = useReports();
+
+  const [tab, setTab] = useState<ReportsTab>("resumen");
+  const [monthDownloadError, setMonthDownloadError] = useState<string | null>(null);
+
+  // Mes actual DEL NEGOCIO (no del equipo) para el botón de la cabecera.
+  const currentMonth = useMemo(() => listReportMonths(allSales, tz).find((m) => m.isCurrent) ?? null, [allSales, tz]);
+
+  function downloadCurrentMonth() {
+    if (!canExport || !currentMonth) return;
+    try {
+      setMonthDownloadError(null);
+      const report = buildMonthReport(allSales, products, tz, currentMonth.monthKey);
+      const file = monthDownloadFromReport(report, businessStore.get().name, companyConfigStore.get().currency);
+      downloadCsv(file.fileName, file.csv);
+    } catch {
+      setMonthDownloadError("No se pudo descargar el archivo. Intenta de nuevo.");
+    }
+  }
 
   if (loading) {
     return (
@@ -80,15 +112,24 @@ export function ReportsDashboard() {
           </p>
         </div>
         {canExport && (
-          <VimdyButton
-            onClick={exportCsv}
-            disabled={sales.length === 0}
-            variant="primary"
-            icon={<Download size={18} />}
-            className="self-start sm:self-auto"
-          >
-            Exportar CSV
-          </VimdyButton>
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+            <VimdyButton
+              onClick={downloadCurrentMonth}
+              disabled={!currentMonth || currentMonth.tickets === 0}
+              variant="secondary"
+              icon={<Download size={18} />}
+            >
+              Descargar reporte del mes
+            </VimdyButton>
+            <VimdyButton
+              onClick={exportCsv}
+              disabled={sales.length === 0}
+              variant="primary"
+              icon={<Download size={18} />}
+            >
+              Exportar ventas (CSV)
+            </VimdyButton>
+          </div>
         )}
       </div>
 
@@ -97,7 +138,45 @@ export function ReportsDashboard() {
           {error}
         </div>
       )}
+      {monthDownloadError && (
+        <div className="rounded-xl border border-vimdy-danger/40 bg-vimdy-danger/10 text-vimdy-danger text-sm px-4 py-3">
+          {monthDownloadError}
+        </div>
+      )}
 
+      {/* Pestañas: Resumen / Por mes */}
+      <div className="flex flex-wrap gap-2" role="tablist">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.id}
+            onClick={() => setTab(t.id)}
+            className={`px-4 py-2 rounded-xl text-sm font-semibold transition border ${
+              tab === t.id
+                ? "bg-vimdy-accent text-white border-vimdy-accent"
+                : "bg-vimdy-surface-hover text-vimdy-text-secondary border-vimdy-border hover:border-vimdy-accent/50"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "mes" ? (
+        <MonthlyReportsPanel
+          loading={false}
+          error={null}
+          allSales={allSales}
+          products={products}
+          tz={tz}
+          businessName={businessStore.get().name}
+          currency={companyConfigStore.get().currency}
+          canExport={canExport}
+        />
+      ) : (
+        <>
       {/* Selector de rango */}
       <div className="flex flex-wrap gap-2">
         {RANGES.map((r) => (
@@ -316,6 +395,8 @@ export function ReportsDashboard() {
           )}
         </div>
       </div>
+        </>
+      )}
         </>
       )}
     </div>

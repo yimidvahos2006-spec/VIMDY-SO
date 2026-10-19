@@ -1,3 +1,4 @@
+import { companyConfigStore } from "../../../core/store/companyConfigStore";
 import React, { useMemo, useState } from "react";
 import { toast } from "../../../core/store/toastStore";
 import { VimdyButton } from "../ui/VimdyButton";
@@ -34,11 +35,14 @@ export function ProductFormModal({
   onClose,
   onSave,
   onBuyIngredient,
-  onViewKardex
+  onViewKardex,
+  saveError
 }: {
   product?: Product;
   onClose: () => void;
   onSave: (input: ProductInput) => Promise<boolean>;
+  /** Último error del inventario (ej. nombre duplicado): se muestra dentro del formulario, que tapa el banner de la página. */
+  saveError?: string | null;
   /** PASO 2.3 (Producción Inteligente): abre el detalle del ingrediente limitante para reponer stock. */
   onBuyIngredient?: (ingredientId: string) => void;
   /** PASO 2.3 (Producción Inteligente): abre el Kardex (ProductDetailModal) de este producto. */
@@ -369,6 +373,8 @@ export function ProductFormModal({
 
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [saveFailed, setSaveFailed] = useState(false);
+  const errorBannerRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     Promise.all([
@@ -463,6 +469,21 @@ export function ProductFormModal({
       return;
     }
 
+    // Protección contra el error más común: escribir "4" queriendo decir 4.000.
+    const isPesos = (companyConfigStore.get().currency || "COP").toUpperCase() === "COP";
+    if (isPesos && priceValue > 0 && priceValue < 100) {
+      const ok = window.confirm(
+        `El precio de venta es solo $${priceValue.toLocaleString("es-CO")} pesos. ¿Seguro que es correcto?\n\nSi quisiste escribir ${(priceValue * 1000).toLocaleString("es-CO")}, toca Cancelar y corrígelo.`
+      );
+      if (!ok) return;
+    }
+    if (isPesos && purchasePriceValue !== undefined && !isNaN(purchasePriceValue) && purchasePriceValue > 0 && purchasePriceValue < 100) {
+      const okCost = window.confirm(
+        `El precio de compra es solo $${purchasePriceValue.toLocaleString("es-CO")} pesos. ¿Seguro que es correcto?`
+      );
+      if (!okCost) return;
+    }
+
     if (
       estimatedPrepMinutes.trim() &&
       (isNaN(estimatedPrepMinutesValue as number) || (estimatedPrepMinutesValue as number) <= 0)
@@ -536,9 +557,12 @@ export function ProductFormModal({
     }
 
     setFormError(null);
+    setSaveFailed(false);
     setSaving(true);
 
-    const ok = await onSave({
+    let ok = false;
+    try {
+      ok = await onSave({
       name: name.trim(),
       description: description.trim() || undefined,
       active,
@@ -577,19 +601,36 @@ export function ProductFormModal({
       trackStock: resolveProductFlags(productType, productionMode).trackStock,
       isIngredient: productType === "ingrediente"
     });
-
-    setSaving(false);
+    } catch {
+      ok = false;
+    } finally {
+      // Sin esto, si algo lanzaba, "Guardar" se quedaba cargando para siempre.
+      setSaving(false);
+    }
 
     if (ok) {
       onClose();
     } else {
-      setFormError(
-        isEditing
-          ? "No se pudo guardar los cambios. Intenta de nuevo."
-          : "No se pudo guardar el producto. Intenta de nuevo."
-      );
+      setSaveFailed(true);
     }
   }
+
+  // Motivo real del fallo (ej. "Ya existe un producto con ese nombre") si el
+  // inventario lo reportó; si no, un mensaje genérico.
+  const failureMessage = saveFailed
+    ? saveError ??
+      (isEditing
+        ? "No se pudo guardar los cambios. Intenta de nuevo."
+        : "No se pudo guardar el producto. Intenta de nuevo.")
+    : null;
+
+  // El botón Guardar está abajo y el aviso arriba: al fallar, se lleva el
+  // aviso a la vista para que nunca parezca que "no pasó nada".
+  React.useEffect(() => {
+    if (formError || saveFailed) {
+      errorBannerRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+    }
+  }, [formError, saveFailed, saveError]);
 
   async function handleCreateQuickIngredient(name: string) {
     const purchasePrice = quickIngredientPurchasePrice.trim() ? parseMoneyInput(quickIngredientPurchasePrice) : undefined;
@@ -645,9 +686,13 @@ export function ProductFormModal({
           </button>
         </div>
 
-        {formError && (
-          <div className="mb-4 rounded-vimdy-md border border-vimdy-danger/40 bg-vimdy-danger/10 text-vimdy-danger text-sm px-3 py-2">
-            {formError}
+        {(formError ?? failureMessage) && (
+          <div
+            ref={errorBannerRef}
+            role="alert"
+            className="mb-4 rounded-vimdy-md border border-vimdy-danger/40 bg-vimdy-danger/10 text-vimdy-danger text-sm px-3 py-2"
+          >
+            {formError ?? failureMessage}
           </div>
         )}
 

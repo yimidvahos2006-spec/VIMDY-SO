@@ -20,7 +20,7 @@ import { PredictionAI } from "../ia/PredictionAI";
 import { RecommendationAI } from "../ia/RecommendationAI";
 import { companyConfigStore } from "../store/companyConfigStore";
 import { getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
-import { getSaleNetTotal, getSaleNetItems, VALID_SALE_STATUSES } from "../utils/saleRefunds";
+import { getSaleNetTotal, getSaleNetItems, isRevenueSaleStatus } from "../utils/saleRefunds";
 import {
   buildWeightedAverageCostMap,
   buildWeightedAverageCostTimeline,
@@ -273,10 +273,13 @@ export class BusinessAnalyzer {
     const todayKey = getBusinessDateKey(now, timezone);
     const yesterdayKey = getYesterdayKey(now, timezone);
 
-    const todaySalesList = summary.sales.filter(
+    const revenueSales = summary.sales.filter(
+      (sale) => isRevenueSaleStatus(sale.status) && getSaleNetTotal(sale) > 0
+    );
+    const todaySalesList = revenueSales.filter(
       (sale) => sale.createdAt && getBusinessDateKey(new Date(sale.createdAt), timezone) === todayKey
     );
-    const yesterdaySalesList = summary.sales.filter(
+    const yesterdaySalesList = revenueSales.filter(
       (sale) => sale.createdAt && getBusinessDateKey(new Date(sale.createdAt), timezone) === yesterdayKey
     );
 
@@ -287,7 +290,7 @@ export class BusinessAnalyzer {
       yesterdaySalesList.reduce((sum, sale) => sum + getSaleNetTotal(sale), 0)
     );
     const totalSalesAllTime = fixed2(
-      summary.sales.reduce((sum, sale) => sum + getSaleNetTotal(sale), 0)
+      revenueSales.reduce((sum, sale) => sum + getSaleNetTotal(sale), 0)
     );
     const averageTicketToday = todaySalesList.length > 0
       ? fixed2(todaySales / todaySalesList.length)
@@ -300,7 +303,7 @@ export class BusinessAnalyzer {
     const totalsByWeekday = new Map<number, number>();
     const countByWeekday = new Map<number, number>();
     for (const sale of summary.sales) {
-      if (!VALID_SALE_STATUSES.has(sale.status!)) continue;
+      if (!isRevenueSaleStatus(sale.status)) continue;
       const weekday = getBusinessWeekdayIndex(new Date(sale.createdAt), timezone);
       totalsByWeekday.set(
         weekday,
@@ -330,7 +333,7 @@ export class BusinessAnalyzer {
     const productAgg30d = new Map<string, number>();
 
     for (const sale of summary.sales) {
-      if (!VALID_SALE_STATUSES.has(sale.status!)) continue;
+      if (!isRevenueSaleStatus(sale.status)) continue;
       const recent = daysAgo(new Date(sale.createdAt), now) <= RECENT_WINDOW_DAYS;
 
       for (const item of getSaleNetItems(sale)) {
@@ -455,7 +458,7 @@ export class BusinessAnalyzer {
 
     const employeeAgg = new Map<string, { salesCount: number; revenue: number }>();
     for (const sale of summary.sales) {
-      if (!VALID_SALE_STATUSES.has(sale.status!)) continue;
+      if (!isRevenueSaleStatus(sale.status)) continue;
       const employeeIds = new Set(
         [sale.cashierId, sale.waiterId].filter(Boolean) as string[]
       );
@@ -617,7 +620,7 @@ export class BusinessAnalyzer {
       { customer: Customer; total: number; count: number }
     >();
     for (const sale of summary.sales) {
-      if (!VALID_SALE_STATUSES.has(sale.status!) || !sale.customerId) continue;
+      if (!isRevenueSaleStatus(sale.status) || !sale.customerId) continue;
       const customer = customers.find((item) => item.id === sale.customerId);
       if (!customer) continue;
       const current = customerLtv.get(sale.customerId) ?? {
@@ -940,7 +943,7 @@ export class BusinessAnalyzer {
 
     const branchSales = summary.sales.filter((sale) => {
       if (sale.shiftId !== shift.id) return false;
-      if (!VALID_SALE_STATUSES.has(sale.status!)) return false;
+      if (!isRevenueSaleStatus(sale.status)) return false;
 
       if (currentBranchId && sale.branchId !== currentBranchId) {
         return false;
@@ -1045,7 +1048,7 @@ export class BusinessAnalyzer {
 
     const shiftSales = sales.filter((sale) => {
       if (sale.shiftId !== shift.id) return false;
-      if (!VALID_SALE_STATUSES.has(sale.status!)) return false;
+      if (!isRevenueSaleStatus(sale.status)) return false;
       const createdAt = sale.createdAt instanceof Date
         ? sale.createdAt
         : new Date(sale.createdAt);
@@ -1243,7 +1246,7 @@ export class BusinessAnalyzer {
     let unreliableLines = 0;
 
     for (const sale of summary.sales) {
-      if (!VALID_SALE_STATUSES.has(sale.status!)) continue;
+      if (!isRevenueSaleStatus(sale.status)) continue;
 
       for (const item of getSaleNetItems(sale)) {
         const line = getHistoricalLineProfit(item, {
@@ -1554,7 +1557,7 @@ export class BusinessAnalyzer {
     if (input.sales.length > 0) {
       const soldByProduct = new Map<string, number>();
       for (const sale of input.sales) {
-        if (!VALID_SALE_STATUSES.has(sale.status!)) continue;
+        if (!isRevenueSaleStatus(sale.status)) continue;
         for (const item of getSaleNetItems(sale)) {
           soldByProduct.set(
             item.productId,
@@ -1649,10 +1652,15 @@ export class BusinessAnalyzer {
     movements: CashMovement[];
     dailySalesHistory: number[];
   }): AIInsightsSnapshot {
-    const normalizedSales = input.sales.map((sale) => ({
-      ...sale,
-      createdAt: new Date(sale.createdAt)
-    }));
+    const normalizedSales = input.sales
+      .filter((sale) => isRevenueSaleStatus(sale.status) && getSaleNetTotal(sale) > 0)
+      .map((sale) => ({
+        ...sale,
+        total: getSaleNetTotal(sale),
+        items: getSaleNetItems(sale),
+        refunds: [],
+        createdAt: new Date(sale.createdAt)
+      }));
 
     const previousSales =
       input.dailySalesHistory.length >= 2

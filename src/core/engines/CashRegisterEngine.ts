@@ -1,6 +1,7 @@
 import { CashRegister } from "../entities/Entities";
 import { CashRegisterRepository } from "../../infrastructure/di/repositories/CashRegisterRepository";
 import { cashRegisterStore } from "../store/cashRegisterStore";
+import { getCurrentBusinessId, getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
 
 export class CashRegisterEngine {
   constructor(private readonly repository: CashRegisterRepository) {}
@@ -30,6 +31,18 @@ export class CashRegisterEngine {
   }
 
   async create(params: { businessId: string; branchId: string; name: string; code: string; primary?: boolean }): Promise<CashRegister> {
+    const activeBusinessId = getCurrentBusinessId();
+    const activeBranchId = getCurrentBranchId();
+    if (!activeBusinessId) {
+      throw new Error("NO_BUSINESS_CONTEXT: selecciona un negocio antes de crear una caja.");
+    }
+    if (!activeBranchId) {
+      throw new Error("NO_BRANCH_CONTEXT: selecciona una sucursal antes de crear una caja.");
+    }
+    if (params.businessId !== activeBusinessId || params.branchId !== activeBranchId) {
+      throw new Error("CASH_REGISTER_CONTEXT_MISMATCH: no se puede crear una caja fuera del contexto activo.");
+    }
+
     const name = params.name.trim();
     const code = params.code.trim().toUpperCase();
     if (!name) throw new Error("CASH_REGISTER_NAME_REQUIRED");

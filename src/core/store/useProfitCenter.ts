@@ -3,7 +3,7 @@ import { container, productsReady, categoriesReady } from "../../infrastructure/
 import { Category, Product, Sale, User } from "../entities/Entities";
 import { Profitability, ProductionCapacity } from "../engines/RecipeEngine";
 import { useVimdyEvent } from "../../hooks/useVimdyCore";
-import { getSaleNetItems, VALID_SALE_STATUSES } from "../utils/saleRefunds";
+import { getSaleNetItems } from "../utils/saleRefunds";
 import { getHistoricalLineProfit } from "../utils/historicalProfit";
 import { companyConfigStore } from "../store/companyConfigStore";
 import {

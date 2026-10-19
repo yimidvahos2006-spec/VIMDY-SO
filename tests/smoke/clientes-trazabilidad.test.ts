@@ -317,6 +317,10 @@ describe("FASE 6 — Clientes + Trazabilidad de ventas", () => {
       customerId: customer.id
     });
 
+    // El LTV solo suma ventas cobradas: una venta pendiente no es ingreso.
+    await ctx.salesEngine.registerPayment(sale1, "CASH");
+    await ctx.salesEngine.registerPayment(sale2, "CASH");
+
     const profile = await ctx.customerEngine.getCustomerProfile(customer.id);
 
     expect(profile.sales).toHaveLength(2);

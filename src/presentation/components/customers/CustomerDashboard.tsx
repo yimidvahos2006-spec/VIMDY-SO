@@ -28,6 +28,7 @@ import {
   CustomerWithStats
 } from "../../../core/store/useCustomers";
 import { Customer, Sale } from "../../../core/entities/Entities";
+import { getSaleNetTotal } from "../../../core/utils/saleRefunds";
 import { useTranslation } from "../../../core/i18n/useTranslation";
 import { OfflineStatusBadge } from "../ui/OfflineStatusBadge";
 import { usePendingCustomerOperationsQueue } from "../../../core/offline/usePendingCustomerOperationsQueue";
@@ -556,7 +557,7 @@ function CustomerDetailModal({
                     <span className="text-white text-sm font-semibold">
                       {sale.code ?? sale.id.slice(0, 8)}
                     </span>
-                    <span className="text-cyan-400 text-sm font-bold">{money(sale.total)}</span>
+                    <span className="text-cyan-400 text-sm font-bold">{money(getSaleNetTotal(sale))}</span>
                   </div>
                   <div className="flex items-center justify-between mt-1">
                     <span className="text-slate-500 text-xs">

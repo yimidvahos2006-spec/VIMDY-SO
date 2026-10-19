@@ -433,25 +433,25 @@ describe("Caja: atomicidad e idempotencia de pagos", () => {
     expect((await ctx.products.findById(BURGER.id))?.stock).toBe(stockBefore - 1);
   });
 
-  it("M. cancelación después de pago: stock restaurado, venta CANCELLED", async () => {
+  it("M. devolución total después de pago: stock restaurado, venta REFUNDED", async () => {
     ctx.cart.addItem(BURGER, 2);
     const stockBefore = (await ctx.products.findById(BURGER.id))?.stock ?? 0;
     const sale = await ctx.salesEngine.quickSale({ cashierId: "cashier-1" });
 
     await ctx.salesEngine.registerPayment(sale, "CASH");
 
-    const cancelled = await ctx.salesEngine.cancelSale(
-      sale.id, "Cancelado por auditoría", "cashier-1"
+    const { sale: refunded } = await ctx.salesEngine.refundSale(
+      sale.id, "Devuelto por auditoría", "cashier-1"
     );
-    expect(cancelled.status).toBe("CANCELLED");
+    expect(refunded.status).toBe("REFUNDED");
 
     // Stock restaurado
     expect((await ctx.products.findById(BURGER.id))?.stock).toBe(stockBefore);
 
-    // Movementos: 1 IN (venta) + 1 OUT (cancelación)
+    // Movimientos: 1 IN (venta) + 1 OUT (reembolso)
     const movements = await ctx.cashMovements.findAll();
     const income = movements.find(m => m.type === "IN");
-    const expense = movements.find(m => m.type === "OUT" && m.description?.includes("Cancelación"));
+    const expense = movements.find(m => m.type === "OUT" && m.description?.includes("Reembolso"));
     expect(income).toBeDefined();
     expect(expense).toBeDefined();
   });

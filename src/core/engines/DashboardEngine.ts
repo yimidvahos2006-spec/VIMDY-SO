@@ -13,6 +13,7 @@ import { RecipeEngine } from "./RecipeEngine";
 import { CashEngine } from "./CashEngine";
 import { ForecastEngine } from "./ForecastEngine";
 import { DashboardSummary } from "../types/DashboardTypes";
+import { getSaleNetItems, getSaleNetTotal, isRevenueSaleStatus } from "../utils/saleRefunds";
 
 /**
  * DashboardEngine
@@ -51,7 +52,10 @@ export class DashboardEngine {
       this.inventory.getLowStockProducts()
     ]);
 
-    const totalSales = sales.reduce((sum, sale) => sum + sale.total, 0);
+    const revenueSales = sales.filter(
+      (sale) => isRevenueSaleStatus(sale.status) && getSaleNetTotal(sale) > 0
+    );
+    const totalSales = revenueSales.reduce((sum, sale) => sum + getSaleNetTotal(sale), 0);
     const criticalAlerts = alerts.filter(
       alert => alert.priority === "CRITICAL"
     ).length;
@@ -65,9 +69,7 @@ export class DashboardEngine {
 
     // Retención real: % de clientes que volvieron a comprar (más de una venta).
     // Si no hay clients o sales, se asume 100 (no penaliza por falta de datos).
-    const paidSales = sales.filter(
-      sale => sale.status === "PAID" || sale.status === "CLOSED"
-    );
+    const paidSales = revenueSales;
     const customerPurchaseCount = new Map<string, number>();
     for (const sale of paidSales) {
       if (sale.customerId) {
@@ -100,8 +102,8 @@ export class DashboardEngine {
       return entry;
     };
 
-    const currentProfit = sales.reduce((sum, sale) => {
-      const saleProfit = sale.items.reduce((itemSum, item) => {
+    const currentProfit = revenueSales.reduce((sum, sale) => {
+      const saleProfit = getSaleNetItems(sale).reduce((itemSum, item) => {
         const { cost, costUnreliable } = getCachedProfitability(item.productId);
         if (costUnreliable) return itemSum;
         return itemSum + (item.price - cost) * item.quantity;

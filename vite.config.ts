@@ -35,13 +35,16 @@ export default defineConfig(({ mode }) => ({
     chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {
-        manualChunks: {
-          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-          'vendor-icons': ['lucide-react'],
-          'vendor-supabase': ['@supabase/supabase-js'],
-          'vendor-charts': ['recharts'],
-          'vendor-three': ['three'],
-          'vendor-sentry': ['@sentry/react']
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return undefined;
+          // Incluye react-dom/client y scheduler, que con la lista anterior
+          // se quedaban dentro del paquete principal (~170 kB).
+          if (/node_modules\/(react|react-dom|scheduler|react-router|react-router-dom|@remix-run)\//.test(id)) return 'vendor-react';
+          if (id.includes('lucide-react')) return 'vendor-icons';
+          if (id.includes('@supabase')) return 'vendor-supabase';
+          if (id.includes('recharts') || id.includes('/d3-') || id.includes('victory-vendor')) return 'vendor-charts';
+          if (id.includes('@sentry')) return 'vendor-sentry';
+          return undefined;
         }
       }
     }

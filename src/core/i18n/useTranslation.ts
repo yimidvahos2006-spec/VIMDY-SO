@@ -1,6 +1,12 @@
-import { useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { companyConfigStore } from "../store/companyConfigStore";
-import { dictionaries, TranslationKey } from "./dictionaries";
+import {
+  dictionaryStore,
+  ensureDictionary,
+  getDictionary,
+  spanishDictionary,
+  TranslationKey
+} from "./dictionaries";
 import { CurrencyCode, LanguageCode } from "../config/globalization";
 import { formatMoney } from "../utils/formatMoney";
 
@@ -27,6 +33,10 @@ import { formatMoney } from "../utils/formatMoney";
  *   <h1>{t("settings.title")}</h1>
  *   <span>{money(42000)}</span>
  */
+// Empieza a bajar el idioma del negocio apenas carga la app, en paralelo,
+// sin esperar a que se pinte el primer componente.
+void ensureDictionary(companyConfigStore.get().language);
+
 export function useTranslation() {
   const language = useSyncExternalStore<LanguageCode>(
     companyConfigStore.subscribe,
@@ -40,8 +50,15 @@ export function useTranslation() {
     () => companyConfigStore.get().currency
   );
 
+  // Se vuelve a pintar cuando termina de llegar el diccionario del idioma.
+  useSyncExternalStore(dictionaryStore.subscribe, dictionaryStore.getVersion, dictionaryStore.getVersion);
+
+  useEffect(() => {
+    void ensureDictionary(language);
+  }, [language]);
+
   function t(key: TranslationKey, vars?: Record<string, string | number>): string {
-    const raw = dictionaries[language]?.[key] ?? dictionaries.es[key] ?? key;
+    const raw = getDictionary(language)?.[key] ?? spanishDictionary[key] ?? key;
     if (!vars) return raw;
     return Object.entries(vars).reduce(
       (acc, [name, value]) => acc.split(`{${name}}`).join(String(value)),

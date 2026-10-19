@@ -282,6 +282,26 @@ export class OrderEngine {
     return orders.filter(order => order.tableId === tableId);
   }
 
+  /**
+   * Duración (ms) de las últimas cuentas de mesa COMPLETADAS: desde que se
+   * creó el pedido (al abrir la mesa) hasta que se cerró. Sirve para calcular
+   * cuánto suele durar una mesa en este negocio.
+   */
+  public async getCompletedTableDurations(sinceDays = 30, limit = 200): Promise<number[]> {
+    const since = Date.now() - sinceDays * 24 * 60 * 60 * 1000;
+    const orders = await this.getAllOrders();
+    return orders
+      .filter(order => order.tableId && order.status === "COMPLETED")
+      .map(order => ({
+        end: new Date(order.updatedAt ?? order.createdAt).getTime(),
+        duration: new Date(order.updatedAt ?? order.createdAt).getTime() - new Date(order.createdAt).getTime()
+      }))
+      .filter(entry => entry.end >= since && Number.isFinite(entry.duration))
+      .sort((a, b) => b.end - a.end)
+      .slice(0, limit)
+      .map(entry => entry.duration);
+  }
+
   public async getOrdersByStatus(status: OrderStatus): Promise<Order[]> {
     const orders = await this.getAllOrders();
     return orders.filter(order => order.status === status);
@@ -625,7 +645,7 @@ export class OrderEngine {
       const receipt = existingReceipt ?? await this.sales.generateReceipt(
         completedSale,
         input.customerName ?? "Cliente General",
-        input.cashier ?? "Administrador",
+        input.cashier ?? "—",
         input.method,
         completedSale.paymentReceived ?? input.received ?? completedSale.total,
         completedSale.discount ?? 0
@@ -665,7 +685,7 @@ export class OrderEngine {
     const { sale: paidSale, payment } = await this.sales.registerPayment(
       sale,
       input.method,
-      { received: input.received, reference: input.reference }
+      { received: input.received, reference: input.reference, cashierName: input.cashier }
     );
 
     if (!payment.success) {
@@ -678,7 +698,7 @@ export class OrderEngine {
     const receipt = existingReceipt ?? await this.sales.generateReceipt(
       paidSale,
       input.customerName ?? "Cliente General",
-      input.cashier ?? "Administrador",
+      input.cashier ?? "—",
       input.method,
       input.received ?? paidSale.total,
       paidSale.discount ?? 0
@@ -706,7 +726,7 @@ export class OrderEngine {
     }
 
     if (order.kitchenOrderId) {
-      await this.kitchen.updateStatus(order.kitchenOrderId, "CANCELADO");
+      await this.kitchen.updateStatus(order.kitchenOrderId, "CANCELADO", reason);
     }
 
     const cancelled = await this.updateOrder(orderId, {

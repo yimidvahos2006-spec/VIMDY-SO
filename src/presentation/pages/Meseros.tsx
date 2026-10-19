@@ -30,6 +30,8 @@ function MeserosContent() {
   const [products, setProducts] = useState<Product[]>([]);
   const [waiters, setWaiters] = useState<Waiter[]>([]);
   const [avgDurationMs, setAvgDurationMs] = useState<number>(45 * 60 * 1000);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   // PASO 1.10 (offline elegante en Mesas) — cuántas aperturas/cierres de
   // mesa hechos sin conexión siguen esperando sincronizarse, para el badge
@@ -71,6 +73,8 @@ function MeserosContent() {
 
   useEffect(() => {
     let cancelled = false;
+    setLoadError(false);
+    setReady(false);
 
     Promise.all([tablesReady, productsReady])
       .then(async () => {
@@ -91,13 +95,18 @@ function MeserosContent() {
         setReady(true);
       })
       .catch(() => {
-        if (!cancelled) setReady(true);
+        // Antes se mostraba "no tienes mesas configuradas", que engañaba:
+        // aquí el problema es la carga, no que falten mesas.
+        if (!cancelled) {
+          setLoadError(true);
+          setReady(true);
+        }
       });
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadKey]);
 
   // Cualquier cambio de mesa en cualquier parte de la app (incluso desde
   // otro módulo) refresca el grid al instante.
@@ -179,14 +188,29 @@ function MeserosContent() {
         </div>
       )}
 
+      {ready && loadError && (
+        <div className="rounded-3xl border border-red-500/40 bg-red-500/10 p-10 text-center">
+          <p className="text-red-200 text-lg font-bold">No pudimos cargar las mesas.</p>
+          <p className="text-slate-400 text-sm mt-2">
+            Revisa tu conexión e inténtalo de nuevo. Tus mesas no se borraron.
+          </p>
+          <button
+            onClick={() => setReloadKey(key => key + 1)}
+            className="mt-5 px-6 py-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold transition"
+          >
+            Reintentar
+          </button>
+        </div>
+      )}
+
       {/* Paso 1: tocar el nombre — sin login. */}
-      {ready && waiterModeEnabled && !activeWaiter && (
+      {ready && !loadError && waiterModeEnabled && !activeWaiter && (
         <WaiterSelect waiters={waiters} onSelect={handleSelectWaiter} />
       )}
 
       {/* Paso 2: mesas, ya con el mesero identificado. */}
-      {ready && tablesEnabled && (!waiterModeEnabled || activeWaiter) && (
-        <TableGrid tables={tables} onSelect={handleSelectTable} avgDurationMs={avgDurationMs} />
+      {ready && !loadError && tablesEnabled && (!waiterModeEnabled || activeWaiter) && (
+        <TableGrid tables={tables} waiters={waiters} onSelect={handleSelectTable} avgDurationMs={avgDurationMs} />
       )}
 
       {dialog === "open" && selectedTable && (

@@ -1,5 +1,5 @@
 import type { Sale } from "../../entities/Entities";
-import { getSaleNetItems, getSaleNetTotal, VALID_SALE_STATUSES } from "../../utils/saleRefunds";
+import { getSaleNetItems, getSaleNetTotal, isRevenueSaleStatus } from "../../utils/saleRefunds";
 import { addBusinessDays, businessDayRangeUTC, startOfBusinessDay } from "../../utils/businessTime";
 import type {
   DashboardSalesComparison,
@@ -9,7 +9,7 @@ import type {
 } from "./DashboardMetricTypes";
 
 function isCompletedSale(sale: Sale): boolean {
-  return typeof sale.status === "string" && VALID_SALE_STATUSES.has(sale.status);
+  return isRevenueSaleStatus(sale.status);
 }
 
 function isInPeriod(date: Date, start: Date, end: Date): boolean {

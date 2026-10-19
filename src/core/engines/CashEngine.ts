@@ -63,6 +63,12 @@ export class CashEngine {
     return typeof (repo as ICashMovementRepository | null)?.saveAtomic === "function";
   }
 
+  private hasFindByDataField(
+    repo: unknown
+  ): repo is { findByDataField(field: string, value: string): Promise<CashMovement[]> } {
+    return typeof (repo as { findByDataField?: unknown } | null)?.findByDataField === "function";
+  }
+
   public isPaymentAtomicRepository(
     repo: unknown = this.repository
   ): repo is ICashMovementRepository {
@@ -230,7 +236,7 @@ export class CashEngine {
     id?: string,
     cashRegisterId?: string
   ): Promise<CashMovement> {
-    if (amount <= 0) {
+    if (!Number.isFinite(amount) || amount <= 0) {
       throw new Error("INVALID_AMOUNT");
     }
 
@@ -485,6 +491,21 @@ export class CashEngine {
 
   public async getMovementsForShift(shiftId: string, openedAt?: Date, closedAt: Date = new Date()): Promise<CashMovement[]> {
     if (!shiftId) throw new Error("SHIFT_ID_REQUIRED");
+    // Camino rápido (producción): pide al servidor SOLO los movimientos de este
+    // turno en vez de bajar todo el historial de caja. Mismo filtro de negocio
+    // y sucursal que getAllMovements(); si el repositorio no lo soporta (tests
+    // InMemory) se usa el camino de siempre.
+    if (this.isAtomicRepository(this.repository) && this.hasFindByDataField(this.repository)) {
+      const businessId = getCurrentBusinessId();
+      const branchId = getCurrentBranchId();
+      const rows = await this.repository.findByDataField("shiftId", shiftId);
+      return rows.filter((movement) => {
+        if (movement.shiftId !== shiftId) return false;
+        if (movement.businessId && movement.businessId !== businessId) return false;
+        if (movement.branchId && movement.branchId !== branchId) return false;
+        return true;
+      });
+    }
     const movements = await this.getAllMovements();
     if (this.isAtomicRepository(this.repository)) {
       return movements.filter((movement) => movement.shiftId === shiftId);

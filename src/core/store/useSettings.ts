@@ -4,6 +4,8 @@ import { businessStore, Business } from "./businessStore";
 import { companyConfigStore, CompanyConfig } from "./companyConfigStore";
 import { Role, User, UserStatus } from "../entities/Entities";
 import { AVAILABLE_COUNTRY_CODES } from "../config/globalization";
+import { saveBusinessSettings } from "../../infrastructure/supabase/businessSettings";
+import { getCurrentBusinessId } from "../../infrastructure/supabase/supabaseClient";
 
 export function useSettings() {
   const [business, setBusiness] = useState<Business>(businessStore.get());
@@ -38,6 +40,22 @@ export function useSettings() {
       companyConfigStore.update({ country: data.country as CompanyConfig["country"] });
       setConfig(companyConfigStore.get());
     }
+  }
+
+  /**
+   * Guarda TODO en la base de datos (negocio + preferencias). Los dos
+   * `save*` de arriba solo cambian la memoria; sin esto, al recargar o abrir
+   * en otro equipo los cambios se perdían. Si falla, deja los valores
+   * anteriores en pantalla y lanza el error para mostrarlo.
+   */
+  async function persistAll(nextBusiness: Business, nextConfig: CompanyConfig) {
+    const businessId = getCurrentBusinessId();
+    if (!businessId) throw new Error("No hay un negocio activo. Vuelve a iniciar sesión.");
+    await saveBusinessSettings(businessId, nextBusiness, nextConfig);
+    businessStore.update(nextBusiness);
+    companyConfigStore.update(nextConfig);
+    setBusiness(businessStore.get());
+    setConfig(companyConfigStore.get());
   }
 
   function saveConfig(data: Partial<CompanyConfig>) {
@@ -89,6 +107,7 @@ export function useSettings() {
     error,
     saveBusiness,
     saveConfig,
+    persistAll,
     createUser,
     setUserStatus,
     roleName

@@ -1,21 +1,16 @@
+import { lazy, Suspense } from "react";
 import { Activity } from "lucide-react";
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 
 import { useTranslation } from "../../../core/i18n/useTranslation";
 import type { DashboardExecutiveModel } from "../../../core/dashboard/executive/DashboardExecutiveTypes";
 
+// recharts pesa ~346 kB: solo se descarga cuando hay datos para dibujar.
+const DashboardSalesTrendChart = lazy(() => import("./DashboardSalesTrendChart"));
+
 interface Props { model: DashboardExecutiveModel; }
 
 export function DashboardSalesTrend({ model }: Props) {
-  const { language, money } = useTranslation();
+  const { language } = useTranslation();
 
   if (!model.capabilities.sales) return null;
 
@@ -37,19 +32,10 @@ export function DashboardSalesTrend({ model }: Props) {
         <p className="mt-8 text-sm text-vimdy-text-secondary">{notEnough}</p>
       ) : (
         <div className="mt-6 h-[280px] w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={model.salesTrend} margin={{ top: 10, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="currentColor" opacity={0.08} />
-              <XAxis dataKey="label" tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
-              <YAxis tick={{ fontSize: 12 }} tickLine={false} axisLine={false} width={72} tickFormatter={(value) => money(Number(value))} />
-              <Tooltip
-                formatter={(value) => [money(Number(value)), language === "en" ? "Net sales" : language === "pt" ? "Vendas líquidas" : "Ventas netas"]}
-                labelFormatter={(label) => label}
-                contentStyle={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.10)", background: "var(--vimdy-surface, #101012)" }}
-              />
-              <Line type="monotone" dataKey="value" stroke="currentColor" className="text-vimdy-accent" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
-            </LineChart>
-          </ResponsiveContainer>
+          {/* El fallback tiene la misma altura que el gráfico para que la pantalla no "salte". */}
+          <Suspense fallback={<div className="h-full w-full animate-pulse rounded-vimdy-xl bg-vimdy-border/20" aria-hidden="true" />}>
+            <DashboardSalesTrendChart data={model.salesTrend} />
+          </Suspense>
         </div>
       )}
     </section>

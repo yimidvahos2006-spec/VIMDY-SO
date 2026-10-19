@@ -1,12 +1,18 @@
-import React, { useState } from "react";
+import React, { lazy, Suspense, useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { ShoppingCart, Wallet, Receipt } from "lucide-react";
 
 import { PosPage } from "./PosPage";
-import { ShiftPanel } from "../components/shift/ShiftPanel";
-import { SalesHistoryPanel } from "../components/shift/SalesHistoryPanel";
 import { RequirePermission } from "../navigation/RequirePermission";
 import { PosCustomer } from "../components/pos/PosCustomer";
+
+// "Venta rápida" (PosPage) es la pestaña inicial y va en el paquete principal.
+// "Turno" y "Ventas" se descargan aparte, y se precargan en segundo plano para
+// que sigan funcionando aunque se caiga el internet después de abrir Caja.
+const loadShiftPanel = () => import("../components/shift/ShiftPanel").then((m) => ({ default: m.ShiftPanel }));
+const loadSalesHistoryPanel = () => import("../components/shift/SalesHistoryPanel").then((m) => ({ default: m.SalesHistoryPanel }));
+const ShiftPanel = lazy(loadShiftPanel);
+const SalesHistoryPanel = lazy(loadSalesHistoryPanel);
 
 type Tab = "venta" | "turno" | "ventas";
 
@@ -14,6 +20,19 @@ function CashOperationsContent() {
   const location = useLocation();
   const initialTab = (location.state as { tab?: Tab })?.tab ?? "venta";
   const [tab, setTab] = useState<Tab>(initialTab);
+
+  useEffect(() => {
+    const preload = () => {
+      void loadShiftPanel();
+      void loadSalesHistoryPanel();
+    };
+    if (typeof window.requestIdleCallback === "function") {
+      const id = window.requestIdleCallback(preload);
+      return () => window.cancelIdleCallback(id);
+    }
+    const id = window.setTimeout(preload, 1500);
+    return () => window.clearTimeout(id);
+  }, []);
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
@@ -56,8 +75,10 @@ function CashOperationsContent() {
 
       <div className="flex-1 min-h-0">
         {tab === "venta" && <PosPage />}
-        {tab === "turno" && <ShiftPanel />}
-        {tab === "ventas" && <SalesHistoryPanel />}
+        <Suspense fallback={<div className="h-full w-full animate-pulse bg-vimdy-border/10" aria-hidden="true" />}>
+          {tab === "turno" && <ShiftPanel />}
+          {tab === "ventas" && <SalesHistoryPanel />}
+        </Suspense>
       </div>
     </div>
   );

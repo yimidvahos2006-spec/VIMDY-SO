@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import { container, productsReady } from "../../infrastructure/di/CompositionRoot";
-import { SalesAI, ProductRanking } from "../ia/SalesAI";
-import { Customer, Product, Sale } from "../entities/Entities";
+import { SalesAI } from "../ia/SalesAI";
+import type { ProductRanking } from "../ia/SalesAI";
+import type { Customer, Product, Sale } from "../entities/Entities";
 import { useVimdyEvent } from "../../hooks/useVimdyCore";
-import { getSaleNetTotal, VALID_SALE_STATUSES } from "../utils/saleRefunds";
+import { getSaleNetItems, getSaleNetTotal } from "../utils/saleRefunds";
 import { companyConfigStore } from "../store/companyConfigStore";
 import {
   startOfBusinessDay,
   startOfBusinessMonth,
   getBusinessHour,
-  getBusinessDateKey,
-  getDayKeyForOffset
+  getBusinessDateKey
 } from "../utils/businessTime";
 
 const salesAI = new SalesAI();
@@ -38,10 +39,6 @@ function addUTCDays(date: Date, days: number): Date {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + days));
 }
 
-function fixed2(value: number): number {
-  return Math.round(value * 100) / 100;
-}
-
 export interface DayBucket {
   label: string;
   date: Date;
@@ -59,7 +56,56 @@ export interface RankedCustomer {
   total: number;
 }
 
-export function useReports() {
+export interface PaymentMethodBreakdown {
+  method: string;
+  total: number;
+}
+
+export interface UseReportsResult {
+  loading: boolean;
+  error: string | null;
+  range: ReportRange;
+  setRange: Dispatch<SetStateAction<ReportRange>>;
+  sales: Sale[];
+  allSales: Sale[];
+  products: Product[];
+  tz: string;
+  summary: ReturnType<SalesAI["generateExecutiveSummary"]>;
+  topProducts: Array<ProductRanking & { name: string }>;
+  topCustomers: RankedCustomer[];
+  dailySeries: DayBucket[];
+  hourlySeries: HourBucket[];
+  paymentMethodBreakdown: PaymentMethodBreakdown[];
+  exportCsv: () => void;
+}
+
+/** Revenue uses the payment date when known; old records fall back to createdAt. */
+function getRevenueDate(sale: Sale): Date {
+  const paidAt = sale.paidAt;
+  if (paidAt instanceof Date && Number.isFinite(paidAt.getTime())) return paidAt;
+  const createdAt = sale.createdAt;
+  return createdAt instanceof Date && Number.isFinite(createdAt.getTime())
+    ? createdAt
+    : new Date(0);
+}
+
+function countsAsRevenue(sale: Sale): boolean {
+  const rawStatus = sale.status;
+  if (rawStatus == null || String(rawStatus).trim() === "") return true;
+  const status = String(rawStatus).trim().toUpperCase();
+  return status === "PAID" || status === "CLOSED";
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return fallback;
+}
+
+export function useReports(): UseReportsResult {
   const [sales, setSales] = useState<Sale[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -83,28 +129,25 @@ export function useReports() {
     setLoading(true);
     setError(null);
     load()
-      .catch((e: any) => setError(e?.message ?? "No se pudieron cargar los reportes."))
+      .catch((cause: unknown) => setError(getErrorMessage(cause, "No se pudieron cargar los reportes.")))
       .finally(() => setLoading(false));
   }, [load]);
 
   useVimdyEvent("sale", () => {
-    load().catch((e: any) => setError(e?.message ?? "No se pudieron cargar los reportes."));
+    load().catch((cause: unknown) => setError(getErrorMessage(cause, "No se pudieron cargar los reportes.")));
   });
   useVimdyEvent("payment", () => {
-    load().catch((e: any) => setError(e?.message ?? "No se pudieron cargar los reportes."));
+    load().catch((cause: unknown) => setError(getErrorMessage(cause, "No se pudieron cargar los reportes.")));
   });
 
   const tz = useMemo(() => companyConfigStore.get().timezone || "America/Bogota", []);
 
-  const paidSales = useMemo(
-    () => sales.filter((s) => s.status === "PAID" || s.status === "CLOSED" || !s.status),
-    [sales]
-  );
+  const paidSales = useMemo(() => sales.filter(countsAsRevenue), [sales]);
 
   const filteredSales = useMemo(() => {
     const from = rangeStart(range, tz);
     if (!from) return paidSales;
-    return paidSales.filter((s) => new Date(s.createdAt).getTime() >= from.getTime());
+    return paidSales.filter((sale) => getRevenueDate(sale).getTime() >= from.getTime());
   }, [paidSales, range, tz]);
 
   /**
@@ -118,11 +161,17 @@ export function useReports() {
    * la auditoría exige que cuadre. `netFilteredSales` es el único punto
    * de transformación: todo lo que se calcula MÁS ABAJO (KPIs, gráficas)
    * debe usar esto, no `filteredSales` directo. La excepción a propósito
-   * es exportCsv(): un CSV contable debe mostrar el total ORIGINAL de
-   * cada venta como registro histórico, no el neto.
+   * exportCsv() conserva los valores originales de subtotal/impuesto/total,
+   * pero muestra también el reembolso acumulado y el total neto que cuenta
+   * como ingreso. Así el histórico bruto no se confunde con el ingreso real.
    */
   const netFilteredSales = useMemo(
-    () => filteredSales.map((s) => ({ ...s, total: getSaleNetTotal(s) })),
+    () => filteredSales.map((s) => ({
+      ...s,
+      total: getSaleNetTotal(s),
+      items: getSaleNetItems(s),
+      refunds: []
+    })),
     [filteredSales]
   );
 
@@ -133,7 +182,7 @@ export function useReports() {
     const previousFrom = new Date(from.getTime() - spanMs);
     return paidSales
       .filter((s) => {
-        const t = new Date(s.createdAt).getTime();
+        const t = getRevenueDate(s).getTime();
         return t >= previousFrom.getTime() && t < from.getTime();
       })
       .reduce((sum, s) => sum + getSaleNetTotal(s), 0);
@@ -179,7 +228,7 @@ export function useReports() {
   const dailySeries: DayBucket[] = useMemo(() => {
     const from = rangeStart(range, tz) ?? startOfBusinessDay(
       filteredSales.length
-        ? new Date(Math.min(...filteredSales.map((s) => new Date(s.createdAt).getTime())))
+        ? new Date(Math.min(...filteredSales.map((sale) => getRevenueDate(sale).getTime())))
         : new Date(),
       tz
     );
@@ -193,7 +242,7 @@ export function useReports() {
       });
     }
     netFilteredSales.forEach((sale) => {
-      const dayKey = getBusinessDateKey(new Date(sale.createdAt), tz);
+      const dayKey = getBusinessDateKey(getRevenueDate(sale), tz);
       const bucket = days.find((d) => getBusinessDateKey(d.date, tz) === dayKey);
       if (bucket) bucket.value += sale.total;
     });
@@ -203,7 +252,7 @@ export function useReports() {
   const hourlySeries: HourBucket[] = useMemo(() => {
     const hours: HourBucket[] = Array.from({ length: 24 }, (_, hour) => ({ hour, value: 0 }));
     netFilteredSales.forEach((sale) => {
-      const hour = getBusinessHour(new Date(sale.createdAt), tz);
+      const hour = getBusinessHour(getRevenueDate(sale), tz);
       hours[hour].value += sale.total;
     });
     return hours;
@@ -221,21 +270,29 @@ export function useReports() {
   }, [netFilteredSales]);
 
   function exportCsv() {
-    const header = ["Código", "Fecha", "Cliente", "Items", "Subtotal", "Impuesto", "Total", "Método de pago", "Estado"];
+    const header = [
+      "Código", "Fecha", "Cliente", "Items netos", "Subtotal original", "Impuesto original",
+      "Total original", "Total reembolsado", "Total neto", "Método de pago", "Estado"
+    ];
     const rows = filteredSales.map((s) => [
       s.code ?? s.id,
-      new Date(s.createdAt).toLocaleString("es-CO"),
+      getRevenueDate(s).toLocaleString("es-CO", { timeZone: tz }),
       customerNameById.get(s.customerId) ?? s.customerId,
-      s.items.reduce((n, i) => n + i.quantity, 0).toString(),
+      getSaleNetItems(s).reduce((n, i) => n + i.quantity, 0).toString(),
       (s.subtotal ?? s.total).toString(),
       (s.tax ?? 0).toString(),
       s.total.toString(),
+      (s.total - getSaleNetTotal(s)).toString(),
+      getSaleNetTotal(s).toString(),
       s.paymentMethod ?? "",
       s.status ?? ""
     ]);
-    const csv = [header, ...rows]
-      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
-      .join("\n");
+    // Excel en español necesita "sep=;", separador ";" y BOM para abrir bien las columnas y las tildes.
+    const csv =
+      "sep=;\r\n" +
+      [header, ...rows]
+        .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(";"))
+        .join("\r\n");
     const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -253,6 +310,10 @@ export function useReports() {
     range,
     setRange,
     sales: filteredSales,
+    // Para "Reportes por mes": TODAS las ventas (sin filtrar por rango), los productos y la zona horaria del negocio.
+    allSales: sales,
+    products,
+    tz,
     summary,
     topProducts,
     topCustomers,

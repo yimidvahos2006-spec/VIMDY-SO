@@ -2,6 +2,7 @@ import { Customer, Sale } from '../entities/Entities';
 import { IRepository } from '../../infrastructure/di/repositories/IRepository';
 import { SaleRepository } from '../../infrastructure/di/repositories/SaleRepository';
 import { AuditEngine } from './AuditEngine';
+import { getSaleNetTotal, isRevenueSaleStatus } from '../utils/saleRefunds';
 
 export interface CustomerProfile {
   readonly customer: Customer;
@@ -36,7 +37,9 @@ export class CustomerEngine {
     const customerSales = await this.saleRepository.findByCustomer(id);
 
     const ltv = customerSales.reduce(
-      (total, sale) => total + sale.total,
+      (total, sale) => isRevenueSaleStatus(sale.status)
+        ? total + getSaleNetTotal(sale)
+        : total,
       0
     );
 

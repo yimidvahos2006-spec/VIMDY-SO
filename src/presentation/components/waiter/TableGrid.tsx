@@ -1,12 +1,14 @@
 import React, { useMemo, useState } from "react";
 import { Users, Search, Filter, Clock } from "lucide-react";
 
-import { Table } from "../../../core/entities/Entities";
+import { Table, Waiter } from "../../../core/entities/Entities";
 import { EmptyState } from "../ui/EmptyState";
 import { getTableUrgency, getUrgencyBorder, getUrgencyBg } from "../../../core/services/tableUrgency";
 
 interface Props {
   tables: Table[];
+  /** Para mostrar qué mesero abrió cada mesa. */
+  waiters?: Waiter[];
   onSelect: (table: Table) => void;
   avgDurationMs?: number;
 }
@@ -37,9 +39,15 @@ function formatMinutes(ms: number): string {
   return `${minutes} min`;
 }
 
-export function TableGrid({ tables, onSelect, avgDurationMs = 45 * 60 * 1000 }: Props) {
+export function TableGrid({ tables, waiters = [], onSelect, avgDurationMs = 45 * 60 * 1000 }: Props) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<Table["status"] | "ALL">("ALL");
+
+  const waiterNames = useMemo(() => {
+    const map = new Map<string, string>();
+    waiters.forEach(w => map.set(w.id, w.name));
+    return map;
+  }, [waiters]);
 
   const mergedCountByTable = useMemo(() => {
     const map = new Map<string, number>();
@@ -137,6 +145,8 @@ export function TableGrid({ tables, onSelect, avgDurationMs = 45 * 60 * 1000 }: 
                 const style = STATUS_STYLES[table.status];
                 const isFree = table.status === "FREE" || table.status === "RESERVED";
                 const elapsedMs = table.openedAt ? Date.now() - table.openedAt.getTime() : 0;
+                const urgency = getTableUrgency(table, avgDurationMs);
+                const waiterName = table.waiterId ? waiterNames.get(table.waiterId) : undefined;
                 const mergedLabel = mergedCountByTable.get(table.id)
                   ? ` / ${Array.from({ length: mergedCountByTable.get(table.id)! + 1 }).map((_, i) => `Mesa ${String.fromCharCode(64 + (i + 1))}`).join(" + ")}`
                   : "";
@@ -145,7 +155,7 @@ export function TableGrid({ tables, onSelect, avgDurationMs = 45 * 60 * 1000 }: 
                   <button
                     key={table.id}
                     onClick={() => onSelect(table)}
-                    className={`${style.bg} rounded-2xl border ${style.border} hover:border-cyan-500 transition-all p-5 text-left relative overflow-hidden`}
+                    className={`${style.bg} rounded-2xl border ${isFree ? style.border : getUrgencyBorder(urgency.level)} hover:border-cyan-500 transition-all p-5 text-left relative overflow-hidden`}
                   >
                     <div className={`absolute top-0 left-0 w-1 h-full ${style.dot}`} />
                     <div className="pl-2">
@@ -177,9 +187,29 @@ export function TableGrid({ tables, onSelect, avgDurationMs = 45 * 60 * 1000 }: 
                         )}
                       </div>
                       {!isFree && (
-                        <p className="text-white font-bold text-lg mt-3">
-                          ${table.total.toLocaleString("es-CO")}
-                        </p>
+                        <div className="flex items-end justify-between mt-3 gap-2">
+                          <p className="text-white font-bold text-lg">
+                            ${table.total.toLocaleString("es-CO")}
+                          </p>
+                          {waiterName && (
+                            <p className="text-slate-400 text-xs truncate max-w-[50%]" title={`Abrió ${waiterName}`}>
+                              {waiterName}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                      {!isFree && (
+                        <div className="mt-3">
+                          <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${
+                                urgency.level === "high" ? "bg-red-500" : urgency.level === "medium" ? "bg-amber-500" : "bg-emerald-500"
+                              }`}
+                              style={{ width: `${Math.round(urgency.progress)}%` }}
+                            />
+                          </div>
+                          <p className="text-slate-500 text-[11px] mt-1">{urgency.action}</p>
+                        </div>
                       )}
                     </div>
                   </button>
