@@ -9,6 +9,19 @@ import { getDefaultCategoriesForBusinessType } from "../../../core/config/onboar
 import type { BusinessTypeId } from "../../../core/config/businessTypes";
 import type { Category } from "../../../core/entities/Entities";
 
+/**
+ * Compara nombres sin importar mayúsculas, tildes ni espacios de más
+ * ("Café", "cafe" y "  CAFÉ " cuentan como la misma categoría).
+ */
+function normalizeName(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
 interface CategoriesStepProps {
   businessType: BusinessTypeId;
   onSaved: (categories: Category[]) => void;
@@ -22,6 +35,7 @@ export function CategoriesStep({ businessType, onSaved }: CategoriesStepProps) {
   const [customInput, setCustomInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [created, setCreated] = useState<Category[]>([]);
   const actionInFlight = useRef(false);
 
@@ -40,12 +54,31 @@ export function CategoriesStep({ businessType, onSaved }: CategoriesStepProps) {
   }
 
   function addCustom() {
-    const trimmed = customInput.trim();
+    const trimmed = customInput.trim().replace(/\s+/g, " ");
     if (!trimmed) return;
-    if (customNames.includes(trimmed)) return;
-    if (suggestedNames.includes(trimmed) && selectedSuggestions.has(trimmed)) return;
+    const key = normalizeName(trimmed);
+
+    // Si es igual a una sugerida, no se crea otra: se marca la sugerida.
+    const matchingSuggestion = suggestedNames.find((name) => normalizeName(name) === key);
+    if (matchingSuggestion) {
+      if (selectedSuggestions.has(matchingSuggestion)) {
+        setNotice("Esa categoría ya está en tu lista.");
+      } else {
+        setSelectedSuggestions(new Set(selectedSuggestions).add(matchingSuggestion));
+        setNotice("Esa categoría ya estaba entre las sugeridas, la marcamos por ti.");
+      }
+      setCustomInput("");
+      return;
+    }
+
+    if (customNames.some((name) => normalizeName(name) === key)) {
+      setNotice("Esa categoría ya está en tu lista.");
+      return;
+    }
+
     setCustomNames([...customNames, trimmed]);
     setCustomInput("");
+    setNotice(null);
   }
 
   async function handleSave() {
@@ -55,11 +88,16 @@ export function CategoriesStep({ businessType, onSaved }: CategoriesStepProps) {
     setError(null);
 
     try {
-      const allNames = Array.from(new Map(
-        [...selectedSuggestions, ...customNames]
-          .map((name) => [name.trim().toLowerCase(), name.trim()] as const)
-          .filter(([key, name]) => key.length > 0 && name.length > 0)
-      ).values());
+      // Sin repetidas: gana la primera escrita (las sugeridas van primero).
+      const seenKeys = new Set<string>();
+      const allNames: string[] = [];
+      for (const rawName of [...selectedSuggestions, ...customNames]) {
+        const name = rawName.trim().replace(/\s+/g, " ");
+        const key = normalizeName(name);
+        if (!key || seenKeys.has(key)) continue;
+        seenKeys.add(key);
+        allNames.push(name);
+      }
 
       if (allNames.length === 0) {
         onSaved([]);
@@ -68,14 +106,14 @@ export function CategoriesStep({ businessType, onSaved }: CategoriesStepProps) {
 
       const existing = await container.categoryEngine.get().listAll();
       const existingByName = new Map(existing.map((category) => [
-        category.name.trim().toLowerCase(),
+        normalizeName(category.name),
         category
       ]));
       const result: Category[] = [];
       const requiresKitchen = false;
 
       for (const name of allNames) {
-        const normalizedName = name.trim().toLowerCase();
+        const normalizedName = normalizeName(name);
         const existingCategory = existingByName.get(normalizedName);
         if (existingCategory) {
           result.push(existingCategory);
@@ -195,7 +233,10 @@ export function CategoriesStep({ businessType, onSaved }: CategoriesStepProps) {
           <VimdyInput
             placeholder="Nombre de categoría personalizada"
             value={customInput}
-            onChange={(e) => setCustomInput(e.target.value)}
+            onChange={(e) => {
+              setCustomInput(e.target.value);
+              setNotice(null);
+            }}
             disabled={saving}
             className="flex-1"
           />
@@ -209,6 +250,12 @@ export function CategoriesStep({ businessType, onSaved }: CategoriesStepProps) {
             Agregar
           </button>
         </div>
+
+        {notice && (
+          <p role="status" className="text-center text-sm text-vimdy-text-secondary mb-4">
+            {notice}
+          </p>
+        )}
 
         {saving && (
           <p className="text-center text-sm text-vimdy-text-secondary mb-4 flex items-center justify-center gap-2">
