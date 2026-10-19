@@ -3,6 +3,7 @@ import Hero from "../components/Hero";
 import { TrustBar } from "../components/TrustBar";
 import { ModuleConnections } from "../components/ModuleConnections";
 import { BusinessTypes } from "../components/BusinessTypes";
+import { CategoriesVideo } from "../components/CategoriesVideo";
 import { HowItWorks } from "../components/HowItWorks";
 import { Pricing } from "../components/Pricing";
 import { FAQ } from "../components/FAQ";
@@ -125,6 +126,7 @@ export function LandingPage() {
         </section>
 
         <BusinessTypes />
+        <CategoriesVideo />
         <HowItWorks />
         <Pricing />
         <FAQ />
