@@ -1,8 +1,5 @@
-import type { CSSProperties } from "react";
-
 import { VimdyButton } from "../ui/VimdyButton";
 import { WelcomeEmblem } from "./WelcomeEmblem";
-import { WelcomeAmbientMotes } from "./WelcomeAmbientMotes";
 
 interface WelcomeStepProps {
   /** Nombre real del dueño (el que escribió al registrarse), viene de useAuth(). */
@@ -42,24 +39,9 @@ export function WelcomeStep({ ownerName, onStart }: WelcomeStepProps) {
 
   return (
     <div className="w-full max-w-md text-center relative">
-      <div className="relative rounded-vimdy-xl bg-vimdy-surface border border-vimdy-border-subtle p-8 md:p-10 overflow-hidden shadow-vimdy-lg">
-        {/* Halo azul suave detrás del emblema */}
-        <div
-          className="pointer-events-none absolute -top-24 left-1/2 h-64 w-64 -translate-x-1/2 rounded-full"
-          style={
-            {
-              background:
-                "radial-gradient(circle, rgba(37,99,235,.22), transparent 70%)",
-              filter: "blur(20px)",
-            } as CSSProperties
-          }
-        />
-
-        {/* Partículas ambientales (dentro del contenedor) */}
-        <WelcomeAmbientMotes />
-
+      <div className="relative rounded-vimdy-xl bg-vimdy-surface border border-vimdy-border-subtle p-8 md:p-10 shadow-vimdy-lg">
         <div className="relative z-10">
-          <div className="mx-auto mb-6 flex justify-center">
+          <div className="mx-auto mb-7 flex justify-center">
             <WelcomeEmblem />
           </div>
 
