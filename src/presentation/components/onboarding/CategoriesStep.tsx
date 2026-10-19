@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Plus, X, Loader2, CheckCircle2 } from "lucide-react";
 
 import { VimdyCard } from "../ui/VimdyCard";
@@ -8,6 +8,7 @@ import { container } from "../../../infrastructure/di/CompositionRoot";
 import { getDefaultCategoriesForBusinessType } from "../../../core/config/onboardingCategories";
 import type { BusinessTypeId } from "../../../core/config/businessTypes";
 import type { Category } from "../../../core/entities/Entities";
+import { useStepDraft } from "./useStepDraft";
 
 /**
  * Compara nombres sin importar mayúsculas, tildes ni espacios de más
@@ -27,12 +28,41 @@ interface CategoriesStepProps {
   onSaved: (categories: Category[]) => void;
 }
 
+interface CategoriesDraft {
+  selected: string[];
+  custom: string[];
+  input: string;
+}
+
+function sanitizeCategoriesDraft(raw: unknown, suggestedNames: readonly string[]): CategoriesDraft | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const strings = (value: unknown): string[] =>
+    Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  return {
+    // Solo se recuperan sugeridas que todavía existan para este tipo de negocio.
+    selected: strings(r.selected).filter((name) => suggestedNames.includes(name)),
+    custom: strings(r.custom).map((name) => name.slice(0, 80)).slice(0, 50),
+    input: typeof r.input === "string" ? r.input.slice(0, 80) : "",
+  };
+}
+
 export function CategoriesStep({ businessType, onSaved }: CategoriesStepProps) {
   const suggestedNames = getDefaultCategoriesForBusinessType(businessType);
 
-  const [selectedSuggestions, setSelectedSuggestions] = useState<Set<string>>(new Set());
-  const [customNames, setCustomNames] = useState<string[]>([]);
-  const [customInput, setCustomInput] = useState("");
+  // Lo marcado y lo escrito se guarda al instante y se recupera si el usuario
+  // sale de la página, vuelve con "Atrás" o recarga.
+  const [draft, setDraft] = useStepDraft<CategoriesDraft>(
+    "categories",
+    { selected: [], custom: [], input: "" },
+    (raw) => sanitizeCategoriesDraft(raw, suggestedNames)
+  );
+  const selectedSuggestions = useMemo(() => new Set(draft.selected), [draft.selected]);
+  const customNames = draft.custom;
+  const customInput = draft.input;
+  const setSelectedSuggestions = (next: Set<string>) => setDraft((current) => ({ ...current, selected: Array.from(next) }));
+  const setCustomNames = (next: string[]) => setDraft((current) => ({ ...current, custom: next }));
+  const setCustomInput = (next: string) => setDraft((current) => ({ ...current, input: next }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);

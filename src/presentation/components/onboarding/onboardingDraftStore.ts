@@ -27,6 +27,67 @@ const LEGACY_KEYS = [
 
 const memory = new Map<string, OnboardingDraft>();
 
+/**
+ * Borradores POR PASO: lo que el usuario va eligiendo o escribiendo dentro de
+ * cada pantalla del onboarding, antes de apretar "Continuar". Se guardan en
+ * cuanto cambian y se recuperan si sale de la página o recarga. Nunca guardan
+ * contraseñas. Se borran todos al terminar el onboarding.
+ */
+const STEP_PREFIX = "vimdy:onboarding:step:v1:";
+const stepMemory = new Map<string, unknown>();
+
+function stepScope(userId: string, businessId: string): string {
+  return `${STEP_PREFIX}${encodeURIComponent(userId)}:${encodeURIComponent(businessId)}:`;
+}
+
+export const onboardingStepDraft = {
+  read(userId: string, businessId: string, step: string): unknown {
+    if (!userId || !businessId) return null;
+    const key = `${stepScope(userId, businessId)}${step}`;
+
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (raw) return JSON.parse(raw) as unknown;
+    } catch {
+      // Almacenamiento bloqueado o dato dañado: se usa la memoria de la sesión.
+    }
+
+    return stepMemory.get(key) ?? null;
+  },
+
+  write(userId: string, businessId: string, step: string, value: unknown): void {
+    if (!userId || !businessId) return;
+    const key = `${stepScope(userId, businessId)}${step}`;
+    stepMemory.set(key, value);
+
+    try {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      // Sin almacenamiento local: queda en memoria mientras la pestaña siga abierta.
+    }
+  },
+
+  clearAll(userId: string, businessId: string): void {
+    if (!userId || !businessId) return;
+    const scope = stepScope(userId, businessId);
+
+    for (const key of Array.from(stepMemory.keys())) {
+      if (key.startsWith(scope)) stepMemory.delete(key);
+    }
+
+    try {
+      const toRemove: string[] = [];
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const key = window.localStorage.key(i);
+        if (key && key.startsWith(scope)) toRemove.push(key);
+      }
+      toRemove.forEach((key) => window.localStorage.removeItem(key));
+    } catch {
+      // No-op.
+    }
+  }
+};
+
 function keyFor(userId: string, businessId: string): string {
   return `${STORAGE_PREFIX}${encodeURIComponent(userId)}:${encodeURIComponent(businessId)}`;
 }
@@ -118,6 +179,8 @@ export const onboardingDraftStore = {
     } catch {
       // No-op.
     }
+
+    onboardingStepDraft.clearAll(userId, businessId);
   },
 
   clearLegacy(): void {

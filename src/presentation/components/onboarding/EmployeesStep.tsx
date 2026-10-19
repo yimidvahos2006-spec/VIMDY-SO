@@ -18,6 +18,7 @@ import { useAuth } from "../../context/AuthContext";
 import { translateBusinessError } from "../../../core/errors/translateBusinessError";
 import type { ModuleId } from "../../../core/config/modules";
 import { useCanUse } from "../../../hooks/useCanUse";
+import { useStepDraft } from "./useStepDraft";
 
 const MIN_PASSWORD_LENGTH = 8;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -55,6 +56,34 @@ interface AddedEmployee {
   roleLabel: string;
 }
 
+interface EmployeesDraft {
+  name: string;
+  email: string;
+  roleId: EmployeeRoleOption["roleId"];
+  added: AddedEmployee[];
+}
+
+function sanitizeEmployeesDraft(raw: unknown): EmployeesDraft | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const roleId = EMPLOYEE_ROLE_OPTIONS.find((option) => option.roleId === r.roleId)?.roleId ?? "CAJERO";
+  const added = Array.isArray(r.added)
+    ? r.added.flatMap((item): AddedEmployee[] => {
+        if (!item || typeof item !== "object") return [];
+        const e = item as Record<string, unknown>;
+        return typeof e.id === "string" && typeof e.name === "string" && typeof e.roleLabel === "string"
+          ? [{ id: e.id, name: e.name, roleLabel: e.roleLabel }]
+          : [];
+      })
+    : [];
+  return {
+    name: typeof r.name === "string" ? r.name.slice(0, 120) : "",
+    email: typeof r.email === "string" ? r.email.slice(0, 200) : "",
+    roleId,
+    added,
+  };
+}
+
 export function EmployeesStep({ enabledModules, onDone }: EmployeesStepProps) {
   const { user } = useAuth();
 
@@ -67,13 +96,25 @@ export function EmployeesStep({ enabledModules, onDone }: EmployeesStepProps) {
       (option.roleId === "MESERO" && usesWaiters)
   );
 
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  // Nombre, correo, rol y la lista de agregados se guardan al instante y se
+  // recuperan si el usuario sale o recarga. La contraseña NUNCA se guarda.
+  const [draft, setDraft] = useStepDraft<EmployeesDraft>(
+    "employees",
+    { name: "", email: "", roleId: availableRoles[0]?.roleId ?? "CAJERO", added: [] },
+    sanitizeEmployeesDraft
+  );
+  const { name, email, added } = draft;
+  const roleId: EmployeeRoleOption["roleId"] = availableRoles.some((option) => option.roleId === draft.roleId)
+    ? draft.roleId
+    : (availableRoles[0]?.roleId ?? "CAJERO");
+  const setName = (value: string) => setDraft((current) => ({ ...current, name: value }));
+  const setEmail = (value: string) => setDraft((current) => ({ ...current, email: value }));
+  const setRoleId = (value: EmployeeRoleOption["roleId"]) => setDraft((current) => ({ ...current, roleId: value }));
+  const setAdded = (update: (previous: AddedEmployee[]) => AddedEmployee[]) =>
+    setDraft((current) => ({ ...current, added: update(current.added) }));
   const [password, setPassword] = useState("");
-  const [roleId, setRoleId] = useState<EmployeeRoleOption["roleId"]>(availableRoles[0]?.roleId ?? "CAJERO");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [added, setAdded] = useState<AddedEmployee[]>([]);
 
   async function handleAdd(event: FormEvent) {
     event.preventDefault();

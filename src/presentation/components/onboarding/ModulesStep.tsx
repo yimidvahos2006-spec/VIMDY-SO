@@ -29,6 +29,7 @@ import {
   type KitchenOutputModeConfig,
 } from "../../../core/config/operation";
 import { container } from "../../../infrastructure/di/CompositionRoot";
+import { useStepDraft } from "./useStepDraft";
 
 interface ModulesStepProps {
   businessId: string;
@@ -66,8 +67,19 @@ const EMPTY_CHOICE: Choice = {
   kitchenOutput: null,
 };
 
-/** Recuerda lo elegido si el usuario vuelve con "Atrás" (se pierde al recargar). */
-let lastSavedChoice: Choice | null = null;
+function sanitizeChoice(raw: unknown): Choice | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const output = r.kitchenOutput;
+  return {
+    mesas: r.mesas === true,
+    meseros: r.meseros === true,
+    cocina: r.cocina === true,
+    clientes: r.clientes === true,
+    tableCount: typeof r.tableCount === "string" ? r.tableCount.replace(/\D/g, "").slice(0, 3) : "",
+    kitchenOutput: output === "kds" || output === "printer" || output === "both" ? output : null,
+  };
+}
 
 const MODULE_ICONS: Record<ModuleId, React.ElementType> = {
   mesas: CalendarCheck,
@@ -91,8 +103,9 @@ const KITCHEN_OPTIONS: ReadonlyArray<{
 ];
 
 export function ModulesStep({ businessId, onSaved }: ModulesStepProps) {
-  // Empieza vacío: lo opcional lo marca el usuario (o lo que ya había elegido).
-  const [choice, setChoice] = useState<Choice>(lastSavedChoice ?? EMPTY_CHOICE);
+  // Empieza vacío: lo opcional lo marca el usuario. Lo elegido se guarda al
+  // instante y se recupera si sale de la página, vuelve con "Atrás" o recarga.
+  const [choice, setChoice] = useStepDraft<Choice>("modules", EMPTY_CHOICE, sanitizeChoice);
   const [saving, setSaving] = useState(false);
   const [creatingTables, setCreatingTables] = useState(false);
   const [createdTables, setCreatedTables] = useState(0);
@@ -175,7 +188,6 @@ export function ModulesStep({ businessId, onSaved }: ModulesStepProps) {
         throw new Error(snapshot.error ?? "No se pudo confirmar la configuración guardada. Inténtalo de nuevo.");
       }
 
-      lastSavedChoice = choice;
       onSaved(modules);
     } catch (err) {
       const message = err instanceof Error ? err.message : "No se pudo guardar la configuración.";

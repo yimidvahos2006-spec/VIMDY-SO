@@ -10,20 +10,54 @@ import { useAuth } from "../../context/AuthContext";
 import { translateBusinessError } from "../../../core/errors/translateBusinessError";
 import { parseMoneyInput } from "../../../core/utils/parseMoneyInput";
 import type { Category } from "../../../core/entities/Entities";
+import { useStepDraft } from "./useStepDraft";
 
 interface FirstProductStepProps {
   categories: Category[];
   onSaved: () => void;
 }
 
+interface FirstProductDraft {
+  name: string;
+  price: string;
+  cost: string;
+  stock: string;
+  categoryId: string;
+}
+
+function sanitizeFirstProductDraft(raw: unknown): FirstProductDraft | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const text = (value: unknown, max: number): string => (typeof value === "string" ? value.slice(0, max) : "");
+  return {
+    name: text(r.name, 120),
+    price: text(r.price, 20),
+    cost: text(r.cost, 20),
+    stock: text(r.stock, 20),
+    categoryId: text(r.categoryId, 80),
+  };
+}
+
 export function FirstProductStep({ categories, onSaved }: FirstProductStepProps) {
   const { user } = useAuth();
 
-  const [name, setName] = useState("");
-  const [price, setPrice] = useState("");
-  const [cost, setCost] = useState("");
-  const [stock, setStock] = useState("");
-  const [categoryId, setCategoryId] = useState(categories[0]?.id ?? (categories.length === 0 ? "uncategorized" : ""));
+  // Lo escrito se guarda al instante y se recupera si el usuario sale o recarga.
+  const defaultCategoryId = categories[0]?.id ?? (categories.length === 0 ? "uncategorized" : "");
+  const [draft, setDraft] = useStepDraft<FirstProductDraft>(
+    "first_product",
+    { name: "", price: "", cost: "", stock: "", categoryId: defaultCategoryId },
+    sanitizeFirstProductDraft
+  );
+  const { name, price, cost, stock } = draft;
+  const categoryId =
+    draft.categoryId === "uncategorized" || categories.some((category) => category.id === draft.categoryId)
+      ? draft.categoryId
+      : defaultCategoryId;
+  const setName = (value: string) => setDraft((current) => ({ ...current, name: value }));
+  const setPrice = (value: string) => setDraft((current) => ({ ...current, price: value }));
+  const setCost = (value: string) => setDraft((current) => ({ ...current, cost: value }));
+  const setStock = (value: string) => setDraft((current) => ({ ...current, stock: value }));
+  const setCategoryId = (value: string) => setDraft((current) => ({ ...current, categoryId: value }));
   const [saving, setSaving] = useState(false);
   const [checkingProducts, setCheckingProducts] = useState(true);
   const [hasActiveProduct, setHasActiveProduct] = useState(false);

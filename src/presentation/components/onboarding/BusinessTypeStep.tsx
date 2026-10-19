@@ -16,7 +16,8 @@ import {
 
 import { VimdyButton } from "../ui/VimdyButton";
 import { setBusinessType } from "../../../infrastructure/supabase/authBusinessContext";
-import { BUSINESS_TYPES, type BusinessTypeId } from "../../../core/config/businessTypes";
+import { BUSINESS_TYPES, isBusinessTypeId, type BusinessTypeId } from "../../../core/config/businessTypes";
+import { useStepDraft } from "./useStepDraft";
 
 interface BusinessTypeStepProps {
   businessId: string;
@@ -42,8 +43,21 @@ const ICONS: Record<string, React.ElementType> = {
   cadena: UtensilsCrossed
 };
 
+function sanitizeBusinessTypeDraft(raw: unknown): { selected: BusinessTypeId | null } | null {
+  if (!raw || typeof raw !== "object") return null;
+  const value = (raw as { selected?: unknown }).selected;
+  return { selected: typeof value === "string" && isBusinessTypeId(value) ? value : null };
+}
+
 export function BusinessTypeStep({ businessId, onSaved }: BusinessTypeStepProps) {
-  const [selected, setSelected] = useState<BusinessTypeId | null>(null);
+  // Lo elegido se guarda al instante: si el usuario sale o recarga, lo recupera.
+  const [draft, setDraft] = useStepDraft<{ selected: BusinessTypeId | null }>(
+    "business_type",
+    { selected: null },
+    sanitizeBusinessTypeDraft
+  );
+  const selected = draft.selected;
+  const setSelected = (value: BusinessTypeId | null) => setDraft({ selected: value });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const saveInFlight = useRef(false);

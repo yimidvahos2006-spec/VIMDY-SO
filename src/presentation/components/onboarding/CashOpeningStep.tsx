@@ -6,6 +6,7 @@ import { VimdyButton } from "../ui/VimdyButton";
 import { VimdyInput } from "../ui/VimdyInput";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { useAuth } from "../../context/AuthContext";
+import { useStepDraft } from "./useStepDraft";
 
 interface CashOpeningStepProps {
   onSaved: () => void;
@@ -14,7 +15,10 @@ interface CashOpeningStepProps {
 export function CashOpeningStep({ onSaved }: CashOpeningStepProps) {
   const { user } = useAuth();
 
-  const [amount, setAmount] = useState("");
+  // El monto se guarda al instante y se recupera si el usuario sale o recarga.
+  const [amount, setAmount] = useStepDraft<string>("cash_opening", "", (raw) =>
+    typeof raw === "string" ? raw.slice(0, 20) : null
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
