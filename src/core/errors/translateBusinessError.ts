@@ -186,6 +186,24 @@ const CODE_MESSAGES: Record<string, (detail: string) => string> = {
   ROLE_IS_SYSTEM: (detail) => detail || "Este rol es del sistema y no se puede eliminar.",
   PERMISSION_NOT_FOUND: () => "Uno de los permisos seleccionados no existe.",
 
+  // Crear empleados (Edge Function create-staff-user)
+  WEAK_PASSWORD: () => "La contraseña es muy corta. Usa al menos 8 caracteres.",
+  ROLE_INVALID: () => "El rol elegido no es válido. Elige otro rol.",
+  FORBIDDEN: () => "Solo un administrador puede agregar empleados.",
+  SESSION_INVALID: () => "Tu sesión venció. Inicia sesión de nuevo.",
+  NO_BUSINESS: () => "Tu usuario no pertenece a ningún negocio.",
+  SUBSCRIPTION_EXPIRED: () =>
+    "El plan de este negocio no está activo, por eso no se pueden agregar empleados. Renueva el plan desde Configuración.",
+  AUTH_CREATE_FAILED: (detail) =>
+    /password|contrase/i.test(detail)
+      ? "La contraseña no cumple los requisitos. Usa al menos 8 caracteres."
+      : "No se pudo crear el empleado. Revisa el correo e intenta de nuevo.",
+  MEMBERSHIP_FAILED: () => "No se pudo asociar el empleado al negocio. Intenta de nuevo.",
+  PROFILE_FAILED: () => "No se pudo guardar el perfil del empleado. Intenta de nuevo.",
+  SERVER_CONFIG_MISSING: () =>
+    "El servidor no está configurado para crear empleados. Avisa a soporte de VIMDY.",
+  UNEXPECTED: () => "Ocurrió un error inesperado al crear el empleado. Intenta de nuevo.",
+
   // Compras
   PURCHASE_ORDER_NOT_OPEN: () =>
     "Esta orden de compra ya fue cerrada o recibida y no se puede modificar.",

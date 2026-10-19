@@ -19,6 +19,9 @@ import { translateBusinessError } from "../../../core/errors/translateBusinessEr
 import type { ModuleId } from "../../../core/config/modules";
 import { useCanUse } from "../../../hooks/useCanUse";
 
+const MIN_PASSWORD_LENGTH = 8;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
 interface EmployeesStepProps {
   enabledModules: ModuleId[];
   onDone: () => void;
@@ -83,6 +86,16 @@ export function EmployeesStep({ enabledModules, onDone }: EmployeesStepProps) {
 
     if (!name.trim() || !email.trim() || !password.trim()) {
       setError("Completa nombre, correo y contraseña.");
+      return;
+    }
+
+    if (!EMAIL_PATTERN.test(email.trim())) {
+      setError("Escribe un correo válido, por ejemplo: nombre@correo.com");
+      return;
+    }
+
+    if (password.trim().length < MIN_PASSWORD_LENGTH) {
+      setError(`La contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres.`);
       return;
     }
 
@@ -163,8 +176,11 @@ export function EmployeesStep({ enabledModules, onDone }: EmployeesStepProps) {
             onChange={setPassword}
             autoComplete="new-password"
             disabled={saving}
-            placeholder="Contraseña"
+            placeholder={`Mínimo ${MIN_PASSWORD_LENGTH} caracteres`}
           />
+          <p className="-mt-2 text-vimdy-micro text-vimdy-text-tertiary">
+            Con esta contraseña y el correo, tu empleado entrará a VIMDY.
+          </p>
 
           <div role="radiogroup" aria-label="Rol del empleado">
             <p className="block text-sm font-semibold text-vimdy-text-secondary mb-2">Rol</p>
