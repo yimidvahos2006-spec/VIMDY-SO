@@ -33,7 +33,14 @@ export class AuditEngine {
       date: new Date()
     };
 
-    await this.repository.save(entry);
+    // La auditoría es un rastro, no parte de la operación: si falla (red,
+    // migración pendiente, etc.) NO debe tumbar la acción del usuario que
+    // ya se completó (ej. el empleado ya quedó creado en Auth).
+    try {
+      await this.repository.save(entry);
+    } catch (error) {
+      console.error("[VIMDY-AUDIT] No se pudo registrar la auditoría:", action, error);
+    }
     return entry;
   }
 
