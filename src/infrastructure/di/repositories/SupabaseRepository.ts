@@ -9,7 +9,7 @@ import { DuplicateNameError } from "../../../core/errors/DuplicateNameError";
  * nativo — se guarda como string y hay que reconstruirlo al leer, igual
  * que ya pasa "gratis" con IndexedDB (que sí preserva Date de forma nativa).
  */
-const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 
 export function reviveDates<T>(value: T): T {
   if (typeof value === "string" && ISO_DATE_RE.test(value)) {
@@ -103,6 +103,43 @@ export abstract class SupabaseRepository<T extends { id: string; version?: numbe
     if (error) throw new Error(`SUPABASE_FIND_ALL_FAILED (${this.tableName}): ${error.message}`);
 
     return (data ?? []).map((row: { data: unknown; version: number }) => this.reviveRow(row));
+  }
+
+  /**
+   * Igual que findAll(), pero pide al servidor SOLO las filas cuyo campo
+   * `data->>field` es igual a `value` (ej. los movimientos de un turno, o
+   * los turnos con status OPEN). Mismo alcance por negocio/sucursal que
+   * findAll(). Pagina de a 1000 y ordena por id para que nunca se pierdan
+   * filas por el tope de 1000 de la API.
+   */
+  public async findByDataField(field: string, value: string): Promise<T[]> {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(field)) {
+      throw new Error(`SUPABASE_FIND_BY_FIELD_INVALID_FIELD (${this.tableName})`);
+    }
+
+    const PAGE_SIZE = 1000;
+    const MAX_PAGES = 200; // tope de seguridad: 200.000 filas
+    const rows: T[] = [];
+
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      const from = page * PAGE_SIZE;
+      const { data, error } = await this.applyScope(
+        this.table().select("data, version")
+      )
+        .eq(`data->>${field}`, value)
+        .order("id", { ascending: true })
+        .range(from, from + PAGE_SIZE - 1);
+
+      if (error) {
+        throw new Error(`SUPABASE_FIND_BY_FIELD_FAILED (${this.tableName}): ${error.message}`);
+      }
+
+      const batch = (data ?? []) as Array<{ data: unknown; version: number }>;
+      for (const row of batch) rows.push(this.reviveRow(row));
+      if (batch.length < PAGE_SIZE) break;
+    }
+
+    return rows;
   }
 
   public async findById(id: string): Promise<T | null> {

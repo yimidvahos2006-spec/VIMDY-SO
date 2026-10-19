@@ -1,4 +1,5 @@
 import { Sale } from "../../../core/entities/Entities";
+import { getSaleNetTotal, isRevenueSaleStatus } from "../../../core/utils/saleRefunds";
 import { SupabaseRepository, reviveDates } from "./SupabaseRepository";
 import { supabase, getCurrentBusinessId, getCurrentBranchId } from "../../supabase/supabaseClient";
 import type {
@@ -76,6 +77,42 @@ export class SaleRepository extends SupabaseRepository<Sale> implements ISaleFul
   }
 
   /**
+   * Anula una venta pendiente en una sola transacción del servidor.
+   * No escribe directamente en `sales`, inventario ni cocina desde el cliente.
+   */
+  public async cancelPendingSaleAtomic(input: {
+    businessId: string;
+    branchId: string;
+    saleId: string;
+    expectedVersion: number;
+    reason: string;
+  }): Promise<Sale> {
+    const { data, error } = await supabase.rpc("cancel_pending_sale_atomic", {
+      p_business_id: input.businessId,
+      p_branch_id: input.branchId,
+      p_sale_id: input.saleId,
+      p_expected_version: input.expectedVersion,
+      p_reason: input.reason.trim()
+    });
+
+    if (error) {
+      throw new Error(`SALE_CANCEL_ATOMIC_FAILED: ${error.message}`);
+    }
+
+    const result = data as {
+      success?: boolean;
+      alreadyCancelled?: boolean;
+      sale?: Sale;
+    } | null;
+
+    if (!result?.success || !result.sale) {
+      throw new Error("SALE_CANCEL_ATOMIC_REJECTED: el servidor no confirmó la anulación.");
+    }
+
+    return reviveDates(result.sale);
+  }
+
+  /**
    * CRÍTICO #3 del checklist de lanzamiento: ventas de un rango de fechas,
    * filtradas y ordenadas por la base de datos usando `sales.created_at` en vez
    * de traer TODAS las ventas del negocio con findAll() y filtrar en JavaScript.
@@ -110,9 +147,9 @@ export class SaleRepository extends SupabaseRepository<Sale> implements ISaleFul
    *   - fecha  -> `sales.created_at`
    *   - monto  -> `data->>'total'`, con conversion SEGURA (solo acepta el
    *     formato numerico plano; cualquier otra cosa suma 0 en vez de lanzar).
-   *   - status -> se replica el criterio del motor de cobro: una venta cuenta
-   *     solo si esta `PAID` o `CLOSED`. Se excluyen PENDING_PAYMENT, OPEN,
-   *     CANCELLED, REFUNDED y cualquier otro estado no cobrado.
+   *   - status -> se aceptan `PAID`, `CLOSED` y registros históricos sin
+   *     estado; se excluyen los estados no cobrados.
+   *   - total -> se usa el total neto de devoluciones parciales acumuladas.
    */
   public async getTotalRevenue(start: Date, end: Date): Promise<number> {
     const { data, error } = await supabase
@@ -120,22 +157,15 @@ export class SaleRepository extends SupabaseRepository<Sale> implements ISaleFul
       .select("data")
       .eq("business_id", getCurrentBusinessId())
       .eq("branch_id", getCurrentBranchId())
-      .in("data->>status", ["PAID", "CLOSED"])
       .gte("created_at", start.toISOString())
       .lt("created_at", end.toISOString());
 
     if (error) throw new Error(`SUPABASE_GET_TOTAL_REVENUE_FAILED (sales): ${error.message}`);
 
     return (data ?? []).reduce((sum, row) => {
-      const rawTotal = (row.data as Sale | undefined)?.total;
-      // Solo `numero plano`: evita que un total sucio lance la consulta completa.
-      const safeTotal =
-        typeof rawTotal === "number"
-          ? rawTotal
-          : typeof rawTotal === "string" && /^[0-9]+([.][0-9]+)?$/.test(rawTotal)
-            ? Number(rawTotal)
-            : 0;
-      return sum + (Number.isFinite(safeTotal) ? safeTotal : 0);
+      const sale = reviveDates(row.data as Sale);
+      if (!isRevenueSaleStatus(sale.status)) return sum;
+      return sum + getSaleNetTotal(sale);
     }, 0);
   }
 

@@ -48,20 +48,6 @@ export function VimdyBackground({ children }: Props) {
         style={{ background: "radial-gradient(circle, rgba(37,99,235,0.10), transparent 70%)" }}
       />
 
-      {/* Rejilla fina, enmascarada para que solo se insinúe cerca del centro */}
-      <div
-        className="pointer-events-none absolute inset-0 opacity-[0.05]"
-        style={{
-          backgroundImage: `
-            linear-gradient(rgba(245,245,244,.5) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(245,245,244,.5) 1px, transparent 1px)
-          `,
-          backgroundSize: "64px 64px",
-          maskImage: "radial-gradient(ellipse 60% 50% at 50% 35%, black, transparent)",
-          WebkitMaskImage: "radial-gradient(ellipse 60% 50% at 50% 35%, black, transparent)"
-        }}
-      />
-
       {/* Viñeta — profundidad hacia los bordes, foco hacia el centro */}
       <div
         className="pointer-events-none absolute inset-0"

@@ -1,4 +1,5 @@
 import { Sale, Waiter } from "../entities/Entities";
+import { getSaleNetTotal, isRevenueSaleStatus } from "../utils/saleRefunds";
 
 /* ===========================================================================
    waiterLeaderboard
@@ -16,9 +17,6 @@ export interface WaiterRankingEntry {
   salesCount: number;
 }
 
-/** Ventas que no cuentan como venta real para efectos de un ranking. */
-const EXCLUDED_STATUSES = new Set(["CANCELLED", "REFUNDED"]);
-
 /**
  * Devuelve el ranking de meseros ordenado de mayor a menor venta.
  * Solo incluye meseros que sí vendieron algo (no lista en $0 a quien no
@@ -29,11 +27,12 @@ export function computeWaiterLeaderboard(sales: Sale[], waiters: Waiter[]): Wait
   const totals = new Map<string, { total: number; count: number }>();
 
   sales.forEach(sale => {
-    if (!sale.waiterId) return;
-    if (sale.status && EXCLUDED_STATUSES.has(sale.status)) return;
+    if (!sale.waiterId || !isRevenueSaleStatus(sale.status)) return;
+    const netTotal = getSaleNetTotal(sale);
+    if (netTotal <= 0) return;
 
     const current = totals.get(sale.waiterId) ?? { total: 0, count: 0 };
-    current.total += sale.total;
+    current.total += netTotal;
     current.count += 1;
     totals.set(sale.waiterId, current);
   });

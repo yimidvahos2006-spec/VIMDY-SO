@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useCommandIntent } from "../../../hooks/useCommandIntent";
 import { toast } from "../../../core/store/toastStore";
 import { ConfirmModal } from "../ui/ConfirmModal";
 import { VimdyButton } from "../ui/VimdyButton";
-import { CategoriesManagerModal } from "./CategoriesManagerModal";
 import { SkeletonCards, SkeletonRows, Skeleton } from "../ui/Skeleton";
 import { Search, Package, AlertTriangle, PackageX, DollarSign, X, Plus, Trash2, Pencil, Sparkles, Copy, Flame, RefreshCw, Tag } from "lucide-react";
 import { useInventory, getStockStatus, StockStatus } from "../../../core/store/useInventory";
@@ -16,15 +15,41 @@ import { container } from "../../../infrastructure/di/CompositionRoot";
 import { useNavigate } from "react-router-dom";
 import { getBranches, getCurrentBranchId, getCurrentBusinessId } from "../../../infrastructure/supabase/supabaseClient";
 import { STATUS_CLASS, STATUS_LABEL, SortKey, money } from "./inventoryShared";
-import { AiImportModal } from "./AiImportModal";
 import { EmptyProductsState } from "./EmptyProductsState";
-import { ProductFormModal } from "./ProductFormModal";
-import { ProduceBatchModal } from "./ProduceBatchModal";
 import { AlertsPanel, CategoryChip, KpiCard, RecentMovementsPanel, SortableHeader } from "./InventoryWidgets";
-import { ProductDetailModal } from "./ProductDetailModal";
+
+// Las ventanas (modales) pesan mucho y solo se abren al hacer clic: se descargan
+// aparte. Después del primer pintado se precargan en segundo plano para que al
+// hacer clic abran al instante.
+const loadProductFormModal = () => import("./ProductFormModal").then((m) => ({ default: m.ProductFormModal }));
+const loadProductDetailModal = () => import("./ProductDetailModal").then((m) => ({ default: m.ProductDetailModal }));
+const loadAiImportModal = () => import("./AiImportModal").then((m) => ({ default: m.AiImportModal }));
+const loadProduceBatchModal = () => import("./ProduceBatchModal").then((m) => ({ default: m.ProduceBatchModal }));
+const loadCategoriesManagerModal = () => import("./CategoriesManagerModal").then((m) => ({ default: m.CategoriesManagerModal }));
+const ProductFormModal = lazy(loadProductFormModal);
+const ProductDetailModal = lazy(loadProductDetailModal);
+const AiImportModal = lazy(loadAiImportModal);
+const ProduceBatchModal = lazy(loadProduceBatchModal);
+const CategoriesManagerModal = lazy(loadCategoriesManagerModal);
 
 export function InventoryDashboard() {
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const preload = () => {
+      void loadProductFormModal();
+      void loadProductDetailModal();
+      void loadProduceBatchModal();
+      void loadCategoriesManagerModal();
+      void loadAiImportModal();
+    };
+    if (typeof window.requestIdleCallback === "function") {
+      const id = window.requestIdleCallback(preload);
+      return () => window.cancelIdleCallback(id);
+    }
+    const id = window.setTimeout(preload, 1500);
+    return () => window.clearTimeout(id);
+  }, []);
   const {
     products,
     recentMovements,
@@ -415,13 +440,15 @@ export function InventoryDashboard() {
       </div>
 
       {showProduceModal && (
-        <ProduceBatchModal
-          products={batchProducts}
-          productMap={productMap}
-          onClose={() => setShowProduceModal(false)}
-          onProduce={produceBatch}
-          error={error}
-        />
+        <Suspense fallback={null}>
+          <ProduceBatchModal
+            products={batchProducts}
+            productMap={productMap}
+            onClose={() => setShowProduceModal(false)}
+            onProduce={produceBatch}
+            error={error}
+          />
+        </Suspense>
       )}
 
       {showTransferModal && transferProduct && (
@@ -528,7 +555,13 @@ export function InventoryDashboard() {
         <KpiCard
           icon={<DollarSign size={20} className="text-vimdy-success" />}
           label="Valor del inventario"
-          value={kpis.productsWithCost > 0 ? money(kpis.totalValue) : "Sin costo configurado"}
+          value={
+            kpis.valuationStatus === "COMPLETE"
+              ? money(kpis.totalValue)
+              : kpis.valuationStatus === "INCOMPLETE"
+                ? `Costo incompleto (${kpis.unvaluedProducts})`
+                : "Sin stock controlado"
+          }
         />
       </div>
 
@@ -778,69 +811,79 @@ export function InventoryDashboard() {
       )}
 
       {selected && (
-        <ProductDetailModal
-          product={selected}
-          categoryName={categoryNameById[selected.categoryId]}
-          saveError={error}
-          allProducts={products}
-          onClose={() => setSelected(null)}
-          getHistory={getHistory}
-          increaseStock={increaseStock}
-          decreaseStock={decreaseStock}
-          onUpdated={(p) => setSelected(p)}
-          onEdit={() => {
-            setEditingProduct(selected);
-            setSelected(null);
-          }}
-          onDuplicate={() => {
-            handleDuplicateProduct(selected);
-            setSelected(null);
-          }}
-          onDelete={() => handleDeleteProduct(selected)}
-        />
+        <Suspense fallback={null}>
+          <ProductDetailModal
+            product={selected}
+            categoryName={categoryNameById[selected.categoryId]}
+            saveError={error}
+            allProducts={products}
+            onClose={() => setSelected(null)}
+            getHistory={getHistory}
+            increaseStock={increaseStock}
+            decreaseStock={decreaseStock}
+            onUpdated={(p) => setSelected(p)}
+            onEdit={() => {
+              setEditingProduct(selected);
+              setSelected(null);
+            }}
+            onDuplicate={() => {
+              handleDuplicateProduct(selected);
+              setSelected(null);
+            }}
+            onDelete={() => handleDeleteProduct(selected)}
+          />
+        </Suspense>
       )}
 
       {showCategories && (
-        <CategoriesManagerModal onClose={() => setShowCategories(false)} />
+        <Suspense fallback={null}>
+          <CategoriesManagerModal onClose={() => setShowCategories(false)} />
+        </Suspense>
       )}
 
       {showNewProduct && (
-        <ProductFormModal
-          onClose={() => setShowNewProduct(false)}
-          onSave={createProduct}
-          saveError={error}
-          onBuyIngredient={(ingredientId) => {
-            const ingredient = productMap.get(ingredientId);
-            if (ingredient) {
-              setShowNewProduct(false);
-              setSelected(ingredient);
-            }
-          }}
-        />
+        <Suspense fallback={null}>
+          <ProductFormModal
+            onClose={() => setShowNewProduct(false)}
+            onSave={createProduct}
+            saveError={error}
+            onBuyIngredient={(ingredientId) => {
+              const ingredient = productMap.get(ingredientId);
+              if (ingredient) {
+                setShowNewProduct(false);
+                setSelected(ingredient);
+              }
+            }}
+          />
+        </Suspense>
       )}
 
       {editingProduct && (
-        <ProductFormModal
-          product={editingProduct}
-          onClose={() => setEditingProduct(null)}
-          onSave={(input) => updateProduct(editingProduct.id, input)}
-          saveError={error}
-          onBuyIngredient={(ingredientId) => {
-            const ingredient = productMap.get(ingredientId);
-            if (ingredient) {
+        <Suspense fallback={null}>
+          <ProductFormModal
+            product={editingProduct}
+            onClose={() => setEditingProduct(null)}
+            onSave={(input) => updateProduct(editingProduct.id, input)}
+            saveError={error}
+            onBuyIngredient={(ingredientId) => {
+              const ingredient = productMap.get(ingredientId);
+              if (ingredient) {
+                setEditingProduct(null);
+                setSelected(ingredient);
+              }
+            }}
+            onViewKardex={(p) => {
               setEditingProduct(null);
-              setSelected(ingredient);
-            }
-          }}
-          onViewKardex={(p) => {
-            setEditingProduct(null);
-            setSelected(p);
-          }}
-        />
+              setSelected(p);
+            }}
+          />
+        </Suspense>
       )}
 
       {showAiImport && (
-        <AiImportModal onClose={() => setShowAiImport(false)} createProduct={createProduct} />
+        <Suspense fallback={null}>
+          <AiImportModal onClose={() => setShowAiImport(false)} createProduct={createProduct} />
+        </Suspense>
       )}
 
       {productToDelete && (

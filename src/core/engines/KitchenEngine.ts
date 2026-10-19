@@ -3,6 +3,16 @@ import { IRepository } from '../../infrastructure/di/repositories/IRepository';
 import { AuditEngine } from './AuditEngine';
 import { vimdyCore } from '../VimdyCore';
 import { getCurrentBusinessId, getCurrentBranchId } from '../../infrastructure/supabase/supabaseClient';
+import type { KitchenOrderMoveTarget } from '../../infrastructure/di/repositories/KitchenOrderRepository';
+
+interface KitchenOrderRepositoryPort extends IRepository<KitchenOrder> {
+  /** Present on the production Supabase repository; writes through an RPC. */
+  createAtomic?(order: KitchenOrder): Promise<KitchenOrder>;
+  /** Present on the production Supabase repository; writes through an RPC. */
+  transitionAtomic?(order: KitchenOrder, nextStatus: KitchenOrder['status'], cancelReason?: string): Promise<KitchenOrder>;
+  /** Present on the production Supabase repository; writes through an RPC. */
+  moveAtomic?(order: KitchenOrder, target: KitchenOrderMoveTarget): Promise<KitchenOrder>;
+}
 
 /** Motivos de cancelación permitidos desde la pantalla de Cocina. */
 export const KITCHEN_CANCEL_REASONS = [
@@ -16,7 +26,10 @@ export type KitchenCancelReason = (typeof KITCHEN_CANCEL_REASONS)[number];
 
 export class KitchenEngine {
   constructor(
-    private readonly repository: IRepository<KitchenOrder>,
+    private readonly repository: KitchenOrderRepositoryPort,
+    // En producción, KitchenOrderRepository ejecuta RPC transaccionales que
+    // auditan con auth.uid(). AuditEngine se usa solamente con repositorios
+    // alternativos que no implementan las mutaciones atómicas.
     private readonly audit: AuditEngine
   ) {}
 
@@ -83,8 +96,21 @@ export class KitchenEngine {
   }
 
   public async save(order: KitchenOrder): Promise<void> {
-    await this.repository.save(order);
-    this.emit('kitchen.order_created', order);
+    let persisted: KitchenOrder;
+
+    if (typeof this.repository.createAtomic === 'function') {
+      // El repositorio de producción ejecuta la RPC transaccional.
+      persisted = await this.repository.createAtomic(order);
+    } else {
+      // Respeta IRepository para implementaciones alternativas. En producción,
+      // KitchenOrderRepository siempre expone createAtomic y nunca cae aquí.
+      await this.repository.save(order);
+      const stored = await this.repository.findById(order.id);
+      if (!stored) throw new Error('KITCHEN_ORDER_SAVE_NOT_CONFIRMED');
+      persisted = stored;
+    }
+
+    this.emit('kitchen.order_created', persisted);
   }
 
   public async getByTableId(tableId: string): Promise<KitchenOrder[]> {
@@ -99,102 +125,77 @@ export class KitchenEngine {
 
   public async updateStatus(
     id: string,
-    status: KitchenOrder['status']
+    status: KitchenOrder['status'],
+    reason?: string
   ): Promise<void> {
     const order = await this.getById(id);
-
-    if (!order) {
-      throw new Error('ORDER_NOT_FOUND');
-    }
+    if (!order) throw new Error('ORDER_NOT_FOUND');
 
     if (order.status === 'ENTREGADO' || order.status === 'CANCELADO') {
-      throw new Error(
-        `ORDER_LOCKED: la comanda ya está en estado "${order.status}" y no se puede modificar.`
-      );
+      // Incluso repetir el estado terminal se rechaza; en particular, un
+      // doble clic sobre ENTREGADO no vuelve a escribir deliveredAt.
+      throw new Error(`ORDER_LOCKED: la comanda ya está en estado "${order.status}" y no se puede modificar.`);
     }
 
     const allowed = this.validTransitions[order.status] ?? [];
-    if (!allowed.includes(status)) {
-      throw new Error(
-        `INVALID_STATUS_TRANSITION: no se puede cambiar de "${order.status}" a "${status}".`
-      );
+    if (order.status !== status && !allowed.includes(status)) {
+      throw new Error(`INVALID_STATUS_TRANSITION: no se puede cambiar de "${order.status}" a "${status}".`);
+    }
+    if (status === 'CANCELADO' && !reason?.trim()) {
+      throw new Error('CANCEL_REASON_REQUIRED: hay que indicar un motivo de cancelación.');
     }
 
-    const updated: KitchenOrder = {
-      ...order,
-      status,
-      deliveredAt:
-        status === 'ENTREGADO'
-          ? order.deliveredAt ?? new Date()
-          : order.deliveredAt
-    };
-
-    await this.repository.update(updated);
+    const updated = await this.persistTransition(order, status, reason?.trim());
     this.emit('kitchen.status_updated', updated);
   }
 
-  public async delete(id: string): Promise<void> {
-    await this.repository.delete(id);
-    this.emit('kitchen.order_deleted', { id });
+  /** El historial de Cocina es append-only; no se habilita el borrado físico. */
+  public async delete(_id: string): Promise<void> {
+    throw new Error('KITCHEN_ORDER_DELETE_DISABLED: el historial de cocina no se borra.');
   }
 
   /**
-   * Cancela una comanda desde Cocina. Nunca la borra (nunca llama a
-   * `delete`): solo cambia su estado a CANCELADO y guarda el motivo, para
-   * que siga apareciendo en el historial general con su razón visible.
-   * Todo queda además en AuditEngine, de solo-anexado, por si el registro
-   * en la propia comanda alguna vez se necesita contrastar.
+   * Cancela una comanda desde Cocina. Nunca la borra: la RPC transaccional
+   * actualiza la comanda, sus líneas relacionadas, trabajos pendientes de
+   * impresión y la auditoría con el actor autenticado real.
    */
   public async cancelOrder(
     id: string,
     reason: string,
     actorId: string
   ): Promise<KitchenOrder> {
-    const order = await this.repository.findById(id);
-
-    if (!order) {
-      throw new Error('ORDER_NOT_FOUND');
-    }
-
+    const order = await this.getById(id);
+    if (!order) throw new Error('ORDER_NOT_FOUND');
     if (order.status === 'ENTREGADO' || order.status === 'CANCELADO') {
-      throw new Error(
-        `ORDER_CANNOT_BE_CANCELLED: la comanda ya está en estado "${order.status}".`
-      );
+      throw new Error(`ORDER_CANNOT_BE_CANCELLED: la comanda ya está en estado "${order.status}".`);
     }
-
     if (!reason.trim()) {
       throw new Error('CANCEL_REASON_REQUIRED: hay que indicar un motivo de cancelación.');
     }
-
-    const updated: KitchenOrder = {
-      ...order,
-      status: 'CANCELADO',
-      cancelReason: reason.trim()
-    };
-
-    await this.repository.update(updated);
-
-    await this.audit.log(
-      actorId,
-      'KITCHEN_ORDER_CANCELLED',
-      'kitchen',
-      `Comanda #${order.orderNumber ?? order.id.slice(0, 8)} (${order.origin ?? "Pedido"}) cancelada: ${reason.trim()}`,
-      order.id
-    );
-
+    // actorId se conserva por compatibilidad de API; la base de datos no
+    // confía en este valor de navegador y audita exclusivamente auth.uid().
+    void actorId;
+    const usesAtomicRpc = typeof this.repository.transitionAtomic === 'function';
+    const updated = await this.persistTransition(order, 'CANCELADO', reason.trim());
+    if (!usesAtomicRpc) {
+      // Adaptadores de repositorio alternativos guardan su auditoría mediante
+      // el repositorio configurado. La implementación Supabase no llega aquí:
+      // la RPC escribe el actor real de auth.uid() dentro de la transacción.
+      await this.audit.log(
+        actorId,
+        'KITCHEN_ORDER_CANCELLED',
+        'kitchen',
+        `Comanda ${id} cancelada: ${reason.trim()}`,
+        id
+      );
+    }
     this.emit('kitchen.status_updated', updated);
-
     return updated;
   }
 
   /**
-   * Re-apunta las comandas YA enviadas de una cuenta a otra mesa (al unir o
-   * transferir). Sin esto, la mesa destino no sabe qué se mandó ya a cocina y
-   * lo vuelve a enviar todo. Cocina además pasa a mostrar el nombre nuevo.
-   *
-   * Solo se mueven las comandas de la cuenta activa de `from` (mismo pedido o
-   * misma sesión). Las canceladas se quedan como historial de la mesa vieja.
-   * Devuelve una función para deshacer el movimiento si un paso posterior falla.
+   * Re-apunta las comandas ya enviadas de una cuenta a otra mesa. La versión,
+   * el cambio de mesa y la auditoría se validan en una RPC server-side.
    */
   public async moveTableOrders(input: {
     from: { id: string; orderId?: string; openOperationId?: string; openedAt?: Date | string };
@@ -217,14 +218,12 @@ export class KitchenEngine {
     const originals: KitchenOrder[] = [];
     try {
       for (const order of candidates) {
-        const updated = {
-          ...order,
+        const updated = await this.persistMove(order, {
           tableId: to.id,
           orderId: to.orderId ?? order.orderId,
           origin: to.name,
-          tableSessionId: toSession
-        } as KitchenOrder;
-        await this.repository.update(updated);
+          tableSessionId: toSession,
+        });
         originals.push(order);
         this.emit('kitchen.status_updated', updated);
       }
@@ -243,18 +242,79 @@ export class KitchenEngine {
     for (const original of originals) {
       try {
         const current = await this.repository.findById(original.id);
-        await this.repository.update({ ...original, version: current?.version ?? original.version } as KitchenOrder);
-        this.emit('kitchen.status_updated', original);
+        if (!current || !original.tableId) continue;
+        const originalExtended = original as KitchenOrder & { tableSessionId?: string };
+        const updated = await this.persistMove(current, {
+          tableId: original.tableId,
+          orderId: original.orderId,
+          origin: original.origin,
+          tableSessionId: originalExtended.tableSessionId,
+        });
+        this.emit('kitchen.status_updated', updated);
       } catch {
-        // Mejor esfuerzo: el llamador ya está manejando un fallo mayor.
+        // El llamador ya está manejando un fallo mayor; se mantiene mejor
+        // esfuerzo al deshacer varias comandas sin sobrescribir su estado.
       }
     }
   }
 
   /**
-   * Cancela las comandas de cocina de una cuenta que todavía no se entregó.
-   * Se usa al cancelar el pedido de una mesa para que cocina deje de preparar.
+   * Persiste un cambio de estado. El repositorio de producción siempre usa
+   * transitionAtomic (RPC); el contrato IRepository se admite para otros
+   * adaptadores que implementan save/update y mantienen su propia persistencia.
+   * No hay fallback tras un error de la RPC, para evitar duplicar una operación.
    */
+  private async persistTransition(
+    order: KitchenOrder,
+    nextStatus: KitchenOrder['status'],
+    cancelReason?: string
+  ): Promise<KitchenOrder> {
+    if (typeof this.repository.transitionAtomic === 'function') {
+      return this.repository.transitionAtomic(order, nextStatus, cancelReason);
+    }
+
+    const nextOrder: KitchenOrder = {
+      ...order,
+      status: nextStatus,
+      ...(nextStatus === 'ENTREGADO'
+        ? { deliveredAt: order.deliveredAt ?? new Date() }
+        : {}),
+      ...(nextStatus === 'CANCELADO' && cancelReason
+        ? { cancelReason }
+        : {}),
+    };
+    await this.repository.update(nextOrder);
+    const stored = await this.repository.findById(order.id);
+    if (!stored) throw new Error('KITCHEN_ORDER_UPDATE_NOT_CONFIRMED');
+    return stored;
+  }
+
+  /**
+   * Persiste la reasignación de mesa. En producción siempre se usa moveAtomic
+   * para validar versión, sucursal y auditoría en PostgreSQL.
+   */
+  private async persistMove(
+    order: KitchenOrder,
+    target: KitchenOrderMoveTarget
+  ): Promise<KitchenOrder> {
+    if (typeof this.repository.moveAtomic === 'function') {
+      return this.repository.moveAtomic(order, target);
+    }
+
+    const nextOrder = {
+      ...order,
+      tableId: target.tableId,
+      orderId: target.orderId ?? order.orderId,
+      origin: target.origin ?? order.origin,
+      tableSessionId: target.tableSessionId,
+    } as KitchenOrder;
+    await this.repository.update(nextOrder);
+    const stored = await this.repository.findById(order.id);
+    if (!stored) throw new Error('KITCHEN_ORDER_MOVE_NOT_CONFIRMED');
+    return stored;
+  }
+
+  /** Cancela las comandas abiertas de una cuenta, conservando motivo e historial. */
   public async cancelOpenOrdersForTable(
     tableId: string,
     reason: string,
@@ -289,12 +349,6 @@ export class KitchenEngine {
     });
   }
 
-  /**
-   * Notifica al bus global de VIMDY. Cualquier componente puede
-   * suscribirse con `useVimdyEvent("kitchen", handler)` para reaccionar
-   * de inmediato cuando Caja, Meseros o Pedidos envían o actualizan una
-   * comanda, sin necesidad de refrescar la página.
-   */
   private emit(action: string, payload: unknown): void {
     vimdyCore.emit('kitchen', { action, payload });
   }

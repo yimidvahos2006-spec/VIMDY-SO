@@ -44,7 +44,7 @@ import { dashboardStore } from "../store/dashboardStore";
 import { operationConfigStore } from "../store/operationConfigStore";
 import { getEffectiveKitchenOutputMode } from "../services/effectiveKitchenOutputMode";
 import { createKitchenOutput } from "../services/KitchenOutputFactory";
-import { getSaleNetTotal, getSaleNetItems } from "../utils/saleRefunds";
+import { getSaleNetTotal, getSaleNetItems, isRevenueSaleStatus } from "../utils/saleRefunds";
 
 /* ===========================================================================
    SalesEngine
@@ -873,20 +873,23 @@ export class SalesEngine {
   public calculateStatistics(sales: Sale[]): SalesStatistics {
     const currency = companyConfigStore.get().currency;
 
+    const revenueSales = sales.filter(
+      (sale) => isRevenueSaleStatus(sale.status) && getSaleNetTotal(sale) > 0
+    );
     const totalSales = roundMoney(
-      sales.reduce((sum, sale) => sum + this.netTotal(sale), 0),
+      revenueSales.reduce((sum, sale) => sum + getSaleNetTotal(sale), 0),
       currency
     );
-    const totalOrders = sales.length;
+    const totalOrders = revenueSales.length;
     const averageTicket =
       totalOrders === 0 ? 0 : roundMoney(totalSales / totalOrders, currency);
 
     const totalTax = roundMoney(
-      sales.reduce((sum, sale) => sum + (sale.tax ?? 0) * (this.netTotal(sale) / (sale.total || 1)), 0),
+      revenueSales.reduce((sum, sale) => sum + (sale.tax ?? 0) * (getSaleNetTotal(sale) / (sale.total || 1)), 0),
       currency
     );
     const totalDiscount = roundMoney(
-      sales.reduce((sum, sale) => sum + (sale.discount ?? 0) * (this.netTotal(sale) / (sale.total || 1)), 0),
+      revenueSales.reduce((sum, sale) => sum + (sale.discount ?? 0) * (getSaleNetTotal(sale) / (sale.total || 1)), 0),
       currency
     );
 
@@ -906,6 +909,8 @@ export class SalesEngine {
       if (sale.status) {
         byStatus[sale.status] = (byStatus[sale.status] ?? 0) + 1;
       }
+
+      if (!isRevenueSaleStatus(sale.status) || getSaleNetTotal(sale) <= 0) continue;
 
       const netItems = getSaleNetItems(sale);
       for (const item of netItems) {
@@ -950,95 +955,6 @@ export class SalesEngine {
     const updated: Sale = { ...sale, updatedAt: new Date() };
     await this.saleRepository.update(updated);
     return updated;
-  }
-
-  /**
-   * Cancela una venta que aún no ha sido cerrada, restituyendo el
-   * inventario y notificando a cocina.
-   */
-  public async cancelSale(id: string, reason: string, actorId?: string): Promise<Sale> {
-    const sale = await this.getSale(id);
-
-    if (!sale) {
-      throw new Error("SALE_NOT_FOUND");
-    }
-
-    if (
-      sale.status === "CANCELLED" ||
-      sale.status === "REFUNDED" ||
-      sale.status === "CLOSED"
-    ) {
-      throw new Error(
-        `SALE_CANNOT_BE_CANCELLED: la venta ya se encuentra en estado "${sale.status}".`
-      );
-    }
-
-    // Solo si ya había sido cobrada llegó a sumarse al Dashboard (eso
-    // ocurre al pagar, no al crear la venta) — así que solo en ese caso
-    // hay algo que revertir ahí.
-    const status = sale.status as string;
-    const wasPaid = status === "PAID" || status === "CLOSED";
-
-    const alreadyRefunded = this.getRefundedQuantities(sale);
-    const remainingItems: SaleItem[] = sale.items
-      .map(item => ({
-        ...item,
-        quantity: item.quantity - (alreadyRefunded[item.productId] ?? 0)
-      }))
-      .filter(item => item.quantity > 0);
-
-    // 🔒 FIX DE SEGURIDAD: Calcular el monto restante (después de reembolsos parciales)
-    // Si la venta tenía reembolsos parciales, solo devolver el dinero restante
-    // Usamos el total de la venta menos lo ya reembolsado para incluir impuestos/descuentos
-    const alreadyRefundedTotal = (sale.refunds ?? []).reduce((sum, r) => sum + r.amount, 0);
-    const remainingAmount = roundMoney(Math.max((sale.total ?? 0) - alreadyRefundedTotal, 0), companyConfigStore.get().currency);
-
-    // Primero cancelar en cocina (best-effort)
-    try {
-      await this.kitchen.updateStatus(sale.id, "CANCELADO");
-    } catch (kitchenError) {
-      logWarning(`No se pudo cancelar la comanda en cocina para venta ${sale.id}`, {
-        context: { error: String(kitchenError) }
-      });
-    }
-
-    // Actualizar el estado de la venta
-    const cancelled = await this.updateSale({
-      ...sale,
-      status: "CANCELLED",
-      notes: this.appendNote(sale.notes, `Cancelada: ${reason}`)
-    });
-
-    if (wasPaid) {
-      // 🔒 FIX DE SEGURIDAD: Registrar el egreso de caja ANTES de restaurar inventario
-      // Usar ID determinístico para evitar duplicados en reintentos
-      await this.cash.registerExpense(
-        remainingAmount,
-        `Cancelación venta ${sale.code ?? sale.id}: ${reason}`,
-        `sale-cancel-${sale.id}`
-      );
-
-      // Ahora restaurar el inventario
-      await this.updateInventory(
-        remainingItems,
-        `Cancelación venta ${sale.code ?? sale.id}: ${reason}`,
-        "INCREASE"
-      );
-
-      this.reverseDashboardForSale(sale, remainingAmount, remainingItems.reduce((sum, item) => sum + item.quantity, 0));
-    }
-
-    await this.updateDashboard();
-
-    await this.audit.log(
-      actorId ?? sale.cashierId ?? "system",
-      "SALE_CANCELLED",
-      "sales",
-      `Venta ${sale.code ?? sale.id} cancelada: ${reason}`,
-      sale.id
-    );
-
-    return cancelled;
   }
 
   /**
@@ -1551,28 +1467,62 @@ export class SalesEngine {
     };
   }
 
-  /**
-   * Elimina definitivamente una venta. Solo permitido para ventas que
-   * nunca llegaron a pagarse o que ya fueron canceladas/reembolsadas.
-   */
-  public async deleteSale(id: string): Promise<void> {
-    const sale = await this.getSale(id);
+  public async getSale(id: string): Promise<Sale | null> {
+    return await this.saleRepository.findById(id);
+  }
 
+  /**
+   * Anula una venta no cobrada mediante la RPC atómica del servidor.
+   * La autorización, el estado y la versión se vuelven a validar en PostgreSQL.
+   */
+  public async cancelPendingSale(id: string, reason: string): Promise<Sale> {
+    const normalizedReason = reason.trim();
+    if (!normalizedReason) {
+      throw new Error("SALE_CANCEL_REASON_REQUIRED: escribe el motivo de anulación.");
+    }
+    if (normalizedReason.length > 500) {
+      throw new Error("SALE_CANCEL_REASON_TOO_LONG: el motivo no puede superar 500 caracteres.");
+    }
+
+    const businessId = getCurrentBusinessId();
+    const branchId = getCurrentBranchId();
+    if (!businessId || !branchId) {
+      throw new Error("SALE_CANCEL_CONTEXT_REQUIRED: se requiere negocio y sucursal activos.");
+    }
+
+    const sale = await this.getSale(id);
     if (!sale) {
       throw new Error("SALE_NOT_FOUND");
     }
-
-    if (sale.status === "PAID" || sale.status === "CLOSED") {
-      throw new Error(
-        "SALE_LOCKED: no se puede eliminar una venta pagada o cerrada. Use refundSale()."
-      );
+    if (typeof sale.version !== "number" || !Number.isInteger(sale.version) || sale.version < 1) {
+      throw new Error("SALE_VERSION_REQUIRED: no se pudo obtener la versión de la venta.");
     }
 
-    await this.saleRepository.delete(id);
+    return this.saleRepository.cancelPendingSaleAtomic({
+      businessId,
+      branchId,
+      saleId: sale.id,
+      expectedVersion: sale.version,
+      reason: normalizedReason
+    });
   }
 
-  public async getSale(id: string): Promise<Sale | null> {
-    return await this.saleRepository.findById(id);
+  /**
+   * Compatibilidad segura para llamadores antiguos. La operación se conecta
+   * exclusivamente a la RPC de anulación de ventas PENDING_PAYMENT; nunca
+   * convierte una venta cobrada en CANCELLED. Las ventas cobradas requieren
+   * el flujo de devolución que registra caja, inventario y auditoría.
+   */
+  public async cancelSale(id: string, reason: string, _actorId?: string): Promise<Sale> {
+    const sale = await this.getSale(id);
+    if (!sale) throw new Error("SALE_NOT_FOUND");
+    if (sale.status === "REFUNDED") {
+      throw new Error("SALE_CANNOT_BE_CANCELLED: la venta ya fue reembolsada.");
+    }
+    if (sale.status !== "PENDING_PAYMENT" && sale.status !== "CANCELLED") {
+      throw new Error("SALE_CANCELLATION_FORBIDDEN: las ventas cobradas deben procesarse mediante devolución.");
+    }
+    return this.cancelPendingSale(id, reason);
   }
 
   public async getAllSales(): Promise<Sale[]> {
@@ -2256,7 +2206,7 @@ export class SalesEngine {
     ]);
 
     const paidSales = allSales.filter(
-      sale => sale.status === "PAID" || sale.status === "CLOSED"
+      sale => isRevenueSaleStatus(sale.status) && getSaleNetTotal(sale) > 0
     );
 
     const realtime = {
@@ -2333,58 +2283,6 @@ export class SalesEngine {
   public async generateEvents(): Promise<Alert[]> {
     const products = await this.inventory.listAll();
     return this.alert.checkStockAlerts(products);
-  }
-
-  /* =======================================================================
-     OPERACIONES ADICIONALES
-  ======================================================================= */
-
-  /**
-   * Duplica una venta existente como un nuevo pedido abierto
-   * (útil para "repetir pedido" en mesas o domicilios recurrentes).
-   */
-  public async duplicateSale(id: string): Promise<Sale> {
-    const original = await this.getSale(id);
-
-    if (!original) {
-      throw new Error("SALE_NOT_FOUND");
-    }
-
-    const now = new Date();
-
-    const duplicated: Sale = {
-      ...original,
-      id: crypto.randomUUID(),
-      code: this.generateSaleCode(original.type ?? "QUICK"),
-      status: "OPEN",
-      createdAt: now,
-      updatedAt: now
-    };
-
-    await this.saveSale(duplicated);
-
-    return duplicated;
-  }
-
-  /**
-   * Cierra una venta ya pagada, dejándola lista para reportes/auditoría.
-   */
-  public async closeSale(id: string): Promise<Sale> {
-    const sale = await this.getSale(id);
-
-    if (!sale) {
-      throw new Error("SALE_NOT_FOUND");
-    }
-
-    if (sale.status !== "PAID") {
-      throw new Error("SALE_NOT_PAID: la venta debe estar pagada antes de cerrarse.");
-    }
-
-    const closed = await this.updateSale({ ...sale, status: "CLOSED" });
-
-    await this.updateDashboard();
-
-    return closed;
   }
 
   /* =======================================================================
@@ -2606,9 +2504,6 @@ export class SalesEngine {
     }
   }
 
-  private appendNote(existing: string | undefined, note: string): string {
-    return existing ? `${existing} | ${note}` : note;
-  }
 
   private generateSaleCode(type: SaleType): string {
     const prefix =

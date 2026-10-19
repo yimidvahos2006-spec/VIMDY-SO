@@ -21,16 +21,32 @@
 import { Sale, SaleItem } from "../entities/Entities";
 
 /** Status de venta que cuentan como "venta real pagada". */
-export const VALID_SALE_STATUSES = new Set(["PAID", "CLOSED", "COMPLETED"]);
+export const VALID_SALE_STATUSES = new Set(["PAID", "CLOSED"]);
+
+/**
+ * Única regla de negocio para decidir si una venta cuenta como ingreso.
+ * PAID/CLOSED cuentan; los registros históricos sin status también cuentan.
+ * PENDING_PAYMENT, OPEN, CANCELLED, REFUNDED y estados desconocidos no cuentan.
+ */
+export function isRevenueSaleStatus(status: string | null | undefined): boolean {
+  if (status == null || status.trim() === "") return true;
+  const normalized = status.trim().toUpperCase();
+  return normalized === "PAID" || normalized === "CLOSED";
+}
 
 /** Monto total ya reembolsado sobre esta venta (parcial + total acumulado). */
 export function getSaleRefundedTotal(sale: Sale): number {
-  return (sale.refunds ?? []).reduce((sum, refund) => sum + refund.amount, 0);
+  return (sale.refunds ?? []).reduce((sum, refund) => {
+    const amount = Number(refund.amount);
+    return sum + (Number.isFinite(amount) ? Math.max(amount, 0) : 0);
+  }, 0);
 }
 
 /** Total de la venta neto de reembolsos — lo que de verdad sigue siendo ingreso. */
 export function getSaleNetTotal(sale: Sale): number {
-  return Math.max(sale.total - getSaleRefundedTotal(sale), 0);
+  const total = Number(sale.total);
+  if (!Number.isFinite(total)) return 0;
+  return Math.max(total - getSaleRefundedTotal(sale), 0);
 }
 
 /**
@@ -44,18 +60,28 @@ export function getSaleNetItems(sale: Sale): SaleItem[] {
   const refundedByProduct = new Map<string, number>();
 
   for (const refund of sale.refunds ?? []) {
-    for (const item of refund.items) {
+    for (const item of refund.items ?? []) {
+      const quantity = Number(item.quantity);
+      if (!item.productId || !Number.isFinite(quantity) || quantity <= 0) continue;
       refundedByProduct.set(
         item.productId,
-        (refundedByProduct.get(item.productId) ?? 0) + item.quantity
+        (refundedByProduct.get(item.productId) ?? 0) + quantity
       );
     }
   }
 
-  return sale.items
-    .map((item) => ({
-      ...item,
-      quantity: item.quantity - (refundedByProduct.get(item.productId) ?? 0)
-    }))
-    .filter((item) => item.quantity > 0);
+  // Distribuir las unidades devueltas entre líneas del mismo producto UNA vez.
+  // Restar la cantidad total a cada línea duplica el efecto si el producto
+  // aparece varias veces (p. ej. distintas variantes o notas en una misma venta).
+  return sale.items.flatMap((item) => {
+    const originalQuantity = Number(item.quantity);
+    if (!Number.isFinite(originalQuantity) || originalQuantity <= 0) return [];
+
+    const remainingRefunded = refundedByProduct.get(item.productId) ?? 0;
+    const refundedFromThisLine = Math.min(originalQuantity, remainingRefunded);
+    refundedByProduct.set(item.productId, Math.max(remainingRefunded - refundedFromThisLine, 0));
+
+    const netQuantity = originalQuantity - refundedFromThisLine;
+    return netQuantity > 0 ? [{ ...item, quantity: netQuantity }] : [];
+  });
 }

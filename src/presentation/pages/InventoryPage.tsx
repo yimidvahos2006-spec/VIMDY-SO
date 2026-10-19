@@ -1,7 +1,11 @@
-import React, { useState } from "react";
+import React, { lazy, Suspense, useState } from "react";
 import { InventoryDashboard } from "../components/inventory/InventoryDashboard";
-import { InsumosPanel } from "../components/inventory/InsumosPanel";
 import { RequirePermission } from "../navigation/RequirePermission";
+
+// El panel de insumos solo se descarga si el usuario abre esa pestaña.
+const InsumosPanel = lazy(() =>
+  import("../components/inventory/InsumosPanel").then((m) => ({ default: m.InsumosPanel }))
+);
 
 type InventoryTab = "productos" | "insumos";
 
@@ -34,7 +38,13 @@ export const InventoryPage: React.FC = () => {
           </button>
         </div>
 
-        {tab === "productos" ? <InventoryDashboard /> : <InsumosPanel />}
+        {tab === "productos" ? (
+          <InventoryDashboard />
+        ) : (
+          <Suspense fallback={<div className="h-64 w-full animate-pulse rounded-vimdy-xl bg-vimdy-border/20" aria-hidden="true" />}>
+            <InsumosPanel />
+          </Suspense>
+        )}
       </div>
     </RequirePermission>
   );

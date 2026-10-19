@@ -726,7 +726,7 @@ export class OrderEngine {
     }
 
     if (order.kitchenOrderId) {
-      await this.kitchen.updateStatus(order.kitchenOrderId, "CANCELADO");
+      await this.kitchen.updateStatus(order.kitchenOrderId, "CANCELADO", reason);
     }
 
     const cancelled = await this.updateOrder(orderId, {

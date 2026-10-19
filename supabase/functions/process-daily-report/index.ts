@@ -85,14 +85,48 @@ function parseDate(value: unknown): Date | null {
 }
 
 function isValidSaleStatus(status: unknown): boolean {
-  return status === "PAID" || status === "CLOSED" || status === "COMPLETED" || status === "PARTIALLY_REFUNDED";
+  if (status == null || (typeof status === "string" && status.trim() === "")) return true;
+  return status === "PAID" || status === "CLOSED";
 }
 
-function netSale(data: Record<string, unknown>) {
-  if (!isValidSaleStatus(data.status)) return { gross: 0, refunded: 0, net: 0 };
+function refundIsEffectiveAt(
+  refund: Record<string, unknown>,
+  cutoffAt?: Date,
+  saleUpdatedAt?: string,
+): boolean {
+  if (!cutoffAt) return true;
+  const refundDate = parseDate(refund.createdAt);
+  if (refundDate) return refundDate.getTime() <= cutoffAt.getTime();
+
+  // Los reembolsos heredados sin createdAt solo se pueden situar antes del
+  // cierre cuando la fila completa no fue modificada después del corte.
+  const updatedAt = parseDate(saleUpdatedAt);
+  return Boolean(updatedAt && updatedAt.getTime() <= cutoffAt.getTime());
+}
+
+function netSale(
+  data: Record<string, unknown>,
+  cutoffAt?: Date,
+  saleUpdatedAt?: string,
+) {
+  const refunds = (Array.isArray(data.refunds) ? data.refunds : [])
+    .map((item) => item as Record<string, unknown>);
+  const eligibleRefunds = refunds.filter((refund) => refundIsEffectiveAt(refund, cutoffAt, saleUpdatedAt));
+  const status = typeof data.status === "string" ? data.status.trim().toUpperCase() : data.status;
+
+  // Un reembolso total posterior al cierre cambia el estado actual a REFUNDED,
+  // pero no debe borrar retroactivamente la venta del snapshot de ese cierre.
+  const refundedAfterCutoff = Boolean(
+    cutoffAt && status === "REFUNDED" && refunds.some((refund) => {
+      const refundDate = parseDate(refund.createdAt);
+      return refundDate !== null && refundDate.getTime() > cutoffAt.getTime();
+    }),
+  );
+  const countsAsRevenue = isValidSaleStatus(status) || refundedAfterCutoff;
+  if (!countsAsRevenue) return { gross: 0, refunded: 0, net: 0 };
+
   const gross = Math.max(num(data.total), 0);
-  const refunds = Array.isArray(data.refunds) ? data.refunds : [];
-  const refunded = Math.max(refunds.reduce((sum, item) => sum + num((item as Record<string, unknown>).amount), 0), 0);
+  const refunded = Math.max(eligibleRefunds.reduce((sum, item) => sum + num(item.amount), 0), 0);
   return { gross, refunded, net: Math.max(gross - refunded, 0) };
 }
 
@@ -159,7 +193,6 @@ async function readSales(
   branchId: string | null,
   startIso: string,
   endIso: string,
-  updatedWindow = false,
   shiftId?: string,
 ): Promise<SaleRow[]> {
   const result: SaleRow[] = [];
@@ -178,15 +211,93 @@ async function readSales(
       query = query.eq("data->>shiftId", shiftId);
     }
 
-    query = query.order(updatedWindow ? "updated_at" : "created_at", { ascending: true });
-    query = updatedWindow
-      ? query.gte("updated_at", startIso).lt("updated_at", endIso)
-      : query.gte("created_at", startIso).lt("created_at", endIso);
+    if (shiftId) {
+      // shiftId se asigna en el momento del cobro. Una venta puede haberse
+      // creado antes de abrir este turno, por eso no se filtra por created_at.
+      query = query.order("created_at", { ascending: true }).order("id", { ascending: true });
+    } else {
+      query = query.order("created_at", { ascending: true }).order("id", { ascending: true })
+        .gte("created_at", startIso)
+        .lt("created_at", endIso);
+    }
 
     const { data, error } = await query.range(from, from + PAGE_SIZE - 1);
     if (error) throw new Error(`SALES_READ_FAILED: ${error.message}`);
     const page = (data ?? []) as SaleRow[];
     result.push(...page);
+    if (page.length < PAGE_SIZE) return result;
+  }
+}
+
+async function readSalesByPaymentWindow(
+  businessId: string,
+  branchId: string | null,
+  startIso: string,
+  endIso: string,
+): Promise<SaleRow[]> {
+  // Usa el timestamp tipado de cash_movements, no comparaciones textuales
+  // contra data->>paidAt (el servidor puede serializar +00:00 y no Z).
+  const saleIds = new Set<string>();
+  for (let from = 0; ; from += PAGE_SIZE) {
+    let query = admin
+      .from("cash_movements")
+      .select("id,data")
+      .eq("business_id", businessId)
+      .eq("data->>type", "IN")
+      .gte("data_date", startIso)
+      .lt("data_date", endIso)
+      .order("data_date", { ascending: true })
+      .order("id", { ascending: true });
+    if (branchId) query = query.eq("branch_id", branchId);
+
+    const { data, error } = await query.range(from, from + PAGE_SIZE - 1);
+    if (error) throw new Error(`PAYMENT_MOVEMENTS_READ_FAILED: ${error.message}`);
+    const page = (data ?? []) as Array<{ data?: Record<string, unknown> }>;
+    for (const row of page) {
+      const movement = row.data ?? {};
+      const saleId = String(movement.saleId ?? "").trim();
+      if (saleId) saleIds.add(saleId);
+    }
+    if (page.length < PAGE_SIZE) break;
+  }
+
+  const ids = [...saleIds];
+  const sales: SaleRow[] = [];
+  for (let offset = 0; offset < ids.length; offset += 500) {
+    let query = admin
+      .from("sales")
+      .select("id,data,created_at,updated_at")
+      .eq("business_id", businessId)
+      .in("id", ids.slice(offset, offset + 500));
+    if (branchId) query = query.eq("branch_id", branchId);
+    const { data, error } = await query;
+    if (error) throw new Error(`PAID_SALES_READ_FAILED: ${error.message}`);
+    sales.push(...((data ?? []) as SaleRow[]));
+  }
+  return sales;
+}
+
+async function readConfirmedRefunds(
+  businessId: string,
+  startIso: string,
+  endIso: string,
+): Promise<Array<{ amount: number; created_at: string }>> {
+  const result: Array<{ amount: number; created_at: string }> = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await admin
+      .from("payment_refunds")
+      .select("id,amount,created_at")
+      .eq("business_id", businessId)
+      .not("sale_id", "is", null)
+      .eq("status", "confirmed")
+      .gte("created_at", startIso)
+      .lt("created_at", endIso)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) throw new Error(`REFUNDS_READ_FAILED: ${error.message}`);
+    const page = (data ?? []) as Array<{ amount: number | string; created_at: string }>;
+    result.push(...page.map((row) => ({ amount: num(row.amount), created_at: row.created_at })));
     if (page.length < PAGE_SIZE) return result;
   }
 }
@@ -222,16 +333,22 @@ async function getAdminEmails(businessId: string): Promise<string[]> {
   return [...emails];
 }
 
-function netItems(data: Record<string, unknown>) {
+function netItems(
+  data: Record<string, unknown>,
+  cutoffAt?: Date,
+  saleUpdatedAt?: string,
+) {
   const rawItems = Array.isArray(data.items) ? data.items : [];
   const refundedByProduct = new Map<string, number>();
   for (const rawRefund of Array.isArray(data.refunds) ? data.refunds : []) {
     const refund = rawRefund as Record<string, unknown>;
+    if (!refundIsEffectiveAt(refund, cutoffAt, saleUpdatedAt)) continue;
     for (const rawItem of Array.isArray(refund.items) ? refund.items : []) {
       const item = rawItem as Record<string, unknown>;
       const productId = String(item.productId ?? "");
-      if (!productId) continue;
-      refundedByProduct.set(productId, (refundedByProduct.get(productId) ?? 0) + Math.max(num(item.quantity), 0));
+      const quantity = num(item.quantity);
+      if (!productId || !Number.isFinite(quantity) || quantity <= 0) continue;
+      refundedByProduct.set(productId, (refundedByProduct.get(productId) ?? 0) + quantity);
     }
   }
 
@@ -240,8 +357,10 @@ function netItems(data: Record<string, unknown>) {
     .map((item) => {
       const productId = String(item.productId ?? "");
       const quantity = Math.max(num(item.quantity), 0);
-      const refunded = refundedByProduct.get(productId) ?? 0;
-      const netQuantity = Math.max(quantity - refunded, 0);
+      const remainingRefunded = refundedByProduct.get(productId) ?? 0;
+      const refundedFromThisLine = Math.min(quantity, remainingRefunded);
+      refundedByProduct.set(productId, Math.max(remainingRefunded - refundedFromThisLine, 0));
+      const netQuantity = Math.max(quantity - refundedFromThisLine, 0);
       return {
         productId,
         quantity: netQuantity,
@@ -350,18 +469,22 @@ async function buildSnapshot(job: JobRow): Promise<Record<string, unknown>> {
   if (!closedAt || !openedAt) throw new Error("INVALID_SHIFT_DATES");
 
   const range = businessDayRange(closedAt, timezone);
+  const cutoffAt = parseDate(job.data_cutoff_at) ?? closedAt;
   const shiftStartIso = openedAt.toISOString();
   const shiftEndIso = closedAt.toISOString();
   const dayStartIso = range.start.toISOString();
-  const dayEndIso = range.end.toISOString();
+  const reportEnd = new Date(Math.min(range.end.getTime(), cutoffAt.getTime()));
+  const reportEndIso = reportEnd.toISOString();
 
-  const shiftSales = await readSales(job.business_id, job.branch_id, shiftStartIso, shiftEndIso, false, job.shift_id);
+  // La caja guarda los límites exactos del turno. El set de ventas se deriva
+  // del shiftId asignado al cobrar, no de cuándo se creó el pedido.
+  const shiftSales = await readSales(job.business_id, job.branch_id, shiftStartIso, shiftEndIso, job.shift_id);
   let salesGross = 0;
   let salesNet = 0;
   let transactionCount = 0;
   const paymentTotals: Record<string, number> = {};
   for (const sale of shiftSales) {
-    const net = netSale(sale.data ?? {});
+    const net = netSale(sale.data ?? {}, cutoffAt, sale.updated_at);
     salesGross += net.gross;
     salesNet += net.net;
     if (net.net > 0) transactionCount += 1;
@@ -369,17 +492,11 @@ async function buildSnapshot(job: JobRow): Promise<Record<string, unknown>> {
     paymentTotals[method] = (paymentTotals[method] ?? 0) + net.net;
   }
 
-  // Reembolsos procesados durante el día pueden pertenecer a una venta de
-  // una fecha anterior; por eso se consulta por updated_at además del turno.
-  const updatedSales = await readSales(job.business_id, null, dayStartIso, dayEndIso, true);
-  let refundsProcessedToday = 0;
-  for (const sale of updatedSales) {
-    for (const item of Array.isArray(sale.data?.refunds) ? sale.data.refunds : []) {
-      const refund = item as Record<string, unknown>;
-      const createdAt = parseDate(refund.createdAt);
-      if (createdAt && createdAt >= range.start && createdAt < range.end) refundsProcessedToday += Math.max(num(refund.amount), 0);
-    }
-  }
+  // El ledger de reembolsos es la fuente de verdad del momento en que se
+  // devolvió dinero. No se infiere a partir de sales.updated_at porque otro
+  // cambio posterior de una venta podría moverla fuera del día del reembolso.
+  const confirmedRefunds = await readConfirmedRefunds(job.business_id, dayStartIso, reportEndIso);
+  const refundsProcessedToday = confirmedRefunds.reduce((sum, refund) => sum + Math.max(refund.amount, 0), 0);
 
   const { data: products, error: productError } = await admin.from("products").select("id,data").eq("business_id", job.business_id).limit(10000);
   if (productError) throw new Error(`PRODUCTS_READ_FAILED: ${productError.message}`);
@@ -390,17 +507,44 @@ async function buildSnapshot(job: JobRow): Promise<Record<string, unknown>> {
   let inventoryCostValue = 0;
   let valuationComplete = true;
   for (const [, product] of productMap) {
-    if (product.isActive === false) continue;
-    const stock = num(product.stock);
-    const minimum = num(product.minStock);
-    if (product.trackStock === true && stock <= minimum) lowStockCount += 1;
-    if (product.trackStock === true && stock > 0) {
-      if (Number.isFinite(Number(product.purchasePrice))) inventoryCostValue += stock * num(product.purchasePrice);
-      else valuationComplete = false;
+    if (product.active === false || product.isActive === false) continue;
+    if (product.trackStock !== true) continue;
+
+    const stockValue = Number(product.stock);
+    const minimumValue = Number(product.minStock);
+    const stockValid = product.stock != null && String(product.stock).trim() !== ""
+      && Number.isFinite(stockValue) && stockValue >= 0;
+    const minimumValid = product.minStock == null || String(product.minStock).trim() === ""
+      || (Number.isFinite(minimumValue) && minimumValue >= 0);
+    if (!stockValid || !minimumValid) {
+      valuationComplete = false;
+      continue;
+    }
+
+    const stock = stockValue;
+    const minimum = product.minStock == null || String(product.minStock).trim() === "" ? 0 : minimumValue;
+    if (stock <= minimum) lowStockCount += 1;
+    if (stock > 0) {
+      const rawCost = product.purchasePrice;
+      const cost = Number(rawCost);
+      if (rawCost == null || String(rawCost).trim() === "" || !Number.isFinite(cost) || cost < 0) {
+        valuationComplete = false;
+      } else {
+        inventoryCostValue += stock * cost;
+      }
     }
   }
 
-  const dailySales = await readSales(job.business_id, null, dayStartIso, dayEndIso, false);
+  // Ventas por fecha de cobro. Se incorpora también el historial sin paidAt,
+  // pero solo para registros creados dentro del día empresarial y sin paidAt.
+  const paidToday = await readSalesByPaymentWindow(job.business_id, null, dayStartIso, reportEndIso);
+  const legacyCreatedToday = await readSales(job.business_id, null, dayStartIso, reportEndIso);
+  const dailySalesById = new Map<string, SaleRow>();
+  for (const sale of paidToday) dailySalesById.set(sale.id, sale);
+  for (const sale of legacyCreatedToday) {
+    if (!sale.data?.paidAt && !dailySalesById.has(sale.id)) dailySalesById.set(sale.id, sale);
+  }
+  const dailySales = [...dailySalesById.values()];
   let salesNetToday = 0;
   let transactionCountToday = 0;
   let knownProfitToday = 0;
@@ -410,13 +554,14 @@ async function buildSnapshot(job: JobRow): Promise<Record<string, unknown>> {
   let wasteToday = 0;
 
   for (const sale of dailySales) {
-    const net = netSale(sale.data ?? {});
+    const net = netSale(sale.data ?? {}, cutoffAt, sale.updated_at);
     salesNetToday += net.net;
     if (net.net > 0) transactionCountToday += 1;
     const method = String(sale.data?.paymentMethod ?? "CASH");
     dailyPaymentTotals[method] = (dailyPaymentTotals[method] ?? 0) + net.net;
+    if (net.gross <= 0) continue;
 
-    for (const item of netItems(sale.data ?? {})) {
+    for (const item of netItems(sale.data ?? {}, cutoffAt, sale.updated_at)) {
       const current = topProductMap.get(item.productId) ?? { quantity: 0, revenue: 0 };
       current.quantity += item.quantity;
       current.revenue += item.price * item.quantity;
@@ -476,8 +621,9 @@ async function buildSnapshot(job: JobRow): Promise<Record<string, unknown>> {
     currency,
     openedAt: job.opened_at,
     closedAt: job.closed_at,
-    reportScope: "BUSINESS_DAY_PLUS_SHIFT_CASH",
+    reportScope: "BUSINESS_DAY_TO_SHIFT_CLOSE_PLUS_SHIFT_CASH",
     salesScopeShiftId: job.shift_id,
+    dataCutoffAt: cutoffAt.toISOString(),
     salesGross,
     refundsProcessedToday,
     salesNet,
@@ -529,10 +675,13 @@ function reportText(snapshot: Record<string, unknown>): string {
     `${snapshot.businessName} · ${snapshot.branchName}`,
     `📅 ${snapshot.businessDate}`,
     "",
-    `💰 Ventas del negocio hoy: ${money(snapshot.salesNetToday)}`,
+    `💰 Ventas netas cobradas en este turno: ${money(snapshot.salesNet)}`,
+    `🧾 Transacciones de este turno: ${num(snapshot.transactionCount)}`,
+    "",
+    `💰 Ventas netas del negocio hasta el cierre: ${money(snapshot.salesNetToday)}`,
     profitLine,
-    `🧾 Pedidos: ${num(snapshot.transactionCountToday)}`,
-    `💵 Caja de esta sucursal: ${money(snapshot.cashCounted)}`,
+    `🧾 Transacciones del negocio hasta el cierre: ${num(snapshot.transactionCountToday)}`,
+    `💵 Efectivo contado en esta sucursal: ${money(snapshot.cashCounted)}`,
     `Esperado: ${money(snapshot.cashExpected)}`,
     cashLine,
     "",

@@ -8,15 +8,6 @@ import { RequireModule } from "../presentation/navigation/RequireModule";
 import { ErrorBoundary } from "../presentation/components/ui/ErrorBoundary";
 
 import { LoginPage } from "../presentation/pages/LoginPage";
-import { RegisterPage } from "../presentation/pages/RegisterPage";
-import { OtpPage } from "../presentation/pages/OtpPage";
-import { ForgotPasswordPage } from "../presentation/pages/ForgotPasswordPage";
-import { UpdatePasswordPage } from "../presentation/pages/UpdatePasswordPage";
-import { OnboardingPage } from "../presentation/pages/OnboardingPage";
-import { CountrySelectionPage } from "../presentation/pages/CountrySelectionPage";
-import { BusinessSelectorPage } from "../presentation/pages/BusinessSelectorPage";
-import { CreateBusinessPage } from "../presentation/pages/CreateBusinessPage";
-import { AuthCallbackPage } from "../presentation/pages/AuthCallbackPage";
 import { RequireCountry } from "../presentation/navigation/RequireCountry";
 
 import { APP_URL } from "../core/config/appUrl";
@@ -40,6 +31,36 @@ function RedirectToApp() {
   }
   return null;
 }
+
+// Pantallas de acceso: se cargan solo cuando el usuario entra a ellas
+// (LoginPage queda en el paquete principal porque es la primera pantalla).
+const RegisterPage = lazy(() =>
+  import("../presentation/pages/RegisterPage").then((m) => ({ default: m.RegisterPage }))
+);
+const OtpPage = lazy(() =>
+  import("../presentation/pages/OtpPage").then((m) => ({ default: m.OtpPage }))
+);
+const ForgotPasswordPage = lazy(() =>
+  import("../presentation/pages/ForgotPasswordPage").then((m) => ({ default: m.ForgotPasswordPage }))
+);
+const UpdatePasswordPage = lazy(() =>
+  import("../presentation/pages/UpdatePasswordPage").then((m) => ({ default: m.UpdatePasswordPage }))
+);
+const OnboardingPage = lazy(() =>
+  import("../presentation/pages/OnboardingPage").then((m) => ({ default: m.OnboardingPage }))
+);
+const CountrySelectionPage = lazy(() =>
+  import("../presentation/pages/CountrySelectionPage").then((m) => ({ default: m.CountrySelectionPage }))
+);
+const BusinessSelectorPage = lazy(() =>
+  import("../presentation/pages/BusinessSelectorPage").then((m) => ({ default: m.BusinessSelectorPage }))
+);
+const CreateBusinessPage = lazy(() =>
+  import("../presentation/pages/CreateBusinessPage").then((m) => ({ default: m.CreateBusinessPage }))
+);
+const AuthCallbackPage = lazy(() =>
+  import("../presentation/pages/AuthCallbackPage").then((m) => ({ default: m.AuthCallbackPage }))
+);
 
 // Lazy loading: cada módulo solo se descarga y se ejecuta cuando el
 // usuario realmente entra a esa ruta, en vez de cargar Dashboard + POS +
@@ -306,6 +327,7 @@ function AuthenticatedApp() {
 export function App() {
   if (isAppSubdomain()) {
     return (
+      <Suspense fallback={<RouteFallback />}>
       <Routes>
         <Route path="/pais" element={<CountrySelectionPage />} />
         <Route
@@ -376,6 +398,7 @@ export function App() {
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/*" element={<AuthenticatedApp />} />
       </Routes>
+      </Suspense>
     );
   }
 

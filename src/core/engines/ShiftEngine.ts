@@ -58,6 +58,12 @@ export class ShiftEngine {
     );
   }
 
+  private hasFindByDataField(
+    repo: unknown
+  ): repo is { findByDataField(field: string, value: string): Promise<Shift[]> } {
+    return typeof (repo as { findByDataField?: unknown } | null)?.findByDataField === "function";
+  }
+
   private isAtomicShiftOpenRepository(
     repo: unknown
   ): repo is IShiftRepository {
@@ -144,7 +150,12 @@ export class ShiftEngine {
     if (!businessId || !branchId) return null;
 
     const selected = cashRegisterId ?? cashRegisterStore.getSelectedId() ?? undefined;
-    const shifts = await this.repository.findAll();
+    // Camino rápido (producción): el servidor devuelve SOLO los turnos OPEN en
+    // vez de todo el historial de turnos. El filtro de abajo es el mismo de
+    // siempre; si el repositorio no lo soporta (tests InMemory) se usa findAll().
+    const shifts = this.hasFindByDataField(this.repository)
+      ? await this.repository.findByDataField("status", "OPEN")
+      : await this.repository.findAll();
     const opens = shifts.filter((shift) => {
       if (shift.status !== "OPEN") return false;
       // En producción, el turno debe pertenecer exactamente al contexto

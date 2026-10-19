@@ -81,10 +81,20 @@ export function PosSalePanel() {
     }
 
     checkShift();
-    const interval = setInterval(checkShift, 4000);
+    // Cada 10 s y solo con la pestaña visible; al volver se revisa al instante.
+    // (El servidor igual exige turno abierto al cobrar, así que esto es solo
+    // para avisar al cajero en pantalla.)
+    const interval = setInterval(() => {
+      if (!document.hidden) void checkShift();
+    }, 10000);
+    const onVisible = () => {
+      if (!document.hidden) void checkShift();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
       clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
 

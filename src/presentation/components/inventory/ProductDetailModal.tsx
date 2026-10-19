@@ -3,6 +3,7 @@ import { toast } from "../../../core/store/toastStore";
 import { VimdyButton } from "../ui/VimdyButton";
 import { AlertTriangle, History, ArrowUpCircle, ArrowDownCircle, X, Trash2, Pencil, Copy, ChefHat, Clock3, Scale } from "lucide-react";
 import { getStockStatus } from "../../../core/store/useInventory";
+import { getProductInventoryCost } from "../../../core/utils/inventoryValuation";
 import { Product, InventoryMovement, LossCategory } from "../../../core/entities/Entities";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { LOSS_CATEGORY_LABEL } from "../../../core/engines/lossCategoryLabels";
@@ -47,6 +48,10 @@ export function ProductDetailModal({
   const [newStock, setNewStock] = useState("");
   const [saving, setSaving] = useState(false);
   const [opFailed, setOpFailed] = useState(false);
+  const inventoryCost = getProductInventoryCost(product);
+  const purchaseCostIsValid = typeof product.purchasePrice === "number"
+    && Number.isFinite(product.purchasePrice)
+    && product.purchasePrice >= 0;
 
   // getHistory llega como función nueva en cada render del padre; si fuera
   // dependencia del efecto, el Kardex se volvería a pedir (y parpadearía en
@@ -208,15 +213,21 @@ export function ProductDetailModal({
           <InfoBox label="Stock actual" value={product.stock.toString()} />
           <InfoBox label="Mínimo" value={product.minStock.toString()} />
           <InfoBox label="Precio" value={money(product.price)} />
-          {product.purchasePrice !== undefined && (
-            <InfoBox label="Costo unitario" value={money(product.purchasePrice)} />
+          {purchaseCostIsValid && product.active !== false && product.trackStock !== false && (
+            <InfoBox label="Costo unitario" value={money(product.purchasePrice as number)} />
           )}
-          {product.purchasePrice !== undefined && (
-            <InfoBox label="Valor en inventario" value={money(product.purchasePrice * product.stock)} />
-          )}
-          {product.purchasePrice === undefined && product.trackStock !== false && (
-            <InfoBox label="Valor en inventario" value="Sin costo configurado" />
-          )}
+          <InfoBox
+            label="Valor en inventario"
+            value={
+              inventoryCost.status === "VALUED"
+                ? money(inventoryCost.value ?? 0)
+                : inventoryCost.status === "MISSING_COST"
+                  ? "Sin costo configurado"
+                  : inventoryCost.status === "INVALID_STOCK"
+                    ? "Stock inválido"
+                    : "No aplica"
+            }
+          />
         </div>
 
         <span className={`inline-block text-xs px-2 py-1 rounded-vimdy-sm mb-5 ${STATUS_CLASS[status]}`}>

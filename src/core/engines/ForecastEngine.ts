@@ -8,6 +8,7 @@ import {
   getBusinessDateKey,
   addBusinessDays
 } from "../utils/businessTime";
+import { getSaleNetItems, getSaleNetTotal, isRevenueSaleStatus } from "../utils/saleRefunds";
 
 const WEEKDAY_NAMES_ES = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 const WEEKDAY_SHORT_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -143,12 +144,15 @@ export class ForecastEngine {
     const byDate = new Map<string, { total: number; quantityByProduct: Map<string, number>; dayKey: string }>();
 
     for (const sale of sales) {
-      if (!sale.createdAt) continue;
+      if (!sale.createdAt || !isRevenueSaleStatus(sale.status)) continue;
+      const netTotal = getSaleNetTotal(sale);
+      if (netTotal <= 0) continue;
+
       const dayKey = getBusinessDateKey(new Date(sale.createdAt), tz);
       const entry = byDate.get(dayKey) ?? { total: 0, quantityByProduct: new Map<string, number>(), dayKey };
 
-      entry.total += sale.total;
-      for (const item of sale.items) {
+      entry.total += netTotal;
+      for (const item of getSaleNetItems(sale)) {
         entry.quantityByProduct.set(item.productId, (entry.quantityByProduct.get(item.productId) ?? 0) + item.quantity);
       }
 

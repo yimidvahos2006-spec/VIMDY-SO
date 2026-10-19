@@ -126,8 +126,19 @@ export function ShiftPanel() {
 
   useEffect(() => {
     void refresh();
-    const interval = window.setInterval(() => void refresh(), 4000);
-    return () => window.clearInterval(interval);
+    // Se refresca cada 8 s y solo si la pestaña está visible; al volver a
+    // verla se refresca de inmediato para no mostrar datos viejos.
+    const interval = window.setInterval(() => {
+      if (!document.hidden) void refresh();
+    }, 8000);
+    const onVisible = () => {
+      if (!document.hidden) void refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [refresh]);
 
   async function handleOpenShift(event: FormEvent) {

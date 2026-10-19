@@ -69,7 +69,7 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
  *     queda de cada producto sumando los reembolsos parciales previos.
  */
 export function SalesHistoryPanel() {
-  const { user, can } = useAuth();
+  const { user, role, can } = useAuth();
   const { language } = useTranslation();
 
   const [sales, setSales] = useState<Sale[]>([]);
@@ -82,6 +82,10 @@ export function SalesHistoryPanel() {
   const [refundReason, setRefundReason] = useState("");
   const [isRefunding, setIsRefunding] = useState(false);
 
+  const [cancelTarget, setCancelTarget] = useState<Sale | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [isCancelling, setIsCancelling] = useState(false);
+
   const [partialTarget, setPartialTarget] = useState<Sale | null>(null);
   const [partialReason, setPartialReason] = useState("");
   const [partialQuantities, setPartialQuantities] = useState<Record<string, number>>({});
@@ -93,6 +97,9 @@ export function SalesHistoryPanel() {
   );
 
   const canRefund = can("sales.refund");
+  const canCancelPending = ["ADMIN", "GERENTE", "CAJERO"].includes(
+    (role?.name ?? "").trim().toUpperCase()
+  );
 
   const loadSales = useCallback(async () => {
     setIsLoading(true);
@@ -214,6 +221,37 @@ export function SalesHistoryPanel() {
       toast.error(translateBusinessError(err, "No se pudo aplicar el reembolso parcial."));
     } finally {
       setIsPartialRefunding(false);
+    }
+  }
+
+  function openCancelPending(sale: Sale) {
+    setCancelReason("");
+    setCancelTarget(sale);
+  }
+
+  async function confirmCancelPending() {
+    if (!cancelTarget) return;
+
+    const reason = cancelReason.trim();
+    if (!reason) {
+      toast.error("Escribe un motivo para poder anular la venta.");
+      return;
+    }
+    if (reason.length > 500) {
+      toast.error("El motivo no puede superar 500 caracteres.");
+      return;
+    }
+
+    setIsCancelling(true);
+    try {
+      await container.salesEngine.get().cancelPendingSale(cancelTarget.id, reason);
+      toast.success(`Venta ${cancelTarget.code ?? cancelTarget.id} anulada. Inventario y cocina actualizados.`);
+      setCancelTarget(null);
+      await loadSales();
+    } catch (err) {
+      toast.error(translateBusinessError(err, "No se pudo anular la venta pendiente."));
+    } finally {
+      setIsCancelling(false);
     }
   }
 
@@ -361,8 +399,24 @@ export function SalesHistoryPanel() {
                           </p>
                         )}
 
-                        <div className="flex items-center justify-end gap-2 pt-1">
-                          {canBeRefunded(sale) ? (
+                        <div className="flex items-center justify-end gap-2 pt-1 flex-wrap">
+                          {status === "PENDING_PAYMENT" ? (
+                            canCancelPending ? (
+                              <button
+                                type="button"
+                                onClick={() => openCancelPending(sale)}
+                                className="flex items-center gap-1.5 h-9 px-3 rounded-lg text-sm font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
+                              >
+                                <Ban size={14} />
+                                Anular venta
+                              </button>
+                            ) : (
+                              <span className="flex items-center gap-1.5 text-xs text-slate-500">
+                                <Ban size={13} />
+                                No tienes permiso para anular esta venta
+                              </span>
+                            )
+                          ) : canBeRefunded(sale) ? (
                             canRefund ? (
                               <>
                                 <button
@@ -411,6 +465,58 @@ export function SalesHistoryPanel() {
           </ul>
         )}
       </div>
+
+      {cancelTarget && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
+          onClick={() => !isCancelling && setCancelTarget(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-800 p-6"
+            onClick={event => event.stopPropagation()}
+          >
+            <h2 className="text-slate-100 font-semibold text-base mb-1">
+              Anular venta {cancelTarget.code ?? cancelTarget.id}
+            </h2>
+            <p className="text-slate-400 text-sm mb-4">
+              Solo se pueden anular ventas pendientes de pago. El servidor restaurará el inventario registrado en el Kardex y cancelará la comanda en la misma transacción. Esta acción no se puede deshacer.
+            </p>
+            <label className="block text-xs font-medium text-slate-300 mb-1" htmlFor="pending-sale-cancel-reason">
+              Motivo obligatorio
+            </label>
+            <textarea
+              id="pending-sale-cancel-reason"
+              value={cancelReason}
+              onChange={event => setCancelReason(event.target.value)}
+              maxLength={500}
+              rows={3}
+              autoFocus
+              placeholder="Ej. el cliente canceló antes de pagar"
+              className="w-full rounded-xl bg-slate-900 border border-slate-700 text-slate-100 text-sm p-3 resize-y focus:outline-none focus:border-red-500/60"
+              disabled={isCancelling}
+            />
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                type="button"
+                onClick={() => setCancelTarget(null)}
+                disabled={isCancelling}
+                className="h-10 px-4 rounded-xl text-sm text-slate-300 hover:bg-slate-700 disabled:opacity-50"
+              >
+                Volver
+              </button>
+              <button
+                type="button"
+                onClick={confirmCancelPending}
+                disabled={isCancelling || !cancelReason.trim()}
+                className="h-10 px-4 rounded-xl text-sm font-semibold bg-red-600 text-white hover:bg-red-500 disabled:opacity-50 flex items-center gap-2"
+              >
+                {isCancelling && <Loader2 size={15} className="animate-spin" />}
+                {isCancelling ? "Anulando…" : "Confirmar anulación"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {refundTarget && (
         <div

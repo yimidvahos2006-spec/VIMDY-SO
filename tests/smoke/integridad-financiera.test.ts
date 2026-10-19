@@ -94,10 +94,10 @@ describe("Integridad financiera", () => {
     expect(incomeMovements.length).toBe(1);
     expect(incomeMovements[0].amount).toBe(119);
 
-    await ctx.salesEngine.cancelSale(paidSale.id, "Prueba integridad");
+    await ctx.salesEngine.refundSale(paidSale.id, "Prueba integridad");
 
     const movementsAfter = await ctx.cash.getAllMovements();
-    const expenseMovements = movementsAfter.filter((m: CashMovement) => m.type === "OUT" && m.description?.includes("Cancelación"));
+    const expenseMovements = movementsAfter.filter((m: CashMovement) => m.type === "OUT" && m.description?.includes("Reembolso"));
     expect(expenseMovements.length).toBe(1);
     expect(expenseMovements[0].amount).toBe(119);
   });

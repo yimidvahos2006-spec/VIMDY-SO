@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Navigate } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext";
-import { VimdyIntro } from "../components/intro/VimdyIntro";
+import { WelcomeIntro } from "../components/intro/WelcomeIntro";
 import { appIntroStore } from "../../core/store/appIntroStore";
 
 interface Props {
@@ -51,7 +51,7 @@ export function OnboardingGate({ children }: Props) {
 
   if (showIntro) {
     return (
-      <VimdyIntro
+      <WelcomeIntro
         onComplete={() => {
           appIntroStore.markShown();
           setShowIntro(false);

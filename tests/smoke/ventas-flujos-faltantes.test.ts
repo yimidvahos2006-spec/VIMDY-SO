@@ -177,7 +177,7 @@ describe("Smoke: flujos de venta faltantes", () => {
     expect(payment.total).toBe(sale.total);
   });
 
-  it("FASE 3: cancelar una venta pagada restaura el inventario y deja la venta en CANCELLED", async () => {
+  it("FASE 3: devolver una venta pagada restaura el inventario y deja la venta en REFUNDED", async () => {
     const stockBefore = (await ctx.products.findById(BURGER.id))?.stock ?? 0;
     ctx.cart.addItem(BURGER, 2);
     const sale = await ctx.salesEngine.quickSale({ cashierId: "cashier-1" });
@@ -186,9 +186,9 @@ describe("Smoke: flujos de venta faltantes", () => {
     const stockAfterSale = (await ctx.products.findById(BURGER.id))?.stock ?? 0;
     expect(stockAfterSale).toBe(stockBefore - 2);
 
-    const cancelled = await ctx.salesEngine.cancelSale(sale.id, "Cliente se arrepintió", "cashier-1");
+    const { sale: refunded } = await ctx.salesEngine.refundSale(sale.id, "Cliente se arrepintió", "cashier-1");
 
-    expect(cancelled.status).toBe("CANCELLED");
+    expect(refunded.status).toBe("REFUNDED");
     const stockAfterCancel = (await ctx.products.findById(BURGER.id))?.stock ?? 0;
     expect(stockAfterCancel).toBe(stockBefore);
   });

@@ -57,4 +57,7 @@ Thumbs.db
 backup-*.sql
 backup-*.dump
 backups/
-*.sql.gz
+*.sql.gz.continue/
+src.zip
+.continue/
+src.zip

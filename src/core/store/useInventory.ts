@@ -10,6 +10,7 @@ import { connectionStore } from "./connectionStore";
 import { isNetworkFailure } from "../services/offlineSale";
 import { queueIncreaseStockOffline, queueDecreaseStockOffline } from "../services/offlineInventory";
 import { getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
+import { calculateInventoryCostValuation, type InventoryValuationStatus } from "../utils/inventoryValuation";
 
 export type StockStatus = "normal" | "bajo" | "agotado";
 
@@ -54,6 +55,9 @@ export interface InventoryKpis {
   outOfStockCount: number;
   totalValue: number;
   productsWithCost: number;
+  unvaluedProducts: number;
+  trackedProducts: number;
+  valuationStatus: InventoryValuationStatus;
 }
 
 export function useInventory() {
@@ -94,23 +98,18 @@ export function useInventory() {
   }, [load]);
 
   const kpis: InventoryKpis = useMemo(() => {
-    let totalValue = 0;
-    let productsWithCost = 0;
-
-    for (const p of products) {
-      if (p.active === false) continue;
-      if (p.trackStock !== false && p.purchasePrice !== undefined) {
-        totalValue += p.purchasePrice * p.stock;
-        productsWithCost += 1;
-      }
-    }
+    const valuation = calculateInventoryCostValuation(products);
 
     return {
       totalProducts: products.filter((p) => p.active !== false).length,
       lowStockCount: products.filter((p) => p.active !== false && getStockStatus(p) === "bajo").length,
       outOfStockCount: products.filter((p) => p.active !== false && getStockStatus(p) === "agotado" && p.price > 0).length,
-      totalValue,
-      productsWithCost,
+      // No devolver una suma parcial si falta el costo de productos con stock.
+      totalValue: valuation.stockCostValue ?? 0,
+      productsWithCost: valuation.valuedProductCount,
+      unvaluedProducts: valuation.unvaluedProductCount,
+      trackedProducts: valuation.trackedProductCount,
+      valuationStatus: valuation.valuationStatus,
     };
   }, [products]);
 

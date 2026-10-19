@@ -489,7 +489,7 @@ describe("Auditoría funcional: ciclo completo Inventario + Ventas", () => {
   // 5. Cancelación de venta
   // =========================================================================
   describe("5. Cancelación de venta", () => {
-    it("cancela venta pagada y restaura inventario", async () => {
+    it("una venta pagada se devuelve con refundSale y restaura inventario", async () => {
       const sale = await ctx.salesEngine.createSale({
         id: `sale-cancel-${Math.random().toString(36).slice(2)}`,
         type: "QUICK",
@@ -499,9 +499,14 @@ describe("Auditoría funcional: ciclo completo Inventario + Ventas", () => {
       await ctx.salesEngine.registerPayment(sale, "CASH", { received: sale.total });
       expect((await ctx.products.findById(productoNormal.id))?.stock).toBe(18);
 
-      const cancelled = await ctx.salesEngine.cancelSale(sale.id, "Error de cajero");
+      // Regla de negocio: una venta cobrada no se "cancela", se devuelve.
+      await expect(ctx.salesEngine.cancelSale(sale.id, "Error de cajero")).rejects.toThrow(
+        /SALE_CANCELLATION_FORBIDDEN/
+      );
 
-      expect(cancelled.status).toBe("CANCELLED");
+      const { sale: refunded } = await ctx.salesEngine.refundSale(sale.id, "Error de cajero");
+
+      expect(refunded.status).toBe("REFUNDED");
 
       const p = await ctx.products.findById(productoNormal.id);
       expect(p?.stock).toBe(20); // 18 + 2
@@ -677,8 +682,8 @@ describe("Auditoría funcional: ciclo completo Inventario + Ventas", () => {
       );
       expect((await ctx.products.findById(productoNormal.id))?.stock).toBe(17);
 
-      // 3. Cancelar la venta restante (3 unidades)
-      await ctx.salesEngine.cancelSale(sale.id, "Cancelación completa");
+      // 3. Devolver el resto de la venta (3 unidades restantes)
+      await ctx.salesEngine.refundSale(sale.id, "Devolución del resto");
       expect((await ctx.products.findById(productoNormal.id))?.stock).toBe(20);
 
       // 4. Ajuste manual: agregar 10
