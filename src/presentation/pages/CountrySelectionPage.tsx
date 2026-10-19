@@ -1,12 +1,11 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Search, ArrowRight, Check } from "lucide-react";
+import { ArrowRight, Check } from "lucide-react";
 
 import { VimdyBackground } from "../components/ui/VimdyBackground";
 import { VimdyLogo } from "../components/ui/VimdyLogo";
 import { VimdyCard } from "../components/ui/VimdyCard";
 import { VimdyButton } from "../components/ui/VimdyButton";
-import { VimdyInput } from "../components/ui/VimdyInput";
 import { useTranslation } from "../../core/i18n/useTranslation";
 import { companyConfigStore } from "../../core/store/companyConfigStore";
 import {
@@ -14,7 +13,6 @@ import {
   CountryCode,
   getCountryDefaults,
   getCountryName,
-  getCurrencyName,
   detectCountryFromBrowser
 } from "../../core/config/globalization";
 
@@ -52,8 +50,6 @@ export function CountrySelectionPage() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [query, setQuery] = useState("");
-
   const detected = useMemo<CountryCode | null>(() => {
     const d = detectCountryFromBrowser();
     return d && AVAILABLE_COUNTRIES.some((c) => c.code === d) ? (d as CountryCode) : null;
@@ -62,19 +58,12 @@ export function CountrySelectionPage() {
   const [selected, setSelected] = useState<CountryCode | null>(detected);
 
   const results = useMemo(() => {
-    const q = query.trim().toLowerCase();
     const withNames = AVAILABLE_COUNTRIES.map((c) => ({
       ...c,
       name: getCountryName(c.code, language)
     }));
-    const filtered = q
-      ? withNames.filter((c) => c.name.toLowerCase().includes(q) || c.code.toLowerCase() === q)
-      : withNames;
-    return filtered.sort((a, b) => a.name.localeCompare(b.name, language));
-  }, [query, language]);
-
-  const detectedName = selected === detected && detected ? getCountryName(detected, language) : null;
-  const detectedDefaults = detected && selected === detected ? getCountryDefaults(detected) : null;
+    return withNames.sort((a, b) => a.name.localeCompare(b.name, language));
+  }, [language]);
 
   function handleContinue() {
     if (!selected) return;
@@ -113,55 +102,10 @@ export function CountrySelectionPage() {
             </p>
           </div>
 
-          {/* Detección automática: destacada con aire y jerarquía clara, pero
-              sin parecer una alerta/error — acento azul de marca, no warning. */}
-          {detected && detectedName && (
-            <div
-              className="flex flex-col gap-1.5 rounded-xl border border-vimdy-accent/30 bg-vimdy-accent/5 px-4 py-3"
-              role="status"
-              aria-label={`${t("country.detected")} ${detectedName}`}
-            >
-              <span className="vimdy-small text-vimdy-text-tertiary">
-                {t("country.detected")}
-              </span>
-
-              <div className="flex items-center gap-2.5">
-                <span className="text-2xl" aria-hidden="true">
-                  {flagEmoji(detected)}
-                </span>
-                <span className="vimdy-h3 font-semibold text-white">
-                  {detectedName}
-                </span>
-              </div>
-
-              {detectedDefaults && (
-                <span className="inline-flex items-center self-start rounded-md px-2 py-0.5 vimdy-micro font-medium text-vimdy-accent bg-vimdy-accent/10 border border-vimdy-accent/20">
-                  {detectedDefaults.currency} ·{" "}
-                  {getCurrencyName(detectedDefaults.currency, language).replace(/^./, (c) => c.toUpperCase())}
-                </span>
-              )}
-            </div>
-          )}
-
-          {/* Búsqueda */}
-          <VimdyInput
-            icon={<Search className="w-4 h-4" />}
-            placeholder={t("country.searchPlaceholder")}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            autoFocus
-          />
-
           {/* Lista de países: scroll interno. El botón Continuar, que está
               fuera de este contenedor (flex-1), siempre queda visible y
               pegado al fondo de la tarjeta sin necesidad de hacer scroll. */}
           <div className="flex-1 min-h-0 overflow-y-auto">
-            {results.length === 0 && (
-              <p className="vimdy-small text-vimdy-text-tertiary text-center py-6">
-                {t("country.noResults")}
-              </p>
-            )}
-
             {results.map((c) => {
               const isSelected = c.code === selected;
               return (
