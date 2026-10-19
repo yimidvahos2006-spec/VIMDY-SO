@@ -13,7 +13,6 @@ import { EmployeesStep } from "../components/onboarding/EmployeesStep";
 import { CategoriesStep } from "../components/onboarding/CategoriesStep";
 import { FirstProductStep } from "../components/onboarding/FirstProductStep";
 import { CashOpeningStep } from "../components/onboarding/CashOpeningStep";
-import { LoadingStep } from "../components/onboarding/LoadingStep";
 import { FinalStep } from "../components/onboarding/FinalStep";
 import { OnboardingProgress } from "../components/onboarding/OnboardingProgress";
 import {
@@ -204,10 +203,6 @@ export function OnboardingPage() {
           <CashOpeningStep
             onSaved={() => setStep(nextOnboardingStep("cash_opening"))}
           />
-        )}
-
-        {stepIsBuilt && step === "loading" && (
-          <LoadingStep onDone={() => setStep(nextOnboardingStep("loading"))} />
         )}
 
         {stepIsBuilt && step === "final" && (

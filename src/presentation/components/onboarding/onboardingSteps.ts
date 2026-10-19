@@ -11,8 +11,9 @@
  * 7. Apertura de caja
  *
  * "Mesas" NO es una pantalla independiente: se configura dentro de
- * ModulesStep. "loading" y "final" son pantallas de transición/cierre y no
- * participan en el contador 1..7.
+ * ModulesStep. "final" es la pantalla de cierre y no participa en el
+ * contador 1..7. No hay pantalla de "carga" falsa: todo lo que se muestra
+ * ya fue guardado de verdad en cada paso.
  */
 export type OnboardingStepId =
   | "welcome"
@@ -22,7 +23,6 @@ export type OnboardingStepId =
   | "categories"
   | "first_product"
   | "cash_opening"
-  | "loading"
   | "final";
 
 export const ONBOARDING_STEP_ORDER: OnboardingStepId[] = [
@@ -33,7 +33,6 @@ export const ONBOARDING_STEP_ORDER: OnboardingStepId[] = [
   "categories",
   "first_product",
   "cash_opening",
-  "loading",
   "final"
 ];
 
@@ -64,8 +63,8 @@ export function nextOnboardingStep(current: OnboardingStepId): OnboardingStepId 
 }
 
 /**
- * Paso anterior al actual. Welcome no tiene anterior; loading y final son
- * pantallas de cierre (ya se guardó todo), por eso no se puede volver desde ahí.
+ * Paso anterior al actual. Welcome no tiene anterior; final es la pantalla
+ * de cierre (ya se guardó todo), por eso no se puede volver desde ahí.
  */
 export function prevOnboardingStep(current: OnboardingStepId): OnboardingStepId {
   if (!canGoBackFromStep(current)) return current;

@@ -116,7 +116,7 @@ export function FinalStep({ onAddProduct }: FinalStepProps) {
   return (
     <div className="w-full max-w-3xl mx-auto">
       <div className="text-center mb-10">
-        <h2 className="text-vimdy-h2 text-vimdy-text mb-2">Tu negocio está listo</h2>
+        <h1 className="text-vimdy-h2 text-vimdy-text mb-2">Tu negocio está listo</h1>
         <p className="text-vimdy-small text-vimdy-text-secondary max-w-md mx-auto">
           Ya puedes comenzar a vender.
         </p>
@@ -147,15 +147,6 @@ export function FinalStep({ onAddProduct }: FinalStepProps) {
         <div className="flex flex-col items-center gap-5 relative z-10 py-8">
           <div className="w-16 h-16 rounded-full bg-vimdy-accent/15 text-vimdy-accent flex items-center justify-center">
             <CheckCircle2 size={32} strokeWidth={1.8} />
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <h1 className="text-vimdy-h2 text-vimdy-text tracking-wide">
-              Tu negocio está listo.
-            </h1>
-            <p className="text-vimdy-small text-vimdy-text-secondary">
-              Ya puedes comenzar a vender.
-            </p>
           </div>
 
           <VimdyButton onClick={handleFinish} disabled={finishing} className="mt-4 min-w-[260px]">
