@@ -88,6 +88,9 @@ export function VimdySidebar() {
     customers: useCanUse("customers"),
     ai: useCanUse("ai"),
   };
+  // La pantalla de /meseros se llama "Meseros" solo si el negocio usa meseros;
+  // si solo tiene mesas, se llama "Mesas".
+  const mesasLabel = availability.waiters ? "Meseros" : "Mesas";
   const visibleMenu = menu.filter((item) => {
     if (item.path === "/meseros") return availability.tables || availability.waiters;
     const capability = capabilities[item.path];
@@ -254,7 +257,7 @@ export function VimdySidebar() {
                       />
 
                       <span className={`text-sm font-medium tracking-wide ${labelClass}`}>
-                        {item.title}
+                        {item.path === "/meseros" ? mesasLabel : item.title}
                       </span>
                     </>
                   )}

@@ -17,6 +17,7 @@ import { container } from "../../../infrastructure/di/CompositionRoot";
 import { useAuth } from "../../context/AuthContext";
 import { translateBusinessError } from "../../../core/errors/translateBusinessError";
 import type { ModuleId } from "../../../core/config/modules";
+import { useCanUse } from "../../../hooks/useCanUse";
 
 interface EmployeesStepProps {
   enabledModules: ModuleId[];
@@ -53,8 +54,13 @@ interface AddedEmployee {
 export function EmployeesStep({ enabledModules, onDone }: EmployeesStepProps) {
   const { user } = useAuth();
 
+  // El rol Mesero aparece si el negocio usa meseros o tiene mesas; Cocina, si tiene cocina.
+  const usesWaiters = useCanUse("waiters");
   const availableRoles = EMPLOYEE_ROLE_OPTIONS.filter(
-    (option) => !option.requiresModule || enabledModules.includes(option.requiresModule)
+    (option) =>
+      !option.requiresModule ||
+      enabledModules.includes(option.requiresModule) ||
+      (option.roleId === "MESERO" && usesWaiters)
   );
 
   const [name, setName] = useState("");

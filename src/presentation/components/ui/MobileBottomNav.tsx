@@ -60,6 +60,8 @@ export function MobileBottomNav() {
     production: useCanUse("production"),
     ai: useCanUse("ai"),
   };
+  // "Meseros" solo si el negocio usa meseros; si solo tiene mesas se llama "Mesas".
+  const mesasLabel = availability.waiters ? "Meseros" : "Mesas";
   const visibleMainItems = MAIN_ITEMS.filter((item) => !item.capability || availability[item.capability]);
   const visibleMoreItems = MORE_ITEMS.filter((item) => {
     if (item.path === "/meseros") return availability.tables || availability.waiters;
@@ -122,7 +124,7 @@ export function MobileBottomNav() {
                 `}
               >
                 <Icon size={22} />
-                <span className="truncate w-full text-center">{item.label}</span>
+                <span className="truncate w-full text-center">{item.path === "/meseros" ? mesasLabel : item.label}</span>
               </button>
             );
           })}
@@ -146,7 +148,7 @@ export function MobileBottomNav() {
                 `}
               >
                 <Icon size={22} className={active ? "text-vimdy-accent" : ""} />
-                <span className="text-[10px] font-medium leading-none">{item.label}</span>
+                <span className="text-[10px] font-medium leading-none">{item.path === "/meseros" ? mesasLabel : item.label}</span>
               </button>
             );
           })}

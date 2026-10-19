@@ -158,7 +158,7 @@ function MeserosContent() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-5xl font-black text-white">{tablesEnabled ? t("waiter.page.title") : "Pedidos de meseros"}</h1>
+            <h1 className="text-5xl font-black text-white">{waiterModeEnabled ? (tablesEnabled ? t("waiter.page.title") : "Pedidos de meseros") : "Mesas"}</h1>
             <OfflineStatusBadge
               pendingCount={pendingTableOperationsCount}
               pendingLabelSingular={t("waiter.offline.pendingSingular")}
