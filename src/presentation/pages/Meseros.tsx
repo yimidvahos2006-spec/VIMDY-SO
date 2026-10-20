@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronDown, Check } from "lucide-react";
 
@@ -19,7 +19,7 @@ import { TableDetailPanel } from "../components/waiter/TableDetailPanel";
 import { VoiceCommandButton } from "../components/waiter/VoiceCommandButton";
 import type { TableVoiceMerge, TableVoiceTarget } from "../../core/voice/useTableVoiceCommand";
 import { playVoiceError, playVoiceSuccess } from "../../core/voice/voiceFeedback";
-import { isMergeableTableStatus } from "../../core/utils/tableMerge";
+import { healOrphanLinkedTables, isMergeableTableStatus } from "../../core/utils/tableMerge";
 import { translateBusinessError } from "../../core/errors/translateBusinessError";
 import { toast } from "../../core/store/toastStore";
 import { OfflineStatusBadge } from "../components/ui/OfflineStatusBadge";
@@ -63,7 +63,9 @@ function MeserosContent() {
   const tablesEnabled = useCanUse("tables");
   const waiterModeEnabled = useCanUse("waiters");
   const [ready, setReady] = useState(false);
-  const [tables, setTables] = useState<Table[]>([]);
+  const [rawTables, setTables] = useState<Table[]>([]);
+  // Una mesa "unida" cuya principal ya no tiene cuenta se trata como libre.
+  const tables = useMemo(() => healOrphanLinkedTables(rawTables), [rawTables]);
   const [products, setProducts] = useState<Product[]>([]);
   const [waiters, setWaiters] = useState<Waiter[]>([]);
   const [avgDurationMs, setAvgDurationMs] = useState<number>(45 * 60 * 1000);
@@ -384,6 +386,7 @@ function MeserosContent() {
       {dialog === "open" && selectedTable && (
         <OpenTableDialog
           table={selectedTable}
+          tables={tables}
           waiterId={activeWaiter?.id ?? null}
           initialPeopleCount={voicePeopleCount}
           initialMode={openInReserveMode ? "reserve" : "open"}

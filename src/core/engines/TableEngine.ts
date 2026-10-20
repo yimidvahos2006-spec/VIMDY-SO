@@ -9,7 +9,7 @@ import { companyConfigStore } from "../store/companyConfigStore";
 import { getEffectiveKitchenOutputMode as resolveKitchenOutputMode } from "../services/effectiveKitchenOutputMode";
 import { createKitchenOutput } from "../services/KitchenOutputFactory";
 import { logWarning } from "../../infrastructure/logging/opsLogger";
-import { assessMerge, mergeSaleItems, subtractSaleItems } from "../utils/tableMerge";
+import { assessMerge, mergeSaleItems, subtractSaleItems, canLinkAsExtra, isLinkedAccountActive, isOrphanLinkedTable } from "../utils/tableMerge";
 import type { PaymentMethod, PaymentResult } from "./PaymentEngine";
 import type { Receipt } from "./ReceiptEngine";
 import { getCurrentBusinessId, getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
@@ -297,11 +297,19 @@ export class TableEngine {
         ? tableOrInput
         : (resolvedInput.tableId ?? (tableOrInput as any).tableId);
 
-    const table = tableId
+    let table = tableId
       ? await this.getRepository().findById(tableId)
       : null;
 
     if (!table) throw new Error("TABLE_NOT_FOUND");
+
+    // Una mesa anexada cuya principal ya no tiene cuenta quedó "huérfana": está libre de verdad.
+    if (table.mergedInto && table.status === "CLOSED") {
+      const primary = await this.getRepository().findById(table.mergedInto);
+      if (isOrphanLinkedTable(table, primary)) {
+        table = { ...table, status: "FREE", mergedInto: undefined, mergedAt: undefined };
+      }
+    }
 
     const providedOperationId = resolvedInput.operationId?.trim() || undefined;
 
@@ -409,6 +417,8 @@ export class TableEngine {
         currentAfterOrder?.openedAt ?? new Date(),
       openOperationId: operationId,
       orderId: order?.id ?? currentAfterOrder?.orderId,
+      mergedInto: undefined,
+      mergedAt: undefined,
       updatedAt: new Date()
     };
 
@@ -620,6 +630,10 @@ export class TableEngine {
         if (!isOptimisticLockError(error)) throw error;
       }
     }
+
+    // Las mesas anexadas a esta (por "Unir mesa") se liberan con la cuenta, aunque el
+    // trigger de la base ya haya liberado la principal.
+    await this.releaseLinkedTables(tableId);
 
     if (this.orders && table?.orderId) {
       try {
@@ -845,7 +859,7 @@ export class TableEngine {
       }
     }
 
-    return this.updateTable(tableId, {
+    const released = await this.updateTable(tableId, {
       status: "FREE",
       peopleCount: 0,
       waiterId: undefined,
@@ -854,6 +868,8 @@ export class TableEngine {
       orderId: undefined,
       openOperationId: undefined
     });
+    await this.releaseLinkedTables(tableId);
+    return released;
   }
 
   /**
@@ -893,8 +909,8 @@ export class TableEngine {
       }
     }
 
-    // 3) La mesa se libera (antes quedaba ocupada y vacía).
-    return this.updateTable(tableId, {
+    // 3) La mesa se libera (antes quedaba ocupada y vacía) junto con sus mesas anexadas.
+    const freed = await this.updateTable(tableId, {
       status: "FREE",
       items: [],
       subtotal: 0,
@@ -909,6 +925,8 @@ export class TableEngine {
       openOperationId: undefined,
       notes: undefined
     });
+    await this.releaseLinkedTables(tableId);
+    return freed;
   }
 
   /**
@@ -1014,6 +1032,9 @@ export class TableEngine {
       }
       throw error;
     }
+
+    // 2b) Las mesas anexadas al origen pasan a depender del destino.
+    await this.repointLinkedTables(fromId, toId);
 
     // 3) El pedido del origen ya no tiene mesa: se cancela (igual que al liberar una mesa).
     if (source.orderId && this.orders) {
@@ -1148,7 +1169,111 @@ export class TableEngine {
       throw error;
     }
 
+    // Las mesas anexadas siguen a la cuenta a su nueva mesa.
+    await this.repointLinkedTables(source.id, target.id);
+
     return repository.findById(target.id);
+  }
+
+  /* ----------------------- Mesas anexadas ("Unir mesa") ----------------------- */
+
+  /**
+   * Anexa mesas LIBRES a una mesa principal con cuenta abierta (cuando llegan más
+   * personas de las que caben). Las anexas quedan "Unidas" (CLOSED + mergedInto),
+   * sin cuenta propia. Es de mejor esfuerzo: devuelve cuáles quedaron unidas y
+   * cuáles no (otra persona las ocupó, falló la red…), sin tumbar la apertura.
+   */
+  public async linkExtraTables(primaryId: string, extraIds: readonly string[]): Promise<{ linked: string[]; skipped: string[] }> {
+    const repository = this.getRepository();
+    const primary = await repository.findById(primaryId);
+    if (!primary || !isLinkedAccountActive(primary)) {
+      throw new Error("TABLE_NOT_OPEN: abre la mesa principal antes de unirle otra");
+    }
+
+    const linked: string[] = [];
+    const skipped: string[] = [];
+
+    for (const id of Array.from(new Set(extraIds))) {
+      try {
+        let extra = await repository.findById(id);
+        // Una anexa huérfana (su principal ya no tiene cuenta) está libre de verdad.
+        if (extra?.mergedInto && extra.status === "CLOSED") {
+          const owner = await repository.findById(extra.mergedInto);
+          if (isOrphanLinkedTable(extra, owner)) {
+            extra = { ...extra, status: "FREE", mergedInto: undefined, mergedAt: undefined };
+          }
+        }
+        if (!extra || !canLinkAsExtra(extra, primary)) {
+          skipped.push(id);
+          continue;
+        }
+        await repository.update({
+          ...extra,
+          status: "CLOSED",
+          mergedInto: primary.id,
+          mergedAt: new Date(),
+          peopleCount: 0,
+          updatedAt: new Date()
+        });
+        linked.push(id);
+      } catch (error) {
+        skipped.push(id);
+        logWarning("[TableEngine] No se pudo anexar la mesa", {
+          category: "sales",
+          context: { primaryId, extraId: id, error: String(error) }
+        });
+      }
+    }
+
+    return { linked, skipped };
+  }
+
+  /** Libera las mesas anexadas a `primaryId` (al cobrar, cancelar o liberar la principal). Nunca lanza. */
+  public async releaseLinkedTables(primaryId: string): Promise<void> {
+    await this.rewriteLinkedTables(primaryId, (table) => ({
+      ...table,
+      status: "FREE",
+      mergedInto: undefined,
+      mergedAt: undefined,
+      peopleCount: 0,
+      updatedAt: new Date()
+    }));
+  }
+
+  /** Las anexas de `fromId` pasan a depender de `toId` (la cuenta se unió o se transfirió). Nunca lanza. */
+  public async repointLinkedTables(fromId: string, toId: string): Promise<void> {
+    await this.rewriteLinkedTables(fromId, (table) => ({
+      ...table,
+      mergedInto: toId,
+      updatedAt: new Date()
+    }));
+  }
+
+  private async rewriteLinkedTables(primaryId: string, build: (table: Table) => Table): Promise<void> {
+    try {
+      const repository = this.getRepository();
+      const candidates = (await repository.findAll()).filter(
+        (table) => table.mergedInto === primaryId && table.status === "CLOSED"
+      );
+
+      for (const candidate of candidates) {
+        try {
+          const fresh = (await repository.findById(candidate.id)) ?? candidate;
+          if (fresh.mergedInto !== primaryId || fresh.status !== "CLOSED") continue;
+          await repository.update(build(fresh));
+        } catch (error) {
+          logWarning("[TableEngine] No se pudo actualizar una mesa anexada", {
+            category: "sales",
+            context: { primaryId, tableId: candidate.id, error: String(error) }
+          });
+        }
+      }
+    } catch (error) {
+      logWarning("[TableEngine] No se pudieron revisar las mesas anexadas", {
+        category: "sales",
+        context: { primaryId, error: String(error) }
+      });
+    }
   }
 
   public splitBill(tableOrId: string | any, splitsOrCount?: any[] | number): { perPerson: number; total: number } {

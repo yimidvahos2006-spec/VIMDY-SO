@@ -8,6 +8,7 @@ import { getTableUrgency } from "../../../core/services/tableUrgency";
 import { translateBusinessError } from "../../../core/errors/translateBusinessError";
 import { toast } from "../../../core/store/toastStore";
 import { sortTables, tableDisplayName, tableNumber } from "../../../core/services/tableOrdering";
+import { healOrphanLinkedTables } from "../../../core/utils/tableMerge";
 
 interface Props {
   tables: Table[];
@@ -519,7 +520,7 @@ function DeleteTableDialog({
 }
 
 /* ------------------------------ Pantalla ------------------------------ */
-export function TableGrid({ tables, waiters = [], onSelect, onReserve, avgDurationMs = 45 * 60 * 1000, onTablesChanged }: Props) {
+export function TableGrid({ tables: rawTables, waiters = [], onSelect, onReserve, avgDurationMs = 45 * 60 * 1000, onTablesChanged }: Props) {
   const { can } = useAuth();
   const canManage = can("tables.manage");
 
@@ -531,6 +532,9 @@ export function TableGrid({ tables, waiters = [], onSelect, onReserve, avgDurati
   const [tableToDelete, setTableToDelete] = useState<Table | null>(null);
   const [menuTableId, setMenuTableId] = useState<string | null>(null);
   const now = useNow();
+
+  // Una mesa "unida" cuya principal ya no tiene cuenta se muestra y se trata como libre.
+  const tables = useMemo(() => healOrphanLinkedTables(rawTables), [rawTables]);
 
   // El menú ⋮ se cierra al tocar fuera o con Escape.
   useEffect(() => {
@@ -560,6 +564,15 @@ export function TableGrid({ tables, waiters = [], onSelect, onReserve, avgDurati
     const map = new Map<string, string[]>();
     tables.forEach(t => {
       if (t.mergedInto) map.set(t.mergedInto, [...(map.get(t.mergedInto) ?? []), displayName(t)]);
+    });
+    return map;
+  }, [tables]);
+
+  /** Capacidad extra que aportan las mesas unidas a cada mesa principal. */
+  const mergedCapacityByTable = useMemo(() => {
+    const map = new Map<string, number>();
+    tables.forEach(t => {
+      if (t.mergedInto) map.set(t.mergedInto, (map.get(t.mergedInto) ?? 0) + (t.capacity ?? 0));
     });
     return map;
   }, [tables]);
@@ -740,7 +753,7 @@ export function TableGrid({ tables, waiters = [], onSelect, onReserve, avgDurati
       </div>
 
       {/* Mesas de la zona activa */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
         {filtered.map(table => {
           const style = STATUS_STYLES[table.status];
           const isFree = table.status === "FREE";
@@ -755,6 +768,7 @@ export function TableGrid({ tables, waiters = [], onSelect, onReserve, avgDurati
           const deletable = editMode && canManage && isIdle;
           const itemCount = table.items.reduce((sum, item) => sum + (item.quantity || 1), 0);
           const number = tableNumber(table);
+          const totalCapacity = table.capacity + (mergedCapacityByTable.get(table.id) ?? 0);
 
           // Menú ⋮: solo acciones que no son la principal de la tarjeta.
           const menuItems: { key: string; label: string; danger?: boolean; icon: React.ReactNode; run: () => void }[] = [];
@@ -773,13 +787,13 @@ export function TableGrid({ tables, waiters = [], onSelect, onReserve, avgDurati
             <div
               key={table.id}
               onClick={runPrimary}
-              className={`relative ${menuOpen ? "z-20" : ""} flex flex-col gap-3 min-h-[196px] p-3.5 rounded-vimdy-lg border-2 bg-vimdy-surface ${style.border} hover:bg-vimdy-surface-hover active:scale-[0.98] cursor-pointer transition-all duration-vimdy-normal ${
+              className={`relative ${menuOpen ? "z-20" : ""} flex flex-col gap-2 min-h-[168px] p-3 rounded-vimdy-lg border-2 bg-vimdy-surface ${style.border} hover:bg-vimdy-surface-hover active:scale-[0.98] cursor-pointer transition-all duration-vimdy-normal ${
                 deletable ? "ring-2 ring-vimdy-danger/70" : ""
               }`}
             >
               {/* Estado + menú */}
               <div className="flex items-center justify-between gap-2">
-                <span className={`px-3 py-1 rounded-full border text-xs font-bold whitespace-nowrap ${style.pill}`}>
+                <span className={`px-2.5 py-0.5 rounded-full border text-[11px] font-bold whitespace-nowrap ${style.pill}`}>
                   {style.label}
                 </span>
                 {menuItems.length > 0 && !deletable ? (
@@ -790,7 +804,7 @@ export function TableGrid({ tables, waiters = [], onSelect, onReserve, avgDurati
                       aria-haspopup="menu"
                       aria-expanded={menuOpen}
                       aria-label={`Más opciones de ${displayName(table)}`}
-                      className="w-11 h-11 -mr-2 -my-2 rounded-vimdy-md text-vimdy-text-secondary hover:text-vimdy-text hover:bg-vimdy-surface-active flex items-center justify-center"
+                      className="w-10 h-10 -mr-2 -my-2 rounded-vimdy-md text-vimdy-text-secondary hover:text-vimdy-text hover:bg-vimdy-surface-active flex items-center justify-center"
                     >
                       <EllipsisVertical size={20} />
                     </button>
@@ -827,28 +841,28 @@ export function TableGrid({ tables, waiters = [], onSelect, onReserve, avgDurati
               {/* Mesa + comensales */}
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1" aria-hidden="true">
-                  <span className="w-1.5 h-6 rounded-full bg-vimdy-border" />
-                  <span className="w-11 h-11 rounded-vimdy-md bg-vimdy-surface-active border border-vimdy-border text-vimdy-text text-xl font-black flex items-center justify-center">
+                  <span className="w-1.5 h-5 rounded-full bg-vimdy-border" />
+                  <span className="w-9 h-9 rounded-vimdy-md bg-vimdy-surface-active border border-vimdy-border text-vimdy-text text-lg font-black flex items-center justify-center">
                     {number ?? displayName(table).charAt(0).toUpperCase()}
                   </span>
-                  <span className="w-1.5 h-6 rounded-full bg-vimdy-border" />
+                  <span className="w-1.5 h-5 rounded-full bg-vimdy-border" />
                 </div>
                 <span
-                  className="flex items-center gap-1 text-vimdy-text-secondary text-sm font-semibold"
+                  className="flex items-center gap-1 text-vimdy-text-secondary text-xs font-semibold"
                   title={isIdle ? "Capacidad" : "Comensales / capacidad"}
                 >
-                  <Users size={15} />
-                  {isIdle ? table.capacity : `${table.peopleCount}/${table.capacity}`}
+                  <Users size={14} />
+                  {isIdle ? totalCapacity : `${table.peopleCount}/${totalCapacity}`}
                 </span>
               </div>
 
               {/* Nombre, total y estado del pedido */}
               <div className="min-w-0">
-                <h2 className="text-vimdy-text text-lg font-bold leading-tight truncate">
+                <h2 className="text-vimdy-text text-base font-bold leading-tight truncate">
                   {displayName(table)}
                   {mergedLabel && <span className="text-vimdy-text-secondary text-sm font-normal ml-1">{mergedLabel}</span>}
                 </h2>
-                <p className="text-vimdy-text-secondary text-base">${table.total.toLocaleString("es-CO")}</p>
+                <p className="text-vimdy-text-secondary text-sm">${table.total.toLocaleString("es-CO")}</p>
                 <div className="flex items-center justify-between gap-2 mt-1 text-vimdy-text-secondary text-xs">
                   <span className="flex items-center gap-1 min-w-0">
                     <Clock size={13} className="shrink-0" />
@@ -875,7 +889,7 @@ export function TableGrid({ tables, waiters = [], onSelect, onReserve, avgDurati
               {/* Pedido (indicador) + acción principal */}
               <div className="mt-auto flex items-center gap-2">
                 <span
-                  className={`relative w-11 h-11 shrink-0 rounded-vimdy-md border flex items-center justify-center ${
+                  className={`relative w-10 h-10 shrink-0 rounded-vimdy-md border flex items-center justify-center ${
                     itemCount > 0
                       ? "bg-vimdy-accent/10 border-vimdy-accent/40 text-vimdy-accent-hover"
                       : "bg-vimdy-surface-active border-vimdy-border text-vimdy-text-tertiary"
@@ -883,7 +897,7 @@ export function TableGrid({ tables, waiters = [], onSelect, onReserve, avgDurati
                   title={itemCount > 0 ? `${itemCount} producto${itemCount === 1 ? "" : "s"} en el pedido` : "Sin pedido"}
                   aria-label={itemCount > 0 ? `${itemCount} productos en el pedido` : "Sin pedido"}
                 >
-                  <Utensils size={18} />
+                  <Utensils size={16} />
                   {itemCount > 0 && (
                     <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-vimdy-accent text-white text-[10px] font-bold flex items-center justify-center">
                       {itemCount}
@@ -896,7 +910,7 @@ export function TableGrid({ tables, waiters = [], onSelect, onReserve, avgDurati
                     e.stopPropagation();
                     runPrimary();
                   }}
-                  className={`flex-1 min-w-0 h-11 px-3 rounded-vimdy-md border text-sm font-bold whitespace-nowrap transition ${
+                  className={`flex-1 min-w-0 h-10 px-2 rounded-vimdy-md border text-sm font-bold whitespace-nowrap transition ${
                     deletable
                       ? "bg-vimdy-danger-bg border-vimdy-danger/50 text-vimdy-danger-hover"
                       : isFree
@@ -914,7 +928,7 @@ export function TableGrid({ tables, waiters = [], onSelect, onReserve, avgDurati
         {canManage && activeZone && (
           <button
             onClick={() => setDialog("table")}
-            className="rounded-vimdy-lg border-2 border-dashed border-vimdy-border hover:border-vimdy-accent hover:bg-vimdy-accent/5 text-vimdy-text-secondary hover:text-vimdy-accent-hover min-h-[196px] flex flex-col items-center justify-center gap-2 active:scale-[0.97] transition"
+            className="rounded-vimdy-lg border-2 border-dashed border-vimdy-border hover:border-vimdy-accent hover:bg-vimdy-accent/5 text-vimdy-text-secondary hover:text-vimdy-accent-hover min-h-[168px] flex flex-col items-center justify-center gap-2 active:scale-[0.97] transition"
           >
             <Plus size={28} />
             <span className="font-bold text-sm">Añadir mesa</span>
