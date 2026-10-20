@@ -44,7 +44,7 @@ interface StatusStyle {
 }
 
 /** Superficie y texto de VIMDY; el estado tiñe borde, fondo y píldora. Clases estáticas para Tailwind. */
-const STATUS_STYLES: Record<Status, StatusStyle> = {
+export const STATUS_STYLES: Record<Status, StatusStyle> = {
   FREE: {
     label: "Libre", icon: CircleCheck,
     border: "border-vimdy-success/40",
