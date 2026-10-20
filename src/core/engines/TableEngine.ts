@@ -184,6 +184,7 @@ export class TableEngine {
       businessId,
       branchId,
       name,
+      zone: typeof input.zone === "string" && input.zone.trim() ? input.zone.trim() : undefined,
       capacity: input.capacity ?? 4,
       status: input.status ?? 'FREE',
       peopleCount: input.peopleCount ?? 0,

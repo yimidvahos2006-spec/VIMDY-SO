@@ -15,6 +15,8 @@ import { WaiterSelect } from "../components/waiter/WaiterSelect";
 import { TableGrid } from "../components/waiter/TableGrid";
 import { OpenTableDialog } from "../components/waiter/OpenTableDialog";
 import { TableDetailPanel } from "../components/waiter/TableDetailPanel";
+import { VoiceCommandButton } from "../components/waiter/VoiceCommandButton";
+import type { TableVoiceTarget } from "../../core/voice/useTableVoiceCommand";
 import { OfflineStatusBadge } from "../components/ui/OfflineStatusBadge";
 import { usePendingTableOperationsQueue } from "../../core/offline/usePendingTableOperationsQueue";
 import { RequirePermission } from "../navigation/RequirePermission";
@@ -43,6 +45,8 @@ function MeserosContent() {
 
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<"open" | "detail" | null>(null);
+  // Comensales dictados por voz para precargar el diálogo de apertura.
+  const [voicePeopleCount, setVoicePeopleCount] = useState<number | null>(null);
 
   const reloadTables = useCallback(async () => {
     const all = await container.tableEngine.get().getAllTables();
@@ -134,6 +138,12 @@ function MeserosContent() {
     }
   }
 
+  /** Control por voz: abre la mesa dicha con los comensales ya cargados. */
+  function handleVoiceTarget({ table, peopleCount }: TableVoiceTarget) {
+    setVoicePeopleCount(peopleCount);
+    handleSelectTable(table);
+  }
+
   function handleSelectWaiter(waiter: Waiter) {
     if (!tablesEnabled && waiterModeEnabled) {
       navigate("/caja", { state: { tab: "venta", waiterId: waiter.id } });
@@ -145,6 +155,7 @@ function MeserosContent() {
   function closeDialogs() {
     setDialog(null);
     setSelectedTableId(null);
+    setVoicePeopleCount(null);
   }
 
   /** Cierra todo y regresa a la pantalla de tarjetas para el siguiente mesero. */
@@ -210,13 +221,14 @@ function MeserosContent() {
 
       {/* Paso 2: mesas, ya con el mesero identificado. */}
       {ready && !loadError && tablesEnabled && (!waiterModeEnabled || activeWaiter) && (
-        <TableGrid tables={tables} waiters={waiters} onSelect={handleSelectTable} avgDurationMs={avgDurationMs} />
+        <TableGrid tables={tables} waiters={waiters} onSelect={handleSelectTable} avgDurationMs={avgDurationMs} onTablesChanged={reloadTables} />
       )}
 
       {dialog === "open" && selectedTable && (
         <OpenTableDialog
           table={selectedTable}
           waiterId={activeWaiter?.id ?? null}
+          initialPeopleCount={voicePeopleCount}
           onClose={closeDialogs}
           onOpened={() => {
             setDialog("detail");
@@ -241,6 +253,12 @@ function MeserosContent() {
             reloadTables();
           }}
         />
+      )}
+
+      {/* Control por voz: mismo criterio de visibilidad que el grid de mesas,
+          y oculto mientras hay un diálogo abierto. */}
+      {ready && !loadError && tablesEnabled && (!waiterModeEnabled || activeWaiter) && dialog === null && (
+        <VoiceCommandButton tables={tables} onTarget={handleVoiceTarget} />
       )}
     </div>
   );
