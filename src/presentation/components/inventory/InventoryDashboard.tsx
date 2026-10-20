@@ -386,9 +386,13 @@ export function InventoryDashboard() {
       <div className="flex flex-col gap-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-vimdy-text">Inventario</h1>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-vimdy-accent/20 text-vimdy-accent">Para vender</span>
+              <span className="text-xs text-vimdy-text-tertiary">Aparecen en Caja</span>
+            </div>
+            <h1 className="text-2xl font-bold text-vimdy-text mt-1">Productos de venta</h1>
             <p className="text-vimdy-text-secondary text-sm mt-1">
-              Productos, stock y movimientos en tiempo real.
+              Platos, bebidas y servicios del menú. Los que llevan receta descuentan sus insumos al venderse.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -538,7 +542,7 @@ export function InventoryDashboard() {
       ) : (
         <>
       {/* KPIs */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-3">
         <KpiCard
           icon={<Package size={20} className="text-vimdy-accent" />}
           label="Total de productos"
@@ -569,9 +573,9 @@ export function InventoryDashboard() {
         />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 gap-6">
         {/* Tabla de productos */}
-        <div className="lg:col-span-2 rounded-vimdy-lg border border-vimdy-border bg-vimdy-surface overflow-hidden">
+        <div className="rounded-vimdy-lg border border-vimdy-border bg-vimdy-surface overflow-hidden">
           <div className="p-4 border-b border-vimdy-border flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
             <div className="relative flex-1">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-vimdy-text-tertiary" />
@@ -649,6 +653,7 @@ export function InventoryDashboard() {
                 <tr className="text-left text-vimdy-text-secondary border-b border-vimdy-border">
                   <SortableHeader label="Producto" active={sortKey === "name"} dir={sortDir} onClick={() => toggleSort("name")} />
                   <th className="px-4 py-3 font-medium">Categoría</th>
+                  <th className="px-4 py-3 font-medium">Receta</th>
                   <SortableHeader label="Stock" active={sortKey === "stock"} dir={sortDir} onClick={() => toggleSort("stock")} />
                   <th className="px-4 py-3 font-medium">Mínimo</th>
                   <SortableHeader label="Precio" active={sortKey === "price"} dir={sortDir} onClick={() => toggleSort("price")} />
@@ -659,7 +664,7 @@ export function InventoryDashboard() {
               <tbody>
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-10 text-center text-vimdy-text-tertiary">
+                    <td colSpan={8} className="px-4 py-10 text-center text-vimdy-text-tertiary">
                       {hasActiveFilters ? (
                         <div className="flex flex-col items-center gap-3">
                           <span>Ningún producto coincide con los filtros activos.</span>
@@ -736,6 +741,15 @@ export function InventoryDashboard() {
                       </td>
                       <td className="px-4 py-3 text-vimdy-text-secondary">
                         {categoryNameById[product.categoryId] ?? product.categoryId}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {product.recipe && product.recipe.length > 0 ? (
+                          <span className="text-xs px-2 py-0.5 rounded-vimdy-sm bg-vimdy-recipe/20 text-vimdy-recipe border border-vimdy-recipe/30">
+                            Receta · {product.recipe.length} {product.recipe.length === 1 ? "insumo" : "insumos"}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-vimdy-text-tertiary">{product.trackStock === false && !product.requiresKitchen ? "No aplica" : "Sin receta"}</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-vimdy-text">{product.stock}</td>
                       <td className="px-4 py-3 text-vimdy-text-secondary">{product.minStock}</td>

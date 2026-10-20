@@ -58,7 +58,9 @@ export function InsumosPanel() {
   const [showNewInsumo, setShowNewInsumo] = useState(false);
   const [editingInsumo, setEditingInsumo] = useState<Product | null>(null);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
-  const [tab, setTab] = useState<Tab>("insumos");
+  const [purchaseTarget, setPurchaseTarget] = useState<Product | null>(null);
+  const [purchaseQty, setPurchaseQty] = useState("");
+  const [purchaseCost, setPurchaseCost] = useState("");
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loadingSuppliers, setLoadingSuppliers] = useState(false);
   const [showNewSupplier, setShowNewSupplier] = useState(false);
@@ -129,220 +131,202 @@ export function InsumosPanel() {
     }
   }
 
+  // Qué productos de venta consumen cada insumo (receta vinculada).
+  const usedIn = new Map<string, string[]>();
+  products.forEach((p) => {
+    if (p.isIngredient === true || !p.recipe) return;
+    p.recipe.forEach((r) => usedIn.set(r.productId, [...(usedIn.get(r.productId) ?? []), p.name]));
+  });
+  const grouped = (() => {
+    const m = new Map<string, Product[]>();
+    filteredInsumos.forEach((i) => m.set(i.categoryId, [...(m.get(i.categoryId) ?? []), i]));
+    return [...m.entries()]
+      .map(([id, items]) => ({
+        id,
+        name: categories.find((c) => c.id === id)?.name ?? "Sin categoría",
+        items: [...items].sort((x, y) => x.name.localeCompare(y.name))
+      }))
+      .sort((x, y) => x.name.localeCompare(y.name));
+  })();
+  const lowCount = insumos.filter((i) => getStockStatus(i) === "bajo").length;
+  const outCount = insumos.filter((i) => getStockStatus(i) === "agotado").length;
+  const stockValue = insumos.reduce((acc, i) => acc + (i.purchasePrice ?? 0) * Math.max(i.stock, 0), 0);
+
+  async function confirmPurchase() {
+    if (!purchaseTarget) return;
+    const qty = Number(purchaseQty);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      toast.error("Ingresa una cantidad mayor que 0.");
+      return;
+    }
+    const cost = purchaseCost.trim() === "" ? undefined : Number(purchaseCost);
+    if (cost !== undefined && (!Number.isFinite(cost) || cost < 0)) {
+      toast.error("El costo unitario no es válido.");
+      return;
+    }
+    const ok = await increaseStock(purchaseTarget.id, qty, "Compra de insumo", undefined, cost);
+    if (ok) {
+      toast.success(`Entrada registrada: ${qty} ${purchaseTarget.unit ?? "und"} de ${purchaseTarget.name}.`);
+      setPurchaseTarget(null);
+      setPurchaseQty("");
+      setPurchaseCost("");
+    }
+  }
+
   return (
-    <div className="w-full min-h-screen flex flex-col">
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-vimdy-text">Insumos</h1>
-              <p className="text-vimdy-text-secondary text-sm mt-1">
-                Gestiona tus ingredientes y materias primas
-              </p>
+    <div className="w-full flex flex-col space-y-4">
+      <div className="rounded-vimdy-lg border border-vimdy-warning/30 bg-vimdy-warning/5 p-4">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-vimdy-warning/20 text-vimdy-warning">Materia prima</span>
+              <span className="text-xs text-vimdy-text-tertiary">No se venden en Caja</span>
             </div>
-            <VimdyButton
-              onClick={() => setShowNewInsumo(true)}
-              icon={<Plus size={18} />}
-            >
-              Nuevo insumo
-            </VimdyButton>
+            <h2 className="text-2xl font-bold text-vimdy-text mt-1">Ingredientes / Insumos</h2>
+            <p className="text-vimdy-text-secondary text-sm mt-1">
+              Lo que compras y guardas. Se descuenta solo cuando se vende un producto cuya receta lo usa.
+            </p>
           </div>
-
-          <div className="flex gap-2 border-b border-vimdy-border">
-            <button
-              onClick={() => setTab("insumos")}
-              className={`px-4 py-2 text-sm font-semibold border-b-2 transition ${
-                tab === "insumos"
-                  ? "border-vimdy-accent text-vimdy-accent"
-                  : "border-transparent text-vimdy-text-secondary hover:text-vimdy-text"
-              }`}
-            >
-              Insumos
-            </button>
-            <button
-              onClick={() => setTab("recetas")}
-              className={`px-4 py-2 text-sm font-semibold border-b-2 transition ${
-                tab === "recetas"
-                  ? "border-vimdy-accent text-vimdy-accent"
-                  : "border-transparent text-vimdy-text-secondary hover:text-vimdy-text"
-              }`}
-            >
-              Recetas
-            </button>
-            <button
-              onClick={() => setTab("historial")}
-              className={`px-4 py-2 text-sm font-semibold border-b-2 transition ${
-                tab === "historial"
-                  ? "border-vimdy-accent text-vimdy-accent"
-                  : "border-transparent text-vimdy-text-secondary hover:text-vimdy-text"
-              }`}
-            >
-              Historial
-            </button>
-          </div>
-
-          {tab === "insumos" && (
-            <div className="space-y-4">
-              <div className="flex flex-col sm:flex-row gap-3">
-                <div className="relative flex-1">
-                  <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-vimdy-text-tertiary" />
-                  <input
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Buscar insumo..."
-                    className="w-full h-11 pl-10 pr-4 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm outline-none focus:border-vimdy-accent"
-                  />
-                </div>
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value as StockStatus | "todos")}
-                  className="h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm outline-none focus:border-vimdy-accent"
-                >
-                  <option value="todos">Todos los estados</option>
-                  <option value="normal">Normal</option>
-                  <option value="bajo">Stock bajo</option>
-                  <option value="agotado">Agotado</option>
-                </select>
-                <select
-                  value={categoryFilter}
-                  onChange={(e) => setCategoryFilter(e.target.value)}
-                  className="h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm outline-none focus:border-vimdy-accent"
-                >
-                  <option value="todos">Todas las categorías</option>
-                  {visibleCategories.map((cat) => (
-                    <option key={cat.id} value={cat.id}>{cat.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {loading ? (
-                <SkeletonRows rows={6} />
-              ) : filteredInsumos.length === 0 ? (
-                <EmptyState
-                  icon={<Package size={48} />}
-                  title="No hay insumos"
-                  description={
-                    search.trim() || statusFilter !== "todos" || categoryFilter !== "todos"
-                      ? "No se encontraron insumos con ese filtro."
-                      : "Agrega tu primer insumo para comenzar a gestionar tu inventario."
-                  }
-                  action={
-                    !search.trim() && statusFilter === "todos" && categoryFilter === "todos"
-                      ? {
-                          label: "Nuevo insumo",
-                          onClick: () => setShowNewInsumo(true)
-                        }
-                      : undefined
-                  }
-                />
-              ) : (
-                <div className="bg-vimdy-surface border border-vimdy-border rounded-vimdy-lg overflow-hidden">
-                  <table className="w-full text-left">
-                    <thead className="bg-vimdy-background/50">
-                      <tr>
-                        <th className="px-4 py-3 text-vimdy-text-secondary text-xs font-semibold uppercase tracking-wider">
-                          Insumo
-                        </th>
-                        <th className="px-4 py-3 text-vimdy-text-secondary text-xs font-semibold uppercase tracking-wider">
-                          Categoría
-                        </th>
-                        <th className="px-4 py-3 text-vimdy-text-secondary text-xs font-semibold uppercase tracking-wider">
-                          Stock
-                        </th>
-                        <th className="px-4 py-3 text-vimdy-text-secondary text-xs font-semibold uppercase tracking-wider">
-                          Precio compra
-                        </th>
-                        <th className="px-4 py-3 text-vimdy-text-secondary text-xs font-semibold uppercase tracking-wider text-right">
-                          Acciones
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-vimdy-border">
-                      {filteredInsumos.map((insumo) => {
-                        const status = getStockStatus(insumo);
-                        const category = categories.find((c) => c.id === insumo.categoryId);
-                        return (
-                          <tr key={insumo.id} className="hover:bg-vimdy-background/30 transition">
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-vimdy-sm bg-vimdy-background flex items-center justify-center text-lg overflow-hidden shrink-0">
-                                  {insumo.image ? (
-                                    <img src={insumo.image} alt={insumo.name} className="w-full h-full object-cover" />
-                                  ) : (
-                                    "📦"
-                                  )}
-                                </div>
-                                <div>
-                                  <p className="text-vimdy-text font-semibold text-sm">{insumo.name}</p>
-                                  {insumo.sku && (
-                                    <p className="text-vimdy-text-tertiary text-xs">SKU: {insumo.sku}</p>
-                                  )}
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 text-vimdy-text-secondary text-sm">
-                              {category?.name ?? "Sin categoría"}
-                            </td>
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-2">
-                                <span className={`w-2 h-2 rounded-full ${
-                                  status === "normal" ? "bg-vimdy-success" :
-                                  status === "bajo" ? "bg-vimdy-warning" : "bg-vimdy-danger"
-                                }`} />
-                                <span className="text-sm font-medium">
-                                  {insumo.stock} {insumo.unit || "unidades"}
-                                </span>
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 text-vimdy-text text-sm font-medium">
-                              {insumo.purchasePrice !== undefined ? money(insumo.purchasePrice) : "—"}
-                            </td>
-                            <td className="px-4 py-3">
-                              <div className="flex items-center justify-end gap-1">
-                                <button
-                                  onClick={() => {
-                                    setEditingInsumo(insumo);
-                                    setShowNewInsumo(true);
-                                  }}
-                                  className="w-8 h-8 rounded-vimdy-sm flex items-center justify-center text-vimdy-text-secondary hover:text-vimdy-text hover:bg-vimdy-surface transition"
-                                  title="Editar"
-                                >
-                                  <Pencil size={16} />
-                                </button>
-                                <button
-                                  onClick={() => setProductToDelete(insumo)}
-                                  className="w-8 h-8 rounded-vimdy-sm flex items-center justify-center text-vimdy-danger hover:bg-vimdy-danger/10 transition"
-                                  title="Eliminar"
-                                >
-                                  <Trash2 size={16} />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
-
-          {tab === "recetas" && (
-            <div className="text-center py-12 text-vimdy-text-tertiary">
-              <ChefHat size={48} className="mx-auto mb-3 opacity-50" />
-              <p>Las recetas se gestionan desde el formulario de cada producto elaborado.</p>
-            </div>
-          )}
-
-          {tab === "historial" && (
-            <div className="text-center py-12 text-vimdy-text-tertiary">
-              <History size={48} className="mx-auto mb-3 opacity-50" />
-              <p>El historial de movimientos está disponible en el kardex de cada insumo.</p>
-            </div>
-          )}
+          <VimdyButton onClick={() => { setEditingInsumo(null); setShowNewInsumo(true); }} size="sm" icon={<Plus size={16} />}>
+            Nuevo insumo
+          </VimdyButton>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3 text-center">
+          <div className="rounded-vimdy-md bg-vimdy-surface border border-vimdy-border py-2"><p className="text-lg font-bold text-vimdy-text">{insumos.length}</p><p className="text-xs text-vimdy-text-secondary">Insumos</p></div>
+          <div className="rounded-vimdy-md bg-vimdy-surface border border-vimdy-border py-2"><p className="text-lg font-bold text-vimdy-warning">{lowCount}</p><p className="text-xs text-vimdy-text-secondary">Stock bajo</p></div>
+          <div className="rounded-vimdy-md bg-vimdy-surface border border-vimdy-border py-2"><p className="text-lg font-bold text-vimdy-danger">{outCount}</p><p className="text-xs text-vimdy-text-secondary">Agotados</p></div>
+          <div className="rounded-vimdy-md bg-vimdy-surface border border-vimdy-border py-2"><p className="text-lg font-bold text-vimdy-text">{money(stockValue)}</p><p className="text-xs text-vimdy-text-secondary">Valor en bodega</p></div>
         </div>
       </div>
+
+      <div className="flex flex-col sm:flex-row gap-2">
+        <div className="relative flex-1">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-vimdy-text-tertiary" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar insumo..."
+            className="w-full h-10 pl-9 pr-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm outline-none focus:border-vimdy-accent"
+          />
+        </div>
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StockStatus | "todos")} aria-label="Filtrar por estado" className="h-10 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm outline-none focus:border-vimdy-accent">
+          <option value="todos">Todos los estados</option>
+          <option value="normal">Normal</option>
+          <option value="bajo">Stock bajo</option>
+          <option value="agotado">Agotado</option>
+        </select>
+        <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} aria-label="Filtrar por categoría" className="h-10 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm outline-none focus:border-vimdy-accent">
+          <option value="todos">Todas las categorías</option>
+          {visibleCategories.map((cat) => (<option key={cat.id} value={cat.id}>{cat.name}</option>))}
+        </select>
+      </div>
+
+      {loading ? (
+        <SkeletonRows rows={6} />
+      ) : filteredInsumos.length === 0 ? (
+        <EmptyState
+          icon={<Package size={48} />}
+          title="No hay insumos"
+          description={search.trim() || statusFilter !== "todos" || categoryFilter !== "todos" ? "No se encontraron insumos con ese filtro." : "Agrega tu primer insumo (carne, verduras, empaques...) para armar recetas."}
+          action={!search.trim() && statusFilter === "todos" && categoryFilter === "todos" ? { label: "Nuevo insumo", onClick: () => setShowNewInsumo(true) } : undefined}
+        />
+      ) : (
+        <div className="space-y-4">
+          {grouped.map((group) => (
+            <div key={group.id} className="rounded-vimdy-lg border border-vimdy-border bg-vimdy-surface overflow-hidden">
+              <div className="px-4 py-2 bg-vimdy-background/50 border-b border-vimdy-border flex items-center justify-between">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-vimdy-text-secondary">{group.name}</h3>
+                <span className="text-xs text-vimdy-text-tertiary">{group.items.length}</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-vimdy-text-tertiary">
+                      <th className="px-4 py-2 font-medium">Insumo</th>
+                      <th className="px-4 py-2 font-medium">Stock actual</th>
+                      <th className="px-4 py-2 font-medium">Mínimo</th>
+                      <th className="px-4 py-2 font-medium">Costo</th>
+                      <th className="px-4 py-2 font-medium">Usado en</th>
+                      <th className="px-4 py-2 font-medium text-right">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-vimdy-border">
+                    {group.items.map((insumo) => {
+                      const status = getStockStatus(insumo);
+                      const unit = insumo.unit || "und";
+                      const uses = usedIn.get(insumo.id) ?? [];
+                      return (
+                        <tr key={insumo.id} className="hover:bg-vimdy-background/30 transition">
+                          <td className="px-4 py-3">
+                            <p className="text-vimdy-text font-semibold">{insumo.name}</p>
+                            {insumo.sku && <p className="text-vimdy-text-tertiary text-xs">SKU: {insumo.sku}</p>}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <span className="inline-flex items-center gap-2 font-medium text-vimdy-text">
+                              <span className={`w-2 h-2 rounded-full ${status === "normal" ? "bg-vimdy-success" : status === "bajo" ? "bg-vimdy-warning" : "bg-vimdy-danger"}`} />
+                              {insumo.stock} {unit}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-vimdy-text-secondary whitespace-nowrap">{insumo.minStock} {unit}</td>
+                          <td className="px-4 py-3 text-vimdy-text whitespace-nowrap">
+                            {insumo.purchasePrice !== undefined ? `${money(insumo.purchasePrice)} / ${unit}` : <span className="text-vimdy-warning text-xs">Sin costo</span>}
+                          </td>
+                          <td className="px-4 py-3">
+                            {uses.length > 0 ? (
+                              <span title={uses.join(", ")} className="text-xs px-2 py-0.5 rounded-vimdy-sm bg-vimdy-recipe/20 text-vimdy-recipe border border-vimdy-recipe/30">
+                                {uses.length} {uses.length === 1 ? "receta" : "recetas"}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-vimdy-text-tertiary">Sin receta</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center justify-end gap-1">
+                              <button onClick={() => { setPurchaseTarget(insumo); setPurchaseCost(insumo.purchasePrice !== undefined ? String(insumo.purchasePrice) : ""); }} title="Registrar compra / entrada" aria-label="Registrar compra" className="w-8 h-8 rounded-vimdy-sm flex items-center justify-center text-vimdy-success hover:bg-vimdy-success/10 transition">
+                                <ArrowUpCircle size={16} />
+                              </button>
+                              <button onClick={() => { setEditingInsumo(insumo); setShowNewInsumo(true); }} title="Editar" aria-label="Editar" className="w-8 h-8 rounded-vimdy-sm flex items-center justify-center text-vimdy-text-secondary hover:text-vimdy-text hover:bg-vimdy-background transition">
+                                <Pencil size={16} />
+                              </button>
+                              <button onClick={() => setProductToDelete(insumo)} title="Eliminar" aria-label="Eliminar" className="w-8 h-8 rounded-vimdy-sm flex items-center justify-center text-vimdy-danger hover:bg-vimdy-danger/10 transition">
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {purchaseTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="w-full max-w-sm rounded-vimdy-lg border border-vimdy-border bg-vimdy-surface p-6 space-y-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-vimdy-text">Registrar compra</h3>
+                <p className="text-sm text-vimdy-text-secondary">{purchaseTarget.name} · stock {purchaseTarget.stock} {purchaseTarget.unit ?? "und"}</p>
+              </div>
+              <button onClick={() => setPurchaseTarget(null)} aria-label="Cerrar" className="text-vimdy-text-secondary hover:text-vimdy-text"><X size={20} /></button>
+            </div>
+            <label className="block text-xs font-semibold text-vimdy-text-secondary">Cantidad que entra ({purchaseTarget.unit ?? "und"})
+              <input type="number" min="0" step="any" autoFocus value={purchaseQty} onChange={(e) => setPurchaseQty(e.target.value)} className="mt-1 w-full h-10 px-3 rounded-vimdy-md bg-vimdy-background border border-vimdy-border text-vimdy-text text-sm" />
+            </label>
+            <label className="block text-xs font-semibold text-vimdy-text-secondary">Costo por {purchaseTarget.unit ?? "und"} (opcional)
+              <input type="number" min="0" step="any" value={purchaseCost} onChange={(e) => setPurchaseCost(e.target.value)} className="mt-1 w-full h-10 px-3 rounded-vimdy-md bg-vimdy-background border border-vimdy-border text-vimdy-text text-sm" />
+            </label>
+            <div className="flex justify-end gap-2">
+              <VimdyButton variant="secondary" onClick={() => setPurchaseTarget(null)}>Cancelar</VimdyButton>
+              <VimdyButton onClick={confirmPurchase}>Registrar entrada</VimdyButton>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showNewInsumo && (
         <InsumoFormModal
