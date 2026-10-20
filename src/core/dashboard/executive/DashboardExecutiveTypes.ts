@@ -38,6 +38,8 @@ export interface DashboardExecutiveInput {
   readonly timezone: string;
   readonly currency: string;
   readonly now: Date;
+  /** Nombre real del negocio (businessStore). Disponible desde el primer render. */
+  readonly businessName?: string;
 }
 
 export interface DashboardExecutiveKpi {
@@ -45,6 +47,8 @@ export interface DashboardExecutiveKpi {
   readonly value: number | null;
   readonly previousValue: number | null;
   readonly unit: "currency" | "number";
+  /** true mientras el dato todavía se está calculando (no es un cero ni "no disponible"). */
+  readonly loading?: boolean;
 }
 
 export interface DashboardExecutiveAttention {

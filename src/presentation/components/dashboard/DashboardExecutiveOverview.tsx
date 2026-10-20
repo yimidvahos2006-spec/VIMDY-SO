@@ -48,7 +48,7 @@ function valueForKpi(kpi: DashboardExecutiveKpi, money: (value: number) => strin
 function KpiCard({ kpi, model }: { kpi: DashboardExecutiveKpi; model: DashboardExecutiveModel }) {
   const { language, money } = useTranslation();
   const change = changePercent(kpi);
-  const value = valueForKpi(kpi, money, language);
+  const value = kpi.loading ? "—" : valueForKpi(kpi, money, language);
   const copy = statusCopy(language, kpi.id, model);
 
   return (
@@ -61,7 +61,11 @@ function KpiCard({ kpi, model }: { kpi: DashboardExecutiveKpi; model: DashboardE
         {kpi.id === "inventoryValue" ? <Package size={18} className="text-vimdy-text-tertiary" aria-hidden="true" /> : null}
         {kpi.id === "transactions" ? <ReceiptText size={18} className="text-vimdy-text-tertiary" aria-hidden="true" /> : null}
       </div>
-      <p className="mt-7 text-2xl xl:text-3xl font-bold tracking-tight text-vimdy-text truncate" title={value}>
+      <p
+        className={`mt-7 text-2xl xl:text-3xl font-bold tracking-tight truncate ${kpi.loading ? "text-vimdy-text-tertiary animate-pulse" : "text-vimdy-text"}`}
+        title={value}
+        aria-busy={kpi.loading ? true : undefined}
+      >
         {value}
       </p>
       <div className="mt-3 flex items-center justify-between gap-3 text-sm">

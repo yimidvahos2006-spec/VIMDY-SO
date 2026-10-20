@@ -80,12 +80,15 @@ function buildKpis(
     });
   }
 
-  if (profile.metrics.netSales && snapshot) {
+  if (profile.metrics.netSales) {
+    // La tarjeta se reserva desde el primer render para que el panel no
+    // "salte" cuando termina el cálculo de ganancia (snapshot).
     kpis.push({
       id: "profit",
-      value: finiteOrNull(snapshot.todayProfit),
+      value: snapshot ? finiteOrNull(snapshot.todayProfit) : null,
       previousValue: null,
       unit: "currency",
+      loading: snapshot === null,
     });
   }
 
@@ -298,6 +301,14 @@ function buildClosing(dashboard: DashboardSnapshot): DashboardExecutiveClosing {
   };
 }
 
+function resolveBusinessName(input: DashboardExecutiveInput): string {
+  const fromStore = input.businessName?.trim();
+  if (fromStore) return fromStore;
+  const fromSnapshot = input.snapshot?.businessName?.trim();
+  if (fromSnapshot) return fromSnapshot;
+  return "Mi negocio";
+}
+
 export function buildDashboardExecutiveModel(
   input: DashboardExecutiveInput,
 ): DashboardExecutiveModel {
@@ -307,7 +318,7 @@ export function buildDashboardExecutiveModel(
     return {
       status: input.profileStatus === "loading" ? "loading-profile" : "insufficient-data",
       businessId: input.profile?.businessId ?? null,
-      businessName: input.snapshot?.businessName ?? "VIMDY",
+      businessName: resolveBusinessName(input),
       currency: input.currency,
       timezone: input.timezone,
       dataFreshAt: input.dashboard.data.comparisonGeneratedAt ?? null,
@@ -330,7 +341,7 @@ export function buildDashboardExecutiveModel(
   return {
     status: hasRealDashboardData ? "ready" : "insufficient-data",
     businessId: input.profile.businessId,
-    businessName: input.snapshot?.businessName ?? "VIMDY",
+    businessName: resolveBusinessName(input),
     currency: input.currency,
     timezone: input.timezone,
     dataFreshAt: input.dashboard.data.comparisonGeneratedAt ?? null,

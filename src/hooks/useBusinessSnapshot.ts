@@ -25,26 +25,44 @@ export function useBusinessSnapshot() {
   const dashboard = useDashboard();
   const [snapshot, setSnapshot] = useState<BusinessSnapshot | null>(null);
   const timeoutRef = React.useRef<number | null>(null);
+  const requestIdRef = React.useRef(0);
+  const appliedIdRef = React.useRef(0);
+  const mountedRef = React.useRef(true);
 
   useEffect(() => {
-    let cancelled = false;
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
+  useEffect(() => {
     if (timeoutRef.current) {
       window.clearTimeout(timeoutRef.current);
     }
 
     timeoutRef.current = window.setTimeout(async () => {
+      const requestId = ++requestIdRef.current;
       const business = businessStore.get();
       const config = companyConfigStore.get();
-      const next = await container.businessAnalyzer.get().buildSnapshot(
-        business.name || "Mi negocio",
-        config.currency
-      );
-      if (!cancelled) setSnapshot(next);
+      try {
+        const next = await container.businessAnalyzer.get().buildSnapshot(
+          business.name || "Mi negocio",
+          config.currency
+        );
+        // Un resultado más viejo nunca pisa a uno más nuevo, pero tampoco se
+        // descarta mientras no haya otro: antes, cada cambio del dashboard
+        // durante la carga cancelaba el cálculo y la pantalla esperaba de más.
+        if (mountedRef.current && requestId > appliedIdRef.current) {
+          appliedIdRef.current = requestId;
+          setSnapshot(next);
+        }
+      } catch (error) {
+        console.error("[useBusinessSnapshot] No se pudo calcular el snapshot:", error);
+      }
     }, 150);
 
     return () => {
-      cancelled = true;
       if (timeoutRef.current) {
         window.clearTimeout(timeoutRef.current);
         timeoutRef.current = null;

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
+import { businessStore } from "../core/store/businessStore";
 import { companyConfigStore } from "../core/store/companyConfigStore";
 import { useDashboard } from "../core/store/useDashboard";
 import { useBusinessOperatingProfile } from "../core/store/useBusinessOperatingProfile";
@@ -21,6 +22,9 @@ export function useDashboardExecutive(): DashboardExecutiveModel {
     () => companyConfigStore.get().timezone,
     () => companyConfigStore.get().timezone,
   );
+  // El nombre ya está en businessStore cuando entra a la app (AuthContext lo
+  // hidrata antes de mostrar el Dashboard): no hay que esperar al snapshot.
+  const businessName = businessStore.get().name;
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
@@ -38,7 +42,8 @@ export function useDashboardExecutive(): DashboardExecutiveModel {
         timezone,
         currency,
         now,
+        businessName,
       }),
-    [dashboard, snapshot, operatingProfile, timezone, currency, now],
+    [dashboard, snapshot, operatingProfile, timezone, currency, now, businessName],
   );
 }
