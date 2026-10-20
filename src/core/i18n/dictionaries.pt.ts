@@ -360,7 +360,8 @@ const pt: Record<TranslationKey, string> = {
   "kitchen.closeAria": "Fechar",
 
   "waiter.page.title": "Garçons",
-  "waiter.page.subtitleWaiter": "{name} — escolha uma mesa.",
+  "waiter.page.tablesTitle": "Mesas",
+  "waiter.page.subtitleWaiter": "{name} · Escolha uma mesa para começar",
   "waiter.page.subtitleAdmin": "Administração de garçons e mesas.",
   "waiter.page.switchWaiter": "Alterar garçom",
   "waiter.page.loading": "Carregando…",

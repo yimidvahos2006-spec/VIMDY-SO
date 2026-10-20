@@ -1,5 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Users, Search, Clock, Plus, Minus, X, Loader2, MapPin, Trash2, Pencil, Utensils, EllipsisVertical, CalendarClock } from "lucide-react";
+import {
+  Users, Search, Clock, Plus, Minus, X, Loader2, MapPin, Trash2, Pencil, Utensils, EllipsisVertical, CalendarClock,
+  CircleCheck, ChefHat, Receipt, Banknote, Hourglass, Link2
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 import { Table, Waiter } from "../../../core/entities/Entities";
 import { container } from "../../../infrastructure/di/CompositionRoot";
@@ -27,34 +31,87 @@ const NO_ZONE = "Sin zona";
 type Status = Table["status"];
 
 interface StatusStyle {
+  /** Texto del estado: SIEMPRE visible en la tarjeta (el color solo refuerza). */
   label: string;
+  /** Icono que acompaña al texto, para distinguir estados sin depender del color. */
+  icon: LucideIcon;
   /** Borde de la tarjeta (tinte del estado sobre la superficie VIMDY). */
   border: string;
+  /** Fondo de la tarjeta: tinte suave del estado (libre = superficie normal). */
+  surface: string;
   /** Píldora de estado. */
   pill: string;
 }
 
-/** Superficie y texto de VIMDY; el estado solo tiñe el borde y la píldora. Clases estáticas para Tailwind. */
+/** Superficie y texto de VIMDY; el estado tiñe borde, fondo y píldora. Clases estáticas para Tailwind. */
 const STATUS_STYLES: Record<Status, StatusStyle> = {
-  FREE: { label: "Libre", border: "border-vimdy-success/40", pill: "bg-vimdy-success-bg text-vimdy-success border-vimdy-success/40" },
-  RESERVED: { label: "Reservada", border: "border-indigo-400/50", pill: "bg-indigo-500/15 text-indigo-300 border-indigo-400/40" },
-  BUSY: { label: "Ocupada", border: "border-vimdy-danger/50", pill: "bg-vimdy-danger-bg text-vimdy-danger-hover border-vimdy-danger/40" },
-  WAITING_FOOD: { label: "Esperando comida", border: "border-orange-400/50", pill: "bg-orange-500/15 text-orange-300 border-orange-400/40" },
-  EATING: { label: "Comiendo", border: "border-vimdy-accent/50", pill: "bg-vimdy-accent/15 text-vimdy-accent-hover border-vimdy-accent/40" },
-  CUENTA_SOLICITADA: { label: "Por cobrar", border: "border-vimdy-warning/60", pill: "bg-vimdy-warning-bg text-vimdy-warning-hover border-vimdy-warning/40" },
-  WAITING_BILL: { label: "Esperando cuenta", border: "border-cyan-400/50", pill: "bg-cyan-500/15 text-cyan-300 border-cyan-400/40" },
-  PAYING: { label: "Cobrando", border: "border-purple-400/50", pill: "bg-purple-500/15 text-purple-300 border-purple-400/40" },
-  CLOSED: { label: "Unida", border: "border-vimdy-border", pill: "bg-vimdy-surface-active text-vimdy-text-secondary border-vimdy-border" }
+  FREE: {
+    label: "Libre", icon: CircleCheck,
+    border: "border-vimdy-success/40",
+    surface: "bg-vimdy-surface hover:bg-vimdy-surface-hover",
+    pill: "bg-vimdy-success-bg text-vimdy-success border-vimdy-success/40"
+  },
+  RESERVED: {
+    label: "Reservada", icon: CalendarClock,
+    border: "border-indigo-400/50",
+    surface: "bg-indigo-500/[0.06] hover:bg-indigo-500/10",
+    pill: "bg-indigo-500/15 text-indigo-300 border-indigo-400/40"
+  },
+  BUSY: {
+    label: "Ocupada", icon: Users,
+    border: "border-vimdy-danger/50",
+    surface: "bg-vimdy-danger/[0.06] hover:bg-vimdy-danger/10",
+    pill: "bg-vimdy-danger-bg text-vimdy-danger-hover border-vimdy-danger/40"
+  },
+  WAITING_FOOD: {
+    label: "Esperando comida", icon: ChefHat,
+    border: "border-orange-400/50",
+    surface: "bg-orange-500/[0.06] hover:bg-orange-500/10",
+    pill: "bg-orange-500/15 text-orange-300 border-orange-400/40"
+  },
+  EATING: {
+    label: "Comiendo", icon: Utensils,
+    border: "border-vimdy-accent/50",
+    surface: "bg-vimdy-accent/[0.06] hover:bg-vimdy-accent/10",
+    pill: "bg-vimdy-accent/15 text-vimdy-accent-hover border-vimdy-accent/40"
+  },
+  CUENTA_SOLICITADA: {
+    label: "Por cobrar", icon: Receipt,
+    border: "border-vimdy-warning/60",
+    surface: "bg-vimdy-warning/[0.07] hover:bg-vimdy-warning/10",
+    pill: "bg-vimdy-warning-bg text-vimdy-warning-hover border-vimdy-warning/40"
+  },
+  WAITING_BILL: {
+    label: "Esperando cuenta", icon: Hourglass,
+    border: "border-cyan-400/50",
+    surface: "bg-cyan-500/[0.06] hover:bg-cyan-500/10",
+    pill: "bg-cyan-500/15 text-cyan-300 border-cyan-400/40"
+  },
+  PAYING: {
+    label: "Cobrando", icon: Banknote,
+    border: "border-purple-400/50",
+    surface: "bg-purple-500/[0.06] hover:bg-purple-500/10",
+    pill: "bg-purple-500/15 text-purple-300 border-purple-400/40"
+  },
+  CLOSED: {
+    label: "Unida", icon: Link2,
+    border: "border-vimdy-border",
+    surface: "bg-vimdy-surface hover:bg-vimdy-surface-hover",
+    pill: "bg-vimdy-surface-active text-vimdy-text-secondary border-vimdy-border"
+  }
 };
 
-const QUICK_FILTERS: { key: Status | "ALL"; label: string }[] = [
-  { key: "ALL", label: "Todas" },
-  { key: "FREE", label: "Libres" },
-  { key: "BUSY", label: "Ocupadas" },
-  { key: "EATING", label: "Comiendo" },
-  { key: "WAITING_FOOD", label: "Esperando" },
-  { key: "CUENTA_SOLICITADA", label: "Por cobrar" },
-  { key: "RESERVED", label: "Reservadas" }
+type FilterKey = "ALL" | "FREE" | "BUSY" | "EATING" | "WAITING_FOOD" | "PAYMENT" | "RESERVED";
+
+/** "Por cobrar" agrupa todo lo pendiente de pago, para que ninguna mesa quede sin filtro. */
+const QUICK_FILTERS: { key: FilterKey; label: string; statuses: Status[] | null }[] = [
+  { key: "ALL", label: "Todas", statuses: null },
+  { key: "FREE", label: "Libres", statuses: ["FREE"] },
+  { key: "BUSY", label: "Ocupadas", statuses: ["BUSY"] },
+  { key: "EATING", label: "Comiendo", statuses: ["EATING"] },
+  { key: "WAITING_FOOD", label: "Esperando comida", statuses: ["WAITING_FOOD"] },
+  { key: "PAYMENT", label: "Por cobrar", statuses: ["CUENTA_SOLICITADA", "WAITING_BILL", "PAYING"] },
+  { key: "RESERVED", label: "Reservadas", statuses: ["RESERVED"] }
 ];
 
 function formatMinutes(ms: number): string {
@@ -525,7 +582,7 @@ export function TableGrid({ tables: rawTables, waiters = [], onSelect, onReserve
   const canManage = can("tables.manage");
 
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<Status | "ALL">("ALL");
+  const [statusFilter, setStatusFilter] = useState<FilterKey>("ALL");
   const [activeZone, setActiveZone] = useState<string | null>(null);
   const [dialog, setDialog] = useState<"zone" | "table" | "deleteZone" | null>(null);
   const [editMode, setEditMode] = useState(false);
@@ -617,13 +674,23 @@ export function TableGrid({ tables: rawTables, waiters = [], onSelect, onReserve
 
   const filtered = useMemo(() => {
     let result = zoneTables;
-    if (statusFilter !== "ALL") result = result.filter(t => t.status === statusFilter);
+    const statuses = QUICK_FILTERS.find(f => f.key === statusFilter)?.statuses;
+    if (statuses) result = result.filter(t => statuses.includes(t.status));
     if (search.trim()) {
       const term = search.trim().toLowerCase();
       result = result.filter(t => t.name.toLowerCase().includes(term) || displayName(t).toLowerCase().includes(term));
     }
     return result;
   }, [zoneTables, statusFilter, search]);
+
+  /** Cuántas mesas de la zona activa hay en cada filtro (se ve el pulso del salón de un vistazo). */
+  const filterCounts = useMemo(() => {
+    const counts = new Map<FilterKey, number>();
+    QUICK_FILTERS.forEach(f => {
+      counts.set(f.key, f.statuses ? zoneTables.filter(t => f.statuses!.includes(t.status)).length : zoneTables.length);
+    });
+    return counts;
+  }, [zoneTables]);
 
   async function refresh() {
     await onTablesChanged?.();
@@ -726,36 +793,47 @@ export function TableGrid({ tables: rawTables, waiters = [], onSelect, onReserve
         )}
       </div>
 
-      {/* Búsqueda + filtros por estado */}
-      <div className="flex flex-col gap-3">
-        <div className="relative">
+      {/* Búsqueda + filtros por estado (en una sola fila desde laptop para no gastar alto) */}
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+        <div className="relative lg:w-72 lg:shrink-0">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Buscar mesa..."
-            className="w-full h-10 pl-9 pr-4 rounded-xl bg-vimdy-surface border border-slate-700 text-white text-sm outline-none focus:border-cyan-500 transition"
+            className="w-full h-11 pl-9 pr-4 rounded-xl bg-vimdy-surface border border-slate-700 text-white text-sm outline-none focus:border-cyan-500 transition"
           />
         </div>
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          {QUICK_FILTERS.map(item => (
-            <button
-              key={item.key}
-              onClick={() => setStatusFilter(item.key)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition ${
-                statusFilter === item.key ? "bg-cyan-500 text-slate-950" : "bg-slate-800 text-slate-300 hover:bg-slate-700"
-              }`}
-            >
-              {item.label}
-            </button>
-          ))}
+        <div className="flex gap-2 overflow-x-auto pb-1 lg:pb-0 lg:min-w-0 lg:flex-1">
+          {QUICK_FILTERS.map(item => {
+            const count = filterCounts.get(item.key) ?? 0;
+            const selected = statusFilter === item.key;
+            return (
+              <button
+                key={item.key}
+                onClick={() => setStatusFilter(item.key)}
+                aria-pressed={selected}
+                className={`shrink-0 h-9 px-3.5 rounded-lg text-xs font-bold whitespace-nowrap flex items-center gap-2 transition ${
+                  selected ? "bg-cyan-500 text-slate-950" : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                }`}
+              >
+                {item.label}
+                {count > 0 && (
+                  <span className={`min-w-[20px] px-1.5 py-0.5 rounded-full text-[11px] leading-none text-center ${selected ? "bg-slate-950/20 text-slate-950" : "bg-slate-700 text-slate-200"}`}>
+                    {count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
 
       {/* Mesas de la zona activa */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+      <div className="grid grid-cols-1 min-[420px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
         {filtered.map(table => {
           const style = STATUS_STYLES[table.status];
+          const StatusIcon = style.icon;
           const isFree = table.status === "FREE";
           const isReserved = table.status === "RESERVED";
           const isIdle = isFree || isReserved;
@@ -787,14 +865,15 @@ export function TableGrid({ tables: rawTables, waiters = [], onSelect, onReserve
             <div
               key={table.id}
               onClick={runPrimary}
-              className={`relative ${menuOpen ? "z-20" : ""} flex flex-col gap-2 min-h-[168px] p-3 rounded-vimdy-lg border-2 bg-vimdy-surface ${style.border} hover:bg-vimdy-surface-hover active:scale-[0.98] cursor-pointer transition-all duration-vimdy-normal ${
+              className={`relative ${menuOpen ? "z-20" : ""} flex flex-col gap-2 min-h-[168px] p-3 rounded-vimdy-lg border-2 ${style.surface} ${style.border} active:scale-[0.98] cursor-pointer transition-all duration-vimdy-normal ${
                 deletable ? "ring-2 ring-vimdy-danger/70" : ""
               }`}
             >
               {/* Estado + menú */}
               <div className="flex items-center justify-between gap-2">
-                <span className={`px-2.5 py-0.5 rounded-full border text-[11px] font-bold whitespace-nowrap ${style.pill}`}>
-                  {style.label}
+                <span className={`inline-flex items-center gap-1.5 min-w-0 px-2.5 py-1 rounded-full border text-xs font-bold leading-tight ${style.pill}`}>
+                  <StatusIcon size={14} className="shrink-0" aria-hidden="true" />
+                  <span>{style.label}</span>
                 </span>
                 {menuItems.length > 0 && !deletable ? (
                   <div className="relative" data-table-menu onClick={(e) => e.stopPropagation()}>
@@ -910,7 +989,7 @@ export function TableGrid({ tables: rawTables, waiters = [], onSelect, onReserve
                     e.stopPropagation();
                     runPrimary();
                   }}
-                  className={`flex-1 min-w-0 h-10 px-2 rounded-vimdy-md border text-sm font-bold whitespace-nowrap transition ${
+                  className={`flex-1 min-w-0 min-h-10 px-2 py-1.5 rounded-vimdy-md border text-sm font-bold leading-tight text-center transition ${
                     deletable
                       ? "bg-vimdy-danger-bg border-vimdy-danger/50 text-vimdy-danger-hover"
                       : isFree

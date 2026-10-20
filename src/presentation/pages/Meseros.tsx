@@ -34,6 +34,12 @@ function shortWaiterName(name: string): string {
   return `${parts[0]} ${parts[1].charAt(0).toUpperCase()}.`;
 }
 
+/** "mesero 2" → "Mesero 2" (solo para mostrar; el nombre guardado no cambia). */
+function capitalizeFirst(text: string): string {
+  const trimmed = text.trim();
+  return trimmed ? trimmed.charAt(0).toUpperCase() + trimmed.slice(1) : text;
+}
+
 /** El mesero activo sobrevive a una recarga o a una caída del Wi-Fi. */
 function activeWaiterStorageKey(businessId: string | null | undefined): string {
   return `vimdy.meseros.activeWaiter.${businessId ?? "default"}`;
@@ -269,12 +275,22 @@ function MeserosContent() {
 
   const showTableTools = ready && !loadError && tablesEnabled && (!waiterModeEnabled || activeWaiter);
 
+  // La pantalla de elegir mesero sigue llamándose "Meseros"; en cuanto hay
+  // un mesero activo (o el negocio no usa meseros) lo que se elige son mesas.
+  const pageTitle = waiterModeEnabled
+    ? tablesEnabled
+      ? activeWaiter
+        ? t("waiter.page.tablesTitle")
+        : t("waiter.page.title")
+      : "Pedidos de meseros"
+    : "Mesas";
+
   return (
     <div className="p-4 sm:p-8">
       <div className="flex flex-wrap items-start justify-between gap-4 mb-6 sm:mb-8">
         <div className="min-w-0">
           <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-3xl sm:text-5xl font-black text-white">{waiterModeEnabled ? (tablesEnabled ? t("waiter.page.title") : "Pedidos de meseros") : "Mesas"}</h1>
+            <h1 className="text-3xl sm:text-5xl font-black text-white">{pageTitle}</h1>
             <OfflineStatusBadge
               pendingCount={pendingTableOperationsCount}
               pendingLabelSingular={t("waiter.offline.pendingSingular")}
@@ -283,7 +299,7 @@ function MeserosContent() {
           </div>
           <p className="text-slate-400 mt-2 sm:mt-3 text-base sm:text-xl">
             {activeWaiter
-              ? t("waiter.page.subtitleWaiter", { name: activeWaiter.name })
+              ? t("waiter.page.subtitleWaiter", { name: capitalizeFirst(activeWaiter.name) })
               : tablesEnabled ? t("waiter.page.subtitleAdmin") : "Selecciona quién atiende la venta de mostrador."}
           </p>
         </div>
