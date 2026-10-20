@@ -3,6 +3,7 @@ import { SupabaseRepository } from "./SupabaseRepository";
 import { TableLocalRepository } from "./TableLocalRepository";
 import { connectionStore } from "../../../core/store/connectionStore";
 import { logWarning } from "../../logging/opsLogger";
+import { vimdyCore } from "../../../core/VimdyCore";
 
 /**
  * TableRepository
@@ -25,6 +26,31 @@ export class TableRepository extends SupabaseRepository<Table> {
   /** Caché local en IndexedDB — ver TableLocalRepository. */
   private readonly local = new TableLocalRepository();
 
+  /**
+   * Cuenta las escrituras propias a la caché local. Si una escritura ocurre
+   * mientras un refresco de Supabase está en vuelo, ese refresco trae datos
+   * anteriores a la escritura: se descarta para no borrar la mesa recién creada.
+   */
+  private writeSeq = 0;
+
+  /** Huella de un listado de mesas (id + versión + última modificación). */
+  private static signature(tables: Table[]): string {
+    return tables
+      .map((t) => `${t.id}:${t.version ?? 1}:${t.updatedAt ? new Date(t.updatedAt).getTime() : 0}`)
+      .sort()
+      .join("|");
+  }
+
+  private async mirrorToLocal(action: () => Promise<void>, what: string): Promise<void> {
+    this.writeSeq += 1;
+    await action().catch((error: unknown) => {
+      logWarning(`[TableRepository] No se pudo reflejar ${what} en la caché local`, {
+        category: "offline",
+        context: { error: String(error) },
+      });
+    });
+  }
+
   public async findAll(): Promise<Table[]> {
     const cached = await this.local.findAll();
 
@@ -32,9 +58,24 @@ export class TableRepository extends SupabaseRepository<Table> {
       // Fire-and-forget a propósito: no bloquea la respuesta local, y un
       // error de red acá no debe tumbar la pantalla de Mesas (que ya
       // tiene el catálogo local para mostrar).
+      const seqAtStart = this.writeSeq;
+      const cachedSignature = TableRepository.signature(cached);
+
       void super
         .findAll()
-        .then((fresh) => this.local.replaceAll(fresh))
+        .then(async (fresh) => {
+          // Hubo una escritura propia durante el refresco: este resultado ya es viejo.
+          if (this.writeSeq !== seqAtStart) return;
+
+          await this.local.replaceAll(fresh);
+
+          // Si la nube tenía algo distinto (p. ej. otro dispositivo creó o cambió una mesa),
+          // la pantalla ya pintó la caché vieja: se avisa para que vuelva a leer.
+          // Converge: la segunda lectura ya coincide y no emite de nuevo.
+          if (TableRepository.signature(fresh) !== cachedSignature) {
+            vimdyCore.emit("table", { action: "table.synced", source: "cache-refresh" });
+          }
+        })
         .catch((error: unknown) => {
           logWarning("[TableRepository] No se pudo refrescar las mesas desde Supabase", {
             category: "offline",
@@ -97,12 +138,38 @@ export class TableRepository extends SupabaseRepository<Table> {
   }
 
   /**
+   * Igual que delete(): guardar solo en Supabase NO basta, porque `findAll()`
+   * responde primero con la caché local y la mesa nueva no aparecería hasta
+   * recargar. Primero la nube (si falla, la caché queda intacta) y luego local.
+   */
+  public async save(item: Table): Promise<void> {
+    await super.save(item);
+    await this.mirrorToLocal(() => this.local.save({ ...item, version: item.version ?? 1 }), "la mesa guardada");
+  }
+
+  public async saveMany(items: Table[]): Promise<void> {
+    await super.saveMany(items);
+    await this.mirrorToLocal(
+      () => this.local.saveMany(items.map((item) => ({ ...item, version: item.version ?? 1 }))),
+      "las mesas guardadas"
+    );
+  }
+
+  /** La nube sube la versión en +1 al actualizar; la copia local debe quedar igual. */
+  public async update(item: Table): Promise<void> {
+    await super.update(item);
+    const mirrored = item.version === undefined ? item : { ...item, version: item.version + 1 };
+    await this.mirrorToLocal(() => this.local.save(mirrored), "la mesa actualizada");
+  }
+
+  /**
    * Borrar en Supabase NO basta: `findAll()` responde primero con la caché
    * local, así que la mesa eliminada reaparecería hasta el siguiente refresco.
    * Se borra primero en la nube (si falla, la caché queda intacta) y luego en local.
    */
   public async delete(id: string): Promise<void> {
     await super.delete(id);
+    this.writeSeq += 1;
     await this.local.delete(id).catch((error: unknown) => {
       logWarning("[TableRepository] No se pudo quitar la mesa de la caché local", {
         category: "offline",
@@ -113,6 +180,7 @@ export class TableRepository extends SupabaseRepository<Table> {
 
   public async deleteMany(ids: string[]): Promise<void> {
     await super.deleteMany(ids);
+    this.writeSeq += 1;
     await this.local.deleteMany(ids).catch((error: unknown) => {
       logWarning("[TableRepository] No se pudieron quitar las mesas de la caché local", {
         category: "offline",

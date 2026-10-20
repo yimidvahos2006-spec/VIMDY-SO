@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { Mic } from "lucide-react";
 
 import type { Table } from "../../../core/entities/Entities";
 import {
@@ -13,17 +14,6 @@ interface Props {
   onTarget: (target: TableVoiceTarget) => void;
   /** El mesero confirmó unir dos mesas por voz. */
   onMerge?: (merge: TableVoiceMerge) => void;
-}
-
-function MicIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor"
-         strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="9" y="2" width="6" height="12" rx="3" />
-      <path d="M5 11a7 7 0 0 0 14 0" />
-      <path d="M12 18v4" />
-    </svg>
-  );
 }
 
 /**
@@ -64,35 +54,44 @@ export function VoiceCommandButton({ tables, onTarget, onMerge }: Props) {
         onClick={voice.supported ? voice.startListening : voice.openTyping}
         aria-label={listening ? "Detener micrófono" : "Control por voz: decir mesa y personas"}
         aria-pressed={listening}
-        className={[
-          "relative h-12 pl-4 pr-5 rounded-xl font-bold text-sm flex items-center gap-2 transition active:scale-95 select-none",
-          listening
-            ? "bg-red-500 text-white"
-            : "bg-cyan-500 hover:bg-cyan-400 text-slate-950"
-        ].join(" ")}
+        className={`
+          flex items-center gap-2 h-11 px-4 rounded-vimdy-md border transition-all duration-vimdy-normal flex-shrink-0 select-none active:scale-95
+
+          ${
+            listening
+              ? "bg-vimdy-accent/10 border-vimdy-accent"
+              : "bg-vimdy-surface-active border-vimdy-border hover:border-vimdy-accent animate-voice-idle-glow"
+          }
+        `}
       >
+        <Mic size={18} className="text-vimdy-accent flex-shrink-0" />
+
+        <span className="text-vimdy-text text-vimdy-small font-semibold whitespace-nowrap">
+          VIMDY Voice
+        </span>
+
         {listening && (
-          <span className="absolute inset-0 rounded-xl bg-red-500/50 animate-ping" aria-hidden="true" />
+          <span className="flex items-end gap-[3px] h-3 ml-1" aria-hidden="true">
+            <span className="w-[2.5px] h-full bg-vimdy-accent/80 rounded-full animate-voice-bar-1" />
+            <span className="w-[2.5px] h-full bg-vimdy-accent/80 rounded-full animate-voice-bar-2" />
+            <span className="w-[2.5px] h-full bg-vimdy-accent/80 rounded-full animate-voice-bar-3" />
+            <span className="w-[2.5px] h-full bg-vimdy-accent/80 rounded-full animate-voice-bar-4" />
+          </span>
         )}
-        <MicIcon className="relative w-5 h-5" />
-        <span className="relative">{listening ? "Escuchando…" : "Voz"}</span>
       </button>
 
       {listening && (
         <div
           role="status"
           aria-live="polite"
-          className="absolute right-0 top-full mt-2 z-[900] w-[min(92vw,360px)] rounded-2xl border border-red-500/50 bg-slate-900 shadow-2xl px-4 py-3"
+          className="absolute right-0 top-full mt-2 z-[900] w-[min(92vw,360px)] rounded-2xl border border-vimdy-accent/50 bg-slate-900 shadow-2xl px-4 py-3"
         >
-          <div className="flex items-center gap-2 text-red-200 text-xs font-bold uppercase tracking-wide">
-            <span className="flex items-end gap-[3px] h-4" aria-hidden="true">
-              {[0, 1, 2, 3].map(i => (
-                <span
-                  key={i}
-                  className="w-[3px] rounded-full bg-red-400 animate-pulse"
-                  style={{ height: `${6 + ((i * 5) % 10)}px`, animationDelay: `${i * 120}ms` }}
-                />
-              ))}
+          <div className="flex items-center gap-2 text-vimdy-accent text-xs font-bold uppercase tracking-wide">
+            <span className="flex items-end gap-[3px] h-3" aria-hidden="true">
+              <span className="w-[2.5px] h-full bg-vimdy-accent/80 rounded-full animate-voice-bar-1" />
+              <span className="w-[2.5px] h-full bg-vimdy-accent/80 rounded-full animate-voice-bar-2" />
+              <span className="w-[2.5px] h-full bg-vimdy-accent/80 rounded-full animate-voice-bar-3" />
+              <span className="w-[2.5px] h-full bg-vimdy-accent/80 rounded-full animate-voice-bar-4" />
             </span>
             Escuchando
           </div>
@@ -177,7 +176,7 @@ export function VoiceCommandButton({ tables, onTarget, onMerge }: Props) {
                 aria-label="Repetir por voz"
                 className="h-12 w-12 shrink-0 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-white flex items-center justify-center"
               >
-                <MicIcon className="w-5 h-5" />
+                <Mic size={18} />
               </button>
             )}
           </form>
