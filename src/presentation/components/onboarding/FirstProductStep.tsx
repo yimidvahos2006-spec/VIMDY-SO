@@ -11,13 +11,28 @@ import { translateBusinessError } from "../../../core/errors/translateBusinessEr
 import { parseMoneyInput } from "../../../core/utils/parseMoneyInput";
 import type { Category } from "../../../core/entities/Entities";
 import { useStepDraft } from "./useStepDraft";
+import { useCanUse } from "../../../hooks/useCanUse";
 
 interface FirstProductStepProps {
   categories: Category[];
   onSaved: () => void;
 }
 
+/** Cómo se vende el producto: define si lleva stock y si pasa por cocina. */
+type SaleMode = "stock" | "prepared" | "service";
+
+const SALE_MODES: ReadonlyArray<{ id: SaleMode; title: string; detail: string }> = [
+  { id: "stock", title: "Se vende de un stock", detail: "Gaseosa, snack, camiseta: se descuenta cada vez que vendes." },
+  { id: "prepared", title: "Se prepara al pedirlo", detail: "Tamal, jugo, almuerzo: no lleva stock propio." },
+  { id: "service", title: "Es un servicio", detail: "Domicilio, corte de cabello: sin stock ni preparación." },
+];
+
+function isSaleMode(value: unknown): value is SaleMode {
+  return value === "stock" || value === "prepared" || value === "service";
+}
+
 interface FirstProductDraft {
+  saleMode: SaleMode | "";
   name: string;
   price: string;
   cost: string;
@@ -30,6 +45,7 @@ function sanitizeFirstProductDraft(raw: unknown): FirstProductDraft | null {
   const r = raw as Record<string, unknown>;
   const text = (value: unknown, max: number): string => (typeof value === "string" ? value.slice(0, max) : "");
   return {
+    saleMode: isSaleMode(r.saleMode) ? r.saleMode : "",
     name: text(r.name, 120),
     price: text(r.price, 20),
     cost: text(r.cost, 20),
@@ -40,19 +56,21 @@ function sanitizeFirstProductDraft(raw: unknown): FirstProductDraft | null {
 
 export function FirstProductStep({ categories, onSaved }: FirstProductStepProps) {
   const { user } = useAuth();
+  const kitchenEnabled = useCanUse("kitchen");
 
   // Lo escrito se guarda al instante y se recupera si el usuario sale o recarga.
   const defaultCategoryId = categories[0]?.id ?? (categories.length === 0 ? "uncategorized" : "");
   const [draft, setDraft] = useStepDraft<FirstProductDraft>(
     "first_product",
-    { name: "", price: "", cost: "", stock: "", categoryId: defaultCategoryId },
+    { saleMode: "", name: "", price: "", cost: "", stock: "", categoryId: defaultCategoryId },
     sanitizeFirstProductDraft
   );
-  const { name, price, cost, stock } = draft;
+  const { name, price, cost, stock, saleMode } = draft;
   const categoryId =
     draft.categoryId === "uncategorized" || categories.some((category) => category.id === draft.categoryId)
       ? draft.categoryId
       : defaultCategoryId;
+  const setSaleMode = (value: SaleMode) => setDraft((current) => ({ ...current, saleMode: value }));
   const setName = (value: string) => setDraft((current) => ({ ...current, name: value }));
   const setPrice = (value: string) => setDraft((current) => ({ ...current, price: value }));
   const setCost = (value: string) => setDraft((current) => ({ ...current, cost: value }));
@@ -87,9 +105,14 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
     if (saving) return;
 
     const priceValue = parseMoneyInput(price);
-    const stockValue = Number(stock);
+    const tracksStock = saleMode === "stock";
+    const stockValue = tracksStock && stock.trim() ? Number(stock) : 0;
     const costValue = cost.trim() ? parseMoneyInput(cost) : undefined;
 
+    if (!saleMode) {
+      setError("Elige cómo se vende este producto.");
+      return;
+    }
     if (!name.trim()) {
       setError("El nombre del producto es obligatorio.");
       return;
@@ -134,7 +157,13 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
           price: priceValue,
           stock: stockValue,
           minStock: 0,
-          purchasePrice: costValue
+          purchasePrice: costValue,
+          // Mismas reglas que Inventario (productType.ts): solo "stock" descuenta
+          // unidades; lo que se prepara va a cocina únicamente si el negocio
+          // activó el módulo Cocina.
+          trackStock: tracksStock,
+          requiresKitchen: saleMode === "prepared" && kitchenEnabled,
+          isIngredient: false
         },
         user?.id
       );
@@ -186,6 +215,29 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
             </div>
           </div>
 
+          <fieldset className="flex flex-col gap-2" disabled={saving}>
+            <legend className="mb-1 text-sm font-semibold text-vimdy-text-secondary">¿Cómo se vende? *</legend>
+            {SALE_MODES.map((mode) => {
+              const active = saleMode === mode.id;
+              return (
+                <button
+                  key={mode.id}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setSaleMode(mode.id)}
+                  className={`rounded-vimdy-md border-2 px-4 py-3 text-left transition-all duration-200 ${
+                    active
+                      ? "border-vimdy-accent bg-vimdy-accent/10"
+                      : "border-vimdy-border bg-vimdy-surface hover:border-vimdy-accent/60"
+                  }`}
+                >
+                  <span className="block text-sm font-semibold text-vimdy-text">{mode.title}</span>
+                  <span className="block text-vimdy-micro text-vimdy-text-tertiary mt-0.5">{mode.detail}</span>
+                </button>
+              );
+            })}
+          </fieldset>
+
           <VimdyInput
             label="Nombre del producto o servicio *"
             placeholder="Ej. Hamburguesa Clásica, Café Americano, Camiseta, Corte de cabello..."
@@ -229,16 +281,18 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
             />
           </div>
 
-          <VimdyInput
-            type="number"
-            min={0}
-            label="Stock inicial"
-            placeholder="0"
-            hint="Si no ingresas stock, comenzará con 0 unidades."
-            value={stock}
-            onChange={(e) => setStock(e.target.value)}
-            disabled={saving}
-          />
+          {saleMode === "stock" && (
+            <VimdyInput
+              type="number"
+              min={0}
+              label="Stock inicial"
+              placeholder="0"
+              hint="Si no ingresas stock, comenzará con 0 unidades."
+              value={stock}
+              onChange={(e) => setStock(e.target.value)}
+              disabled={saving}
+            />
+          )}
 
           {error && (
             <div className="flex items-start gap-2 rounded-vimdy-md border border-vimdy-danger/40 bg-vimdy-danger-bg px-4 py-3 text-vimdy-small text-vimdy-danger">

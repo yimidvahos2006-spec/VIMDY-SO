@@ -4,6 +4,17 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Campos numéricos sin las flechitas de subir/bajar (no sirven para dinero ni cantidades). */
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 /* ===========================================================
    VIMDY DESIGN SYSTEM v1.0 — Variables globales
    -----------------------------------------------------------
