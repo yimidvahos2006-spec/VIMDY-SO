@@ -218,3 +218,123 @@ function removeFirst(list: number[], value: number): number[] {
   if (index === -1) return list;
   return [...list.slice(0, index), ...list.slice(index + 1)];
 }
+
+/* ===========================================================================
+   Comandos de voz con UNIR mesas
+   ---------------------------------------------------------------------------
+   parseVoiceCommand() es la puerta de entrada nueva: decide si la frase es
+   "abrir/ocupar una mesa" (usa parseTableCommand tal cual, sin cambios) o
+   "unir dos mesas". Es pura (sin DOM ni React).
+
+   Entiende, entre otras:
+     "Unir mesa 5 y 4, 6 personas"      "Mesa 5 y 4, 6 personas"
+     "Juntar la 5 con la 4 seis personas"  "Fusionar mesa 5 y 4"
+=========================================================================== */
+
+export type VoiceCommand =
+  | { kind: "open"; tableNumber: number; peopleCount: number | null; normalized: string }
+  | {
+      kind: "merge";
+      /** [principal, secundaria]: la cuenta de la secundaria pasa a la principal. */
+      tableNumbers: [number, number];
+      peopleCount: number | null;
+      normalized: string;
+    }
+  | { kind: "none"; normalized: string };
+
+/** Verbos que significan "unir" (sin tildes, ya normalizados). */
+const MERGE_VERBS = new Set([
+  "unir", "une", "unan", "unamos", "uni", "juntar", "junta", "juntan", "juntemos",
+  "juntame", "fusionar", "fusiona", "fusionan", "combinar", "combina", "pegar", "pega"
+]);
+
+/** "con" NO va aquí: "mesa 4 con 3 comensales" es abrir, no unir. */
+const PEOPLE_LEAD_WORDS_MERGE = new Set(["para", "somos", "son", "seremos"]);
+
+/** Un poco más de margen: "juntar la 5 con la 4 seis personas" son 9 piezas. */
+const STRICT_MAX_TOKENS_MERGE = 11;
+
+export function parseVoiceCommand(text: string, options: ParseTableOptions = {}): VoiceCommand {
+  const normalized = normalize(text);
+  const tokens = tokenize(normalized);
+  const strict = options.strict === true;
+
+  const hasMergeVerb = tokens.some(t => t.kind === "word" && MERGE_VERBS.has(t.value));
+
+  // Patrón sin verbo: "mesa 5 y 4" / "mesas 5 y 4".
+  let pairedByAnd = false;
+  for (let i = 0; i + 3 < tokens.length; i++) {
+    const [a, b, c, d] = [tokens[i], tokens[i + 1], tokens[i + 2], tokens[i + 3]];
+    if (
+      a.kind === "word" && TABLE_WORDS.has(a.value) &&
+      b.kind === "num" && c.kind === "word" && c.value === "y" && d.kind === "num"
+    ) {
+      pairedByAnd = true;
+      break;
+    }
+  }
+
+  if (!hasMergeVerb && !pairedByAnd) {
+    const open = parseTableCommand(text, { strict });
+    return open.tableNumber === null
+      ? { kind: "none", normalized }
+      : { kind: "open", tableNumber: open.tableNumber, peopleCount: open.peopleCount, normalized };
+  }
+
+  if (strict && tokens.length > STRICT_MAX_TOKENS_MERGE) return { kind: "none", normalized };
+
+  // 1) Comensales: "6 personas" o "para/somos 6".
+  let peopleIndex = -1;
+  for (let i = 1; i < tokens.length; i++) {
+    const t = tokens[i];
+    const prev = tokens[i - 1];
+    if (t.kind === "word" && PEOPLE_WORDS.has(t.value) && prev.kind === "num") {
+      peopleIndex = i - 1;
+      break;
+    }
+  }
+  if (peopleIndex === -1) {
+    for (let i = 0; i < tokens.length - 1; i++) {
+      const t = tokens[i];
+      const next = tokens[i + 1];
+      if (t.kind === "word" && PEOPLE_LEAD_WORDS_MERGE.has(t.value) && next.kind === "num") {
+        peopleIndex = i + 1;
+        break;
+      }
+    }
+  }
+
+  // 2) Mesas: el resto de números, en el orden dicho, sin repetir.
+  const tableNumbers: number[] = [];
+  tokens.forEach((t, index) => {
+    if (t.kind !== "num" || index === peopleIndex) return;
+    if (t.value < 1 || t.value > MAX_TABLE_NUMBER) return;
+    if (!tableNumbers.includes(t.value)) tableNumbers.push(t.value);
+  });
+
+  // Si hay más de dos números sueltos solo cuentan las dos primeras mesas.
+  let peopleCount: number | null = null;
+  if (peopleIndex !== -1) {
+    const value = (tokens[peopleIndex] as { kind: "num"; value: number }).value;
+    peopleCount = value >= 1 && value <= MAX_PEOPLE ? value : null;
+  }
+
+  if (tableNumbers.length < 2) {
+    // "mesa 3 y 4 personas": el "y 4" eran los comensales, no una segunda mesa.
+    // Sin verbo de unir se interpreta como abrir mesa normal.
+    if (!hasMergeVerb) {
+      const open = parseTableCommand(text, { strict });
+      if (open.tableNumber !== null) {
+        return { kind: "open", tableNumber: open.tableNumber, peopleCount: open.peopleCount, normalized };
+      }
+    }
+    return { kind: "none", normalized };
+  }
+
+  return {
+    kind: "merge",
+    tableNumbers: [tableNumbers[0], tableNumbers[1]],
+    peopleCount,
+    normalized
+  };
+}

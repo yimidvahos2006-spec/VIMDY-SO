@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Users, Search, Clock, Plus, Minus, X, Loader2, MapPin } from "lucide-react";
+import { Users, Search, Clock, Plus, Minus, X, Loader2, MapPin, Trash2, Pencil } from "lucide-react";
 
 import { Table, Waiter } from "../../../core/entities/Entities";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { useAuth } from "../../context/AuthContext";
 import { getTableUrgency } from "../../../core/services/tableUrgency";
+import { translateBusinessError } from "../../../core/errors/translateBusinessError";
+import { toast } from "../../../core/store/toastStore";
 
 interface Props {
   tables: Table[];
@@ -30,11 +32,11 @@ interface StatusStyle {
 /** Libre = verde. Ocupada = rojo. Esperando comida = naranja. Clases estáticas para Tailwind. */
 const STATUS_STYLES: Record<Status, StatusStyle> = {
   FREE: { label: "Libre", card: "bg-emerald-950/60 border-emerald-500/60", header: "bg-emerald-500 text-emerald-950", action: "text-emerald-300" },
-  RESERVED: { label: "Reservada", card: "bg-amber-950/50 border-amber-500/60", header: "bg-amber-400 text-amber-950", action: "text-amber-300" },
+  RESERVED: { label: "Reservada", card: "bg-indigo-950/50 border-indigo-400/60", header: "bg-indigo-400 text-indigo-950", action: "text-indigo-300" },
   BUSY: { label: "Ocupada", card: "bg-red-950/60 border-red-500/60", header: "bg-red-500 text-white", action: "text-red-200" },
   WAITING_FOOD: { label: "Esperando comida", card: "bg-orange-950/60 border-orange-500/60", header: "bg-orange-500 text-orange-950", action: "text-orange-200" },
   EATING: { label: "Comiendo", card: "bg-blue-950/60 border-blue-500/60", header: "bg-blue-500 text-white", action: "text-blue-200" },
-  CUENTA_SOLICITADA: { label: "Cuenta solicitada", card: "bg-amber-950/50 border-amber-500/60", header: "bg-amber-500 text-amber-950", action: "text-amber-200" },
+  CUENTA_SOLICITADA: { label: "Por cobrar", card: "bg-yellow-950/50 border-yellow-400/70", header: "bg-yellow-400 text-yellow-950", action: "text-yellow-200" },
   WAITING_BILL: { label: "Esperando cuenta", card: "bg-cyan-950/50 border-cyan-500/60", header: "bg-cyan-500 text-cyan-950", action: "text-cyan-200" },
   PAYING: { label: "Cobrando", card: "bg-purple-950/50 border-purple-500/60", header: "bg-purple-500 text-white", action: "text-purple-200" },
   CLOSED: { label: "Unida", card: "bg-slate-900 border-slate-700", header: "bg-slate-600 text-white", action: "text-slate-400" }
@@ -46,6 +48,7 @@ const QUICK_FILTERS: { key: Status | "ALL"; label: string }[] = [
   { key: "BUSY", label: "Ocupadas" },
   { key: "EATING", label: "Comiendo" },
   { key: "WAITING_FOOD", label: "Esperando" },
+  { key: "CUENTA_SOLICITADA", label: "Por cobrar" },
   { key: "RESERVED", label: "Reservadas" }
 ];
 
@@ -361,6 +364,158 @@ function AddTableDialog({
   );
 }
 
+/** Reloj que se refresca solo: los minutos de cada mesa avanzan sin tocar nada. */
+function useNow(intervalMs = 30000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(timer);
+  }, [intervalMs]);
+  return now;
+}
+
+/* ---------------------------- Eliminar zona ---------------------------- */
+function DeleteZoneDialog({
+  zone,
+  zoneTables,
+  onClose,
+  onDeleted
+}: {
+  zone: string;
+  zoneTables: Table[];
+  onClose: () => void;
+  onDeleted: () => void | Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // No se borra una zona con mesas que tengan cuenta abierta (ni reservadas).
+  const blocking = zoneTables.filter(t => t.status !== "FREE" || t.items.length > 0 || Boolean(t.orderId));
+
+  async function handleDelete() {
+    setBusy(true);
+    setError(null);
+    try {
+      await container.tableEngine.get().deleteZone(zone);
+      toast.success(`Zona "${zone}" eliminada.`);
+      await onDeleted();
+    } catch (err) {
+      setError(translateBusinessError(err, "No se pudo eliminar la zona. Revisa tu conexión e inténtalo de nuevo."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (blocking.length > 0) {
+    return (
+      <ModalShell title="No se puede eliminar" onClose={onClose}>
+        <p className="text-slate-300 text-sm leading-relaxed">
+          La zona <span className="font-bold text-white">{zone}</span> tiene mesas con cuenta abierta o reservadas.
+          Cóbralas o libéralas primero:
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {blocking.map(t => (
+            <span key={t.id} className="px-3 py-1.5 rounded-lg bg-red-500/15 border border-red-500/40 text-red-200 text-sm font-semibold">
+              {displayName(t)}
+            </span>
+          ))}
+        </div>
+        <button onClick={onClose} className="w-full h-12 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-bold">
+          Entendido
+        </button>
+      </ModalShell>
+    );
+  }
+
+  return (
+    <ModalShell title="Eliminar zona" onClose={onClose}>
+      {error && <ErrorBox text={error} />}
+      <p className="text-slate-300 text-sm leading-relaxed">
+        ¿Eliminar la zona <span className="font-bold text-white">{zone}</span>
+        {zoneTables.length > 0 ? ` y sus ${zoneTables.length} mesa${zoneTables.length === 1 ? "" : "s"}` : ""}?
+        Esta acción no se puede deshacer.
+      </p>
+      <div className="flex justify-end gap-3">
+        <button onClick={onClose} className="h-12 px-5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold">
+          Cancelar
+        </button>
+        <button
+          onClick={handleDelete}
+          disabled={busy}
+          className="h-12 px-6 rounded-xl bg-red-500 hover:bg-red-400 disabled:opacity-50 text-white font-bold flex items-center gap-2"
+        >
+          {busy ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+          {busy ? "Eliminando…" : "Sí, eliminar zona"}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+/* ---------------------------- Eliminar mesa ---------------------------- */
+function DeleteTableDialog({
+  table,
+  onClose,
+  onDeleted
+}: {
+  table: Table;
+  onClose: () => void;
+  onDeleted: () => void | Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const blocked = table.status !== "FREE" || table.items.length > 0 || Boolean(table.orderId);
+
+  async function handleDelete() {
+    setBusy(true);
+    setError(null);
+    try {
+      await container.tableEngine.get().deleteTable(table.id);
+      toast.success(`${displayName(table)} eliminada.`);
+      await onDeleted();
+    } catch (err) {
+      setError(translateBusinessError(err, "No se pudo eliminar la mesa. Revisa tu conexión e inténtalo de nuevo."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ModalShell title={blocked ? "No se puede eliminar" : "Eliminar mesa"} onClose={onClose}>
+      {error && <ErrorBox text={error} />}
+      {blocked ? (
+        <>
+          <p className="text-slate-300 text-sm leading-relaxed">
+            <span className="font-bold text-white">{displayName(table)}</span> no está libre. Cóbrala o libérala primero.
+          </p>
+          <button onClick={onClose} className="w-full h-12 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-bold">
+            Entendido
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="text-slate-300 text-sm leading-relaxed">
+            ¿Eliminar <span className="font-bold text-white">{displayName(table)}</span>? Esta acción no se puede deshacer.
+          </p>
+          <div className="flex justify-end gap-3">
+            <button onClick={onClose} className="h-12 px-5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold">
+              Cancelar
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={busy}
+              className="h-12 px-6 rounded-xl bg-red-500 hover:bg-red-400 disabled:opacity-50 text-white font-bold flex items-center gap-2"
+            >
+              {busy ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+              {busy ? "Eliminando…" : "Sí, eliminar"}
+            </button>
+          </div>
+        </>
+      )}
+    </ModalShell>
+  );
+}
+
 /* ------------------------------ Pantalla ------------------------------ */
 export function TableGrid({ tables, waiters = [], onSelect, avgDurationMs = 45 * 60 * 1000, onTablesChanged }: Props) {
   const { can } = useAuth();
@@ -369,7 +524,10 @@ export function TableGrid({ tables, waiters = [], onSelect, avgDurationMs = 45 *
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<Status | "ALL">("ALL");
   const [activeZone, setActiveZone] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<"zone" | "table" | null>(null);
+  const [dialog, setDialog] = useState<"zone" | "table" | "deleteZone" | null>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [tableToDelete, setTableToDelete] = useState<Table | null>(null);
+  const now = useNow();
 
   const waiterNames = useMemo(() => {
     const map = new Map<string, string>();
@@ -377,10 +535,11 @@ export function TableGrid({ tables, waiters = [], onSelect, avgDurationMs = 45 *
     return map;
   }, [waiters]);
 
-  const mergedCountByTable = useMemo(() => {
-    const map = new Map<string, number>();
+  /** Nombres de las mesas unidas a cada mesa principal ("Mesa 4", "Mesa 6"…). */
+  const mergedNamesByTable = useMemo(() => {
+    const map = new Map<string, string[]>();
     tables.forEach(t => {
-      if (t.mergedInto) map.set(t.mergedInto, (map.get(t.mergedInto) ?? 0) + 1);
+      if (t.mergedInto) map.set(t.mergedInto, [...(map.get(t.mergedInto) ?? []), displayName(t)]);
     });
     return map;
   }, [tables]);
@@ -511,6 +670,26 @@ export function TableGrid({ tables, waiters = [], onSelect, avgDurationMs = 45 *
             <Plus size={18} /> Nueva zona
           </button>
         )}
+        {canManage && activeZone && activeZone !== NO_ZONE && (
+          <button
+            onClick={() => setDialog("deleteZone")}
+            className="shrink-0 h-12 px-4 rounded-2xl border-2 border-red-500/40 text-red-300 hover:bg-red-500/10 active:scale-95 font-bold text-sm flex items-center gap-2 transition"
+            aria-label={`Eliminar zona ${activeZone}`}
+          >
+            <Trash2 size={16} /> Eliminar zona
+          </button>
+        )}
+        {canManage && (
+          <button
+            onClick={() => setEditMode(v => !v)}
+            aria-pressed={editMode}
+            className={`shrink-0 h-12 px-4 rounded-2xl border-2 font-bold text-sm flex items-center gap-2 active:scale-95 transition ${
+              editMode ? "border-red-400 bg-red-500/15 text-red-200" : "border-slate-700 text-slate-300 hover:border-slate-500"
+            }`}
+          >
+            <Pencil size={16} /> {editMode ? "Listo" : "Editar mesas"}
+          </button>
+        )}
       </div>
 
       {/* Búsqueda + filtros por estado */}
@@ -544,25 +723,30 @@ export function TableGrid({ tables, waiters = [], onSelect, avgDurationMs = 45 *
         {filtered.map(table => {
           const style = STATUS_STYLES[table.status];
           const isFree = table.status === "FREE" || table.status === "RESERVED";
-          const elapsedMs = table.openedAt ? Date.now() - table.openedAt.getTime() : 0;
+          const elapsedMs = table.openedAt ? now - table.openedAt.getTime() : 0;
           const urgency = getTableUrgency(table, avgDurationMs);
           const waiterName = table.waiterId ? waiterNames.get(table.waiterId) : undefined;
-          const mergedCount = mergedCountByTable.get(table.id);
-          const mergedLabel = mergedCount
-            ? ` / ${Array.from({ length: mergedCount + 1 })
-                .map((_, i) => `Mesa ${String.fromCharCode(65 + i)}`)
-                .join(" + ")}`
-            : "";
+          const mergedNames = mergedNamesByTable.get(table.id);
+          const mergedLabel = mergedNames?.length ? ` + ${mergedNames.join(" + ")}` : "";
+          // En modo edición una mesa libre se toca para eliminarla, no para abrirla.
+          const deletable = editMode && canManage && isFree;
 
           return (
             <button
               key={table.id}
-              onClick={() => onSelect(table)}
-              className={`${style.card} rounded-2xl border-2 text-left overflow-hidden min-h-[132px] active:scale-[0.97] hover:brightness-125 transition-all duration-200`}
+              onClick={() => (deletable ? setTableToDelete(table) : onSelect(table))}
+              className={`relative ${style.card} rounded-2xl border-2 text-left overflow-hidden min-h-[132px] active:scale-[0.97] hover:brightness-125 transition-all duration-200 ${
+                deletable ? "ring-2 ring-red-500/70" : ""
+              }`}
             >
               <div className={`${style.header} px-4 py-1.5 text-xs font-black uppercase tracking-wider transition-colors duration-300`}>
                 {style.label}
               </div>
+              {deletable && (
+                <span className="absolute top-8 right-2 w-8 h-8 rounded-full bg-red-500 text-white flex items-center justify-center shadow-lg" aria-hidden="true">
+                  <Trash2 size={15} />
+                </span>
+              )}
               <div className="p-4">
                 <div className="flex items-start justify-between gap-2">
                   <h2 className="text-white text-xl font-black leading-tight uppercase">
@@ -576,7 +760,7 @@ export function TableGrid({ tables, waiters = [], onSelect, avgDurationMs = 45 *
 
                 {isFree ? (
                   <p className={`${style.action} font-bold text-sm mt-4 uppercase`}>
-                    {table.status === "RESERVED" ? "Abrir reserva →" : "Abrir mesa →"}
+                    {deletable ? "Eliminar mesa" : table.status === "RESERVED" ? "Abrir reserva →" : "Abrir mesa →"}
                   </p>
                 ) : (
                   <>
@@ -635,6 +819,30 @@ export function TableGrid({ tables, waiters = [], onSelect, avgDurationMs = 45 *
       )}
 
       {zoneDialog}
+
+      {dialog === "deleteZone" && activeZone && (
+        <DeleteZoneDialog
+          zone={activeZone}
+          zoneTables={visible.filter(t => zoneOf(t) === activeZone)}
+          onClose={() => setDialog(null)}
+          onDeleted={async () => {
+            setDialog(null);
+            setActiveZone(null);
+            await refresh();
+          }}
+        />
+      )}
+
+      {tableToDelete && (
+        <DeleteTableDialog
+          table={tableToDelete}
+          onClose={() => setTableToDelete(null)}
+          onDeleted={async () => {
+            setTableToDelete(null);
+            await refresh();
+          }}
+        />
+      )}
 
       {dialog === "table" && activeZone && (
         <AddTableDialog

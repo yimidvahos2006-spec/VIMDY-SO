@@ -1,12 +1,18 @@
 import React, { useEffect, useRef, useState } from "react";
 
 import type { Table } from "../../../core/entities/Entities";
-import { useTableVoiceCommand, TableVoiceTarget } from "../../../core/voice/useTableVoiceCommand";
+import {
+  useTableVoiceCommand,
+  TableVoiceMerge,
+  TableVoiceTarget
+} from "../../../core/voice/useTableVoiceCommand";
 
 interface Props {
   tables: readonly Table[];
   /** Mesa clara detectada: la pantalla abre el diálogo/panel correspondiente. */
   onTarget: (target: TableVoiceTarget) => void;
+  /** El mesero confirmó unir dos mesas por voz. */
+  onMerge?: (merge: TableVoiceMerge) => void;
 }
 
 function MicIcon({ className }: { className?: string }) {
@@ -21,14 +27,17 @@ function MicIcon({ className }: { className?: string }) {
 }
 
 /**
- * Botón flotante de micrófono para el módulo de Meseros.
- * Toque → habla ("Mesa 3, 4 personas") → se abre la mesa con los datos listos.
- * Si no se entiende, aparece un aviso con campo de texto para escribir o
- * repetir sin perder tiempo.
+ * Micrófono del módulo de Meseros, pensado para la barra superior (junto a
+ * "Cambiar de mesero").
+ *
+ * Toque → habla ("Mesa 3, 4 personas" / "Unir mesa 5 y 4, 6 personas") →
+ * se ve lo que va escuchando en tiempo real → se abre la mesa o se pide
+ * confirmar la unión. Si no se entiende, o el micrófono está bloqueado,
+ * aparece el panel de comando rápido para escribirlo sin perder tiempo.
  */
-export function VoiceCommandButton({ tables, onTarget }: Props) {
-  const voice = useTableVoiceCommand({ tables, onTarget });
-  const { fallback, phase } = voice;
+export function VoiceCommandButton({ tables, onTarget, onMerge }: Props) {
+  const voice = useTableVoiceCommand({ tables, onTarget, onMerge });
+  const { fallback, phase, transcript } = voice;
   const listening = phase === "listening";
 
   const [typed, setTyped] = useState("");
@@ -49,11 +58,54 @@ export function VoiceCommandButton({ tables, onTarget }: Props) {
   }
 
   return (
-    <div className="fixed bottom-6 right-6 z-[900] flex flex-col items-end gap-3">
-      {fallback && (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={voice.supported ? voice.startListening : voice.openTyping}
+        aria-label={listening ? "Detener micrófono" : "Control por voz: decir mesa y personas"}
+        aria-pressed={listening}
+        className={[
+          "relative h-12 pl-4 pr-5 rounded-xl font-bold text-sm flex items-center gap-2 transition active:scale-95 select-none",
+          listening
+            ? "bg-red-500 text-white"
+            : "bg-cyan-500 hover:bg-cyan-400 text-slate-950"
+        ].join(" ")}
+      >
+        {listening && (
+          <span className="absolute inset-0 rounded-xl bg-red-500/50 animate-ping" aria-hidden="true" />
+        )}
+        <MicIcon className="relative w-5 h-5" />
+        <span className="relative">{listening ? "Escuchando…" : "Voz"}</span>
+      </button>
+
+      {listening && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="absolute right-0 top-full mt-2 z-[900] w-[min(92vw,360px)] rounded-2xl border border-red-500/50 bg-slate-900 shadow-2xl px-4 py-3"
+        >
+          <div className="flex items-center gap-2 text-red-200 text-xs font-bold uppercase tracking-wide">
+            <span className="flex items-end gap-[3px] h-4" aria-hidden="true">
+              {[0, 1, 2, 3].map(i => (
+                <span
+                  key={i}
+                  className="w-[3px] rounded-full bg-red-400 animate-pulse"
+                  style={{ height: `${6 + ((i * 5) % 10)}px`, animationDelay: `${i * 120}ms` }}
+                />
+              ))}
+            </span>
+            Escuchando
+          </div>
+          <p className={`mt-1 text-base leading-snug ${transcript ? "text-white" : "text-slate-400"}`}>
+            {transcript || "Di “Mesa 3, 4 personas” o “Unir mesa 5 y 4”"}
+          </p>
+        </div>
+      )}
+
+      {!listening && fallback && (
         <div
           role="alert"
-          className="w-[min(92vw,380px)] rounded-2xl border border-amber-500/40 bg-slate-900 shadow-2xl p-4 space-y-3"
+          className="absolute right-0 top-full mt-2 z-[900] w-[min(92vw,380px)] rounded-2xl border border-amber-500/40 bg-slate-900 shadow-2xl p-4 space-y-3"
         >
           <div className="flex items-start justify-between gap-3">
             <p className="text-amber-200 text-sm font-semibold leading-snug">{fallback.message}</p>
@@ -61,11 +113,21 @@ export function VoiceCommandButton({ tables, onTarget }: Props) {
               type="button"
               onClick={voice.dismiss}
               aria-label="Cerrar aviso"
-              className="text-slate-400 hover:text-white text-lg leading-none"
+              className="text-slate-400 hover:text-white text-lg leading-none w-8 h-8 shrink-0"
             >
               ✕
             </button>
           </div>
+
+          {fallback.mergeSuggestion && (
+            <button
+              type="button"
+              onClick={() => voice.confirmMerge(fallback.mergeSuggestion!)}
+              className="w-full h-12 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold"
+            >
+              Sí, unir {fallback.mergeSuggestion.primary.name} + {fallback.mergeSuggestion.secondary.name}
+            </button>
+          )}
 
           {fallback.suggestion && (
             <button
@@ -97,7 +159,7 @@ export function VoiceCommandButton({ tables, onTarget }: Props) {
               ref={inputRef}
               value={typed}
               onChange={e => setTyped(e.target.value)}
-              placeholder="Ej: 3 4  (mesa 3, 4 personas)"
+              placeholder="Ej: 3 4  ·  unir 5 y 4"
               inputMode="text"
               autoComplete="off"
               className="flex-1 min-w-0 h-12 rounded-xl bg-slate-800 border border-slate-700 px-3 text-white outline-none focus:border-cyan-500"
@@ -121,30 +183,6 @@ export function VoiceCommandButton({ tables, onTarget }: Props) {
           </form>
         </div>
       )}
-
-      {listening && (
-        <div className="rounded-full bg-slate-900 border border-red-500/50 px-4 py-2 text-sm text-red-200 shadow-lg">
-          Escuchando… di “Mesa 3, 4 personas”
-        </div>
-      )}
-
-      <button
-        type="button"
-        onClick={voice.supported ? voice.startListening : voice.openTyping}
-        aria-label={listening ? "Detener micrófono" : "Control por voz: decir mesa y personas"}
-        aria-pressed={listening}
-        className={[
-          "relative w-16 h-16 rounded-full shadow-2xl flex items-center justify-center transition active:scale-95",
-          listening
-            ? "bg-red-500 text-white"
-            : "bg-cyan-500 hover:bg-cyan-400 text-slate-950"
-        ].join(" ")}
-      >
-        {listening && (
-          <span className="absolute inset-0 rounded-full bg-red-500/60 animate-ping" aria-hidden="true" />
-        )}
-        <MicIcon className="relative w-7 h-7" />
-      </button>
     </div>
   );
 }

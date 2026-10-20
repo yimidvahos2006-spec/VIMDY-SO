@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseTableCommand } from "../../src/core/voice/tableVoiceParser";
+import { parseTableCommand, parseVoiceCommand } from "../../src/core/voice/tableVoiceParser";
 import { findTablesByNumber } from "../../src/core/voice/tableVoiceResolver";
 import type { Table } from "../../src/core/entities/Entities";
 
@@ -101,5 +101,65 @@ describe("findTablesByNumber", () => {
 
   it("no confunde 1 con 12 ni encuentra mesas inexistentes", () => {
     expect(findTablesByNumber(tables, 2)).toEqual([]);
+  });
+});
+
+describe("parseVoiceCommand — abrir / ocupar mesa", () => {
+  const open = (text: string, strict = true) => {
+    const c = parseVoiceCommand(text, { strict });
+    return c.kind === "open" ? { mesa: c.tableNumber, personas: c.peopleCount } : c.kind;
+  };
+
+  it.each([
+    ["Mesa 4, 3 personas", 4, 3],
+    ["Mesa 4 con 3 comensales", 4, 3],
+    ["Mesa 4 para 3", 4, 3],
+    ["Llenar mesa 4 tres personas", 4, 3],
+    ["Ocupar mesa cuatro, tres personas", 4, 3],
+    ["mesa cinco para seis", 5, 6],
+    ["meza 4 somos 3", 4, 3]
+  ])("%s → mesa %s, %s personas", (text, mesa, personas) => {
+    expect(open(text as string)).toEqual({ mesa, personas });
+  });
+});
+
+describe("parseVoiceCommand — unir mesas", () => {
+  const merge = (text: string, strict = true) => {
+    const c = parseVoiceCommand(text, { strict });
+    return c.kind === "merge" ? { mesas: c.tableNumbers, personas: c.peopleCount } : c.kind;
+  };
+
+  it.each([
+    ["Unir mesa 5 y 4, 6 personas", [5, 4], 6],
+    ["Mesa 5 y 4, 6 personas", [5, 4], 6],
+    ["Juntar la 5 con la 4 seis personas", [5, 4], 6],
+    ["Fusionar mesa 5 y 4", [5, 4], null],
+    ["unir mesa cinco y cuatro seis personas", [5, 4], 6],
+    ["Unir las mesas 2 y 3 para 8", [2, 3], 8],
+    ["mesas 7 y 8", [7, 8], null],
+    ["junta la mesa 1 con la 2", [1, 2], null]
+  ])("%s", (text, mesas, personas) => {
+    expect(merge(text as string)).toEqual({ mesas, personas });
+  });
+
+  it("también funciona con texto escrito (no estricto)", () => {
+    expect(merge("unir 5 y 4", false)).toEqual({ mesas: [5, 4], personas: null });
+  });
+
+  it("no confunde 'con N comensales' ni 'mesa 3 y 4 personas' con unir", () => {
+    expect(parseVoiceCommand("Mesa 4 con 3 comensales", { strict: true }).kind).toBe("open");
+    const c = parseVoiceCommand("mesa 3 y 4 personas", { strict: true });
+    expect(c.kind).toBe("open");
+    if (c.kind === "open") expect(c).toMatchObject({ tableNumber: 3, peopleCount: 4 });
+  });
+
+  it("no une una mesa consigo misma ni con una sola mesa", () => {
+    expect(parseVoiceCommand("unir mesa 5 y 5", { strict: true }).kind).toBe("none");
+    expect(parseVoiceCommand("unir mesa 5", { strict: true }).kind).toBe("none");
+  });
+
+  it("ignora charla de fondo larga y ruido", () => {
+    expect(parseVoiceCommand("oye nos pueden traer la cuenta que ya nos vamos y hay que juntar las mesas 5 y 4 por favor", { strict: true }).kind).toBe("none");
+    expect(parseVoiceCommand("buenas tardes", { strict: true }).kind).toBe("none");
   });
 });
