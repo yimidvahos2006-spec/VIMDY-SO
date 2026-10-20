@@ -11,12 +11,14 @@ interface Props {
   table: Table;
   /** id del mesero ligero (Waiter) elegido en la pantalla de tarjetas. */
   waiterId: string | null;
+  /** Comensales ya conocidos (ej. dictados por voz); si no, arranca en 2. */
+  initialPeopleCount?: number | null;
   onClose: () => void;
   onOpened: () => void;
 }
 
-export function OpenTableDialog({ table, waiterId, onClose, onOpened }: Props) {
-  const [peopleCount, setPeopleCount] = useState(2);
+export function OpenTableDialog({ table, waiterId, initialPeopleCount, onClose, onOpened }: Props) {
+  const [peopleCount, setPeopleCount] = useState(initialPeopleCount && initialPeopleCount > 0 ? initialPeopleCount : 2);
   const [mode, setMode] = useState<"open" | "reserve">("open");
   const [busy, setBusy] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
