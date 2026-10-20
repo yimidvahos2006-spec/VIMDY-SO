@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Users, Search, Clock, Plus, Minus, X, Loader2, MapPin, Trash2, Pencil } from "lucide-react";
+import { Users, Search, Clock, Plus, Minus, X, Loader2, MapPin, Trash2, Pencil, Utensils, EllipsisVertical, CalendarClock } from "lucide-react";
 
 import { Table, Waiter } from "../../../core/entities/Entities";
 import { container } from "../../../infrastructure/di/CompositionRoot";
@@ -7,12 +7,15 @@ import { useAuth } from "../../context/AuthContext";
 import { getTableUrgency } from "../../../core/services/tableUrgency";
 import { translateBusinessError } from "../../../core/errors/translateBusinessError";
 import { toast } from "../../../core/store/toastStore";
+import { sortTables, tableDisplayName, tableNumber } from "../../../core/services/tableOrdering";
 
 interface Props {
   tables: Table[];
   /** Para mostrar qué mesero abrió cada mesa. */
   waiters?: Waiter[];
   onSelect: (table: Table) => void;
+  /** Si se pasa, el menú ⋮ de una mesa libre ofrece "Reservar mesa". */
+  onReserve?: (table: Table) => void;
   avgDurationMs?: number;
   /** Se llama después de crear una zona o una mesa para recargar la lista. */
   onTablesChanged?: () => void | Promise<void>;
@@ -24,22 +27,23 @@ type Status = Table["status"];
 
 interface StatusStyle {
   label: string;
-  card: string;
-  header: string;
-  action: string;
+  /** Borde de la tarjeta (tinte del estado sobre la superficie VIMDY). */
+  border: string;
+  /** Píldora de estado. */
+  pill: string;
 }
 
-/** Libre = verde. Ocupada = rojo. Esperando comida = naranja. Clases estáticas para Tailwind. */
+/** Superficie y texto de VIMDY; el estado solo tiñe el borde y la píldora. Clases estáticas para Tailwind. */
 const STATUS_STYLES: Record<Status, StatusStyle> = {
-  FREE: { label: "Libre", card: "bg-emerald-950/60 border-emerald-500/60", header: "bg-emerald-500 text-emerald-950", action: "text-emerald-300" },
-  RESERVED: { label: "Reservada", card: "bg-indigo-950/50 border-indigo-400/60", header: "bg-indigo-400 text-indigo-950", action: "text-indigo-300" },
-  BUSY: { label: "Ocupada", card: "bg-red-950/60 border-red-500/60", header: "bg-red-500 text-white", action: "text-red-200" },
-  WAITING_FOOD: { label: "Esperando comida", card: "bg-orange-950/60 border-orange-500/60", header: "bg-orange-500 text-orange-950", action: "text-orange-200" },
-  EATING: { label: "Comiendo", card: "bg-blue-950/60 border-blue-500/60", header: "bg-blue-500 text-white", action: "text-blue-200" },
-  CUENTA_SOLICITADA: { label: "Por cobrar", card: "bg-yellow-950/50 border-yellow-400/70", header: "bg-yellow-400 text-yellow-950", action: "text-yellow-200" },
-  WAITING_BILL: { label: "Esperando cuenta", card: "bg-cyan-950/50 border-cyan-500/60", header: "bg-cyan-500 text-cyan-950", action: "text-cyan-200" },
-  PAYING: { label: "Cobrando", card: "bg-purple-950/50 border-purple-500/60", header: "bg-purple-500 text-white", action: "text-purple-200" },
-  CLOSED: { label: "Unida", card: "bg-slate-900 border-slate-700", header: "bg-slate-600 text-white", action: "text-slate-400" }
+  FREE: { label: "Libre", border: "border-vimdy-success/40", pill: "bg-vimdy-success-bg text-vimdy-success border-vimdy-success/40" },
+  RESERVED: { label: "Reservada", border: "border-indigo-400/50", pill: "bg-indigo-500/15 text-indigo-300 border-indigo-400/40" },
+  BUSY: { label: "Ocupada", border: "border-vimdy-danger/50", pill: "bg-vimdy-danger-bg text-vimdy-danger-hover border-vimdy-danger/40" },
+  WAITING_FOOD: { label: "Esperando comida", border: "border-orange-400/50", pill: "bg-orange-500/15 text-orange-300 border-orange-400/40" },
+  EATING: { label: "Comiendo", border: "border-vimdy-accent/50", pill: "bg-vimdy-accent/15 text-vimdy-accent-hover border-vimdy-accent/40" },
+  CUENTA_SOLICITADA: { label: "Por cobrar", border: "border-vimdy-warning/60", pill: "bg-vimdy-warning-bg text-vimdy-warning-hover border-vimdy-warning/40" },
+  WAITING_BILL: { label: "Esperando cuenta", border: "border-cyan-400/50", pill: "bg-cyan-500/15 text-cyan-300 border-cyan-400/40" },
+  PAYING: { label: "Cobrando", border: "border-purple-400/50", pill: "bg-purple-500/15 text-purple-300 border-purple-400/40" },
+  CLOSED: { label: "Unida", border: "border-vimdy-border", pill: "bg-vimdy-surface-active text-vimdy-text-secondary border-vimdy-border" }
 };
 
 const QUICK_FILTERS: { key: Status | "ALL"; label: string }[] = [
@@ -62,9 +66,7 @@ function zoneOf(table: Table): string {
 
 /** Dentro de su zona la tarjeta no necesita repetir " · Terraza". */
 function displayName(table: Table): string {
-  const zone = table.zone?.trim();
-  const suffix = zone ? ` · ${zone}` : "";
-  return suffix && table.name.endsWith(suffix) ? table.name.slice(0, -suffix.length) : table.name;
+  return tableDisplayName(table);
 }
 
 /**
@@ -517,7 +519,7 @@ function DeleteTableDialog({
 }
 
 /* ------------------------------ Pantalla ------------------------------ */
-export function TableGrid({ tables, waiters = [], onSelect, avgDurationMs = 45 * 60 * 1000, onTablesChanged }: Props) {
+export function TableGrid({ tables, waiters = [], onSelect, onReserve, avgDurationMs = 45 * 60 * 1000, onTablesChanged }: Props) {
   const { can } = useAuth();
   const canManage = can("tables.manage");
 
@@ -527,7 +529,25 @@ export function TableGrid({ tables, waiters = [], onSelect, avgDurationMs = 45 *
   const [dialog, setDialog] = useState<"zone" | "table" | "deleteZone" | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [tableToDelete, setTableToDelete] = useState<Table | null>(null);
+  const [menuTableId, setMenuTableId] = useState<string | null>(null);
   const now = useNow();
+
+  // El menú ⋮ se cierra al tocar fuera o con Escape.
+  useEffect(() => {
+    if (!menuTableId) return;
+    function onPointerDown(event: PointerEvent) {
+      if (!(event.target as HTMLElement | null)?.closest("[data-table-menu]")) setMenuTableId(null);
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setMenuTableId(null);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [menuTableId]);
 
   const waiterNames = useMemo(() => {
     const map = new Map<string, string>();
@@ -577,7 +597,8 @@ export function TableGrid({ tables, waiters = [], onSelect, avgDurationMs = 45 *
   }, [visible]);
 
   const zoneTables = useMemo(
-    () => (activeZone ? visible.filter(t => zoneOf(t) === activeZone) : []),
+    // Orden natural (1, 2, 3 … 10) dentro de la zona; filtered y la búsqueda heredan este orden.
+    () => (activeZone ? sortTables(visible.filter(t => zoneOf(t) === activeZone)) : []),
     [visible, activeZone]
   );
 
@@ -586,7 +607,7 @@ export function TableGrid({ tables, waiters = [], onSelect, avgDurationMs = 45 *
     if (statusFilter !== "ALL") result = result.filter(t => t.status === statusFilter);
     if (search.trim()) {
       const term = search.trim().toLowerCase();
-      result = result.filter(t => t.name.toLowerCase().includes(term));
+      result = result.filter(t => t.name.toLowerCase().includes(term) || displayName(t).toLowerCase().includes(term));
     }
     return result;
   }, [zoneTables, statusFilter, search]);
@@ -722,89 +743,178 @@ export function TableGrid({ tables, waiters = [], onSelect, avgDurationMs = 45 *
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
         {filtered.map(table => {
           const style = STATUS_STYLES[table.status];
-          const isFree = table.status === "FREE" || table.status === "RESERVED";
+          const isFree = table.status === "FREE";
+          const isReserved = table.status === "RESERVED";
+          const isIdle = isFree || isReserved;
           const elapsedMs = table.openedAt ? now - table.openedAt.getTime() : 0;
           const urgency = getTableUrgency(table, avgDurationMs);
           const waiterName = table.waiterId ? waiterNames.get(table.waiterId) : undefined;
           const mergedNames = mergedNamesByTable.get(table.id);
           const mergedLabel = mergedNames?.length ? ` + ${mergedNames.join(" + ")}` : "";
           // En modo edición una mesa libre se toca para eliminarla, no para abrirla.
-          const deletable = editMode && canManage && isFree;
+          const deletable = editMode && canManage && isIdle;
+          const itemCount = table.items.reduce((sum, item) => sum + (item.quantity || 1), 0);
+          const number = tableNumber(table);
+
+          // Menú ⋮: solo acciones que no son la principal de la tarjeta.
+          const menuItems: { key: string; label: string; danger?: boolean; icon: React.ReactNode; run: () => void }[] = [];
+          if (isFree && onReserve) {
+            menuItems.push({ key: "reserve", label: "Reservar mesa", icon: <CalendarClock size={18} />, run: () => onReserve(table) });
+          }
+          if (isFree && canManage) {
+            menuItems.push({ key: "delete", label: "Eliminar mesa", danger: true, icon: <Trash2 size={18} />, run: () => setTableToDelete(table) });
+          }
+          const menuOpen = menuTableId === table.id;
+
+          const primaryLabel = deletable ? "Eliminar mesa" : isFree ? "Abrir mesa" : isReserved ? "Abrir reserva" : "Gestionar";
+          const runPrimary = () => (deletable ? setTableToDelete(table) : onSelect(table));
 
           return (
-            <button
+            <div
               key={table.id}
-              onClick={() => (deletable ? setTableToDelete(table) : onSelect(table))}
-              className={`relative ${style.card} rounded-2xl border-2 text-left overflow-hidden min-h-[132px] active:scale-[0.97] hover:brightness-125 transition-all duration-200 ${
-                deletable ? "ring-2 ring-red-500/70" : ""
+              onClick={runPrimary}
+              className={`relative ${menuOpen ? "z-20" : ""} flex flex-col gap-3 min-h-[196px] p-3.5 rounded-vimdy-lg border-2 bg-vimdy-surface ${style.border} hover:bg-vimdy-surface-hover active:scale-[0.98] cursor-pointer transition-all duration-vimdy-normal ${
+                deletable ? "ring-2 ring-vimdy-danger/70" : ""
               }`}
             >
-              <div className={`${style.header} px-4 py-1.5 text-xs font-black uppercase tracking-wider transition-colors duration-300`}>
-                {style.label}
-              </div>
-              {deletable && (
-                <span className="absolute top-8 right-2 w-8 h-8 rounded-full bg-red-500 text-white flex items-center justify-center shadow-lg" aria-hidden="true">
-                  <Trash2 size={15} />
+              {/* Estado + menú */}
+              <div className="flex items-center justify-between gap-2">
+                <span className={`px-3 py-1 rounded-full border text-xs font-bold whitespace-nowrap ${style.pill}`}>
+                  {style.label}
                 </span>
-              )}
-              <div className="p-4">
-                <div className="flex items-start justify-between gap-2">
-                  <h2 className="text-white text-xl font-black leading-tight uppercase">
-                    {displayName(table)}
-                    {mergedLabel && <span className="text-slate-300 text-sm font-normal ml-1 normal-case">{mergedLabel}</span>}
-                  </h2>
-                  <span className="text-slate-300 text-sm font-bold shrink-0" title="Capacidad">
-                    P{table.capacity}
-                  </span>
-                </div>
-
-                {isFree ? (
-                  <p className={`${style.action} font-bold text-sm mt-4 uppercase`}>
-                    {deletable ? "Eliminar mesa" : table.status === "RESERVED" ? "Abrir reserva →" : "Abrir mesa →"}
-                  </p>
-                ) : (
-                  <>
-                    <div className="flex items-center gap-3 mt-1 text-slate-200 text-xs">
-                      <span className="flex items-center gap-1">
-                        <Users size={12} /> Comensales: {table.peopleCount}
-                      </span>
-                      {table.openedAt && (
-                        <span className="flex items-center gap-1">
-                          <Clock size={12} /> {formatMinutes(elapsedMs)}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-end justify-between mt-3 gap-2">
-                      <p className="text-white font-bold text-lg">${table.total.toLocaleString("es-CO")}</p>
-                      {waiterName && (
-                        <p className="text-slate-300 text-xs truncate max-w-[50%]" title={`Abrió ${waiterName}`}>
-                          {waiterName}
-                        </p>
-                      )}
-                    </div>
-                    <div className="mt-3">
-                      <div className="h-1.5 rounded-full bg-black/40 overflow-hidden">
-                        <div
-                          className={`h-full rounded-full ${
-                            urgency.level === "high" ? "bg-red-400" : urgency.level === "medium" ? "bg-amber-400" : "bg-emerald-400"
-                          }`}
-                          style={{ width: `${Math.round(urgency.progress)}%` }}
-                        />
+                {menuItems.length > 0 && !deletable ? (
+                  <div className="relative" data-table-menu onClick={(e) => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      onClick={() => setMenuTableId(menuOpen ? null : table.id)}
+                      aria-haspopup="menu"
+                      aria-expanded={menuOpen}
+                      aria-label={`Más opciones de ${displayName(table)}`}
+                      className="w-11 h-11 -mr-2 -my-2 rounded-vimdy-md text-vimdy-text-secondary hover:text-vimdy-text hover:bg-vimdy-surface-active flex items-center justify-center"
+                    >
+                      <EllipsisVertical size={20} />
+                    </button>
+                    {menuOpen && (
+                      <div
+                        role="menu"
+                        className="absolute right-0 top-full mt-1 w-52 rounded-vimdy-md border border-vimdy-border bg-vimdy-surface-active shadow-vimdy-md overflow-hidden"
+                      >
+                        {menuItems.map(item => (
+                          <button
+                            key={item.key}
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setMenuTableId(null);
+                              item.run();
+                            }}
+                            className={`w-full h-12 px-3 flex items-center gap-3 text-sm font-semibold text-left hover:bg-vimdy-surface-hover ${
+                              item.danger ? "text-vimdy-danger-hover" : "text-vimdy-text"
+                            }`}
+                          >
+                            {item.icon}
+                            {item.label}
+                          </button>
+                        ))}
                       </div>
-                      <p className="text-slate-300/80 text-[11px] mt-1">{urgency.action}</p>
-                    </div>
-                    <p className={`${style.action} font-bold text-sm mt-2 uppercase`}>Gestionar →</p>
-                  </>
+                    )}
+                  </div>
+                ) : (
+                  <span className="h-6" aria-hidden="true" />
                 )}
               </div>
-            </button>
+
+              {/* Mesa + comensales */}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1" aria-hidden="true">
+                  <span className="w-1.5 h-6 rounded-full bg-vimdy-border" />
+                  <span className="w-11 h-11 rounded-vimdy-md bg-vimdy-surface-active border border-vimdy-border text-vimdy-text text-xl font-black flex items-center justify-center">
+                    {number ?? displayName(table).charAt(0).toUpperCase()}
+                  </span>
+                  <span className="w-1.5 h-6 rounded-full bg-vimdy-border" />
+                </div>
+                <span
+                  className="flex items-center gap-1 text-vimdy-text-secondary text-sm font-semibold"
+                  title={isIdle ? "Capacidad" : "Comensales / capacidad"}
+                >
+                  <Users size={15} />
+                  {isIdle ? table.capacity : `${table.peopleCount}/${table.capacity}`}
+                </span>
+              </div>
+
+              {/* Nombre, total y estado del pedido */}
+              <div className="min-w-0">
+                <h2 className="text-vimdy-text text-lg font-bold leading-tight truncate">
+                  {displayName(table)}
+                  {mergedLabel && <span className="text-vimdy-text-secondary text-sm font-normal ml-1">{mergedLabel}</span>}
+                </h2>
+                <p className="text-vimdy-text-secondary text-base">${table.total.toLocaleString("es-CO")}</p>
+                <div className="flex items-center justify-between gap-2 mt-1 text-vimdy-text-secondary text-xs">
+                  <span className="flex items-center gap-1 min-w-0">
+                    <Clock size={13} className="shrink-0" />
+                    {isIdle ? (isReserved ? "Reservada" : "Sin pedido") : table.openedAt ? formatMinutes(elapsedMs) : "En curso"}
+                  </span>
+                  {!isIdle && waiterName && (
+                    <span className="truncate max-w-[50%]" title={`Abrió ${waiterName}`}>
+                      {waiterName}
+                    </span>
+                  )}
+                </div>
+                {!isIdle && (
+                  <div className="h-1 mt-2 rounded-full bg-black/40 overflow-hidden" title={urgency.action}>
+                    <div
+                      className={`h-full rounded-full ${
+                        urgency.level === "high" ? "bg-vimdy-danger" : urgency.level === "medium" ? "bg-vimdy-warning" : "bg-vimdy-success"
+                      }`}
+                      style={{ width: `${Math.round(urgency.progress)}%` }}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Pedido (indicador) + acción principal */}
+              <div className="mt-auto flex items-center gap-2">
+                <span
+                  className={`relative w-11 h-11 shrink-0 rounded-vimdy-md border flex items-center justify-center ${
+                    itemCount > 0
+                      ? "bg-vimdy-accent/10 border-vimdy-accent/40 text-vimdy-accent-hover"
+                      : "bg-vimdy-surface-active border-vimdy-border text-vimdy-text-tertiary"
+                  }`}
+                  title={itemCount > 0 ? `${itemCount} producto${itemCount === 1 ? "" : "s"} en el pedido` : "Sin pedido"}
+                  aria-label={itemCount > 0 ? `${itemCount} productos en el pedido` : "Sin pedido"}
+                >
+                  <Utensils size={18} />
+                  {itemCount > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-vimdy-accent text-white text-[10px] font-bold flex items-center justify-center">
+                      {itemCount}
+                    </span>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    runPrimary();
+                  }}
+                  className={`flex-1 min-w-0 h-11 px-3 rounded-vimdy-md border text-sm font-bold whitespace-nowrap transition ${
+                    deletable
+                      ? "bg-vimdy-danger-bg border-vimdy-danger/50 text-vimdy-danger-hover"
+                      : isFree
+                        ? "bg-vimdy-accent hover:bg-vimdy-accent-hover border-transparent text-white"
+                        : "bg-vimdy-surface-active border-vimdy-border hover:border-vimdy-accent text-vimdy-text"
+                  }`}
+                >
+                  {primaryLabel}
+                </button>
+              </div>
+            </div>
           );
         })}
 
         {canManage && activeZone && (
           <button
             onClick={() => setDialog("table")}
-            className="rounded-2xl border-2 border-dashed border-slate-600 hover:border-cyan-500 hover:bg-cyan-500/5 text-slate-400 hover:text-cyan-300 min-h-[132px] flex flex-col items-center justify-center gap-2 active:scale-[0.97] transition"
+            className="rounded-vimdy-lg border-2 border-dashed border-vimdy-border hover:border-vimdy-accent hover:bg-vimdy-accent/5 text-vimdy-text-secondary hover:text-vimdy-accent-hover min-h-[196px] flex flex-col items-center justify-center gap-2 active:scale-[0.97] transition"
           >
             <Plus size={28} />
             <span className="font-bold text-sm">Añadir mesa</span>

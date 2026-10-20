@@ -85,6 +85,8 @@ function MeserosContent() {
   const [dialog, setDialog] = useState<"open" | "detail" | null>(null);
   // Comensales dictados por voz para precargar el diálogo de apertura.
   const [voicePeopleCount, setVoicePeopleCount] = useState<number | null>(null);
+  // El menú ⋮ de la mesa abre el diálogo directamente en "Reservar".
+  const [openInReserveMode, setOpenInReserveMode] = useState(false);
 
   const reloadTables = useCallback(async () => {
     const all = await container.tableEngine.get().getAllTables();
@@ -176,7 +178,8 @@ function MeserosContent() {
     ? tables.find(t => t.id === selectedTableId) ?? null
     : null;
 
-  function handleSelectTable(table: Table) {
+  function handleSelectTable(table: Table, options?: { reserve?: boolean }) {
+    setOpenInReserveMode(Boolean(options?.reserve));
     setSelectedTableId(table.id);
     if (table.status === "FREE" || table.status === "RESERVED") {
       setDialog("open");
@@ -375,7 +378,7 @@ function MeserosContent() {
 
       {/* Paso 2: mesas, ya con el mesero identificado. */}
       {ready && !loadError && tablesEnabled && (!waiterModeEnabled || activeWaiter) && (
-        <TableGrid tables={tables} waiters={waiters} onSelect={handleSelectTable} avgDurationMs={avgDurationMs} onTablesChanged={reloadTables} />
+        <TableGrid tables={tables} waiters={waiters} onSelect={(table) => handleSelectTable(table)} onReserve={(table) => handleSelectTable(table, { reserve: true })} avgDurationMs={avgDurationMs} onTablesChanged={reloadTables} />
       )}
 
       {dialog === "open" && selectedTable && (
@@ -383,6 +386,7 @@ function MeserosContent() {
           table={selectedTable}
           waiterId={activeWaiter?.id ?? null}
           initialPeopleCount={voicePeopleCount}
+          initialMode={openInReserveMode ? "reserve" : "open"}
           onClose={closeDialogs}
           onOpened={() => {
             setDialog("detail");
