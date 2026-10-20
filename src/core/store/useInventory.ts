@@ -23,7 +23,10 @@ export function getStockStatus(product: Product): StockStatus {
   // de "stock bajo" — mismo criterio que InventoryEngine/SalesEngine/
   // AlertEngine.
   if (product.trackStock === false) return "normal";
-  if (product.price <= 0) return "normal";
+  // Un insumo nunca se vende (precio 0 a propósito): su alerta de stock bajo /
+  // agotado SÍ debe funcionar. La excepción de precio 0 es solo para productos
+  // de venta incompletos.
+  if (product.price <= 0 && product.isIngredient !== true) return "normal";
   if (product.stock <= 0) return "agotado";
   if (product.stock <= product.minStock) return "bajo";
   return "normal";
@@ -97,13 +100,19 @@ export function useInventory() {
     return unsubscribe;
   }, [load]);
 
+  // Separación de mundos: `products` trae TODO (lo necesitan los motores y
+  // las recetas para resolver ingredientes); la pestaña Productos y sus
+  // KPIs usan solo lo que se vende, y la pestaña Insumos solo la materia prima.
+  const sellableProducts = useMemo(() => products.filter((p) => p.isIngredient !== true), [products]);
+  const insumos = useMemo(() => products.filter((p) => p.isIngredient === true), [products]);
+
   const kpis: InventoryKpis = useMemo(() => {
-    const valuation = calculateInventoryCostValuation(products);
+    const valuation = calculateInventoryCostValuation(sellableProducts);
 
     return {
-      totalProducts: products.filter((p) => p.active !== false).length,
-      lowStockCount: products.filter((p) => p.active !== false && getStockStatus(p) === "bajo").length,
-      outOfStockCount: products.filter((p) => p.active !== false && getStockStatus(p) === "agotado" && p.price > 0).length,
+      totalProducts: sellableProducts.filter((p) => p.active !== false).length,
+      lowStockCount: sellableProducts.filter((p) => p.active !== false && getStockStatus(p) === "bajo").length,
+      outOfStockCount: sellableProducts.filter((p) => p.active !== false && getStockStatus(p) === "agotado" && p.price > 0).length,
       // No devolver una suma parcial si falta el costo de productos con stock.
       totalValue: valuation.stockCostValue ?? 0,
       productsWithCost: valuation.valuedProductCount,
@@ -111,11 +120,11 @@ export function useInventory() {
       trackedProducts: valuation.trackedProductCount,
       valuationStatus: valuation.valuationStatus,
     };
-  }, [products]);
+  }, [sellableProducts]);
 
   const lowStockProducts = useMemo(
-    () => products.filter((p) => p.active !== false && getStockStatus(p) !== "normal"),
-    [products]
+    () => sellableProducts.filter((p) => p.active !== false && getStockStatus(p) !== "normal"),
+    [sellableProducts]
   );
 
   async function getHistory(productId: string): Promise<InventoryMovement[]> {
@@ -421,6 +430,8 @@ export function useInventory() {
 
   return {
     products,
+    sellableProducts,
+    insumos,
     recentMovements,
     kpis,
     lowStockProducts,

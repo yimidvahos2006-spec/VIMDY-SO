@@ -1,4 +1,4 @@
-import { Category, Product } from '../entities/Entities';
+import { Category, CategoryKind, Product } from '../entities/Entities';
 import { IRepository } from '../../infrastructure/di/repositories/IRepository';
 import { isDuplicateNameError } from '../errors/DuplicateNameError';
 
@@ -53,6 +53,8 @@ export class CategoryEngine {
     description?: string;
     requiresKitchenByDefault?: boolean;
     printStation?: string;
+    /** "INSUMO" para materia prima; sin valor = categoría de productos de venta. */
+    kind?: CategoryKind;
   }): Promise<Category> {
     const name = input.name.trim();
 
@@ -80,7 +82,8 @@ export class CategoryEngine {
       // defecto. Esto evita que productos de tiendas, bares, etc. se envíen
       // a cocina incorrectamente.
       requiresKitchenByDefault: input.requiresKitchenByDefault ?? false,
-      printStation: input.printStation?.trim() || undefined
+      printStation: input.printStation?.trim() || undefined,
+      kind: input.kind === 'INSUMO' ? 'INSUMO' : undefined
     };
 
     await this.saveCategory(category);

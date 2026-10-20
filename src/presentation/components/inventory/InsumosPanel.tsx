@@ -50,7 +50,7 @@ export function InsumosPanel() {
     decreaseStock
   } = useInventory();
 
-  const { categories } = useCategories();
+  const { categories, insumoCategories, createCategory } = useCategories();
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StockStatus | "todos">("todos");
@@ -68,6 +68,15 @@ export function InsumosPanel() {
   const insumos = useMemo(() => {
     return products.filter((p) => p.isIngredient === true);
   }, [products]);
+
+  // Categorías propias de insumos (Carnes, Verduras, Lácteos, Empaques...).
+  // Se suman las categorías que ya usan insumos creados antes de existir esta
+  // separación, para no dejarlos "Sin categoría".
+  const visibleCategories = useMemo(() => {
+    const usedIds = new Set(insumos.map((p) => p.categoryId));
+    const legacy = categories.filter((c) => c.kind !== "INSUMO" && usedIds.has(c.id));
+    return [...insumoCategories, ...legacy].sort((a, b) => a.name.localeCompare(b.name));
+  }, [categories, insumoCategories, insumos]);
 
   const filteredInsumos = useMemo(() => {
     let list = insumos;
@@ -200,7 +209,7 @@ export function InsumosPanel() {
                   className="h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm outline-none focus:border-vimdy-accent"
                 >
                   <option value="todos">Todas las categorías</option>
-                  {categories.map((cat) => (
+                  {visibleCategories.map((cat) => (
                     <option key={cat.id} value={cat.id}>{cat.name}</option>
                   ))}
                 </select>
@@ -338,7 +347,11 @@ export function InsumosPanel() {
       {showNewInsumo && (
         <InsumoFormModal
           insumo={editingInsumo}
-          categories={categories}
+          categories={visibleCategories}
+          onCreateCategory={async (name) => {
+            const created = await createCategory({ name, kind: "INSUMO", requiresKitchenByDefault: false });
+            return created;
+          }}
           suppliers={suppliers}
           onClose={() => {
             setShowNewInsumo(false);
@@ -387,6 +400,7 @@ export function InsumosPanel() {
 function InsumoFormModal({
   insumo,
   categories,
+  onCreateCategory,
   suppliers,
   onClose,
   onSave,
@@ -394,6 +408,7 @@ function InsumoFormModal({
 }: {
   insumo: Product | null;
   categories: Category[];
+  onCreateCategory: (name: string) => Promise<Category | null>;
   suppliers: Supplier[];
   onClose: () => void;
   onSave: (input: ProductInput) => Promise<boolean>;
@@ -416,6 +431,29 @@ function InsumoFormModal({
   const [showNewSupplier, setShowNewSupplier] = useState(false);
   const [supplierForm, setSupplierForm] = useState({ name: "", phone: "", email: "", address: "" });
   const [creatingSupplier, setCreatingSupplier] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [creatingCategory, setCreatingCategory] = useState(false);
+
+  async function handleCreateCategory(rawName?: string) {
+    const name = (rawName ?? newCategoryName).trim();
+    if (!name) {
+      setError("Escribe el nombre de la categoría.");
+      return;
+    }
+    setError(null);
+    setCreatingCategory(true);
+    try {
+      const created = await onCreateCategory(name);
+      if (created) {
+        setCategoryId(created.id);
+        setNewCategoryName("");
+      } else {
+        setError("No se pudo crear la categoría (¿ya existe una con ese nombre?).");
+      }
+    } finally {
+      setCreatingCategory(false);
+    }
+  }
 
   useEffect(() => {
     if (!insumo && categories.length > 0 && !categoryId) {
@@ -431,8 +469,8 @@ function InsumoFormModal({
       setError("Escribe el nombre del insumo.");
       return;
     }
-    if (!categoryId) {
-      setError("Selecciona una categoría.");
+    if (!categoryId || categoryId === "__nueva__") {
+      setError("Selecciona o crea una categoría.");
       return;
     }
     if (purchasePrice < 0) {
@@ -531,10 +569,41 @@ function InsumoFormModal({
                 onChange={(e) => setCategoryId(e.target.value)}
                 className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-background border border-vimdy-border text-vimdy-text text-sm outline-none focus:border-vimdy-accent"
               >
+                {categories.length === 0 && <option value="">Crea una categoría abajo</option>}
                 {categories.map((cat) => (
                   <option key={cat.id} value={cat.id}>{cat.name}</option>
                 ))}
+                <option value="__nueva__">+ Nueva categoría...</option>
               </select>
+              {(categoryId === "__nueva__" || categories.length === 0) && (
+                <div className="mt-2 space-y-2">
+                  <div className="flex gap-2">
+                    <input
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      placeholder="Ej: Carnes"
+                      className="flex-1 h-10 px-3 rounded-vimdy-sm bg-vimdy-background border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
+                    />
+                    <VimdyButton type="button" variant="secondary" loading={creatingCategory} onClick={() => handleCreateCategory()}>
+                      Crear
+                    </VimdyButton>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {["Carnes", "Verduras", "Lácteos", "Empaques"]
+                      .filter((n) => !categories.some((c) => c.name.toLowerCase() === n.toLowerCase()))
+                      .map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          onClick={() => handleCreateCategory(n)}
+                          className="px-2.5 py-1 rounded-full border border-vimdy-border text-xs text-vimdy-text-secondary hover:text-vimdy-text hover:bg-vimdy-surface-hover"
+                        >
+                          + {n}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              )}
             </div>
             <div>
               <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Unidad</label>

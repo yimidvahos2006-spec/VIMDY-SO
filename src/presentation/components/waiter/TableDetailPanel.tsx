@@ -111,7 +111,7 @@ export function TableDetailPanel({
     id === "Todos" ? "Todos" : categoryNames.get(id) ?? "Otros";
 
   const categories = useMemo(() => {
-    const set = new Set(products.map(p => p.categoryId));
+    const set = new Set(products.filter(p => p.isIngredient !== true).map(p => p.categoryId));
     return ["Todos", ...Array.from(set)];
   }, [products]);
 

@@ -852,6 +852,20 @@ export interface Category {
    * undefined = sin estación configurada (no se separa el ticket).
    */
   readonly printStation?: string;
+
+  /**
+   * A qué "mundo" pertenece la categoría: "PRODUCTO" (lo que se vende en
+   * Caja) o "INSUMO" (materia prima: Carnes, Verduras, Lácteos, Empaques).
+   * undefined = "PRODUCTO", así las categorías ya creadas siguen igual.
+   * Se guarda dentro del JSON de la categoría: no requiere migración.
+   */
+  readonly kind?: CategoryKind;
+}
+
+export type CategoryKind = "PRODUCTO" | "INSUMO";
+
+export function isInsumoCategory(category: Pick<Category, "kind">): boolean {
+  return category.kind === "INSUMO";
 }
 
 export interface Supplier {

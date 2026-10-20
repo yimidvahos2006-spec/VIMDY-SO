@@ -51,7 +51,11 @@ export function InventoryDashboard() {
     return () => window.clearTimeout(id);
   }, []);
   const {
-    products,
+    // `allProducts` incluye insumos: solo para resolver recetas/capacidad,
+    // movimientos y el selector de ingredientes. La tabla, filtros, alertas y
+    // KPIs de esta pestaña usan `products` (solo lo que se vende).
+    products: allProducts,
+    sellableProducts: products,
     recentMovements,
     kpis,
     loading,
@@ -67,7 +71,7 @@ export function InventoryDashboard() {
     productsWithCost
   } = useInventory();
 
-  const { categories } = useCategories();
+  const { productCategories: categories } = useCategories();
 
   // PASO 1.10 (offline elegante en Inventario) — cuántos ajustes de stock
   // hechos sin conexión siguen esperando sincronizarse, para el badge del
@@ -77,7 +81,7 @@ export function InventoryDashboard() {
   // PASO 2 (Motor de Producción): mapa id->Product reutilizado por
   // RecipeEngine para resolver costo/capacidad sin volver a consultar el
   // repositorio en cada fila de la tabla.
-  const productMap = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
+  const productMap = useMemo(() => new Map(allProducts.map((p) => [p.id, p])), [allProducts]);
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StockStatus | "todos">("todos");
@@ -603,7 +607,6 @@ export function InventoryDashboard() {
             >
               <option value="todos">Todos los tipos</option>
               <option value="inventario">Producto para vender</option>
-              <option value="ingrediente">Ingrediente</option>
               <option value="cocina">Producto preparado</option>
               <option value="cocina_receta">Producto con receta</option>
               <option value="servicio">Servicio</option>
@@ -804,7 +807,7 @@ export function InventoryDashboard() {
         {/* Alertas + últimos movimientos */}
         <div className="space-y-6">
           <AlertsPanel products={products} onSelect={setSelected} />
-          <RecentMovementsPanel movements={recentMovements} products={products} />
+          <RecentMovementsPanel movements={recentMovements} products={allProducts} />
         </div>
       </div>
         </>
@@ -816,7 +819,7 @@ export function InventoryDashboard() {
             product={selected}
             categoryName={categoryNameById[selected.categoryId]}
             saveError={error}
-            allProducts={products}
+            allProducts={allProducts}
             onClose={() => setSelected(null)}
             getHistory={getHistory}
             increaseStock={increaseStock}

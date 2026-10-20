@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { container, categoriesReady } from "../infrastructure/di/CompositionRoot";
-import { Category } from "../core/entities/Entities";
+import { Category, CategoryKind, isInsumoCategory } from "../core/entities/Entities";
 import { vimdyCore } from "../core/VimdyCore";
 // NOTA: categorías comparte el evento "inventory" con productos y
 // proveedores (ver TABLE_EVENT_MAP en realtimeSync.ts) — así, un cambio de
@@ -17,7 +17,12 @@ import { vimdyCore } from "../core/VimdyCore";
 =========================================================================== */
 
 export interface UseCategoriesResult {
+  /** Todas las categorías (productos e insumos). */
   categories: Category[];
+  /** Solo categorías de productos de venta (lo que se ve en Caja y Productos). */
+  productCategories: Category[];
+  /** Solo categorías de insumos (Carnes, Verduras, Lácteos, Empaques...). */
+  insumoCategories: Category[];
   loading: boolean;
   error: string | null;
   reload: () => Promise<void>;
@@ -25,6 +30,7 @@ export interface UseCategoriesResult {
     name: string;
     description?: string;
     requiresKitchenByDefault?: boolean;
+    kind?: CategoryKind;
   }) => Promise<Category | null>;
   updateCategory: (
     id: string,
@@ -78,6 +84,7 @@ export function useCategories(): UseCategoriesResult {
       name: string;
       description?: string;
       requiresKitchenByDefault?: boolean;
+      kind?: CategoryKind;
     }): Promise<Category | null> => {
       setError(null);
       try {
@@ -133,8 +140,13 @@ export function useCategories(): UseCategoriesResult {
     [reload]
   );
 
+  const productCategories = useMemo(() => categories.filter((c) => !isInsumoCategory(c)), [categories]);
+  const insumoCategories = useMemo(() => categories.filter((c) => isInsumoCategory(c)), [categories]);
+
   return {
     categories,
+    productCategories,
+    insumoCategories,
     loading,
     error,
     reload,

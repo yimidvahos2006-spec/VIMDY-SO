@@ -59,7 +59,7 @@ export function PosCategoriesPanel() {
 
   const { selected, select } = useCategory();
   const { products } = useProductCatalog();
-  const { categories, loading } = useCategories();
+  const { productCategories: categories, loading } = useCategories();
   const { t } = useTranslation();
 
   function countFor(categoryId: string) {

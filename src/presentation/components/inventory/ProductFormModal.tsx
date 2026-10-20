@@ -36,7 +36,6 @@ const PRODUCT_TYPE_CHOICES: ReadonlyArray<{ id: ProductType; label: string; hint
   { id: "inventario", label: "Para vender", hint: "Se vende y descuenta directo del stock. Ej: gaseosa, cerveza, snack empacado." },
   { id: "cocina", label: "Preparado", hint: "Se prepara al venderlo; no maneja stock propio ni receta fija. Ej: tamal, jugo, plato del día." },
   { id: "cocina_receta", label: "Preparado con receta", hint: "Se prepara y descuenta los ingredientes de su receta. Ej: hamburguesa, pizza." },
-  { id: "ingrediente", label: "Ingrediente", hint: "Existencias para preparar otros productos. No aparece en Caja. Ej: carne, harina, tomate." },
   { id: "servicio", label: "Servicio", hint: "Sin stock ni preparación. Ej: domicilio, propina, cover." }
 ];
 
@@ -108,7 +107,10 @@ export function ProductFormModal({
   );
   const [printStationOverride, setPrintStationOverride] = useState(product?.printStationOverride ?? "");
 
+  // Solo categorías de productos de venta. Las de insumos (Carnes, Verduras...)
+  // viven en la pestaña Insumos y no se mezclan aquí.
   const [categories, setCategories] = useState<Category[]>([]);
+  const [insumoCategories, setInsumoCategories] = useState<Category[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [newCategoryName, setNewCategoryName] = useState("");
@@ -399,11 +401,13 @@ export function ProductFormModal({
       container.inventoryEngine.get().listAll()
     ])
       .then(([cats, provs, prods]) => {
-        setCategories(cats);
+        const sellCats = cats.filter((c) => c.kind !== "INSUMO");
+        setCategories(sellCats);
+        setInsumoCategories(cats.filter((c) => c.kind === "INSUMO"));
         setSuppliers(provs);
         setAllProducts(prods);
         if (!categoryId) {
-          setCategoryId(cats.length > 0 ? cats[0].id : "__nueva__");
+          setCategoryId(sellCats.length > 0 ? sellCats[0].id : "__nueva__");
         }
       })
       .finally(() => setLoadingOptions(false));
@@ -657,9 +661,30 @@ export function ProductFormModal({
     const purchasePrice = quickIngredientPurchasePrice.trim() ? parseMoneyInput(quickIngredientPurchasePrice) : undefined;
     setCreatingIngredient(true);
     try {
+      // El insumo nuevo va a una categoría de INSUMOS, nunca a la del producto.
+      let insumoCategoryId: string | undefined = insumoCategories[0]?.id;
+      if (!insumoCategoryId) {
+        try {
+          const cat = await container.categoryEngine.get().create({
+            name: "Insumos",
+            kind: "INSUMO",
+            requiresKitchenByDefault: false
+          });
+          setInsumoCategories((prev) => [...prev, cat]);
+          insumoCategoryId = cat.id;
+        } catch {
+          const all = await container.categoryEngine.get().listAll();
+          insumoCategoryId = all.find((c) => c.kind === "INSUMO")?.id ?? all.find((c) => c.name.trim().toLowerCase() === "insumos")?.id;
+        }
+      }
+      if (!insumoCategoryId) {
+        toast.error("No se pudo crear la categoría de insumos.");
+        return;
+      }
+      const finalCategoryId: string = insumoCategoryId;
       const created = await container.inventoryEngine.get().createProduct({
         name,
-        categoryId: categoryId || categories[0]?.id || "",
+        categoryId: finalCategoryId,
         price: 0,
         purchasePrice,
         stock: 0,
