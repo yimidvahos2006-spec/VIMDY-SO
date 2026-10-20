@@ -95,4 +95,29 @@ export class TableRepository extends SupabaseRepository<Table> {
 
     return this.local.findById(id);
   }
+
+  /**
+   * Borrar en Supabase NO basta: `findAll()` responde primero con la caché
+   * local, así que la mesa eliminada reaparecería hasta el siguiente refresco.
+   * Se borra primero en la nube (si falla, la caché queda intacta) y luego en local.
+   */
+  public async delete(id: string): Promise<void> {
+    await super.delete(id);
+    await this.local.delete(id).catch((error: unknown) => {
+      logWarning("[TableRepository] No se pudo quitar la mesa de la caché local", {
+        category: "offline",
+        context: { error: String(error) },
+      });
+    });
+  }
+
+  public async deleteMany(ids: string[]): Promise<void> {
+    await super.deleteMany(ids);
+    await this.local.deleteMany(ids).catch((error: unknown) => {
+      logWarning("[TableRepository] No se pudieron quitar las mesas de la caché local", {
+        category: "offline",
+        context: { error: String(error) },
+      });
+    });
+  }
 }

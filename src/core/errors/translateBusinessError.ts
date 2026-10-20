@@ -64,6 +64,15 @@ const CODE_MESSAGES: Record<string, (detail: string) => string> = {
       : "Esa mesa no tiene una cuenta abierta. Solo se pueden unir mesas con pedido en curso; si está libre, usa Transferir mesa.";
   },
   TABLE_TRANSFER_SAME: () => "Elige una mesa distinta a la actual.",
+  TABLE_DELETE_NOT_FREE: (detail) => {
+    const name = extractQuoted(detail);
+    return name
+      ? `No se puede eliminar "${name}": tiene una cuenta abierta. Cóbrala o libérala primero.`
+      : "No se puede eliminar una mesa con cuenta abierta. Cóbrala o libérala primero.";
+  },
+  ZONE_HAS_OCCUPIED_TABLES: () =>
+    "No se puede eliminar la zona: hay mesas con cuenta abierta. Cóbralas o libéralas primero.",
+  ZONE_REQUIRED: () => "Elige la zona que quieres eliminar.",
   TABLE_PEOPLE_INVALID: () => "Indica cuántas personas se suman (1 o más).",
   TABLE_CANCEL_HAS_DELIVERED: () =>
     "Ya se entregó comida de esta cuenta, así que no se puede cancelar. Cóbrala o pide ayuda a un gerente.",

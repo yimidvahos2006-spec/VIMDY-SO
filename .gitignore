@@ -61,3 +61,5 @@ backups/
 src.zip
 .continue/
 src.zip
+
+config.json
