@@ -4,6 +4,7 @@ import { container, productsReady } from "../infrastructure/di/CompositionRoot";
 import { SaleRepository } from "../infrastructure/di/repositories/SaleRepository";
 import { ShiftRepository } from "../infrastructure/di/repositories/ShiftRepository";
 import { dashboardStore } from "../core/store/dashboardStore";
+import { dashboardSyncStatusStore } from "../core/store/dashboardSyncStatusStore";
 import { vimdyCore } from "../core/VimdyCore";
 import { Customer, KitchenOrder } from "../core/entities/Entities";
 import { companyConfigStore } from "../core/store/companyConfigStore";
@@ -15,6 +16,9 @@ import { DashboardInventoryReconciliationService } from "../core/dashboard/metri
 import { mapSalesReconciliationToDashboard } from "../core/dashboard/metrics/DashboardSalesStoreMapper";
 
 const HISTORY_DAYS = 14;
+/** Reintentos automáticos si falla la sincronización (red caída, etc.). */
+const MAX_AUTO_RETRIES = 3;
+const RETRY_BASE_DELAY_MS = 4_000;
 const dashboardSalesMetricsService = new DashboardSalesMetricsService(new SaleRepository());
 const dashboardCashReconciliationService = new DashboardCashReconciliationService(new ShiftRepository());
 
@@ -25,6 +29,15 @@ export function useDashboardSync() {
   useEffect(() => {
     let cancelled = false;
     let reconcileVersion = 0;
+    let failedAttempts = 0;
+    let retryTimer: number | null = null;
+
+    const clearRetryTimer = () => {
+      if (retryTimer !== null) {
+        window.clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+    };
 
     async function reconcile() {
       const version = ++reconcileVersion;
@@ -111,15 +124,37 @@ export function useDashboardSync() {
         );
 
         if (isStale()) return;
+        failedAttempts = 0;
+        clearRetryTimer();
+        dashboardSyncStatusStore.set("ready");
         setLoading(false);
         setError(null);
       } catch (err) {
         if (isStale()) return;
-        setError(err instanceof Error ? err.message : "Error al sincronizar el dashboard");
+        const message = err instanceof Error ? err.message : "Error al sincronizar el dashboard";
+        console.error("[useDashboardSync] Falló la sincronización:", err);
+        dashboardSyncStatusStore.set("error", message);
+        setError(message);
         setLoading(false);
+
+        failedAttempts += 1;
+        if (failedAttempts <= MAX_AUTO_RETRIES) {
+          clearRetryTimer();
+          retryTimer = window.setTimeout(() => {
+            retryTimer = null;
+            void reconcile();
+          }, RETRY_BASE_DELAY_MS * failedAttempts);
+        }
       }
     }
 
+    dashboardSyncStatusStore.set("loading");
+    dashboardSyncStatusStore.setRetryHandler(() => {
+      failedAttempts = 0;
+      clearRetryTimer();
+      dashboardSyncStatusStore.set("loading");
+      void reconcile();
+    });
     void reconcile();
 
     const offSale = vimdyCore.on("sale", () => void reconcile());
@@ -132,6 +167,9 @@ export function useDashboardSync() {
     return () => {
       cancelled = true;
       reconcileVersion += 1;
+      clearRetryTimer();
+      dashboardSyncStatusStore.setRetryHandler(null);
+      dashboardSyncStatusStore.set("loading");
       offSale();
       offCustomer();
       offInventory();

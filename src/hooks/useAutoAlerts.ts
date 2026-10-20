@@ -1,8 +1,7 @@
 import { useEffect } from "react";
 
-import { container } from "../infrastructure/di/CompositionRoot";
+import { loadBusinessSnapshot } from "./loadBusinessSnapshot";
 import { useDashboard } from "../core/store/useDashboard";
-import { businessStore } from "../core/store/businessStore";
 import { companyConfigStore } from "../core/store/companyConfigStore";
 import { notificationStore, type NotificationCategory } from "../core/store/notificationStore";
 import { productCatalogStore } from "../core/store/productCatalogStore";
@@ -69,12 +68,7 @@ export function useAutoAlerts() {
       await notificationStore.init();
       if (cancelled) return;
 
-      const business = businessStore.get();
-      const config = companyConfigStore.get();
-      const snapshot = await container.businessAnalyzer.get().buildSnapshot(
-        business.name || "Mi negocio",
-        config.currency
-      );
+      const snapshot = await loadBusinessSnapshot();
       if (cancelled) return;
 
       snapshot.smartAlerts
@@ -96,8 +90,14 @@ export function useAutoAlerts() {
       });
     }
 
-    check();
-    const interval = setInterval(check, REFRESH_INTERVAL_MS);
+    const safeCheck = () => {
+      check().catch((error: unknown) => {
+        console.error("[useAutoAlerts] No se pudieron revisar las alertas:", error);
+      });
+    };
+
+    safeCheck();
+    const interval = setInterval(safeCheck, REFRESH_INTERVAL_MS);
 
     return () => {
       cancelled = true;

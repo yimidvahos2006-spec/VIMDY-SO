@@ -1,6 +1,8 @@
+import { useSyncExternalStore } from "react";
 import { ArrowDownRight, ArrowUpRight, Minus, Wallet, Package, ReceiptText } from "lucide-react";
 
 import { useTranslation } from "../../../core/i18n/useTranslation";
+import { dashboardSyncStatusStore } from "../../../core/store/dashboardSyncStatusStore";
 import type { DashboardExecutiveKpi, DashboardExecutiveKpiId, DashboardExecutiveModel } from "../../../core/dashboard/executive/DashboardExecutiveTypes";
 
 interface Props { model: DashboardExecutiveModel; }
@@ -85,7 +87,35 @@ function KpiCard({ kpi, model }: { kpi: DashboardExecutiveKpi; model: DashboardE
 
 export function DashboardExecutiveOverview({ model }: Props) {
   const { language } = useTranslation();
+  const sync = useSyncExternalStore(
+    dashboardSyncStatusStore.subscribe,
+    dashboardSyncStatusStore.getSnapshot,
+    dashboardSyncStatusStore.getSnapshot,
+  );
   if (model.status === "loading-profile") return <div className="h-48 rounded-vimdy-xl border border-vimdy-border bg-vimdy-surface animate-pulse" aria-label={language === "en" ? "Loading" : language === "pt" ? "Carregando" : "Cargando"} />;
+  if (model.status === "insufficient-data" && sync.state === "error") {
+    return (
+      <section aria-labelledby="dashboard-executive-overview" role="alert" className="rounded-vimdy-xl border border-vimdy-border bg-vimdy-surface p-6 shadow-vimdy-xs">
+        <h2 id="dashboard-executive-overview" className="text-xl font-bold text-vimdy-text">
+          {language === "en" ? "We could not load your business data" : language === "pt" ? "Não foi possível carregar os dados do negócio" : "No pudimos cargar los datos de tu negocio"}
+        </h2>
+        <p className="mt-2 text-sm text-vimdy-text-secondary">
+          {language === "en"
+            ? "Check your connection. VIMDY keeps retrying automatically."
+            : language === "pt"
+              ? "Verifique sua conexão. O VIMDY continua tentando automaticamente."
+              : "Revisa tu conexión. VIMDY sigue reintentando automáticamente."}
+        </p>
+        <button
+          type="button"
+          onClick={() => dashboardSyncStatusStore.retry()}
+          className="mt-4 rounded-vimdy-lg border border-vimdy-border px-4 py-2 text-sm font-semibold text-vimdy-text hover:bg-vimdy-surface-hover transition-colors"
+        >
+          {language === "en" ? "Retry now" : language === "pt" ? "Tentar agora" : "Reintentar ahora"}
+        </button>
+      </section>
+    );
+  }
   if (model.status === "insufficient-data") {
     return (
       <section aria-labelledby="dashboard-executive-overview" className="rounded-vimdy-xl border border-vimdy-border bg-vimdy-surface p-6 shadow-vimdy-xs">
