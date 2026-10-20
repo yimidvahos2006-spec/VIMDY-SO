@@ -17,7 +17,9 @@ export function OnboardingGate({ children }: Props) {
     businessBootstrapError,
     retryBusinessBootstrap
   } = useAuth();
-  const [showIntro, setShowIntro] = useState(() => !appIntroStore.hasBeenShown());
+  // La intro se muestra una vez por negocio (ver appIntroStore).
+  const [introDone, setIntroDone] = useState(false);
+  const showIntro = !!businessId && !introDone && !appIntroStore.hasBeenShown(businessId);
 
   if (businessBootstrapError) {
     return (
@@ -53,8 +55,8 @@ export function OnboardingGate({ children }: Props) {
     return (
       <WelcomeIntro
         onComplete={() => {
-          appIntroStore.markShown();
-          setShowIntro(false);
+          appIntroStore.markShown(businessId);
+          setIntroDone(true);
         }}
       />
     );

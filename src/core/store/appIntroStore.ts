@@ -5,12 +5,10 @@ const STORAGE_KEY = "vimdy:intro:shown";
  * ---------------------------------------------------------------------------
  * FASE 6, PASO 1 — Intro cinematográfica.
  *
- * Guarda, por dispositivo/navegador (no por cuenta ni por negocio), si la
- * intro ya se mostró alguna vez. Es intencional que viva en localStorage y
- * no en Supabase: el requisito es "una sola vez por instalación", no "una
- * vez por usuario" — si dos personas distintas usan el mismo dispositivo,
- * la segunda no debe volver a verla; si la misma persona reinstala la app
- * en OTRO dispositivo, sí debe verla de nuevo ahí.
+ * Guarda, por negocio y por navegador, si la intro ya se mostró. Cada
+ * negocio nuevo la ve una vez al terminar su configuración inicial, aunque
+ * el navegador ya la haya mostrado a otro negocio. Vive en localStorage y no
+ * en Supabase: es solo una cortesía visual, no un dato del negocio.
  *
  * Falla en modo silencioso si localStorage no está disponible (navegación
  * privada estricta, etc.): en ese caso se comporta como si la intro nunca
@@ -18,17 +16,21 @@ const STORAGE_KEY = "vimdy:intro:shown";
  * más, nunca deja de aparecer del todo por un error.
  */
 class AppIntroStore {
-  hasBeenShown(): boolean {
+  private key(scope?: string | null): string {
+    return scope ? `${STORAGE_KEY}:${scope}` : STORAGE_KEY;
+  }
+
+  hasBeenShown(scope?: string | null): boolean {
     try {
-      return localStorage.getItem(STORAGE_KEY) === "1";
+      return localStorage.getItem(this.key(scope)) === "1";
     } catch {
       return false;
     }
   }
 
-  markShown(): void {
+  markShown(scope?: string | null): void {
     try {
-      localStorage.setItem(STORAGE_KEY, "1");
+      localStorage.setItem(this.key(scope), "1");
     } catch {
       /** No es crítico: en el peor caso, la intro se repite una vez más. */
     }

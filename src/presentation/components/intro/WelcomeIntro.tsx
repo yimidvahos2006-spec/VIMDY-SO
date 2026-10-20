@@ -1,30 +1,44 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Volume2, VolumeX } from "lucide-react";
 
 import { VimdyLogo } from "../ui/VimdyLogo";
 import { useTranslation } from "../../../core/i18n/useTranslation";
+import {
+  cancelSpeech,
+  createIntroSound,
+  isIntroMuted,
+  preloadVoices,
+  setIntroMuted,
+  speakIntro,
+  type IntroSound
+} from "./introAudio";
 
 /**
  * WelcomeIntro
  * ---------------------------------------------------------------------------
- * Intro de ~7s que se muestra cuando la persona terminó el registro y todos
- * los pasos del onboarding, justo antes de entrar a la app (ver
- * OnboardingGate). Frases cortas que aparecen una tras otra, una esfera de
- * luz con círculos flotando que se reúnen, y al final el logo de VIMDY.
+ * Intro de ~8s que se muestra una vez por negocio, cuando termina todos los
+ * pasos del onboarding, justo antes de entrar a la app (ver OnboardingGate).
+ * Frases cortas que aparecen una tras otra, una esfera de luz con círculos
+ * flotando que se reúnen, y al final el logo de VIMDY.
+ *
+ * Tiene sonido ambiente y una voz que lee las mismas frases (ver
+ * introAudio.ts). Arriba a la derecha hay "Omitir" y un botón para silenciar;
+ * la elección de silencio se recuerda.
  *
  * Colores oficiales: fondo #0A0A0C, azul #2563EB, celeste #38BDF8.
  * Línea de tiempo (ms): frases 400-5000, esfera + círculos se reúnen 4600,
- * logo 5200, texto de bienvenida 5900, fundido de salida 6500-7000.
+ * logo 5200, bienvenida 5700, fundido de salida 7400-7900.
  *
  * Para cambiar los textos, edita PHRASES / WELCOME más abajo.
  * Respeta prefers-reduced-motion (sin movimiento, solo fundidos).
  */
 
-const TOTAL_MS = 7000;
+const TOTAL_MS = 7900;
 const PHRASE_STARTS = [400, 1950, 3500];
 const GATHER_MS = 4600;
 const LOGO_MS = 5200;
-const WELCOME_MS = 5900;
-const FADE_OUT_MS = 6500;
+const WELCOME_MS = 5700;
+const FADE_OUT_MS = 7400;
 
 type Language = "es" | "en" | "pt";
 interface Phrase {
@@ -57,6 +71,17 @@ const WELCOME: Record<Language, string> = {
   pt: "Bem-vindo ao VIMDY"
 };
 
+/** Lo que dice la voz. "VIMDY" se escribe como se pronuncia para que lo lea bien. */
+const SPOKEN: Record<Language, { phrases: string[]; welcome: string }> = {
+  es: { phrases: ["Tu negocio.", "Tu control.", "Sin complicaciones."], welcome: "Bienvenido a Vimdi." },
+  en: { phrases: ["Your business.", "Your control.", "No complications."], welcome: "Welcome to Vimdi." },
+  pt: { phrases: ["Seu negócio.", "Seu controle.", "Sem complicações."], welcome: "Bem-vindo ao Vimdi." }
+};
+
+const SKIP_LABEL: Record<Language, string> = { es: "Omitir", en: "Skip", pt: "Pular" };
+const SOUND_ON_LABEL: Record<Language, string> = { es: "Activar sonido", en: "Turn sound on", pt: "Ativar som" };
+const SOUND_OFF_LABEL: Record<Language, string> = { es: "Silenciar", en: "Mute", pt: "Silenciar" };
+
 /** Círculos que flotan alrededor y luego se reúnen en la esfera. */
 const RINGS = [
   { x: -150, y: -120, s: 26, d: 0.0 },
@@ -87,17 +112,71 @@ export function WelcomeIntro({ onComplete }: { onComplete: () => void }) {
   const [showWelcome, setShowWelcome] = useState(false);
   const [fadeOut, setFadeOut] = useState(false);
 
-  useEffect(() => {
-    const timers: number[] = [];
-    PHRASE_STARTS.forEach((ms, i) => timers.push(window.setTimeout(() => setPhraseIndex(i), ms)));
-    timers.push(window.setTimeout(() => { setPhraseIndex(-1); setPhase("gather"); }, GATHER_MS));
-    timers.push(window.setTimeout(() => setPhase("logo"), LOGO_MS));
-    timers.push(window.setTimeout(() => setShowWelcome(true), WELCOME_MS));
-    timers.push(window.setTimeout(() => setFadeOut(true), FADE_OUT_MS));
-    timers.push(window.setTimeout(onComplete, TOTAL_MS));
-    return () => timers.forEach((id) => window.clearTimeout(id));
+  const soundRef = useRef<IntroSound | null>(null);
+  const mutedRef = useRef(isIntroMuted());
+  const [muted, setMuted] = useState(mutedRef.current);
+  const doneRef = useRef(false);
+
+  // Termina una sola vez (ya sea por tiempo o porque la persona tocó "Omitir").
+  const finish = useCallback(() => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    cancelSpeech();
+    soundRef.current?.stop();
+    onComplete();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const sound = createIntroSound();
+    soundRef.current = sound;
+    sound.setMuted(mutedRef.current);
+    preloadVoices();
+    if (!mutedRef.current) sound.start();
+
+    const spoken = SPOKEN[lang];
+    const say = (text: string) => {
+      if (!mutedRef.current) speakIntro(text, lang);
+    };
+
+    const timers: number[] = [];
+    PHRASE_STARTS.forEach((ms, i) =>
+      timers.push(
+        window.setTimeout(() => {
+          setPhraseIndex(i);
+          say(spoken.phrases[i]);
+        }, ms)
+      )
+    );
+    timers.push(window.setTimeout(() => { setPhraseIndex(-1); setPhase("gather"); sound.sweep(); }, GATHER_MS));
+    timers.push(window.setTimeout(() => { setPhase("logo"); sound.chime(); }, LOGO_MS));
+    timers.push(window.setTimeout(() => { setShowWelcome(true); say(spoken.welcome); }, WELCOME_MS));
+    timers.push(window.setTimeout(() => { setFadeOut(true); sound.fadeOut(); }, FADE_OUT_MS));
+    timers.push(window.setTimeout(finish, TOTAL_MS));
+    return () => {
+      timers.forEach((id) => window.clearTimeout(id));
+      cancelSpeech();
+      sound.stop();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function toggleMuted() {
+    const next = !mutedRef.current;
+    mutedRef.current = next;
+    setMuted(next);
+    setIntroMuted(next);
+    const sound = soundRef.current;
+    if (next) {
+      cancelSpeech();
+      sound?.setMuted(true);
+    } else {
+      // Este toque cuenta como interacción: si el navegador estaba bloqueando
+      // el sonido, desde aquí ya puede sonar.
+      sound?.setMuted(false);
+      sound?.start();
+    }
+  }
 
   const phrase = phraseIndex >= 0 ? phrases[phraseIndex] : null;
   const gathered = phase !== "words";
@@ -211,6 +290,26 @@ export function WelcomeIntro({ onComplete }: { onComplete: () => void }) {
             {phrase.after}
           </p>
         )}
+      </div>
+
+      {/* Controles: omitir y sonido */}
+      <div className="absolute right-4 top-4 z-10 flex items-center gap-2 sm:right-6 sm:top-6">
+        <button
+          type="button"
+          onClick={toggleMuted}
+          aria-label={muted ? SOUND_ON_LABEL[lang] : SOUND_OFF_LABEL[lang]}
+          title={muted ? SOUND_ON_LABEL[lang] : SOUND_OFF_LABEL[lang]}
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-vimdy-border bg-vimdy-surface/60 text-vimdy-text-secondary transition-colors hover:text-white"
+        >
+          {muted ? <VolumeX size={16} strokeWidth={1.8} /> : <Volume2 size={16} strokeWidth={1.8} />}
+        </button>
+        <button
+          type="button"
+          onClick={finish}
+          className="rounded-full border border-vimdy-border bg-vimdy-surface/60 px-4 py-2 text-vimdy-small text-vimdy-text-secondary transition-colors hover:text-white"
+        >
+          {SKIP_LABEL[lang]}
+        </button>
       </div>
 
       {/* Bienvenida final */}
