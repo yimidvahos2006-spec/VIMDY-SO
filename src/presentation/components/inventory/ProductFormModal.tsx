@@ -15,6 +15,8 @@ import { ProductionIntelligencePanel } from "./ProductionIntelligencePanel";
 import { parseDecimalInput } from "./importHelpers";
 import { UNIT_OPTIONS } from "./inventoryShared";
 import { CategoryStationEditor } from "./InventoryWidgets";
+import { NewSupplierModal } from "./NewSupplierModal";
+import { useCanUse } from "../../../hooks/useCanUse";
 
 /**
  * Formulario completo de "Nuevo producto" (Parte 1).
@@ -30,6 +32,14 @@ import { CategoryStationEditor } from "./InventoryWidgets";
  * El Stock inicial solo se pide al crear: InventoryEngine.updateProduct
  * no toca el stock a propósito (para eso están Aumentar/Disminuir stock).
  */
+const PRODUCT_TYPE_CHOICES: ReadonlyArray<{ id: ProductType; label: string; hint: string }> = [
+  { id: "inventario", label: "Para vender", hint: "Se vende y descuenta directo del stock. Ej: gaseosa, cerveza, snack empacado." },
+  { id: "cocina", label: "Preparado", hint: "Se prepara al venderlo; no maneja stock propio ni receta fija. Ej: tamal, jugo, plato del día." },
+  { id: "cocina_receta", label: "Preparado con receta", hint: "Se prepara y descuenta los ingredientes de su receta. Ej: hamburguesa, pizza." },
+  { id: "ingrediente", label: "Ingrediente", hint: "Existencias para preparar otros productos. No aparece en Caja. Ej: carne, harina, tomate." },
+  { id: "servicio", label: "Servicio", hint: "Sin stock ni preparación. Ej: domicilio, propina, cover." }
+];
+
 export function ProductFormModal({
   product,
   onClose,
@@ -57,8 +67,11 @@ export function ProductFormModal({
   // PASO 1 (rediseño formulario de producto): el campo más importante, va
   // arriba de todo. Los pasos siguientes lo usarán para decidir qué otras
   // secciones del formulario se muestran u ocultan.
+  // Producto nuevo: "Preparado" si el negocio usa Cocina; si no, "Para vender".
+  const kitchenEnabled = useCanUse("kitchen");
   const [productType, setProductType] = useState<ProductType>(() => {
-    if (product?.isIngredient) return "ingrediente";
+    if (!product) return kitchenEnabled ? "cocina" : "inventario";
+    if (product.isIngredient) return "ingrediente";
     return inferProductType(product);
   });
 
@@ -182,6 +195,7 @@ export function ProductFormModal({
   // que ya funciona mientras se implementan los pasos siguientes.
   function handleProductTypeChange(type: ProductType) {
     setProductType(type);
+    setFormError(null);
     switch (type) {
       case "cocina":
         setRequiresKitchen(true);
@@ -191,6 +205,7 @@ export function ProductFormModal({
       case "cocina_receta":
         setRequiresKitchen(true);
         setHasRecipe(true);
+        if (recipeRows.length === 0) addRecipeRow();
         break;
       case "servicio":
         setRequiresKitchen(false);
@@ -373,6 +388,7 @@ export function ProductFormModal({
 
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [showMore, setShowMore] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
   const errorBannerRef = React.useRef<HTMLDivElement>(null);
 
@@ -446,13 +462,18 @@ export function ProductFormModal({
   }
 
   async function handleSave() {
-    const priceValue = parseMoneyInput(price);
+    // Un ingrediente no se vende: su precio de venta es 0 y no se pide.
+    const isIngredientType = productType === "ingrediente";
+    const flags = resolveProductFlags(productType, productionMode);
+    const showsStock =
+      productType === "inventario" || isIngredientType || (productType === "cocina_receta" && productionMode === "BATCH");
+    const priceValue = isIngredientType && !price.trim() ? 0 : parseMoneyInput(price);
     const purchasePriceValue = purchasePrice.trim() ? parseMoneyInput(purchasePrice) : undefined;
     const taxRateValue = taxRate.trim() ? Number(taxRate) : undefined;
-    const stockValue = isEditing ? product!.stock : stock.trim() ? Number(stock) : 0;
+    const stockValue = isEditing ? product!.stock : showsStock && stock.trim() ? Number(stock) : 0;
     const minStockValue = minStock.trim() ? Number(minStock) : 0;
     const estimatedPrepMinutesValue =
-      requiresKitchen && estimatedPrepMinutes.trim() ? Number(estimatedPrepMinutes) : undefined;
+      flags.requiresKitchen && estimatedPrepMinutes.trim() ? Number(estimatedPrepMinutes) : undefined;
 
     if (!name.trim()) {
       setFormError("El nombre del producto es obligatorio.");
@@ -464,7 +485,7 @@ export function ProductFormModal({
       return;
     }
 
-    if (!price.trim() || isNaN(priceValue) || priceValue < 0) {
+    if (!isIngredientType && (!price.trim() || isNaN(priceValue) || priceValue < 0)) {
       setFormError("El precio de venta no es válido.");
       return;
     }
@@ -580,7 +601,7 @@ export function ProductFormModal({
       image,
       recipe: recipeValue,
       productionMode: hasRecipe ? productionMode : undefined,
-      requiresKitchen,
+      requiresKitchen: flags.requiresKitchen,
       estimatedPrepMinutes: estimatedPrepMinutesValue,
       printStationOverride: printStationOverride.trim() || undefined,
       sizes: sizesValue,
@@ -598,7 +619,7 @@ export function ProductFormModal({
       //                    ON_DEMAND (consume ingredientes directo), true
       //                    si BATCH (maneja stock propio de tandas).
       //  - servicio:       trackStock=false, requiresKitchen=false
-      trackStock: resolveProductFlags(productType, productionMode).trackStock,
+      trackStock: flags.trackStock,
       isIngredient: productType === "ingrediente"
     });
     } catch {
@@ -671,13 +692,20 @@ export function ProductFormModal({
     }
   }
 
+  const isKitchenType = productType === "cocina" || productType === "cocina_receta";
+  const isStockType = productType === "inventario" || productType === "ingrediente";
+  const isBatchRecipe = productType === "cocina_receta" && productionMode === "BATCH";
+  const showsStockFields = isStockType || isBatchRecipe;
+  const showSalePrice = productType !== "ingrediente";
+  const typeHint = PRODUCT_TYPE_CHOICES.find((t) => t.id === productType)?.hint ?? "";
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
       <div
-        className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-vimdy-lg border border-vimdy-border bg-vimdy-surface p-6"
+        className="w-full max-w-2xl max-h-[92vh] flex flex-col rounded-vimdy-lg border border-vimdy-border bg-vimdy-surface"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between mb-5">
+        <div className="flex items-start justify-between px-6 pt-5 pb-3 shrink-0">
           <h2 className="text-xl font-bold text-vimdy-text">
             {isEditing ? "Editar producto" : "Nuevo producto"}
           </h2>
@@ -686,6 +714,7 @@ export function ProductFormModal({
           </button>
         </div>
 
+        <div className="flex-1 overflow-y-auto px-6 pb-4">
         {(formError ?? failureMessage) && (
           <div
             ref={errorBannerRef}
@@ -697,92 +726,37 @@ export function ProductFormModal({
         )}
 
         <div className="space-y-4">
-          {/* PASO 1 (rediseño formulario de producto): Tipo de producto, el campo más
-              importante, va arriba de todo. Decide qué otras secciones se muestran
-              (eso se implementa en los pasos siguientes). */}
+          {/* Tipo: decide qué campos se muestran. */}
           <div>
-            <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Tipo de producto *</label>
-            <select
-              value={productType}
-              onChange={(e) => handleProductTypeChange(e.target.value as ProductType)}
-              className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-accent"
-            >
-              <option value="inventario">Producto para vender</option>
-              <option value="ingrediente">Ingrediente</option>
-              <option value="cocina">Producto preparado</option>
-              <option value="cocina_receta">Producto preparado con receta</option>
-              <option value="servicio">Servicio</option>
-            </select>
-            <p className="text-vimdy-text-tertiary text-xs mt-1">
-              {productType === "inventario" &&
-                "Se vende y descuenta directo del stock. Ej: gaseosa, cerveza, snack empacado."}
-              {productType === "ingrediente" &&
-                "Existencias usadas para preparar otros productos. No aparece en Caja por defecto. Ej: carne, harina, tomate."}
-              {productType === "cocina" &&
-                "Se prepara en cocina al venderlo; no maneja stock propio ni receta fija. Ej: plato del día, caldo de costilla."}
-              {productType === "cocina_receta" &&
-                "Se prepara en cocina y descuenta los ingredientes de su receta. Ej: hamburguesa, pizza."}
-              {productType === "servicio" &&
-                "No maneja stock ni preparación en cocina. Ej: domicilio, propina, cover."}
-            </p>
-          </div>
-
-          {/* Imagen */}
-          <div>
-            <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Imagen</label>
-            <div className="flex items-center gap-3">
-              <div className="w-20 h-20 rounded-vimdy-md border border-vimdy-border bg-vimdy-surface flex items-center justify-center overflow-hidden shrink-0">
-                {image ? (
-                  <img src={image} alt="Vista previa" className="w-full h-full object-cover" />
-                ) : (
-                  <ImagePlus size={22} className="text-vimdy-text-tertiary" />
-                )}
-              </div>
-              <div className="flex-1 space-y-1">
-                <div className="flex gap-2 flex-wrap">
-                  <label className="h-9 px-3 rounded-vimdy-sm border border-vimdy-border text-vimdy-text-secondary text-sm hover:bg-vimdy-surface cursor-pointer flex items-center gap-2">
-                    <ImagePlus size={14} />
-                    {processingImage ? "Procesando..." : "Subir imagen"}
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      disabled={processingImage}
-                      onChange={handleImageChange}
-                    />
-                  </label>
-                  <label className="h-9 px-3 rounded-vimdy-sm border border-vimdy-border text-vimdy-text-secondary text-sm hover:bg-vimdy-surface cursor-pointer flex items-center gap-2">
-                    Tomar foto
-                    <input
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      className="hidden"
-                      disabled={processingImage}
-                      onChange={handleImageChange}
-                    />
-                  </label>
-                  {image && (
-                    <VimdyButton
-                      type="button"
-                      onClick={() => setImage(undefined)}
-                      variant="danger"
-                      size="sm"
-                      icon={<Trash2 size={14} />}
-                    >
-                      Quitar
-                    </VimdyButton>
-                  )}
-                </div>
-                {imageError && <p className="text-vimdy-danger text-xs">{imageError}</p>}
-              </div>
+            <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">¿Qué vas a crear? *</label>
+            <div className="flex flex-wrap gap-2" role="group" aria-label="Tipo de producto">
+              {PRODUCT_TYPE_CHOICES.map((choice) => {
+                const selected = productType === choice.id;
+                return (
+                  <button
+                    key={choice.id}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => handleProductTypeChange(choice.id)}
+                    className={`h-10 px-3 rounded-vimdy-md border text-sm font-medium transition-colors ${
+                      selected
+                        ? "border-vimdy-accent bg-vimdy-accent/10 text-vimdy-accent"
+                        : "border-vimdy-border text-vimdy-text-secondary hover:text-vimdy-text hover:bg-vimdy-surface-hover"
+                    }`}
+                  >
+                    {choice.label}
+                  </button>
+                );
+              })}
             </div>
+            <p className="text-vimdy-text-tertiary text-xs mt-1.5">{typeHint}</p>
           </div>
 
+          {/* Nombre */}
           <div>
             <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Nombre *</label>
             <input
-              autoFocus
+              autoFocus={!isEditing}
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Ej: Hamburguesa Premium"
@@ -790,21 +764,8 @@ export function ProductFormModal({
             />
           </div>
 
-          {/* PASO 2 (Información General): Descripción, siempre visible, opcional. */}
-          <div>
-            <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">
-              Descripción <span className="text-vimdy-text-tertiary font-normal">(opcional)</span>
-            </label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Ej: Carne 150g, queso cheddar, lechuga, tomate y salsa especial"
-              rows={2}
-              className="w-full px-3 py-2 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent resize-none"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Categoría y precio de venta */}
+          <div className={`grid grid-cols-1 ${showSalePrice ? "sm:grid-cols-2" : ""} gap-4`}>
             <div>
               <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Categoría *</label>
               <select
@@ -875,25 +836,28 @@ export function ProductFormModal({
               {categoryError && <p className="text-vimdy-danger text-xs mt-1">{categoryError}</p>}
             </div>
 
-            <div>
-              <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Unidad</label>
-              <select
-                value={unit}
-                onChange={(e) => setUnit(e.target.value)}
-                className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-accent"
-              >
-                {UNIT_OPTIONS.map((u) => (
-                  <option key={u} value={u}>
-                    {u}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {showSalePrice && (
+              <div>
+                <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Precio de venta *</label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={price}
+                  onChange={(e) => setPrice(e.target.value)}
+                  placeholder="Ej: 15000"
+                  className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
+                />
+              </div>
+            )}
           </div>
 
+          {/* Costo, unidad, stock inicial / tiempo de preparación: solo lo que aplica al tipo. */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-              <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">{`Precio de compra (por cada ${normalizeUnit(unit)})`}</label>
+              <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">
+                {isStockType ? `Costo (por cada ${normalizeUnit(unit)})` : "Costo"}
+                {!isStockType && <span className="text-vimdy-text-tertiary font-normal"> (opcional)</span>}
+              </label>
               <input
                 type="text"
                 inputMode="decimal"
@@ -904,296 +868,73 @@ export function ProductFormModal({
               />
             </div>
 
-            <div>
-              <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Precio de venta *</label>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
-                placeholder="Ej: 15000"
-                className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
-              />
-            </div>
-
-            <div>
-              <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">IVA (%)</label>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                step="0.01"
-                value={taxRate}
-                onChange={(e) => setTaxRate(e.target.value)}
-                placeholder="Ej: 19"
-                className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
-              />
-            </div>
-          </div>
-
-          {/* PASO 2 (Información General): Estado, siempre visible. Es un
-              interruptor manual (independiente del stock) para que el
-              negocio pueda marcar "Agotado" al instante -- ej. se acabó
-              el ingrediente clave de un plato -- sin tener que tocar
-              stock ni categoría. */}
-          <div>
-            <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Estado</label>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setActive(true)}
-                aria-pressed={active}
-                className={`flex-1 h-11 rounded-vimdy-md border text-sm font-medium transition-colors ${
-                  active
-                    ? "border-vimdy-success/60 bg-vimdy-success/10 text-vimdy-success"
-                    : "border-vimdy-border text-vimdy-text-secondary hover:bg-vimdy-surface"
-                }`}
-              >
-                🟢 Disponible
-              </button>
-              <button
-                type="button"
-                onClick={() => setActive(false)}
-                aria-pressed={!active}
-                className={`flex-1 h-11 rounded-vimdy-md border text-sm font-medium transition-colors ${
-                  !active
-                    ? "border-vimdy-danger/60 bg-vimdy-danger/10 text-vimdy-danger"
-                    : "border-vimdy-border text-vimdy-text-secondary hover:bg-vimdy-surface"
-                }`}
-              >
-                🔴 Agotado
-              </button>
-            </div>
-            {!active && (
-              <p className="text-vimdy-text-tertiary text-xs mt-1">
-                Mientras esté "Agotado" no aparece en Caja para vender, sin importar el stock.
-              </p>
-            )}
-          </div>
-
-          {/* PASO 3 (rediseño formulario de producto): Stock inicial y Stock
-              mínimo solo tienen sentido para productos de tipo "Inventario"
-              -- un producto de Cocina se prepara al venderse (no se
-              descuenta stock propio) y un Servicio tampoco tiene unidades
-              físicas que contar.
-              BLOQUEANTE (auditoría Fase 2 — Panadería): excepción — un
-              producto "cocina_receta" en modo BATCH (ej. Pan) sí tiene
-              stock propio real, así que también necesita estos campos. */}
-          {productType === "inventario" || (productType === "cocina_receta" && productionMode === "BATCH") ? (
-            <>
-              <div className={`grid grid-cols-1 ${isEditing ? "" : "sm:grid-cols-2"} gap-4`}>
-                {!isEditing && (
-                  <div>
-                    <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Stock inicial</label>
-                    <input
-                      type="number"
-                      min={0}
-                      value={stock}
-                      onChange={(e) => setStock(e.target.value)}
-                      placeholder="Ej: 20"
-                      className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
-                    />
-                    {(!stock.trim() || Number(stock) === 0) && (
-                      <p className="text-vimdy-warning text-xs mt-1">
-                        Con 0 unidades el producto se va a ver como "Agotado" en Inventario y en Caja.
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                <div>
-                  <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Stock mínimo</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={minStock}
-                    onChange={(e) => setMinStock(e.target.value)}
-                    className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-accent"
-                  />
-                </div>
-              </div>
-
-              {isEditing && (
-                <p className="text-vimdy-text-tertiary text-xs -mt-2">
-                  El stock actual ({product!.stock}) se cambia desde "Aumentar stock" / "Disminuir stock", no aquí.
-                </p>
-              )}
-            </>
-          ) : (
-            <p className="text-vimdy-text-tertiary text-xs -mt-1">
-              {productType === "servicio"
-                ? "Los productos de tipo Servicio no manejan stock."
-                : "Los productos de Cocina se preparan al venderse: no manejan stock propio."}
-            </p>
-          )}
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Código de barras</label>
-              <input
-                value={barcode}
-                onChange={(e) => setBarcode(e.target.value)}
-                placeholder="Ej: 7701234567890"
-                className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
-              />
-            </div>
-
-            <div>
-              <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">SKU</label>
-              <input
-                value={sku}
-                onChange={(e) => setSku(e.target.value)}
-                placeholder="Ej: HAM-001"
-                className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Proveedor principal</label>
-              <div className="flex gap-2">
+            {isStockType && (
+              <div>
+                <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Unidad</label>
                 <select
-                  value={supplierId}
-                  onChange={(e) => {
-                    setSupplierId(e.target.value);
-                    if (e.target.value && e.target.value === alternateSupplierId) {
-                      setAlternateSupplierId("");
-                    }
-                  }}
-                  disabled={loadingOptions}
-                  className="flex-1 h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-accent"
+                  value={unit}
+                  onChange={(e) => setUnit(e.target.value)}
+                  className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
                 >
-                  <option value="">Sin proveedor</option>
-                  {suppliers.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
+                  {UNIT_OPTIONS.map((u) => (
+                    <option key={u} value={u}>
+                      {u}
                     </option>
                   ))}
                 </select>
-                <button
-                  type="button"
-                  onClick={() => setShowNewSupplierModal(true)}
-                  className="h-11 px-3 rounded-vimdy-md bg-vimdy-accent/10 border border-vimdy-border text-vimdy-accent hover:bg-vimdy-accent/20 transition"
-                  title="Nuevo proveedor"
-                >
-                  <UserPlus size={18} />
-                </button>
               </div>
-            </div>
-            <div>
-              <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">
-                Proveedor alternativo
-                <span className="text-vimdy-text-tertiary font-normal"> (opcional)</span>
-              </label>
-              <select
-                value={alternateSupplierId}
-                onChange={(e) => setAlternateSupplierId(e.target.value)}
-                disabled={loadingOptions}
-                className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-accent"
-              >
-                <option value="">Sin proveedor alternativo</option>
-                {suppliers
-                  .filter((s) => s.id !== supplierId)
-                  .map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-              </select>
-            </div>
-          </div>
+            )}
 
-          <div className="rounded-vimdy-md border border-vimdy-border bg-vimdy-background/60 p-4">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={requiresKitchen}
-                onChange={(e) => setRequiresKitchen(e.target.checked)}
-                className="w-4 h-4 rounded border-vimdy-border bg-vimdy-surface accent-orange-500"
-              />
-              <span className="flex items-center gap-1.5 text-vimdy-text text-sm font-medium">
-                <Flame size={15} className="text-vimdy-warning" />
-                Este producto necesita preparación en cocina
-              </span>
-            </label>
-            <p className="text-vimdy-text-tertiary text-xs mt-1">
-              {requiresKitchen
-                ? "Al venderlo, se enviará una comanda a Cocina (ej. una hamburguesa, un plato)."
-                : "Al venderlo, NO se enviará comanda a Cocina: se cobra y se entrega directo (ej. una gaseosa embotellada, un paquete, una playera)."}
-            </p>
+            {showsStockFields && !isEditing && (
+              <div>
+                <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Stock inicial</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={stock}
+                  onChange={(e) => setStock(e.target.value)}
+                  placeholder="Ej: 20"
+                  className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
+                />
+              </div>
+            )}
 
-            {requiresKitchen && (
-              <div className="mt-3">
+            {isKitchenType && (
+              <div>
                 <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">
-                  <span className="flex items-center gap-1.5">
-                    <Clock3 size={14} className="text-vimdy-accent" />
-                    Tiempo estimado de preparación
-                    <span className="text-vimdy-text-tertiary font-normal"> (opcional)</span>
-                  </span>
+                  Minutos de preparación
+                  <span className="text-vimdy-text-tertiary font-normal"> (opcional)</span>
                 </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    min={1}
-                    value={estimatedPrepMinutes}
-                    onChange={(e) => setEstimatedPrepMinutes(e.target.value)}
-                    placeholder="Ej: 15"
-                    className="w-32 h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-accent"
-                  />
-                  <span className="text-vimdy-text-secondary text-sm">minutos</span>
-                </div>
-                <p className="text-vimdy-text-tertiary text-xs mt-1">
-                  Sirve para que Cocina se organice y para mostrarle un tiempo estimado al
-                  mesero/cliente. Si lo dejas vacío, no se muestra ningún tiempo.
-                </p>
-
-                <div className="mt-3">
-                  <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">
-                    Estación (si es distinta a la de su categoría)
-                    <span className="text-vimdy-text-tertiary font-normal"> (opcional)</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={printStationOverride}
-                    onChange={(e) => setPrintStationOverride(e.target.value)}
-                    placeholder="Hereda la estación de su categoría"
-                    className="w-full h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
-                  />
-                  <p className="text-vimdy-text-tertiary text-xs mt-1">
-                    Casi ningún producto necesita esto: la mayoría hereda la estación de su
-                    categoría (arriba). Úsalo solo para una excepción puntual.
-                  </p>
-                </div>
+                <input
+                  type="number"
+                  min={1}
+                  value={estimatedPrepMinutes}
+                  onChange={(e) => setEstimatedPrepMinutes(e.target.value)}
+                  placeholder="Ej: 15"
+                  className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
+                />
               </div>
             )}
           </div>
 
-          {/* PASO 4 (rediseño formulario de producto): "usa ingredientes" ya
-              existía como "Este producto es elaborado (receta/BOM)" -- es el
-              mismo interruptor que pide el plan. Solo aplica a productos de
-              Cocina: un producto de Inventario o Servicio no tiene BOM. Si
-              está desmarcado, la lista de ingredientes permanece oculta
-              (eso ya lo hacía `{hasRecipe && (...)}` más abajo). */}
-          {(productType === "cocina" || productType === "cocina_receta") && (
+          {showsStockFields && !isEditing && (!stock.trim() || Number(stock) === 0) && (
+            <p className="text-vimdy-warning text-xs -mt-2">
+              Con 0 unidades el producto se va a ver como "Agotado" en Inventario y en Caja.
+            </p>
+          )}
+          {showsStockFields && isEditing && (
+            <p className="text-vimdy-text-tertiary text-xs -mt-2">
+              El stock actual ({product!.stock}) se cambia desde "Aumentar stock" / "Disminuir stock", no aquí.
+            </p>
+          )}
+
+          {/* Receta: solo para "Preparado con receta". */}
+          {productType === "cocina_receta" && (
           <div ref={recipeSectionRef} className="rounded-vimdy-md border border-vimdy-border bg-vimdy-background/60 p-4">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={hasRecipe}
-                onChange={(e) => {
-                  setHasRecipe(e.target.checked);
-                  if (e.target.checked && recipeRows.length === 0) {
-                    addRecipeRow();
-                  }
-                }}
-                className="w-4 h-4 rounded border-vimdy-border bg-vimdy-surface accent-vimdy-recipe"
-              />
-              <span className="flex items-center gap-1.5 text-vimdy-text text-sm font-medium">
-                <ChefHat size={15} className="text-vimdy-recipe" />
-                Este producto es elaborado (tiene receta / BOM)
-              </span>
-            </label>
+            <p className="flex items-center gap-1.5 text-vimdy-text text-sm font-medium">
+              <ChefHat size={15} className="text-vimdy-recipe" />
+              Receta (ingredientes)
+            </p>
             <p className="text-vimdy-text-tertiary text-xs mt-1 mb-3">
               Al vender este producto NO se descontará su propio stock: se descontará el de
               cada ingrediente, en la cantidad indicada.
@@ -1491,6 +1232,254 @@ export function ProductFormModal({
           </div>
           )}
 
+          {/* Más opciones: lo menos usado, cerrado por defecto. */}
+          <div className="rounded-vimdy-md border border-vimdy-border">
+            <button
+              type="button"
+              onClick={() => setShowMore((v) => !v)}
+              aria-expanded={showMore}
+              className="w-full flex items-center justify-between px-4 h-11 text-sm font-medium text-vimdy-text-secondary hover:text-vimdy-text"
+            >
+              <span>Más opciones</span>
+              <span aria-hidden="true">{showMore ? "▴" : "▾"}</span>
+            </button>
+
+            {showMore && (
+              <div className="space-y-4 px-4 pb-4 border-t border-vimdy-border pt-4">
+          {/* Imagen */}
+          <div>
+            <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Imagen</label>
+            <div className="flex items-center gap-3">
+              <div className="w-20 h-20 rounded-vimdy-md border border-vimdy-border bg-vimdy-surface flex items-center justify-center overflow-hidden shrink-0">
+                {image ? (
+                  <img src={image} alt="Vista previa" className="w-full h-full object-cover" />
+                ) : (
+                  <ImagePlus size={22} className="text-vimdy-text-tertiary" />
+                )}
+              </div>
+              <div className="flex-1 space-y-1">
+                <div className="flex gap-2 flex-wrap">
+                  <label className="h-9 px-3 rounded-vimdy-sm border border-vimdy-border text-vimdy-text-secondary text-sm hover:bg-vimdy-surface cursor-pointer flex items-center gap-2">
+                    <ImagePlus size={14} />
+                    {processingImage ? "Procesando..." : "Subir imagen"}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      disabled={processingImage}
+                      onChange={handleImageChange}
+                    />
+                  </label>
+                  <label className="h-9 px-3 rounded-vimdy-sm border border-vimdy-border text-vimdy-text-secondary text-sm hover:bg-vimdy-surface cursor-pointer flex items-center gap-2">
+                    Tomar foto
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      disabled={processingImage}
+                      onChange={handleImageChange}
+                    />
+                  </label>
+                  {image && (
+                    <VimdyButton
+                      type="button"
+                      onClick={() => setImage(undefined)}
+                      variant="danger"
+                      size="sm"
+                      icon={<Trash2 size={14} />}
+                    >
+                      Quitar
+                    </VimdyButton>
+                  )}
+                </div>
+                {imageError && <p className="text-vimdy-danger text-xs">{imageError}</p>}
+              </div>
+            </div>
+          </div>
+
+          {/* PASO 2 (Información General): Descripción, siempre visible, opcional. */}
+          <div>
+            <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">
+              Descripción <span className="text-vimdy-text-tertiary font-normal">(opcional)</span>
+            </label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Ej: Carne 150g, queso cheddar, lechuga, tomate y salsa especial"
+              rows={2}
+              className="w-full px-3 py-2 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent resize-none"
+            />
+          </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {showSalePrice && (
+                    <div>
+                      <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">IVA (%)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step="0.01"
+                        value={taxRate}
+                        onChange={(e) => setTaxRate(e.target.value)}
+                        placeholder="Ej: 19"
+                        className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
+                      />
+                    </div>
+                  )}
+                  {showsStockFields && (
+                    <div>
+                      <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Stock mínimo</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={minStock}
+                        onChange={(e) => setMinStock(e.target.value)}
+                        className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
+                      />
+                    </div>
+                  )}
+                  {isKitchenType && (
+                    <div className="sm:col-span-2">
+                      <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">
+                        Estación (si es distinta a la de su categoría)
+                        <span className="text-vimdy-text-tertiary font-normal"> (opcional)</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={printStationOverride}
+                        onChange={(e) => setPrintStationOverride(e.target.value)}
+                        placeholder="Hereda la estación de su categoría"
+                        className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {isStockType && (
+                  <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Código de barras</label>
+              <input
+                value={barcode}
+                onChange={(e) => setBarcode(e.target.value)}
+                placeholder="Ej: 7701234567890"
+                className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
+              />
+            </div>
+
+            <div>
+              <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">SKU</label>
+              <input
+                value={sku}
+                onChange={(e) => setSku(e.target.value)}
+                placeholder="Ej: HAM-001"
+                className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Proveedor principal</label>
+              <div className="flex gap-2">
+                <select
+                  value={supplierId}
+                  onChange={(e) => {
+                    setSupplierId(e.target.value);
+                    if (e.target.value && e.target.value === alternateSupplierId) {
+                      setAlternateSupplierId("");
+                    }
+                  }}
+                  disabled={loadingOptions}
+                  className="flex-1 h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-accent"
+                >
+                  <option value="">Sin proveedor</option>
+                  {suppliers.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setShowNewSupplierModal(true)}
+                  className="h-11 px-3 rounded-vimdy-md bg-vimdy-accent/10 border border-vimdy-border text-vimdy-accent hover:bg-vimdy-accent/20 transition"
+                  title="Nuevo proveedor"
+                >
+                  <UserPlus size={18} />
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">
+                Proveedor alternativo
+                <span className="text-vimdy-text-tertiary font-normal"> (opcional)</span>
+              </label>
+              <select
+                value={alternateSupplierId}
+                onChange={(e) => setAlternateSupplierId(e.target.value)}
+                disabled={loadingOptions}
+                className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-accent"
+              >
+                <option value="">Sin proveedor alternativo</option>
+                {suppliers
+                  .filter((s) => s.id !== supplierId)
+                  .map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+              </select>
+            </div>
+          </div>
+                  </>
+                )}
+
+          {/* PASO 2 (Información General): Estado, siempre visible. Es un
+              interruptor manual (independiente del stock) para que el
+              negocio pueda marcar "Agotado" al instante -- ej. se acabó
+              el ingrediente clave de un plato -- sin tener que tocar
+              stock ni categoría. */}
+          <div>
+            <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Estado</label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setActive(true)}
+                aria-pressed={active}
+                className={`flex-1 h-11 rounded-vimdy-md border text-sm font-medium transition-colors ${
+                  active
+                    ? "border-vimdy-success/60 bg-vimdy-success/10 text-vimdy-success"
+                    : "border-vimdy-border text-vimdy-text-secondary hover:bg-vimdy-surface"
+                }`}
+              >
+                🟢 Disponible
+              </button>
+              <button
+                type="button"
+                onClick={() => setActive(false)}
+                aria-pressed={!active}
+                className={`flex-1 h-11 rounded-vimdy-md border text-sm font-medium transition-colors ${
+                  !active
+                    ? "border-vimdy-danger/60 bg-vimdy-danger/10 text-vimdy-danger"
+                    : "border-vimdy-border text-vimdy-text-secondary hover:bg-vimdy-surface"
+                }`}
+              >
+                🔴 Agotado
+              </button>
+            </div>
+            {!active && (
+              <p className="text-vimdy-text-tertiary text-xs mt-1">
+                Mientras esté "Agotado" no aparece en Caja para vender, sin importar el stock.
+              </p>
+            )}
+          </div>
+
+                {productType !== "ingrediente" && (
+                  <>
           {/* PASO 9 (rediseño formulario de producto — Opciones): Tamaños y
               Extras configurables. Aplica a cualquier tipo de producto (una
               gaseosa puede tener tamaños, una hamburguesa puede tener
@@ -1614,9 +1603,15 @@ export function ProductFormModal({
               </p>
             )}
           </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
         </div>
 
-        <div className="flex gap-2 mt-6">
+        <div className="flex gap-2 px-6 py-4 border-t border-vimdy-border shrink-0">
           <VimdyButton
             loading={saving}
             onClick={handleSave}
@@ -1634,6 +1629,25 @@ export function ProductFormModal({
           </VimdyButton>
         </div>
       </div>
+
+      <NewSupplierModal
+        open={showNewSupplierModal}
+        creating={creatingSupplier}
+        onClose={() => setShowNewSupplierModal(false)}
+        onCreate={async (input) => {
+          setCreatingSupplier(true);
+          try {
+            const created = await container.supplierEngine.get().create(input);
+            setSuppliers((prev) => [...prev, created]);
+            setSupplierId(created.id);
+            setShowNewSupplierModal(false);
+          } catch {
+            toast.error("No se pudo crear el proveedor.");
+          } finally {
+            setCreatingSupplier(false);
+          }
+        }}
+      />
     </div>
   );
 }
