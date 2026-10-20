@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { ChevronDown, Check } from "lucide-react";
 
 import { useTranslation } from "../../core/i18n/useTranslation";
 import { Table, Product, Waiter } from "../../core/entities/Entities";
@@ -15,10 +16,46 @@ import { WaiterSelect } from "../components/waiter/WaiterSelect";
 import { TableGrid } from "../components/waiter/TableGrid";
 import { OpenTableDialog } from "../components/waiter/OpenTableDialog";
 import { TableDetailPanel } from "../components/waiter/TableDetailPanel";
+import { VoiceCommandButton } from "../components/waiter/VoiceCommandButton";
+import type { TableVoiceMerge, TableVoiceTarget } from "../../core/voice/useTableVoiceCommand";
+import { playVoiceError, playVoiceSuccess } from "../../core/voice/voiceFeedback";
+import { isMergeableTableStatus } from "../../core/utils/tableMerge";
+import { translateBusinessError } from "../../core/errors/translateBusinessError";
+import { toast } from "../../core/store/toastStore";
 import { OfflineStatusBadge } from "../components/ui/OfflineStatusBadge";
 import { usePendingTableOperationsQueue } from "../../core/offline/usePendingTableOperationsQueue";
 import { RequirePermission } from "../navigation/RequirePermission";
 import { useCanUse } from "../../hooks/useCanUse";
+
+/** "Juan Martínez Gómez" → "Juan M." (cabe en la barra del tablet). */
+function shortWaiterName(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return parts[0] ?? name;
+  return `${parts[0]} ${parts[1].charAt(0).toUpperCase()}.`;
+}
+
+/** El mesero activo sobrevive a una recarga o a una caída del Wi-Fi. */
+function activeWaiterStorageKey(businessId: string | null | undefined): string {
+  return `vimdy.meseros.activeWaiter.${businessId ?? "default"}`;
+}
+
+function readStoredWaiterId(businessId: string | null | undefined): string | null {
+  try {
+    return window.localStorage.getItem(activeWaiterStorageKey(businessId));
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredWaiterId(businessId: string | null | undefined, waiterId: string | null): void {
+  try {
+    const key = activeWaiterStorageKey(businessId);
+    if (waiterId) window.localStorage.setItem(key, waiterId);
+    else window.localStorage.removeItem(key);
+  } catch {
+    /* modo privado o almacenamiento lleno: se sigue sin recordar */
+  }
+}
 
 function MeserosContent() {
   const { t } = useTranslation();
@@ -41,8 +78,13 @@ function MeserosContent() {
   // null = todavía estamos en la pantalla de tarjetas de mesero.
   const [activeWaiter, setActiveWaiter] = useState<Waiter | null>(null);
 
+  const restoredWaiterRef = useRef(false);
+  const [waiterMenuOpen, setWaiterMenuOpen] = useState(false);
+
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<"open" | "detail" | null>(null);
+  // Comensales dictados por voz para precargar el diálogo de apertura.
+  const [voicePeopleCount, setVoicePeopleCount] = useState<number | null>(null);
 
   const reloadTables = useCallback(async () => {
     const all = await container.tableEngine.get().getAllTables();
@@ -92,6 +134,15 @@ function MeserosContent() {
         setProducts(allProducts);
         setWaiters(allWaiters);
         setAvgDurationMs(avgDuration);
+
+        // Recupera al mesero que estaba atendiendo antes de recargar (una sola vez).
+        if (!restoredWaiterRef.current) {
+          restoredWaiterRef.current = true;
+          const storedId = readStoredWaiterId(businessId);
+          const stored = storedId ? allWaiters.find(w => w.id === storedId) : undefined;
+          if (stored) setActiveWaiter(stored);
+        }
+
         setReady(true);
       })
       .catch(() => {
@@ -134,52 +185,166 @@ function MeserosContent() {
     }
   }
 
+  /** Control por voz: abre la mesa dicha con los comensales ya cargados. */
+  function handleVoiceTarget({ table, peopleCount }: TableVoiceTarget) {
+    setVoicePeopleCount(peopleCount);
+    handleSelectTable(table);
+  }
+
+  /** Control por voz: unir dos mesas con cuenta abierta (ya confirmado por el mesero). */
+  async function handleVoiceMerge({ primary, secondary, peopleCount }: TableVoiceMerge) {
+    const engine = container.tableEngine.get();
+    try {
+      // Siempre con datos frescos: el estado pudo cambiar mientras se dictaba.
+      const [freshPrimary, freshSecondary] = await Promise.all([
+        engine.getTable(primary.id),
+        engine.getTable(secondary.id)
+      ]);
+
+      if (!freshPrimary || !freshSecondary) {
+        playVoiceError();
+        toast.error("No encontré una de las mesas. Actualiza e inténtalo de nuevo.");
+        return;
+      }
+
+      const closed = [freshPrimary, freshSecondary].find(t => !isMergeableTableStatus(t.status));
+      if (closed) {
+        playVoiceError();
+        toast.warning(`${closed.name} no tiene una cuenta abierta. Ábrela primero y luego únelas.`);
+        return;
+      }
+
+      await engine.mergeTables(freshSecondary.id, freshPrimary.id);
+
+      if (peopleCount && peopleCount > 0) {
+        await engine.updateTable(freshPrimary.id, { peopleCount });
+      }
+
+      playVoiceSuccess();
+      toast.success(`${freshSecondary.name} unida a ${freshPrimary.name}.`);
+      await reloadTables();
+    } catch (err) {
+      playVoiceError();
+      toast.error(translateBusinessError(err, "No se pudieron unir las mesas."));
+      await reloadTables();
+    }
+  }
+
   function handleSelectWaiter(waiter: Waiter) {
     if (!tablesEnabled && waiterModeEnabled) {
       navigate("/caja", { state: { tab: "venta", waiterId: waiter.id } });
       return;
     }
+    writeStoredWaiterId(getCurrentBusinessId(), waiter.id);
     setActiveWaiter(waiter);
+  }
+
+  /** Cambio rápido de mesero desde la barra superior, sin pasar por las tarjetas. */
+  function handleQuickSwitch(waiter: Waiter) {
+    setWaiterMenuOpen(false);
+    if (waiter.id === activeWaiter?.id) return;
+    writeStoredWaiterId(getCurrentBusinessId(), waiter.id);
+    setActiveWaiter(waiter);
+    toast.info(`Ahora atiende ${waiter.name}.`, 2500);
   }
 
   function closeDialogs() {
     setDialog(null);
     setSelectedTableId(null);
+    setVoicePeopleCount(null);
   }
 
   /** Cierra todo y regresa a la pantalla de tarjetas para el siguiente mesero. */
   function returnToWaiterSelect() {
     closeDialogs();
+    setWaiterMenuOpen(false);
+    writeStoredWaiterId(getCurrentBusinessId(), null);
     setActiveWaiter(null);
   }
 
+  const showTableTools = ready && !loadError && tablesEnabled && (!waiterModeEnabled || activeWaiter);
+
   return (
-    <div className="p-8">
-      <div className="flex items-center justify-between mb-8">
-        <div>
+    <div className="p-4 sm:p-8">
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-6 sm:mb-8">
+        <div className="min-w-0">
           <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-5xl font-black text-white">{waiterModeEnabled ? (tablesEnabled ? t("waiter.page.title") : "Pedidos de meseros") : "Mesas"}</h1>
+            <h1 className="text-3xl sm:text-5xl font-black text-white">{waiterModeEnabled ? (tablesEnabled ? t("waiter.page.title") : "Pedidos de meseros") : "Mesas"}</h1>
             <OfflineStatusBadge
               pendingCount={pendingTableOperationsCount}
               pendingLabelSingular={t("waiter.offline.pendingSingular")}
               pendingLabelPlural={t("waiter.offline.pendingPlural", { count: pendingTableOperationsCount })}
             />
           </div>
-          <p className="text-slate-400 mt-3 text-xl">
+          <p className="text-slate-400 mt-2 sm:mt-3 text-base sm:text-xl">
             {activeWaiter
               ? t("waiter.page.subtitleWaiter", { name: activeWaiter.name })
               : tablesEnabled ? t("waiter.page.subtitleAdmin") : "Selecciona quién atiende la venta de mostrador."}
           </p>
         </div>
 
-        {activeWaiter && (
-          <button
-            onClick={returnToWaiterSelect}
-            className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-semibold transition"
-          >
-            Cambiar de mesero
-          </button>
-        )}
+        {/* Barra superior derecha: micrófono + mesero activo + cambio de mesero. */}
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          {showTableTools && dialog === null && (
+            <VoiceCommandButton tables={tables} onTarget={handleVoiceTarget} onMerge={handleVoiceMerge} />
+          )}
+
+          {activeWaiter && (
+            <div className="relative">
+              <button
+                onClick={() => setWaiterMenuOpen(open => !open)}
+                aria-haspopup="listbox"
+                aria-expanded={waiterMenuOpen}
+                className="h-12 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 text-sm font-semibold flex items-center gap-2 transition"
+              >
+                <span className="text-slate-400 font-medium">Atendiendo:</span>
+                <span className="font-bold">{shortWaiterName(activeWaiter.name)}</span>
+                <ChevronDown size={16} className={`transition ${waiterMenuOpen ? "rotate-180" : ""}`} />
+              </button>
+
+              {waiterMenuOpen && (
+                <>
+                  <button
+                    type="button"
+                    aria-label="Cerrar lista de meseros"
+                    className="fixed inset-0 z-[890] cursor-default"
+                    onClick={() => setWaiterMenuOpen(false)}
+                  />
+                  <ul
+                    role="listbox"
+                    className="absolute right-0 top-full mt-2 z-[900] w-64 max-h-[60vh] overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl py-2"
+                  >
+                    {waiters.map(waiter => {
+                      const selected = waiter.id === activeWaiter.id;
+                      return (
+                        <li key={waiter.id} role="option" aria-selected={selected}>
+                          <button
+                            onClick={() => handleQuickSwitch(waiter)}
+                            className={`w-full min-h-[48px] px-4 flex items-center justify-between gap-3 text-left text-sm transition ${
+                              selected ? "bg-cyan-500/15 text-cyan-300 font-bold" : "text-slate-200 hover:bg-slate-800"
+                            }`}
+                          >
+                            <span className="truncate">{waiter.name}</span>
+                            {selected && <Check size={16} />}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </>
+              )}
+            </div>
+          )}
+
+          {activeWaiter && (
+            <button
+              onClick={returnToWaiterSelect}
+              className="h-12 px-5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-semibold transition"
+            >
+              Cambiar de mesero
+            </button>
+          )}
+        </div>
       </div>
 
       {!ready && (
@@ -210,13 +375,14 @@ function MeserosContent() {
 
       {/* Paso 2: mesas, ya con el mesero identificado. */}
       {ready && !loadError && tablesEnabled && (!waiterModeEnabled || activeWaiter) && (
-        <TableGrid tables={tables} waiters={waiters} onSelect={handleSelectTable} avgDurationMs={avgDurationMs} />
+        <TableGrid tables={tables} waiters={waiters} onSelect={handleSelectTable} avgDurationMs={avgDurationMs} onTablesChanged={reloadTables} />
       )}
 
       {dialog === "open" && selectedTable && (
         <OpenTableDialog
           table={selectedTable}
           waiterId={activeWaiter?.id ?? null}
+          initialPeopleCount={voicePeopleCount}
           onClose={closeDialogs}
           onOpened={() => {
             setDialog("detail");
@@ -242,6 +408,7 @@ function MeserosContent() {
           }}
         />
       )}
+
     </div>
   );
 }

@@ -184,6 +184,7 @@ export class TableEngine {
       businessId,
       branchId,
       name,
+      zone: typeof input.zone === "string" && input.zone.trim() ? input.zone.trim() : undefined,
       capacity: input.capacity ?? 4,
       status: input.status ?? 'FREE',
       peopleCount: input.peopleCount ?? 0,
@@ -200,6 +201,57 @@ export class TableEngine {
 
     await this.getRepository().save(table);
     return table;
+  }
+
+  /**
+   * Una mesa solo se puede eliminar si está LIBRE y sin cuenta: nunca una con
+   * comensales, productos o pedido en curso (se perdería la venta).
+   */
+  private assertDeletable(table: Table): void {
+    const hasAccount = table.items.length > 0 || Boolean(table.orderId) || (table.peopleCount ?? 0) > 0;
+    if (table.status !== "FREE" || hasAccount) {
+      throw new Error(`TABLE_DELETE_NOT_FREE: "${table.name}" tiene una cuenta abierta`);
+    }
+  }
+
+  /** Elimina una mesa libre. Si ya no existe, no hace nada (idempotente). */
+  public async deleteTable(tableId: string): Promise<void> {
+    const repository = this.getRepository();
+    const table = await repository.findById(tableId);
+    if (!table) return;
+    this.assertDeletable(table);
+    await repository.delete(tableId);
+  }
+
+  /**
+   * Elimina una zona completa: solo si TODAS sus mesas están libres. Se valida
+   * todo antes de borrar nada, así nunca queda una zona a medias.
+   */
+  public async deleteZone(zone: string): Promise<number> {
+    const name = zone.trim().toLowerCase();
+    if (!name) throw new Error("ZONE_REQUIRED");
+
+    const repository = this.getRepository();
+    const inZone = (await repository.findAll()).filter(
+      (table) => (table.zone ?? "").trim().toLowerCase() === name
+    );
+
+    const occupied = inZone.filter((table) => {
+      try {
+        this.assertDeletable(table);
+        return false;
+      } catch {
+        return true;
+      }
+    });
+    if (occupied.length > 0) {
+      throw new Error(
+        `ZONE_HAS_OCCUPIED_TABLES: ${occupied.length} mesa(s) con cuenta abierta (${occupied.map((t) => t.name).join(", ")})`
+      );
+    }
+
+    await repository.deleteMany(inZone.map((table) => table.id));
+    return inZone.length;
   }
 
   public async getAllTables(): Promise<Table[]> {
