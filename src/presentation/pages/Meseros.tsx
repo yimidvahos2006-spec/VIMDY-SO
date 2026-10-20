@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronDown, Check } from "lucide-react";
 
@@ -19,7 +19,7 @@ import { TableDetailPanel } from "../components/waiter/TableDetailPanel";
 import { VoiceCommandButton } from "../components/waiter/VoiceCommandButton";
 import type { TableVoiceMerge, TableVoiceTarget } from "../../core/voice/useTableVoiceCommand";
 import { playVoiceError, playVoiceSuccess } from "../../core/voice/voiceFeedback";
-import { isMergeableTableStatus } from "../../core/utils/tableMerge";
+import { healOrphanLinkedTables, isMergeableTableStatus } from "../../core/utils/tableMerge";
 import { translateBusinessError } from "../../core/errors/translateBusinessError";
 import { toast } from "../../core/store/toastStore";
 import { OfflineStatusBadge } from "../components/ui/OfflineStatusBadge";
@@ -32,6 +32,12 @@ function shortWaiterName(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length <= 1) return parts[0] ?? name;
   return `${parts[0]} ${parts[1].charAt(0).toUpperCase()}.`;
+}
+
+/** "mesero 2" → "Mesero 2" (solo para mostrar; el nombre guardado no cambia). */
+function capitalizeFirst(text: string): string {
+  const trimmed = text.trim();
+  return trimmed ? trimmed.charAt(0).toUpperCase() + trimmed.slice(1) : text;
 }
 
 /** El mesero activo sobrevive a una recarga o a una caída del Wi-Fi. */
@@ -63,7 +69,9 @@ function MeserosContent() {
   const tablesEnabled = useCanUse("tables");
   const waiterModeEnabled = useCanUse("waiters");
   const [ready, setReady] = useState(false);
-  const [tables, setTables] = useState<Table[]>([]);
+  const [rawTables, setTables] = useState<Table[]>([]);
+  // Una mesa "unida" cuya principal ya no tiene cuenta se trata como libre.
+  const tables = useMemo(() => healOrphanLinkedTables(rawTables), [rawTables]);
   const [products, setProducts] = useState<Product[]>([]);
   const [waiters, setWaiters] = useState<Waiter[]>([]);
   const [avgDurationMs, setAvgDurationMs] = useState<number>(45 * 60 * 1000);
@@ -267,12 +275,22 @@ function MeserosContent() {
 
   const showTableTools = ready && !loadError && tablesEnabled && (!waiterModeEnabled || activeWaiter);
 
+  // La pantalla de elegir mesero sigue llamándose "Meseros"; en cuanto hay
+  // un mesero activo (o el negocio no usa meseros) lo que se elige son mesas.
+  const pageTitle = waiterModeEnabled
+    ? tablesEnabled
+      ? activeWaiter
+        ? t("waiter.page.tablesTitle")
+        : t("waiter.page.title")
+      : "Pedidos de meseros"
+    : "Mesas";
+
   return (
     <div className="p-4 sm:p-8">
       <div className="flex flex-wrap items-start justify-between gap-4 mb-6 sm:mb-8">
         <div className="min-w-0">
           <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-3xl sm:text-5xl font-black text-white">{waiterModeEnabled ? (tablesEnabled ? t("waiter.page.title") : "Pedidos de meseros") : "Mesas"}</h1>
+            <h1 className="text-3xl sm:text-5xl font-black text-white">{pageTitle}</h1>
             <OfflineStatusBadge
               pendingCount={pendingTableOperationsCount}
               pendingLabelSingular={t("waiter.offline.pendingSingular")}
@@ -281,7 +299,7 @@ function MeserosContent() {
           </div>
           <p className="text-slate-400 mt-2 sm:mt-3 text-base sm:text-xl">
             {activeWaiter
-              ? t("waiter.page.subtitleWaiter", { name: activeWaiter.name })
+              ? t("waiter.page.subtitleWaiter", { name: capitalizeFirst(activeWaiter.name) })
               : tablesEnabled ? t("waiter.page.subtitleAdmin") : "Selecciona quién atiende la venta de mostrador."}
           </p>
         </div>
@@ -384,6 +402,7 @@ function MeserosContent() {
       {dialog === "open" && selectedTable && (
         <OpenTableDialog
           table={selectedTable}
+          tables={tables}
           waiterId={activeWaiter?.id ?? null}
           initialPeopleCount={voicePeopleCount}
           initialMode={openInReserveMode ? "reserve" : "open"}

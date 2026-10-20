@@ -372,7 +372,8 @@ const es = {
   "kitchen.closeAria": "Cerrar",
 
   "waiter.page.title": "Meseros",
-  "waiter.page.subtitleWaiter": "{name} — elige una mesa.",
+  "waiter.page.tablesTitle": "Mesas",
+  "waiter.page.subtitleWaiter": "{name} · Elige una mesa para comenzar",
   "waiter.page.subtitleAdmin": "Administración de meseros y mesas.",
   "waiter.page.switchWaiter": "Cambiar de mesero",
   "waiter.page.loading": "Cargando…",

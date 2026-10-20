@@ -147,3 +147,47 @@ export function assessMerge(source: Table, target: Table): MergeAssessment {
 
   return { ok: true };
 }
+
+/* ===========================================================================
+   Mesas anexadas ("Unir mesa" al abrir): una mesa LIBRE se pega a la mesa
+   principal cuando llegan más personas de las que caben. La extra queda en
+   estado CLOSED ("Unida") con `mergedInto` = id de la principal, sin cuenta
+   propia: toda la cuenta vive en la principal.
+=========================================================================== */
+
+/** La mesa principal sigue sosteniendo a sus anexas mientras tenga cuenta abierta. */
+export function isLinkedAccountActive(primary: Pick<Table, "status"> | null | undefined): boolean {
+  return Boolean(primary) && primary!.status !== "FREE" && primary!.status !== "RESERVED" && primary!.status !== "CLOSED";
+}
+
+/**
+ * Anexa "huérfana": quedó marcada como unida pero su principal ya no tiene
+ * cuenta (se cobró, se canceló, se borró…). Debe tratarse como LIBRE; así
+ * ninguna mesa queda escondida para siempre por un fallo a mitad de camino.
+ */
+export function isOrphanLinkedTable(table: Table, primary: Table | null | undefined): boolean {
+  return Boolean(table.mergedInto) && table.status === "CLOSED" && !isLinkedAccountActive(primary);
+}
+
+/** ¿Se puede anexar `candidate` a `primary`? Debe estar libre, sin unir y del mismo negocio/sucursal. */
+export function canLinkAsExtra(candidate: Table, primary: Table): boolean {
+  if (candidate.id === primary.id) return false;
+  if (candidate.status !== "FREE" || candidate.mergedInto) return false;
+  if (
+    (candidate.businessId && primary.businessId && candidate.businessId !== primary.businessId) ||
+    (candidate.branchId && primary.branchId && candidate.branchId !== primary.branchId)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/** Vista de pantalla: las anexas huérfanas se muestran (y se tratan) como mesas libres. */
+export function healOrphanLinkedTables(tables: readonly Table[]): Table[] {
+  const byId = new Map(tables.map((t) => [t.id, t]));
+  return tables.map((t) =>
+    isOrphanLinkedTable(t, t.mergedInto ? byId.get(t.mergedInto) : null)
+      ? { ...t, status: "FREE" as const, mergedInto: undefined, mergedAt: undefined }
+      : t
+  );
+}
