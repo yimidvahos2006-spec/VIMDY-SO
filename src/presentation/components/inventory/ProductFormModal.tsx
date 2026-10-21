@@ -467,7 +467,20 @@ export function ProductFormModal({
     }
   }
 
+  // Envoltorio de seguridad: si algo lanza una excepción inesperada antes de
+  // llegar al guardado, el botón parecía "no hacer nada". Ahora se muestra el
+  // motivo en el aviso rojo y queda registrado en la consola.
   async function handleSave() {
+    try {
+      await handleSaveInner();
+    } catch (err: any) {
+      console.error("[ProductFormModal] Error inesperado al guardar", err);
+      setSaving(false);
+      setFormError(`Error inesperado al guardar: ${err?.message ?? String(err)}`);
+    }
+  }
+
+  async function handleSaveInner() {
     // Un ingrediente no se vende: su precio de venta es 0 y no se pide.
     const isIngredientType = productType === "ingrediente";
     const flags = resolveProductFlags(productType, productionMode);
@@ -502,13 +515,19 @@ export function ProductFormModal({
       const ok = window.confirm(
         `El precio de venta es solo $${priceValue.toLocaleString("es-CO")} pesos. ¿Seguro que es correcto?\n\nSi quisiste escribir ${(priceValue * 1000).toLocaleString("es-CO")}, toca Cancelar y corrígelo.`
       );
-      if (!ok) return;
+      if (!ok) {
+        setFormError("Revisa el precio de venta: se guarda solo si confirmas que es correcto.");
+        return;
+      }
     }
     if (isPesos && purchasePriceValue !== undefined && !isNaN(purchasePriceValue) && purchasePriceValue > 0 && purchasePriceValue < 100) {
       const okCost = window.confirm(
         `El precio de compra es solo $${purchasePriceValue.toLocaleString("es-CO")} pesos. ¿Seguro que es correcto?`
       );
-      if (!okCost) return;
+      if (!okCost) {
+        setFormError("Revisa el costo: se guarda solo si confirmas que es correcto.");
+        return;
+      }
     }
 
     if (
@@ -528,7 +547,12 @@ export function ProductFormModal({
           `Si lo preparas tú con ingredientes, toca Cancelar y elige "Con receta" o "Se prepara, sin receta".\n\n` +
           `Si lo compras ya hecho, toca Aceptar y agrega el stock después con "Aumentar stock".`
       );
-      if (!okEmptyStock) return;
+      if (!okEmptyStock) {
+        setFormError(
+          'Este producto tiene 0 unidades. Escribe el "Stock inicial", o cambia el tipo a "Con receta" / "Se prepara, sin receta".'
+        );
+        return;
+      }
     }
 
     let recipeValue: RecipeItem[] | undefined;
@@ -1338,7 +1362,11 @@ export function ProductFormModal({
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Ej: Carne 150g, queso cheddar, lechuga, tomate y salsa especial"
+              placeholder={
+                productType === "inventario" || productType === "ingrediente"
+                  ? "Ej: Botella 400 ml, sabor manzana"
+                  : "Ej: Carne 150g, queso cheddar, lechuga, tomate y salsa especial"
+              }
               rows={2}
               className="w-full px-3 py-2 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent resize-none"
             />

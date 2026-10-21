@@ -271,6 +271,7 @@ export function useInventory() {
       vimdyCore.emit("inventory");
       return true;
     } catch (e: any) {
+      console.error("[useInventory] createProduct falló", e);
       const messages: Record<string, string> = {
         NOMBRE_REQUERIDO: "El nombre del producto es obligatorio.",
         NOMBRE_DUPLICADO: "Ya existe un producto con ese nombre. Usa otro nombre o edita el actual.",
