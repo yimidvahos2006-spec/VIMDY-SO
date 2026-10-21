@@ -1,7 +1,7 @@
 import type { IRepository } from "../../infrastructure/di/repositories/IRepository";
 import type { Table, SaleItem, Product, Order, Sale, KitchenOrder, OrderPriority } from "../entities/Entities";
 import { isOptimisticLockError } from "../errors/OptimisticLockError";
-import { CartEngine } from "./CartEngine";
+import { CartEngine, normalizeLineNote, type CartLineRef } from "./CartEngine";
 import type { KitchenEngine } from "./KitchenEngine";
 import type { SalesEngine } from "./SalesEngine";
 import { OrderEngine } from "./OrderEngine";
@@ -37,6 +37,14 @@ async function deterministicUuid(seed: string): Promise<string> {
     hex.slice(16, 20),
     hex.slice(20, 32)
   ].join("-");
+}
+
+/**
+ * Clave de una línea para saber cuánto de ella ya salió a cocina: producto +
+ * nota. Así "hamburguesa" y "hamburguesa sin cebolla" se cuentan por separado.
+ */
+function kitchenLineKey(productId: string, note?: string | null): string {
+  return `${productId}\u0000${normalizeLineNote(note)}`;
 }
 
 function kitchenFingerprint(
@@ -130,12 +138,12 @@ export class TableEngine {
   private async mutateItems(
     tableId: string,
     mutate: (cart: CartEngine) => void,
-    precheck?: (table: Table) => void
+    precheck?: (table: Table) => void | Promise<void>
   ): Promise<Table> {
     for (let attempt = 1; attempt <= TableEngine.MAX_CONFLICT_RETRIES; attempt++) {
       const table = await this.getTable(tableId);
       if (!table) throw new Error("TABLE_NOT_FOUND");
-      precheck?.(table);
+      await precheck?.(table);
 
       const cart = new CartEngine();
       cart.loadItems(table.items);
@@ -775,20 +783,66 @@ export class TableEngine {
       requiresKitchen: product.requiresKitchen ?? true,
     };
 
+    // En mesas, el mismo producto con OTRA nota va en una línea aparte: así
+    // "sin cebolla" llega solo a ese plato y cocina recibe cada variante.
     return this.mutateItems(table.id, (cart) => cart.addItem({
       id: item.productId,
       name: product.name ?? "Producto",
       price: item.price,
       requiresKitchen: item.requiresKitchen
-    } as Product, item.quantity, item.note));
+    } as Product, item.quantity, item.note, { splitByNote: true }));
   }
 
-  public async removeItem(tableId: string, productId: string): Promise<any> {
-    return this.mutateItems(tableId, (cart) => cart.removeItem(productId));
+  /** Sin `line` quita todas las líneas del producto; con `line` solo la de esa nota. */
+  public async removeItem(tableId: string, productId: string, line?: CartLineRef): Promise<any> {
+    return this.mutateItems(tableId, (cart) => cart.removeItem(productId, line));
   }
 
-  public async updateItemQuantity(tableId: string, productId: string, quantity: number): Promise<any> {
-    return this.mutateItems(tableId, (cart) => cart.updateQuantity(productId, quantity), (table) => this.assertTableAcceptsItems(table));
+  public async updateItemQuantity(tableId: string, productId: string, quantity: number, line?: CartLineRef): Promise<any> {
+    return this.mutateItems(tableId, (cart) => cart.updateQuantity(productId, quantity, line), (table) => this.assertTableAcceptsItems(table));
+  }
+
+  /**
+   * Cambia la nota de un producto de la cuenta (o solo de `units` unidades).
+   *
+   * Protección: si esas unidades YA se enviaron a cocina, la nota no se puede
+   * cambiar, porque cocina no se enteraría y prepararía el plato sin ella.
+   * Para pedir algo distinto hay que agregar el producto de nuevo con la nota
+   * (queda como línea nueva y sale en una comanda nueva).
+   */
+  public async updateItemNote(
+    tableId: string,
+    productId: string,
+    fromNote: string | null | undefined,
+    toNote: string | null | undefined,
+    units?: number
+  ): Promise<any> {
+    return this.mutateItems(
+      tableId,
+      (cart) => cart.setLineNote(productId, fromNote, toNote, units),
+      async (table) => {
+        this.assertTableAcceptsItems(table);
+        if (normalizeLineNote(fromNote) === normalizeLineNote(toNote)) return;
+        const line = table.items.find(
+          (candidate) =>
+            candidate.productId === productId &&
+            normalizeLineNote(candidate.note) === normalizeLineNote(fromNote)
+        );
+        if (!line || line.requiresKitchen !== true) return;
+
+        const sent = (await this.getKitchenSentQuantities(table)).get(
+          kitchenLineKey(line.productId, line.note)
+        ) ?? 0;
+        // Solo molesta si la nota tocaría unidades ya enviadas.
+        const touched = units !== undefined && units >= 1 && units < line.quantity ? units : line.quantity;
+        const untouchedUnsent = line.quantity - sent;
+        if (sent > 0 && touched > untouchedUnsent) {
+          throw new Error(
+            "TABLE_NOTE_ALREADY_SENT: esas unidades ya salieron a cocina; agrega el producto de nuevo con la nota"
+          );
+        }
+      }
+    );
   }
 
   public async updateTable(tableId: string, patch: Record<string, any>): Promise<any> {
@@ -1321,6 +1375,55 @@ export class TableEngine {
     }
   }
 
+  /**
+   * Comandas de la cuenta ACTIVA de la mesa. Solo la sesión/orden activa
+   * cuenta: así no se suman comandas de una visita anterior a la misma mesa.
+   * Los registros legacy sin session id se aceptan solo si se crearon después
+   * de openedAt y pertenecen al orderId activo.
+   */
+  private async getKitchenSessionOrders(table: Table): Promise<KitchenOrder[]> {
+    if (!this.kitchen) return [];
+
+    const activeOrderId = table.orderId;
+    const sessionIdentity = table.openOperationId ?? activeOrderId ?? table.id;
+    const previousOrders = await this.kitchen.getByTableId(table.id);
+
+    return previousOrders.filter((previous) => {
+      const extended = previous as KitchenOrder & { tableSessionId?: string };
+
+      if (activeOrderId && previous.orderId) {
+        return previous.orderId === activeOrderId;
+      }
+
+      if (extended.tableSessionId) {
+        return extended.tableSessionId === sessionIdentity;
+      }
+
+      if (table.openedAt) {
+        return new Date(previous.createdAt).getTime() >= new Date(table.openedAt).getTime();
+      }
+
+      return false;
+    });
+  }
+
+  /** Unidades ya enviadas a cocina por línea (producto + nota); ignora comandas canceladas. */
+  private sumSentQuantities(sessionOrders: readonly KitchenOrder[]): Map<string, number> {
+    const sent = new Map<string, number>();
+    for (const previous of sessionOrders) {
+      if (previous.status === "CANCELADO") continue;
+      for (const item of previous.items) {
+        const key = kitchenLineKey(item.productId, item.note);
+        sent.set(key, (sent.get(key) ?? 0) + item.quantity);
+      }
+    }
+    return sent;
+  }
+
+  private async getKitchenSentQuantities(table: Table): Promise<Map<string, number>> {
+    return this.sumSentQuantities(await this.getKitchenSessionOrders(table));
+  }
+
   public async sendToKitchen(
     tableId: string,
     priority: OrderPriority = "NORMAL"
@@ -1337,51 +1440,13 @@ export class TableEngine {
     const sessionIdentity =
       table.openOperationId ?? activeOrderId ?? table.id;
 
-    const previousOrders = await this.kitchen.getByTableId(table.id);
-
-    // SOLAMENTE la sesión/orden activa participa en el cálculo de lo ya
-    // enviado. Esto elimina el bug de sumar comandas de una visita anterior
-    // a la misma mesa. Los registros legacy sin session id se aceptan solo
-    // cuando fueron creados después de openedAt y pertenecen al orderId activo.
-    const sessionOrders = previousOrders.filter((previous) => {
-      const extended = previous as KitchenOrder & {
-        tableSessionId?: string;
-      };
-
-      if (activeOrderId && previous.orderId) {
-        return previous.orderId === activeOrderId;
-      }
-
-      if (extended.tableSessionId) {
-        return extended.tableSessionId === sessionIdentity;
-      }
-
-      if (table.openedAt) {
-        return (
-          new Date(previous.createdAt).getTime() >=
-          new Date(table.openedAt).getTime()
-        );
-      }
-
-      return false;
-    });
-
-    const sentQuantities = new Map<string, number>();
-
-    for (const previous of sessionOrders) {
-      if (previous.status === "CANCELADO") continue;
-      for (const item of previous.items) {
-        sentQuantities.set(
-          item.productId,
-          (sentQuantities.get(item.productId) ?? 0) + item.quantity
-        );
-      }
-    }
+    const sessionOrders = await this.getKitchenSessionOrders(table);
+    const sentQuantities = this.sumSentQuantities(sessionOrders);
 
     const kitchenItems = table.items
       .filter((item) => item.requiresKitchen === true)
       .map((item) => {
-        const sent = sentQuantities.get(item.productId) ?? 0;
+        const sent = sentQuantities.get(kitchenLineKey(item.productId, item.note)) ?? 0;
         if (item.quantity <= sent) return null;
         return {
           ...item,
