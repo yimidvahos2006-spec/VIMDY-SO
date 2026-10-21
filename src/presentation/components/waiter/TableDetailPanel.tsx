@@ -47,7 +47,7 @@ export function TableDetailPanel({
   const [showCloseDialog, setShowCloseDialog] = useState(false);
   const [priority, setPriority] = useState<OrderPriority>("NORMAL");
   const [voiceSuccess, setVoiceSuccess] = useState<string | null>(null);
-  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingLineKey, setEditingLineKey] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [mobileTab, setMobileTab] = useState<"order" | "products">("products");
   const [showActions, setShowActions] = useState(false);
@@ -172,41 +172,43 @@ export function TableDetailPanel({
     );
   }
 
-  function decreaseItem(productId: string, currentQty: number) {
+  // Un mismo producto puede tener varias líneas (una por nota): se identifica por producto + nota.
+  const lineKey = (item: Table["items"][number]) => `${item.productId}::${(item.note ?? "").trim()}`;
+
+  function decreaseItem(item: Table["items"][number]) {
     run(() =>
-      container.tableEngine.get().updateItemQuantity(table.id, productId, currentQty - 1)
+      container.tableEngine.get().updateItemQuantity(table.id, item.productId, item.quantity - 1, { note: item.note })
     );
   }
 
-  function increaseItem(productId: string, currentQty: number) {
+  function increaseItem(item: Table["items"][number]) {
     run(() =>
-      container.tableEngine.get().updateItemQuantity(table.id, productId, currentQty + 1)
+      container.tableEngine.get().updateItemQuantity(table.id, item.productId, item.quantity + 1, { note: item.note })
     );
   }
 
-  function removeItem(productId: string) {
-    run(() => container.tableEngine.get().removeItem(table.id, productId));
+  function removeItem(item: Table["items"][number]) {
+    run(() => container.tableEngine.get().removeItem(table.id, item.productId, { note: item.note }));
   }
 
-  function startEditNote(itemId: string, currentNote?: string) {
-    setEditingNoteId(itemId);
-    setNoteDraft(currentNote ?? "");
+  function startEditNote(item: Table["items"][number]) {
+    setEditingLineKey(lineKey(item));
+    setNoteDraft(item.note ?? "");
   }
 
-  function saveNote(itemId: string) {
-    const trimmed = noteDraft.trim();
-    run(async () => {
-      const currentTable = await container.tableEngine.get().getTable(table.id);
-      if (!currentTable) throw new Error("TABLE_NOT_FOUND");
-      const items = currentTable.items.map((item: any) =>
-        item.productId === itemId
-          ? { ...item, note: trimmed || undefined }
-          : item
-      );
-      await container.tableEngine.get().updateTable(currentTable.id, { items });
-    });
-    setEditingNoteId(null);
+  /**
+   * Guarda la nota de una línea. `units` permite ponerla solo a una parte de
+   * las unidades (2 hamburguesas, una "sin cebolla"). Si esas unidades ya
+   * salieron a cocina, el motor lo rechaza y explica qué hacer.
+   */
+  function saveNote(item: Table["items"][number], units?: number) {
+    const next = noteDraft.trim();
+    setEditingLineKey(null);
     setNoteDraft("");
+    if (next === (item.note ?? "").trim()) return;
+    run(() =>
+      container.tableEngine.get().updateItemNote(table.id, item.productId, item.note, next, units)
+    );
   }
 
   async function sendToKitchen() {
@@ -304,8 +306,11 @@ export function TableDetailPanel({
    * consumo se usa el flujo de "Cancelar pedido" (pide motivo, avisa a cocina
    * y bloquea si ya se entregó comida), nunca se borra una cuenta en silencio.
    */
+  const canRelease = table.status !== "FREE";
+
   function handleReleaseClick() {
     setShowActions(false);
+    if (!canRelease) return;
     if (hasItems) setShowCancelConfirm(true);
     else setShowReleaseConfirm(true);
   }
@@ -342,33 +347,64 @@ export function TableDetailPanel({
   /** Línea del pedido actual: miniatura, nota, precio y cantidad. */
   function renderOrderItem(item: Table["items"][number]) {
     const product = productMap.get(item.productId);
-    const isEditing = editingNoteId === item.productId;
+    const isEditing = editingLineKey === lineKey(item);
+    const canSplitUnits = item.quantity > 1 && Number.isInteger(item.quantity);
     const name = product?.name ?? item.productId;
     return (
-      <div key={item.productId} className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3 flex gap-3">
+      <div key={lineKey(item)} className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3 flex gap-3">
         <ProductThumb image={product?.image} className="w-14 h-14 shrink-0 rounded-xl text-xl" />
         <div className="flex-1 min-w-0">
           <div className="flex justify-between items-start gap-2">
             <div className="min-w-0 flex-1">
               <p className="text-white font-semibold leading-tight">{name}</p>
               {isEditing ? (
-                <input
-                  autoFocus
-                  value={noteDraft}
-                  onChange={(e) => setNoteDraft(e.target.value)}
-                  onBlur={() => saveNote(item.productId)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") saveNote(item.productId);
-                    if (e.key === "Escape") setEditingNoteId(null);
-                  }}
-                  placeholder="Ej: sin arroz, al punto..."
-                  className="mt-1 w-full h-10 rounded-lg bg-slate-800 border border-slate-700 text-white text-sm px-2 outline-none focus:border-cyan-500"
-                />
+                <div className="mt-1">
+                  <input
+                    autoFocus
+                    value={noteDraft}
+                    onChange={(e) => setNoteDraft(e.target.value)}
+                    onBlur={() => { if (!canSplitUnits) saveNote(item); }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") saveNote(item);
+                      if (e.key === "Escape") setEditingLineKey(null);
+                    }}
+                    placeholder="Ej: sin cebolla, al punto..."
+                    className="w-full h-10 rounded-lg bg-slate-800 border border-slate-700 text-white text-sm px-2 outline-none focus:border-cyan-500"
+                  />
+                  {canSplitUnits && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => saveNote(item, 1)}
+                        className="h-9 px-3 rounded-lg bg-cyan-500 text-slate-950 text-xs font-bold"
+                      >
+                        Solo a 1 unidad
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => saveNote(item)}
+                        className="h-9 px-3 rounded-lg bg-slate-700 text-white text-xs font-bold"
+                      >
+                        A las {item.quantity}
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => setEditingLineKey(null)}
+                        className="h-9 px-3 rounded-lg text-slate-400 text-xs font-semibold"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  )}
+                </div>
               ) : item.note ? (
                 <p className="text-amber-400 text-xs mt-1">{item.note}</p>
               ) : (
                 <button
-                  onClick={() => startEditNote(item.productId)}
+                  onClick={() => startEditNote(item)}
                   className="text-slate-500 hover:text-slate-300 text-xs mt-1 flex items-center gap-1"
                 >
                   <MessageSquarePlus size={12} />
@@ -379,7 +415,7 @@ export function TableDetailPanel({
             </div>
             <button
               disabled={busy}
-              onClick={() => removeItem(item.productId)}
+              onClick={() => removeItem(item)}
               aria-label={`Quitar ${name}`}
               className="p-2 -m-1 text-red-400 hover:text-red-300 disabled:opacity-40"
             >
@@ -389,7 +425,7 @@ export function TableDetailPanel({
           <div className="flex items-center gap-3 mt-2">
             <button
               disabled={busy}
-              onClick={() => decreaseItem(item.productId, item.quantity)}
+              onClick={() => decreaseItem(item)}
               aria-label={`Menos ${name}`}
               className="w-10 h-10 rounded-lg bg-slate-700 hover:bg-slate-600 flex items-center justify-center disabled:opacity-40 active:scale-95 transition"
             >
@@ -398,7 +434,7 @@ export function TableDetailPanel({
             <span className="text-white font-bold text-lg w-8 text-center">{item.quantity}</span>
             <button
               disabled={busy}
-              onClick={() => increaseItem(item.productId, item.quantity)}
+              onClick={() => increaseItem(item)}
               aria-label={`Más ${name}`}
               className="w-10 h-10 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center justify-center disabled:opacity-40 active:scale-95 transition"
             >
@@ -449,16 +485,6 @@ export function TableDetailPanel({
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              disabled={busy}
-              onClick={handleReleaseClick}
-              aria-label="Liberar mesa"
-              className="h-11 w-11 sm:w-auto sm:px-4 justify-center rounded-xl bg-red-500/10 border border-red-500/50 hover:bg-red-500/20 active:scale-95 disabled:opacity-40 text-red-300 text-sm font-bold flex items-center gap-2 whitespace-nowrap transition"
-            >
-              <DoorOpen size={18} aria-hidden="true" />
-              <span className="hidden sm:inline">Liberar mesa</span>
-            </button>
             <div className="relative">
               <button
                 onClick={() => setShowActions(!showActions)}
@@ -668,6 +694,27 @@ export function TableDetailPanel({
           </div>
         </div>
 
+        {/* Liberar mesa: fila propia, encima de las acciones principales, separada para no pulsarla por error */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4 px-4 sm:px-6 pt-3 pb-3 border-t border-slate-700 bg-slate-950/40 flex-shrink-0">
+          <p className="text-slate-400 text-xs sm:text-sm leading-snug">
+            {!canRelease
+              ? "Esta mesa ya está libre."
+              : hasItems
+                ? "Esta mesa tiene consumo: para liberarla se cancela el pedido (pide motivo y avisa a cocina)."
+                : "Mesa sin consumo: se libera de inmediato y queda disponible."}
+          </p>
+          <button
+            type="button"
+            disabled={busy || !canRelease}
+            onClick={handleReleaseClick}
+            aria-label={`Liberar mesa ${table.name}`}
+            className="w-full sm:w-auto sm:min-w-[220px] h-12 px-6 rounded-xl border-2 border-red-500/60 bg-red-500/10 hover:bg-red-500/20 active:scale-[0.98] disabled:opacity-40 disabled:hover:bg-red-500/10 text-red-200 text-base font-bold flex items-center justify-center gap-2 whitespace-nowrap transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-red-500/30"
+          >
+            <DoorOpen size={20} aria-hidden="true" />
+            Liberar mesa
+          </button>
+        </div>
+
         {/* Acciones principales */}
         <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3 px-4 sm:px-6 py-3 sm:py-4 border-t border-slate-700 flex-shrink-0">
           <div className="flex items-center gap-3">
@@ -801,6 +848,7 @@ export function TableDetailPanel({
 
       {showReleaseConfirm && (
         <ConfirmReleaseDialog
+          tableName={table.name}
           linkedNames={tables.filter(t => t.mergedInto === table.id).map(t => t.name)}
           onConfirm={handleRelease}
           onCancel={() => setShowReleaseConfirm(false)}
@@ -998,13 +1046,13 @@ function TransferTableDialog({ tables, currentTable, onSelect, onClose }: MoveTa
   );
 }
 
-function ConfirmReleaseDialog({ onConfirm, onCancel, linkedNames = [] }: { onConfirm: () => void; onCancel: () => void; linkedNames?: string[] }) {
+function ConfirmReleaseDialog({ onConfirm, onCancel, tableName, linkedNames = [] }: { onConfirm: () => void; onCancel: () => void; tableName: string; linkedNames?: string[] }) {
   return (
     <div className="fixed inset-0 z-[1003] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-vimdy-surface p-6 shadow-2xl">
-        <h3 className="text-white text-lg font-bold mb-2">¿Liberar esta mesa?</h3>
+      <div role="alertdialog" aria-modal="true" className="w-full max-w-sm rounded-2xl border border-slate-700 bg-vimdy-surface p-6 shadow-2xl">
+        <h3 className="text-white text-lg font-bold mb-2">¿Liberar {tableName}?</h3>
         <p className="text-slate-400 text-sm mb-6">
-          Se eliminarán las personas registradas y la mesa volverá a estar disponible.
+          Se liberará <span className="text-white font-semibold">{tableName}</span>: se quitan las personas registradas y la mesa volverá a estar disponible. No se borra ninguna venta ni historial.
           {linkedNames.length > 0 && ` También quedan libres las mesas unidas: ${linkedNames.join(", ")}.`}
         </p>
         <div className="flex justify-end gap-2">
@@ -1035,10 +1083,10 @@ function ConfirmCancelOrderDialog({
       <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-vimdy-surface p-6 shadow-2xl">
         <div className="flex items-center gap-2 mb-2">
           <AlertTriangle size={20} className="text-red-400" />
-          <h3 className="text-white text-lg font-bold">¿Cancelar este pedido?</h3>
+          <h3 className="text-white text-lg font-bold">¿Liberar {table.name} y cancelar su pedido?</h3>
         </div>
         <p className="text-slate-400 text-sm mb-4">
-          Se cancelan {units} {units === 1 ? "producto" : "productos"} ({money(table.total)}), cocina deja de preparar lo pendiente y {table.name} queda libre.
+          {table.name} tiene consumo sin cobrar, por eso liberarla cancela el pedido (queda registrado con el motivo). Se cancelan {units} {units === 1 ? "producto" : "productos"} ({money(table.total)}), cocina deja de preparar lo pendiente y {table.name} queda libre.
         </p>
         <label className="text-slate-400 text-xs uppercase tracking-wide">Motivo</label>
         <div className="grid grid-cols-2 gap-2 mt-2 mb-6">
