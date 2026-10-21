@@ -1,6 +1,9 @@
-import { StockStatus } from "../../../core/store/useInventory";
+import type { StockStatus, useInventory } from "../../../core/store/useInventory";
 import { formatMoney } from "../../../core/utils/formatMoney";
 import { companyConfigStore } from "../../../core/store/companyConfigStore";
+
+/** Estado completo de Inventario (lo crea InventoryPage una sola vez y lo comparten los paneles). */
+export type InventoryState = ReturnType<typeof useInventory>;
 
 export const UNIT_OPTIONS = ["unidad", "kg", "g", "litro", "ml", "libra", "servicio", "paquete", "caja"];
 

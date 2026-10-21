@@ -4,8 +4,8 @@ import { toast } from "../../../core/store/toastStore";
 import { ConfirmModal } from "../ui/ConfirmModal";
 import { VimdyButton } from "../ui/VimdyButton";
 import { SkeletonCards, SkeletonRows, Skeleton } from "../ui/Skeleton";
-import { Search, Package, AlertTriangle, PackageX, DollarSign, X, Plus, Trash2, Pencil, Sparkles, Copy, Flame, RefreshCw, Tag } from "lucide-react";
-import { useInventory, getStockStatus, StockStatus } from "../../../core/store/useInventory";
+import { Search, X, Plus, Trash2, Pencil, Sparkles, Copy, Flame, RefreshCw, Tag } from "lucide-react";
+import { getStockStatus, StockStatus } from "../../../core/store/useInventory";
 import { useCategories } from "../../../hooks/useCategories";
 import { OfflineStatusBadge } from "../ui/OfflineStatusBadge";
 import { usePendingInventoryAdjustmentsQueue } from "../../../core/offline/usePendingInventoryAdjustmentsQueue";
@@ -15,8 +15,10 @@ import { container } from "../../../infrastructure/di/CompositionRoot";
 import { useNavigate } from "react-router-dom";
 import { getBranches, getCurrentBranchId, getCurrentBusinessId } from "../../../infrastructure/supabase/supabaseClient";
 import { STATUS_CLASS, STATUS_LABEL, SortKey, money } from "./inventoryShared";
+import type { InventoryState } from "./inventoryShared";
 import { EmptyProductsState } from "./EmptyProductsState";
-import { AlertsPanel, CategoryChip, KpiCard, RecentMovementsPanel, SortableHeader } from "./InventoryWidgets";
+import { getProductProfitView } from "./productProfit";
+import { AlertsPanel, CategoryChip, RecentMovementsPanel, SortableHeader } from "./InventoryWidgets";
 
 // Las ventanas (modales) pesan mucho y solo se abren al hacer clic: se descargan
 // aparte. Después del primer pintado se precargan en segundo plano para que al
@@ -32,7 +34,7 @@ const AiImportModal = lazy(loadAiImportModal);
 const ProduceBatchModal = lazy(loadProduceBatchModal);
 const CategoriesManagerModal = lazy(loadCategoriesManagerModal);
 
-export function InventoryDashboard() {
+export function InventoryDashboard({ inventory }: { inventory: InventoryState }) {
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -57,7 +59,6 @@ export function InventoryDashboard() {
     products: allProducts,
     sellableProducts: products,
     recentMovements,
-    kpis,
     loading,
     error,
     getHistory,
@@ -69,7 +70,7 @@ export function InventoryDashboard() {
     deleteProduct,
     reactivateProduct,
     productsWithCost
-  } = useInventory();
+  } = inventory;
 
   const { productCategories: categories } = useCategories();
 
@@ -281,6 +282,13 @@ export function InventoryDashboard() {
     categoryNameById
   ]);
 
+  // "Te cuesta / Ganas" de cada fila, calculado una sola vez por cambio de lista
+  // (no en cada tecla que se escribe en el buscador).
+  const profitById = useMemo(() => {
+    const engine = container.recipeEngine.get();
+    return new Map(filtered.map((p) => [p.id, getProductProfitView(p, () => engine.getProfitability(p, productMap))]));
+  }, [filtered, productMap]);
+
   // Solo mostramos como chip las categorías que de verdad tienen productos,
   // para no llenar la barra de filtros con categorías vacías.
   const categoryChips = useMemo(() => {
@@ -387,10 +395,10 @@ export function InventoryDashboard() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-vimdy-accent/20 text-vimdy-accent">Para vender</span>
+              <span className="text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-vimdy-accent/20 text-vimdy-accent">Lo que vendes</span>
               <span className="text-xs text-vimdy-text-tertiary">Aparecen en Caja</span>
             </div>
-            <h1 className="text-2xl font-bold text-vimdy-text mt-1">Productos de venta</h1>
+            <h1 className="text-2xl font-bold text-vimdy-text mt-1">Productos</h1>
             <p className="text-vimdy-text-secondary text-sm mt-1">
               Platos, bebidas y servicios del menú. Los que llevan receta descuentan sus insumos al venderse.
             </p>
@@ -541,38 +549,6 @@ export function InventoryDashboard() {
         <EmptyProductsState onCreate={() => setShowNewProduct(true)} />
       ) : (
         <>
-      {/* KPIs */}
-      <div className="grid grid-cols-2 gap-3">
-        <KpiCard
-          icon={<Package size={20} className="text-vimdy-accent" />}
-          label="Total de productos"
-          value={kpis.totalProducts.toString()}
-        />
-        <KpiCard
-          icon={<AlertTriangle size={20} className="text-vimdy-warning" />}
-          label="Stock bajo"
-          value={kpis.lowStockCount.toString()}
-          highlight={kpis.lowStockCount > 0 ? "yellow" : undefined}
-        />
-        <KpiCard
-          icon={<PackageX size={20} className="text-vimdy-danger" />}
-          label="Agotados"
-          value={kpis.outOfStockCount.toString()}
-          highlight={kpis.outOfStockCount > 0 ? "red" : undefined}
-        />
-        <KpiCard
-          icon={<DollarSign size={20} className="text-vimdy-success" />}
-          label="Valor del inventario"
-          value={
-            kpis.valuationStatus === "COMPLETE"
-              ? money(kpis.totalValue)
-              : kpis.valuationStatus === "INCOMPLETE"
-                ? `Costo incompleto (${kpis.unvaluedProducts})`
-                : "Sin stock controlado"
-          }
-        />
-      </div>
-
       <div className="grid grid-cols-1 gap-6">
         {/* Tabla de productos */}
         <div className="rounded-vimdy-lg border border-vimdy-border bg-vimdy-surface overflow-hidden">
@@ -753,7 +729,30 @@ export function InventoryDashboard() {
                       </td>
                       <td className="px-4 py-3 text-vimdy-text">{product.stock}</td>
                       <td className="px-4 py-3 text-vimdy-text-secondary">{product.minStock}</td>
-                      <td className="px-4 py-3 text-vimdy-accent font-semibold">{money(product.price)}</td>
+                      <td className="px-4 py-3">
+                        <p className="text-vimdy-accent font-semibold">{money(product.price)}</p>
+                        {(() => {
+                          const profit = profitById.get(product.id);
+                          if (!profit || profit.kind === "none") return null;
+                          if (profit.kind === "missing-cost") {
+                            return (
+                              <p className="text-xs text-vimdy-warning" title="Agrega el costo (del producto o de sus insumos) para saber cuánto ganas.">
+                                Falta el costo
+                              </p>
+                            );
+                          }
+                          return (
+                            <p className="text-xs text-vimdy-text-secondary whitespace-nowrap">
+                              Te cuesta {money(profit.cost)} ·{" "}
+                              {profit.profit < 0 ? (
+                                <span className="text-vimdy-danger font-semibold">Pierdes {money(Math.abs(profit.profit))}</span>
+                              ) : (
+                                <span className="text-vimdy-success font-semibold">Ganas {money(profit.profit)}</span>
+                              )}
+                            </p>
+                          );
+                        })()}
+                      </td>
                       <td className="px-4 py-3">
                         <span className={`text-xs px-2 py-1 rounded-vimdy-sm ${STATUS_CLASS[status]}`}>
                           {STATUS_LABEL[status]}

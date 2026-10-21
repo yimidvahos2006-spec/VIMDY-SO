@@ -277,7 +277,11 @@ export function ProductDetailModal({
               <InfoBox label="Costo por porción" value={money(recipeCost.costPerPortion)} />
               <InfoBox
                 label="Ganancia por unidad"
-                value={`${money(profitability.profit)} (${Math.round(profitability.marginPercent)}%)`}
+                value={
+                  recipeCost.missingCostIngredients.length > 0
+                    ? "No se sabe: falta costo"
+                    : `${money(profitability.profit)} (${Math.round(profitability.marginPercent)}%)`
+                }
               />
               {!!product.estimatedPrepMinutes && (
                 <InfoBox label="Tiempo estimado" value={`${product.estimatedPrepMinutes} min`} />

@@ -33,10 +33,10 @@ import { useCanUse } from "../../../hooks/useCanUse";
  * no toca el stock a propósito (para eso están Aumentar/Disminuir stock).
  */
 const PRODUCT_TYPE_CHOICES: ReadonlyArray<{ id: ProductType; label: string; hint: string }> = [
-  { id: "inventario", label: "Para vender", hint: "Se vende y descuenta directo del stock. Ej: gaseosa, cerveza, snack empacado." },
-  { id: "cocina", label: "Preparado", hint: "Se prepara al venderlo; no maneja stock propio ni receta fija. Ej: tamal, jugo, plato del día." },
-  { id: "cocina_receta", label: "Preparado con receta", hint: "Se prepara y descuenta los ingredientes de su receta. Ej: hamburguesa, pizza." },
-  { id: "servicio", label: "Servicio", hint: "Sin stock ni preparación. Ej: domicilio, propina, cover." }
+  { id: "inventario", label: "Se compra y se vende igual", hint: "Tiene su propio stock: compras unidades y las vendes tal cual. Ej: gaseosa, agua, paquete de papas." },
+  { id: "cocina", label: "Se prepara, sin receta", hint: "Va a cocina al venderlo, pero no descuenta nada del inventario. Ej: plato del día, jugo sin receta armada." },
+  { id: "cocina_receta", label: "Con receta", hint: "Se prepara y descuenta solos los ingredientes de su receta. Ej: hamburguesa, pizza, tamal." },
+  { id: "servicio", label: "No se controla", hint: "Sin stock ni cocina: nunca sale agotado. Ej: domicilio, propina, cover." }
 ];
 
 export function ProductFormModal({
@@ -66,7 +66,7 @@ export function ProductFormModal({
   // PASO 1 (rediseño formulario de producto): el campo más importante, va
   // arriba de todo. Los pasos siguientes lo usarán para decidir qué otras
   // secciones del formulario se muestran u ocultan.
-  // Producto nuevo: "Preparado" si el negocio usa Cocina; si no, "Para vender".
+  // Producto nuevo: "Se prepara, sin receta" si el negocio usa Cocina; si no, "Se compra y se vende igual".
   const kitchenEnabled = useCanUse("kitchen");
   const [productType, setProductType] = useState<ProductType>(() => {
     if (!product) return kitchenEnabled ? "cocina" : "inventario";
@@ -517,6 +517,18 @@ export function ProductFormModal({
       return;
     }
 
+    // Aviso antes de guardar: un producto "Se compra y se vende igual" con 0
+    // unidades queda "Agotado". Es el error más común cuando el dueño en
+    // realidad prepara el plato (ej. un tamal) y eligió esta opción.
+    if (!isEditing && productType === "inventario" && stockValue === 0) {
+      const okEmptyStock = window.confirm(
+        `"${name.trim()}" se guardará con 0 unidades y va a salir como "Agotado".\n\n` +
+          `Si lo preparas tú con ingredientes, toca Cancelar y elige "Con receta" o "Se prepara, sin receta".\n\n` +
+          `Si lo compras ya hecho, toca Aceptar y agrega el stock después con "Aumentar stock".`
+      );
+      if (!okEmptyStock) return;
+    }
+
     let recipeValue: RecipeItem[] | undefined;
     if (hasRecipe) {
       const validRows = recipeRows.filter((r) => r.productId && r.quantity.trim());
@@ -945,6 +957,7 @@ export function ProductFormModal({
           {showsStockFields && !isEditing && (!stock.trim() || Number(stock) === 0) && (
             <p className="text-vimdy-warning text-xs -mt-2">
               Con 0 unidades el producto se va a ver como "Agotado" en Inventario y en Caja.
+              {productType === "inventario" && " Si lo preparas tú, elige \"Con receta\" arriba."}
             </p>
           )}
           {showsStockFields && isEditing && (

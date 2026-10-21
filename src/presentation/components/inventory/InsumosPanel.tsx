@@ -3,11 +3,12 @@ import { toast } from "../../../core/store/toastStore";
 import { EmptyState } from "../ui/EmptyState";
 import { VimdyButton } from "../ui/VimdyButton";
 import { SkeletonRows, Skeleton } from "../ui/Skeleton";
-import { useInventory, getStockStatus, StockStatus } from "../../../core/store/useInventory";
+import { getStockStatus, StockStatus } from "../../../core/store/useInventory";
+import type { InventoryState } from "./inventoryShared";
 import { useCategories } from "../../../hooks/useCategories";
 import { OfflineStatusBadge } from "../ui/OfflineStatusBadge";
 import { container } from "../../../infrastructure/di/CompositionRoot";
-import { Product, Category, Supplier } from "../../../core/entities/Entities";
+import { Product, Category, Supplier, LossCategory } from "../../../core/entities/Entities";
 import { ProductInput } from "../../../core/engines/InventoryEngine";
 import { ProductType, resolveProductFlags } from "../../../core/types/productType";
 import { formatMoney } from "../../../core/utils/formatMoney";
@@ -18,8 +19,6 @@ import {
   Plus,
   Pencil,
   Trash2,
-  ArrowUpCircle,
-  ArrowDownCircle,
   X,
   Package,
   AlertTriangle,
@@ -38,7 +37,17 @@ const money = (value: number) => {
 
 type Tab = "insumos" | "recetas" | "historial";
 
-export function InsumosPanel() {
+// Motivos de un ajuste hacia abajo, en palabras del dueño. Cada uno queda
+// guardado con su categoría de pérdida real en el historial de movimientos.
+const ADJUST_REASONS: ReadonlyArray<{ id: LossCategory; label: string }> = [
+  { id: "AJUSTE_ADMINISTRATIVO", label: "Al contar, no coincidía" },
+  { id: "DAÑO", label: "Se dañó o se botó" },
+  { id: "VENCIDO", label: "Se venció" },
+  { id: "CONSUMO_INTERNO", label: "Lo usamos en la cocina o en casa" },
+  { id: "OTRO", label: "Otro motivo" }
+];
+
+export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
   const {
     products,
     loading,
@@ -48,7 +57,7 @@ export function InsumosPanel() {
     deleteProduct,
     increaseStock,
     decreaseStock
-  } = useInventory();
+  } = inventory;
 
   const { categories, insumoCategories, createCategory } = useCategories();
 
@@ -61,6 +70,9 @@ export function InsumosPanel() {
   const [purchaseTarget, setPurchaseTarget] = useState<Product | null>(null);
   const [purchaseQty, setPurchaseQty] = useState("");
   const [purchaseCost, setPurchaseCost] = useState("");
+  const [adjustTarget, setAdjustTarget] = useState<Product | null>(null);
+  const [adjustCount, setAdjustCount] = useState("");
+  const [adjustReason, setAdjustReason] = useState<LossCategory>("AJUSTE_ADMINISTRATIVO");
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loadingSuppliers, setLoadingSuppliers] = useState(false);
   const [showNewSupplier, setShowNewSupplier] = useState(false);
@@ -148,9 +160,6 @@ export function InsumosPanel() {
       }))
       .sort((x, y) => x.name.localeCompare(y.name));
   })();
-  const lowCount = insumos.filter((i) => getStockStatus(i) === "bajo").length;
-  const outCount = insumos.filter((i) => getStockStatus(i) === "agotado").length;
-  const stockValue = insumos.reduce((acc, i) => acc + (i.purchasePrice ?? 0) * Math.max(i.stock, 0), 0);
 
   async function confirmPurchase() {
     if (!purchaseTarget) return;
@@ -173,16 +182,59 @@ export function InsumosPanel() {
     }
   }
 
+  // Ajustar: siempre se compara contra el stock ACTUAL del insumo (no contra
+  // el que se veía al abrir la ventana), por si otra caja vendió mientras tanto.
+  const adjustCurrent = adjustTarget ? products.find((p) => p.id === adjustTarget.id) ?? adjustTarget : null;
+  const adjustReal = adjustCount.trim() === "" ? null : Number(adjustCount);
+  const adjustDiff =
+    adjustCurrent && adjustReal !== null && Number.isFinite(adjustReal) && adjustReal >= 0
+      ? Math.round((adjustReal - adjustCurrent.stock) * 10000) / 10000
+      : null;
+
+  function closeAdjust() {
+    setAdjustTarget(null);
+    setAdjustCount("");
+    setAdjustReason("AJUSTE_ADMINISTRATIVO");
+  }
+
+  async function confirmAdjust() {
+    if (!adjustCurrent) return;
+    if (adjustDiff === null) {
+      toast.error("Escribe cuánto hay de verdad (0 o más).");
+      return;
+    }
+    const unit = adjustCurrent.unit ?? "und";
+    if (adjustDiff === 0) {
+      toast.success("Sin cambios: el stock ya coincide.");
+      closeAdjust();
+      return;
+    }
+    if (adjustDiff > 0) {
+      const ok = await increaseStock(adjustCurrent.id, adjustDiff, "Ajuste de conteo");
+      if (ok) {
+        toast.success(`Ajuste guardado: se sumaron ${adjustDiff} ${unit} de ${adjustCurrent.name}.`);
+        closeAdjust();
+      }
+      return;
+    }
+    const reasonLabel = ADJUST_REASONS.find((r) => r.id === adjustReason)?.label ?? "Ajuste";
+    const ok = await decreaseStock(adjustCurrent.id, Math.abs(adjustDiff), `Ajuste de conteo: ${reasonLabel}`, adjustReason);
+    if (ok) {
+      toast.success(`Ajuste guardado: se descontaron ${Math.abs(adjustDiff)} ${unit} de ${adjustCurrent.name}.`);
+      closeAdjust();
+    }
+  }
+
   return (
     <div className="w-full flex flex-col space-y-4">
       <div className="rounded-vimdy-lg border border-vimdy-warning/30 bg-vimdy-warning/5 p-4">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-vimdy-warning/20 text-vimdy-warning">Materia prima</span>
+              <span className="text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-vimdy-warning/20 text-vimdy-warning">Lo que compras</span>
               <span className="text-xs text-vimdy-text-tertiary">No se venden en Caja</span>
             </div>
-            <h2 className="text-2xl font-bold text-vimdy-text mt-1">Ingredientes / Insumos</h2>
+            <h2 className="text-2xl font-bold text-vimdy-text mt-1">Insumos</h2>
             <p className="text-vimdy-text-secondary text-sm mt-1">
               Lo que compras y guardas. Se descuenta solo cuando se vende un producto cuya receta lo usa.
             </p>
@@ -190,12 +242,6 @@ export function InsumosPanel() {
           <VimdyButton onClick={() => { setEditingInsumo(null); setShowNewInsumo(true); }} size="sm" icon={<Plus size={16} />}>
             Nuevo insumo
           </VimdyButton>
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3 text-center">
-          <div className="rounded-vimdy-md bg-vimdy-surface border border-vimdy-border py-2"><p className="text-lg font-bold text-vimdy-text">{insumos.length}</p><p className="text-xs text-vimdy-text-secondary">Insumos</p></div>
-          <div className="rounded-vimdy-md bg-vimdy-surface border border-vimdy-border py-2"><p className="text-lg font-bold text-vimdy-warning">{lowCount}</p><p className="text-xs text-vimdy-text-secondary">Stock bajo</p></div>
-          <div className="rounded-vimdy-md bg-vimdy-surface border border-vimdy-border py-2"><p className="text-lg font-bold text-vimdy-danger">{outCount}</p><p className="text-xs text-vimdy-text-secondary">Agotados</p></div>
-          <div className="rounded-vimdy-md bg-vimdy-surface border border-vimdy-border py-2"><p className="text-lg font-bold text-vimdy-text">{money(stockValue)}</p><p className="text-xs text-vimdy-text-secondary">Valor en bodega</p></div>
         </div>
       </div>
 
@@ -282,9 +328,8 @@ export function InsumosPanel() {
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex items-center justify-end gap-1">
-                              <button onClick={() => { setPurchaseTarget(insumo); setPurchaseCost(insumo.purchasePrice !== undefined ? String(insumo.purchasePrice) : ""); }} title="Registrar compra / entrada" aria-label="Registrar compra" className="w-8 h-8 rounded-vimdy-sm flex items-center justify-center text-vimdy-success hover:bg-vimdy-success/10 transition">
-                                <ArrowUpCircle size={16} />
-                              </button>
+                              <button onClick={() => { setPurchaseTarget(insumo); setPurchaseCost(insumo.purchasePrice !== undefined ? String(insumo.purchasePrice) : ""); }} className="h-8 px-3 rounded-vimdy-sm bg-vimdy-success/15 text-vimdy-success border border-vimdy-success/30 text-xs font-bold hover:bg-vimdy-success/25 transition whitespace-nowrap">+ Compré</button>
+                              <button onClick={() => { setAdjustTarget(insumo); setAdjustCount(""); setAdjustReason("AJUSTE_ADMINISTRATIVO"); }} className="h-8 px-3 rounded-vimdy-sm border border-vimdy-border text-vimdy-text-secondary text-xs font-bold hover:text-vimdy-text hover:border-vimdy-accent transition whitespace-nowrap">Ajustar</button>
                               <button onClick={() => { setEditingInsumo(insumo); setShowNewInsumo(true); }} title="Editar" aria-label="Editar" className="w-8 h-8 rounded-vimdy-sm flex items-center justify-center text-vimdy-text-secondary hover:text-vimdy-text hover:bg-vimdy-background transition">
                                 <Pencil size={16} />
                               </button>
@@ -322,7 +367,46 @@ export function InsumosPanel() {
             </label>
             <div className="flex justify-end gap-2">
               <VimdyButton variant="secondary" onClick={() => setPurchaseTarget(null)}>Cancelar</VimdyButton>
-              <VimdyButton onClick={confirmPurchase}>Registrar entrada</VimdyButton>
+              <VimdyButton onClick={confirmPurchase}>Guardar compra</VimdyButton>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {adjustTarget && adjustCurrent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="w-full max-w-sm rounded-vimdy-lg border border-vimdy-border bg-vimdy-surface p-6 space-y-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-vimdy-text">Ajustar stock</h3>
+                <p className="text-sm text-vimdy-text-secondary">{adjustCurrent.name} · en el sistema hay {adjustCurrent.stock} {adjustCurrent.unit ?? "und"}</p>
+              </div>
+              <button onClick={closeAdjust} aria-label="Cerrar" className="text-vimdy-text-secondary hover:text-vimdy-text"><X size={20} /></button>
+            </div>
+            <label className="block text-xs font-semibold text-vimdy-text-secondary">¿Cuánto hay de verdad? ({adjustCurrent.unit ?? "und"})
+              <input type="number" min="0" step="any" autoFocus value={adjustCount} onChange={(e) => setAdjustCount(e.target.value)} className="mt-1 w-full h-10 px-3 rounded-vimdy-md bg-vimdy-background border border-vimdy-border text-vimdy-text text-sm" />
+            </label>
+            {adjustDiff !== null && (
+              <p className={`text-sm font-medium ${adjustDiff < 0 ? "text-vimdy-danger" : adjustDiff > 0 ? "text-vimdy-success" : "text-vimdy-text-secondary"}`}>
+                {adjustDiff === 0
+                  ? "Sin cambios: ya coincide."
+                  : adjustDiff > 0
+                    ? `Se van a sumar ${adjustDiff} ${adjustCurrent.unit ?? "und"}.`
+                    : `Se van a descontar ${Math.abs(adjustDiff)} ${adjustCurrent.unit ?? "und"}.`}
+              </p>
+            )}
+            {adjustDiff !== null && adjustDiff < 0 && (
+              <label className="block text-xs font-semibold text-vimdy-text-secondary">¿Por qué faltó?
+                <select value={adjustReason} onChange={(e) => setAdjustReason(e.target.value as LossCategory)} className="mt-1 w-full h-10 px-3 rounded-vimdy-md bg-vimdy-background border border-vimdy-border text-vimdy-text text-sm">
+                  {ADJUST_REASONS.map((r) => (
+                    <option key={r.id} value={r.id}>{r.label}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <div className="flex justify-end gap-2">
+              <VimdyButton variant="secondary" onClick={closeAdjust}>Cancelar</VimdyButton>
+              <VimdyButton onClick={confirmAdjust}>Guardar ajuste</VimdyButton>
             </div>
           </div>
         </div>
