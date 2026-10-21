@@ -3,6 +3,8 @@ import React, { useMemo, useState } from "react";
 import { toast } from "../../../core/store/toastStore";
 import { VimdyButton } from "../ui/VimdyButton";
 import { parseMoneyInput } from "../../../core/utils/parseMoneyInput";
+import { toMoneyInputValue } from "../../../core/utils/formatMoneyInput";
+import { MoneyInput } from "../ui/MoneyInput";
 import { compatibleUnits, convertQuantity, normalizeUnit } from "../../../core/utils/unitConversion";
 import { X, Plus, ImagePlus, Trash2, Sparkles, ChefHat, Flame, Clock3, UserPlus } from "lucide-react";
 import { generateRecipeWithAI } from "../../../core/ia/RecipeAI";
@@ -81,9 +83,9 @@ export function ProductFormModal({
   const [active, setActive] = useState<boolean>(product?.active ?? true);
   const [categoryId, setCategoryId] = useState(product?.categoryId ?? "");
   const [purchasePrice, setPurchasePrice] = useState(
-    product?.purchasePrice !== undefined ? String(product.purchasePrice) : ""
+    product?.purchasePrice !== undefined ? toMoneyInputValue(product.purchasePrice) : ""
   );
-  const [price, setPrice] = useState(product ? String(product.price) : "");
+  const [price, setPrice] = useState(product ? toMoneyInputValue(product.price) : "");
   const [taxRate, setTaxRate] = useState(product?.taxRate !== undefined ? String(product.taxRate) : "");
   const [stock, setStock] = useState("");
   const [minStock, setMinStock] = useState(product ? String(product.minStock) : "0");
@@ -328,7 +330,7 @@ export function ProductFormModal({
         if (matched) setCategoryId(matched.id);
       }
       if (result.suggestedPrice && !price.trim()) {
-        setPrice(String(result.suggestedPrice));
+        setPrice(toMoneyInputValue(result.suggestedPrice));
       }
 
       if (result.unmatchedIngredients.length > 0) {
@@ -876,11 +878,9 @@ export function ProductFormModal({
             {showSalePrice && (
               <div>
                 <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Precio de venta *</label>
-                <input
-                  type="text"
-                  inputMode="decimal"
+                <MoneyInput
                   value={price}
-                  onChange={(e) => setPrice(e.target.value)}
+                  onValueChange={setPrice}
                   placeholder="Ej: 15000"
                   className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
                 />
@@ -895,11 +895,9 @@ export function ProductFormModal({
                 {isStockType ? `Costo (por cada ${normalizeUnit(unit)})` : "Costo"}
                 {!isStockType && <span className="text-vimdy-text-tertiary font-normal"> (opcional)</span>}
               </label>
-              <input
-                type="text"
-                inputMode="decimal"
+              <MoneyInput
                 value={purchasePrice}
-                onChange={(e) => setPurchasePrice(e.target.value)}
+                onValueChange={setPurchasePrice}
                 placeholder="Ej: 8000"
                 className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
               />
@@ -1207,14 +1205,10 @@ export function ProductFormModal({
                        <option value="paquete">Paquete</option>
                        <option value="caja">Caja</option>
                      </select>
-                     <input
-                       type="text"
-                       inputMode="decimal"
+                     <MoneyInput
                        value={quickIngredientPurchasePrice}
-                      onChange={(e) => setQuickIngredientPurchasePrice(e.target.value)}
+                      onValueChange={setQuickIngredientPurchasePrice}
                       placeholder="Precio compra (opcional)"
-                      min={0}
-                      step="0.01"
                       className="w-36 h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-recipe"
                     />
                     <button
@@ -1555,11 +1549,9 @@ export function ProductFormModal({
                     />
                     <div className="flex items-center gap-1 shrink-0">
                       <span className="text-vimdy-text-tertiary text-xs">+$</span>
-                      <input
-                        type="text"
-                        inputMode="decimal"
+                      <MoneyInput
                         value={row.priceDelta}
-                        onChange={(e) => updateSizeRow(row.rowId, "priceDelta", e.target.value)}
+                        onValueChange={(v) => updateSizeRow(row.rowId, "priceDelta", v)}
                         placeholder="0"
                         className="w-24 h-10 px-2 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
                       />
@@ -1603,11 +1595,9 @@ export function ProductFormModal({
                     />
                     <div className="flex items-center gap-1 shrink-0">
                       <span className="text-vimdy-text-tertiary text-xs">+$</span>
-                      <input
-                        type="text"
-                        inputMode="decimal"
+                      <MoneyInput
                         value={row.priceDelta}
-                        onChange={(e) => updateExtraRow(row.rowId, "priceDelta", e.target.value)}
+                        onValueChange={(v) => updateExtraRow(row.rowId, "priceDelta", v)}
                         placeholder="0"
                         className="w-24 h-10 px-2 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
                       />
