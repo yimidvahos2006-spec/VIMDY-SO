@@ -28,6 +28,7 @@ import {
   History
 } from "lucide-react";
 import { ConfirmModal } from "../ui/ConfirmModal";
+import { QuickWasteModal } from "./QuickWasteModal";
 
 const money = (value: number) => {
   const currency = companyConfigStore.get().currency;
@@ -67,6 +68,7 @@ export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
   const [showNewInsumo, setShowNewInsumo] = useState(false);
   const [editingInsumo, setEditingInsumo] = useState<Product | null>(null);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+  const [wasteTarget, setWasteTarget] = useState<Product | null>(null);
   const [purchaseTarget, setPurchaseTarget] = useState<Product | null>(null);
   const [purchaseQty, setPurchaseQty] = useState("");
   const [purchaseCost, setPurchaseCost] = useState("");
@@ -329,6 +331,9 @@ export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
                           <td className="px-4 py-3">
                             <div className="flex items-center justify-end gap-1">
                               <button onClick={() => { setPurchaseTarget(insumo); setPurchaseCost(insumo.purchasePrice !== undefined ? String(insumo.purchasePrice) : ""); }} className="h-8 px-3 rounded-vimdy-sm bg-vimdy-success/15 text-vimdy-success border border-vimdy-success/30 text-xs font-bold hover:bg-vimdy-success/25 transition whitespace-nowrap">+ Compré</button>
+                              {insumo.stock > 0 && (
+                                <button onClick={() => setWasteTarget(insumo)} className="h-8 px-3 rounded-vimdy-sm border border-vimdy-warning/30 text-vimdy-warning text-xs font-bold hover:bg-vimdy-warning/10 transition whitespace-nowrap">Merma</button>
+                              )}
                               <button onClick={() => { setAdjustTarget(insumo); setAdjustCount(""); setAdjustReason("AJUSTE_ADMINISTRATIVO"); }} className="h-8 px-3 rounded-vimdy-sm border border-vimdy-border text-vimdy-text-secondary text-xs font-bold hover:text-vimdy-text hover:border-vimdy-accent transition whitespace-nowrap">Ajustar</button>
                               <button onClick={() => { setEditingInsumo(insumo); setShowNewInsumo(true); }} title="Editar" aria-label="Editar" className="w-8 h-8 rounded-vimdy-sm flex items-center justify-center text-vimdy-text-secondary hover:text-vimdy-text hover:bg-vimdy-background transition">
                                 <Pencil size={16} />
@@ -447,6 +452,14 @@ export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
             setSuppliers((prev) => [...prev, created]);
             return created;
           }}
+        />
+      )}
+
+      {wasteTarget && (
+        <QuickWasteModal
+          product={products.find((p) => p.id === wasteTarget.id) ?? wasteTarget}
+          decreaseStock={decreaseStock}
+          onClose={() => setWasteTarget(null)}
         />
       )}
 

@@ -4,7 +4,7 @@ import { toast } from "../../../core/store/toastStore";
 import { ConfirmModal } from "../ui/ConfirmModal";
 import { VimdyButton } from "../ui/VimdyButton";
 import { SkeletonCards, SkeletonRows, Skeleton } from "../ui/Skeleton";
-import { Search, X, Plus, Trash2, Pencil, Sparkles, Copy, Flame, RefreshCw, Tag, FileSpreadsheet } from "lucide-react";
+import { MinusCircle, Search, X, Plus, Trash2, Pencil, Sparkles, Copy, Flame, RefreshCw, Tag, FileSpreadsheet } from "lucide-react";
 import { getStockStatus, StockStatus } from "../../../core/store/useInventory";
 import { useCategories } from "../../../hooks/useCategories";
 import { OfflineStatusBadge } from "../ui/OfflineStatusBadge";
@@ -20,6 +20,7 @@ import { EmptyProductsState } from "./EmptyProductsState";
 import { getProductProfitView } from "./productProfit";
 import { AlertsPanel, CategoryChip, RecentMovementsPanel, SortableHeader } from "./InventoryWidgets";
 import { useAuth } from "../../context/AuthContext";
+import { QuickWasteModal } from "./QuickWasteModal";
 
 // Las ventanas (modales) pesan mucho y solo se abren al hacer clic: se descargan
 // aparte. Después del primer pintado se precargan en segundo plano para que al
@@ -102,6 +103,7 @@ export function InventoryDashboard({ inventory }: { inventory: InventoryState })
   const [showAiImport, setShowAiImport] = useState(false);
   const [showCsvImport, setShowCsvImport] = useState(false);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+  const [wasteProduct, setWasteProduct] = useState<Product | null>(null);
   // BLOQUEANTE (auditoría Fase 2 — Panadería): productos elaborados que se
   // producen por tanda (ver Product.productionMode) — son los únicos que
   // puede recibir InventoryEngine.produceBatch(). Si no hay ninguno, el
@@ -783,6 +785,19 @@ export function InventoryDashboard({ inventory }: { inventory: InventoryState })
                           >
                             <Pencil size={14} />
                           </button>
+                          {product.trackStock !== false && product.active !== false && product.stock > 0 && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setWasteProduct(product);
+                              }}
+                              aria-label="Registrar merma"
+                              title="Registrar merma"
+                              className="w-8 h-8 rounded-vimdy-sm border border-vimdy-warning/30 text-vimdy-warning hover:bg-vimdy-warning/10 flex items-center justify-center"
+                            >
+                              <MinusCircle size={14} />
+                            </button>
+                          )}
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -861,6 +876,14 @@ export function InventoryDashboard({ inventory }: { inventory: InventoryState })
             onDelete={() => handleDeleteProduct(selected)}
           />
         </Suspense>
+      )}
+
+      {wasteProduct && (
+        <QuickWasteModal
+          product={allProducts.find((p) => p.id === wasteProduct.id) ?? wasteProduct}
+          decreaseStock={decreaseStock}
+          onClose={() => setWasteProduct(null)}
+        />
       )}
 
       {showCategories && (
