@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from "react";
-import { Minus, Plus, Trash2, X, ChefHat, Wallet, Search, Mic, MicOff, CheckCircle2, MessageSquarePlus, ClipboardList, UtensilsCrossed, Users, GitMerge, ArrowRightLeft, Receipt, MoreVertical, XCircle, Clock, AlertTriangle, ArrowRight } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { Minus, Plus, Trash2, X, ChefHat, Wallet, Search, Mic, MicOff, CheckCircle2, MessageSquarePlus, ClipboardList, UtensilsCrossed, Users, GitMerge, ArrowRightLeft, Receipt, MoreVertical, XCircle, Clock, AlertTriangle, ArrowRight, Armchair, DoorOpen, ShoppingBasket, MapPin } from "lucide-react";
 
 import { Table, Product, OrderPriority } from "../../../core/entities/Entities";
 import { container } from "../../../infrastructure/di/CompositionRoot";
@@ -8,6 +8,7 @@ import { translateBusinessError } from "../../../core/errors/translateBusinessEr
 import { useVoiceOrder } from "../../../core/voice/useVoiceOrder";
 import { VoiceOrder } from "../../../core/voice/voiceParser";
 import { CloseTableDialog } from "./CloseTableDialog";
+import { STATUS_STYLES } from "./TableGrid";
 import { useAuth } from "../../context/AuthContext";
 import { useCategories } from "../../../hooks/useCategories";
 import { toast } from "../../../core/store/toastStore";
@@ -46,7 +47,7 @@ export function TableDetailPanel({
   const [showCloseDialog, setShowCloseDialog] = useState(false);
   const [priority, setPriority] = useState<OrderPriority>("NORMAL");
   const [voiceSuccess, setVoiceSuccess] = useState<string | null>(null);
-  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingLineKey, setEditingLineKey] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [mobileTab, setMobileTab] = useState<"order" | "products">("products");
   const [showActions, setShowActions] = useState(false);
@@ -171,41 +172,43 @@ export function TableDetailPanel({
     );
   }
 
-  function decreaseItem(productId: string, currentQty: number) {
+  // Un mismo producto puede tener varias líneas (una por nota): se identifica por producto + nota.
+  const lineKey = (item: Table["items"][number]) => `${item.productId}::${(item.note ?? "").trim()}`;
+
+  function decreaseItem(item: Table["items"][number]) {
     run(() =>
-      container.tableEngine.get().updateItemQuantity(table.id, productId, currentQty - 1)
+      container.tableEngine.get().updateItemQuantity(table.id, item.productId, item.quantity - 1, { note: item.note })
     );
   }
 
-  function increaseItem(productId: string, currentQty: number) {
+  function increaseItem(item: Table["items"][number]) {
     run(() =>
-      container.tableEngine.get().updateItemQuantity(table.id, productId, currentQty + 1)
+      container.tableEngine.get().updateItemQuantity(table.id, item.productId, item.quantity + 1, { note: item.note })
     );
   }
 
-  function removeItem(productId: string) {
-    run(() => container.tableEngine.get().removeItem(table.id, productId));
+  function removeItem(item: Table["items"][number]) {
+    run(() => container.tableEngine.get().removeItem(table.id, item.productId, { note: item.note }));
   }
 
-  function startEditNote(itemId: string, currentNote?: string) {
-    setEditingNoteId(itemId);
-    setNoteDraft(currentNote ?? "");
+  function startEditNote(item: Table["items"][number]) {
+    setEditingLineKey(lineKey(item));
+    setNoteDraft(item.note ?? "");
   }
 
-  function saveNote(itemId: string) {
-    const trimmed = noteDraft.trim();
-    run(async () => {
-      const currentTable = await container.tableEngine.get().getTable(table.id);
-      if (!currentTable) throw new Error("TABLE_NOT_FOUND");
-      const items = currentTable.items.map((item: any) =>
-        item.productId === itemId
-          ? { ...item, note: trimmed || undefined }
-          : item
-      );
-      await container.tableEngine.get().updateTable(currentTable.id, { items });
-    });
-    setEditingNoteId(null);
+  /**
+   * Guarda la nota de una línea. `units` permite ponerla solo a una parte de
+   * las unidades (2 hamburguesas, una "sin cebolla"). Si esas unidades ya
+   * salieron a cocina, el motor lo rechaza y explica qué hacer.
+   */
+  function saveNote(item: Table["items"][number], units?: number) {
+    const next = noteDraft.trim();
+    setEditingLineKey(null);
     setNoteDraft("");
+    if (next === (item.note ?? "").trim()) return;
+    run(() =>
+      container.tableEngine.get().updateItemNote(table.id, item.productId, item.note, next, units)
+    );
   }
 
   async function sendToKitchen() {
@@ -292,98 +295,267 @@ export function TableDetailPanel({
     setSplitPeople(2);
   }
 
-  const statusLabel =
-    table.status === "CUENTA_SOLICITADA"
-      ? "Cuenta solicitada"
-      : table.status === "WAITING_BILL"
-        ? "Esperando cuenta"
-        : table.status === "WAITING_FOOD"
-          ? "Esperando comida"
-          : table.status === "EATING"
-            ? "Comiendo"
-            : table.status === "PAYING"
-              ? "Pagando"
-              : table.status === "BUSY"
-                ? "Ocupada"
-                : table.status === "RESERVED"
-                  ? "Reservada"
-                  : "Disponible";
+  const statusStyle = STATUS_STYLES[table.status];
+  const StatusIcon = statusStyle.icon;
+  const now = useNow();
+  const minutesOpen = table.openedAt ? Math.max(0, Math.floor((now - table.openedAt.getTime()) / 60000)) : null;
+  const itemCount = table.items.reduce((sum, item) => sum + (item.quantity || 1), 0);
+
+  /**
+   * "Liberar mesa" siempre a la vista. Sin consumo se libera directo; con
+   * consumo se usa el flujo de "Cancelar pedido" (pide motivo, avisa a cocina
+   * y bloquea si ya se entregó comida), nunca se borra una cuenta en silencio.
+   */
+  const canRelease = table.status !== "FREE";
+
+  function handleReleaseClick() {
+    setShowActions(false);
+    if (!canRelease) return;
+    if (hasItems) setShowCancelConfirm(true);
+    else setShowReleaseConfirm(true);
+  }
+
+  /** Tarjeta de producto: foto, nombre, precio y descripción; toda la tarjeta agrega (como en la Caja). */
+  function renderProductCard(product: Product) {
+    return (
+      <button
+        key={product.id}
+        type="button"
+        disabled={busy}
+        onClick={() => addProduct(product)}
+        aria-label={`Agregar ${product.name}, ${money(product.price)}`}
+        className="group flex gap-3 p-3 text-left rounded-2xl bg-slate-950/60 border border-slate-800 hover:border-cyan-500 active:scale-[0.98] transition disabled:opacity-40 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-cyan-500/30"
+      >
+        <ProductThumb image={product.image} className="w-24 h-24 sm:w-28 sm:h-28 shrink-0 rounded-xl text-3xl" />
+        <div className="flex-1 min-w-0 flex flex-col">
+          <h4 className="text-white font-bold leading-tight line-clamp-2">{product.name}</h4>
+          <p className="text-cyan-400 font-black text-xl mt-1 tabular-nums">{money(product.price)}</p>
+          {product.description && (
+            <p className="text-slate-400 text-xs mt-1 leading-snug line-clamp-2">{product.description}</p>
+          )}
+          <span
+            aria-hidden="true"
+            className="mt-auto pt-1 self-end w-10 h-10 shrink-0 rounded-xl border-2 border-cyan-400 text-cyan-300 flex items-center justify-center group-hover:bg-cyan-500/10 transition"
+          >
+            <Plus size={20} />
+          </span>
+        </div>
+      </button>
+    );
+  }
+
+  /** Línea del pedido actual: miniatura, nota, precio y cantidad. */
+  function renderOrderItem(item: Table["items"][number]) {
+    const product = productMap.get(item.productId);
+    const isEditing = editingLineKey === lineKey(item);
+    const canSplitUnits = item.quantity > 1 && Number.isInteger(item.quantity);
+    const name = product?.name ?? item.productId;
+    return (
+      <div key={lineKey(item)} className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3 flex gap-3">
+        <ProductThumb image={product?.image} className="w-14 h-14 shrink-0 rounded-xl text-xl" />
+        <div className="flex-1 min-w-0">
+          <div className="flex justify-between items-start gap-2">
+            <div className="min-w-0 flex-1">
+              <p className="text-white font-semibold leading-tight">{name}</p>
+              {isEditing ? (
+                <div className="mt-1">
+                  <input
+                    autoFocus
+                    value={noteDraft}
+                    onChange={(e) => setNoteDraft(e.target.value)}
+                    onBlur={() => { if (!canSplitUnits) saveNote(item); }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") saveNote(item);
+                      if (e.key === "Escape") setEditingLineKey(null);
+                    }}
+                    placeholder="Ej: sin cebolla, al punto..."
+                    className="w-full h-10 rounded-lg bg-slate-800 border border-slate-700 text-white text-sm px-2 outline-none focus:border-cyan-500"
+                  />
+                  {canSplitUnits && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => saveNote(item, 1)}
+                        className="h-9 px-3 rounded-lg bg-cyan-500 text-slate-950 text-xs font-bold"
+                      >
+                        Solo a 1 unidad
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => saveNote(item)}
+                        className="h-9 px-3 rounded-lg bg-slate-700 text-white text-xs font-bold"
+                      >
+                        A las {item.quantity}
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => setEditingLineKey(null)}
+                        className="h-9 px-3 rounded-lg text-slate-400 text-xs font-semibold"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : item.note ? (
+                <p className="text-amber-400 text-xs mt-1">{item.note}</p>
+              ) : (
+                <button
+                  onClick={() => startEditNote(item)}
+                  className="text-slate-500 hover:text-slate-300 text-xs mt-1 flex items-center gap-1"
+                >
+                  <MessageSquarePlus size={12} />
+                  Agregar nota
+                </button>
+              )}
+              <p className="text-cyan-400 text-sm mt-1">{money(item.price)}</p>
+            </div>
+            <button
+              disabled={busy}
+              onClick={() => removeItem(item)}
+              aria-label={`Quitar ${name}`}
+              className="p-2 -m-1 text-red-400 hover:text-red-300 disabled:opacity-40"
+            >
+              <Trash2 size={18} />
+            </button>
+          </div>
+          <div className="flex items-center gap-3 mt-2">
+            <button
+              disabled={busy}
+              onClick={() => decreaseItem(item)}
+              aria-label={`Menos ${name}`}
+              className="w-10 h-10 rounded-lg bg-slate-700 hover:bg-slate-600 flex items-center justify-center disabled:opacity-40 active:scale-95 transition"
+            >
+              <Minus size={16} />
+            </button>
+            <span className="text-white font-bold text-lg w-8 text-center">{item.quantity}</span>
+            <button
+              disabled={busy}
+              onClick={() => increaseItem(item)}
+              aria-label={`Más ${name}`}
+              className="w-10 h-10 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center justify-center disabled:opacity-40 active:scale-95 transition"
+            >
+              <Plus size={16} />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="fixed inset-0 z-[999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="w-full max-w-6xl h-[90vh] rounded-3xl bg-vimdy-surface border border-slate-700 shadow-2xl flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-[999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4">
+      <div className="w-full max-w-6xl h-[94vh] sm:h-[90vh] rounded-3xl bg-vimdy-surface border border-slate-700 shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700 flex-shrink-0">
-          <div className="flex items-center gap-4">
-            <div>
-              <h2 className="text-2xl font-bold text-white">{table.name}</h2>
-              <p className="text-slate-400 text-sm">
-                {table.peopleCount} personas • {table.zone ?? "Sin zona"} • {statusLabel}
-              </p>
+        <div className="flex items-center justify-between gap-3 px-4 sm:px-6 py-4 border-b border-slate-700 flex-shrink-0">
+          <div className="flex items-center gap-4 min-w-0 flex-1">
+            <div
+              aria-hidden="true"
+              className="hidden sm:flex w-14 h-14 shrink-0 rounded-2xl bg-slate-800 border border-slate-700 text-slate-200 items-center justify-center"
+            >
+              <Armchair size={26} />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-3 flex-wrap">
+                <h2 className="text-2xl sm:text-3xl font-black text-white leading-tight whitespace-nowrap">{table.name}</h2>
+                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-sm font-bold ${statusStyle.pill}`}>
+                  <StatusIcon size={14} className="shrink-0" aria-hidden="true" />
+                  {statusStyle.label}
+                </span>
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 sm:gap-x-4 gap-y-1 text-slate-400 text-xs sm:text-sm">
+                <span className="flex items-center gap-1.5">
+                  <Users size={15} aria-hidden="true" />
+                  {table.peopleCount} {table.peopleCount === 1 ? "persona" : "personas"}
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <MapPin size={15} aria-hidden="true" />
+                  {table.zone ?? "Sin zona"}
+                </span>
+                {minutesOpen !== null && (
+                  <span className="flex items-center gap-1.5">
+                    <Clock size={15} aria-hidden="true" />
+                    {minutesOpen} min
+                  </span>
+                )}
+              </div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <div className="relative">
               <button
                 onClick={() => setShowActions(!showActions)}
-                className="w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition"
+                aria-label="Más acciones de la mesa"
+                aria-haspopup="menu"
+                aria-expanded={showActions}
+                className="w-11 h-11 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition"
               >
                 <MoreVertical size={18} />
               </button>
               {showActions && (
-                <div className="absolute top-full right-0 mt-2 w-64 rounded-2xl border border-slate-700 bg-vimdy-surface shadow-2xl overflow-hidden z-50">
-                  <button onClick={() => { setShowAddPeople(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
-                    <Users size={16} /> Agregar personas
-                  </button>
-                  <button onClick={() => { setShowMergeDialog(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
-                    <GitMerge size={16} /> Unir mesa
-                  </button>
-                  <button onClick={() => { setShowTransferDialog(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
-                    <ArrowRightLeft size={16} /> Transferir mesa
-                  </button>
-                  {table.items.length > 0 && (
-                    <>
-                      <button onClick={() => { setShowSplitBill(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
-                        <Receipt size={16} /> Dividir cuenta
-                      </button>
-                      <button onClick={() => { handleRequestBill(); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
-                        <ClipboardList size={16} /> Solicitar cuenta
-                      </button>
-                      <button onClick={() => { setShowCancelConfirm(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-300 hover:bg-red-500/10 transition">
-                        <XCircle size={16} /> Cancelar pedido
-                      </button>
-                    </>
-                  )}
-                  {table.items.length === 0 && (
-                    <button onClick={() => { setShowReleaseConfirm(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-300 hover:bg-red-500/10 transition">
-                      <Trash2 size={16} /> Liberar mesa
+                <>
+                  <button
+                    type="button"
+                    aria-label="Cerrar menú de la mesa"
+                    className="fixed inset-0 z-40 cursor-default"
+                    onClick={() => setShowActions(false)}
+                  />
+                  <div className="absolute top-full right-0 mt-2 w-64 rounded-2xl border border-slate-700 bg-vimdy-surface shadow-2xl overflow-hidden z-50">
+                    <button onClick={() => { setShowAddPeople(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
+                      <Users size={16} /> Agregar personas
                     </button>
-                  )}
-                </div>
+                    <button onClick={() => { setShowMergeDialog(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
+                      <GitMerge size={16} /> Unir mesa
+                    </button>
+                    <button onClick={() => { setShowTransferDialog(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
+                      <ArrowRightLeft size={16} /> Transferir mesa
+                    </button>
+                    {table.items.length > 0 && (
+                      <>
+                        <button onClick={() => { setShowSplitBill(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
+                          <Receipt size={16} /> Dividir cuenta
+                        </button>
+                        <button onClick={() => { handleRequestBill(); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 transition">
+                          <ClipboardList size={16} /> Solicitar cuenta
+                        </button>
+                        <button onClick={() => { setShowCancelConfirm(true); setShowActions(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-300 hover:bg-red-500/10 transition">
+                          <XCircle size={16} /> Cancelar pedido
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </>
               )}
             </div>
-            <button onClick={onClose} className="w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition">
+            <button
+              onClick={onClose}
+              aria-label="Volver a las mesas"
+              className="w-11 h-11 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition"
+            >
               <X size={18} />
             </button>
           </div>
         </div>
 
         {errorMsg && (
-          <div className="mx-6 mt-4 rounded-xl bg-red-500/10 border border-red-500/40 text-red-300 px-4 py-3 text-sm">
+          <div className="mx-4 sm:mx-6 mt-4 rounded-xl bg-red-500/10 border border-red-500/40 text-red-300 px-4 py-3 text-sm">
             {errorMsg}
           </div>
         )}
 
         {voiceSuccess && (
-          <div className="mx-6 mt-4 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-emerald-300 px-4 py-3 text-sm flex items-center gap-2">
+          <div className="mx-4 sm:mx-6 mt-4 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-emerald-300 px-4 py-3 text-sm flex items-center gap-2">
             <CheckCircle2 size={16} />
             {voiceSuccess}
           </div>
         )}
 
-        <div className="flex-1 overflow-hidden">
-          {/* Mobile tab switcher */}
-          <div className="flex md:hidden border-b border-slate-700 bg-vimdy-background">
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+          {/* Móvil: pestañas Productos / Pedido */}
+          <div className="flex md:hidden border-b border-slate-700 bg-vimdy-background flex-shrink-0">
             <button
               onClick={() => setMobileTab("products")}
               className={`flex-1 flex items-center justify-center gap-2 h-12 text-sm font-bold transition ${
@@ -406,143 +578,40 @@ export function TableDetailPanel({
               <ClipboardList size={18} />
               Pedido
               {hasItems && (
-                <span className="absolute top-2 right-4 w-2 h-2 rounded-full bg-cyan-400" />
+                <span className="absolute top-2 right-4 min-w-[20px] h-5 px-1.5 rounded-full bg-cyan-400 text-slate-950 text-[11px] font-bold flex items-center justify-center">
+                  {itemCount}
+                </span>
               )}
             </button>
           </div>
 
-          {/* Desktop: 3 columns. Mobile: tabbed single column */}
-          <div className="hidden md:grid grid-cols-3 gap-4 h-full p-6 overflow-hidden">
-            {/* Pedido actual */}
-            <div className="flex flex-col overflow-hidden">
-              <h3 className="text-slate-300 font-bold mb-3">Pedido actual</h3>
-              <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-                {!hasItems && (
-                  <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-6 text-center text-slate-500">
-                    {search.trim() || category !== "Todos"
-                      ? "No se encontraron productos con ese filtro."
-                      : "Toca un producto para agregarlo a esta mesa."}
-                  </div>
-                )}
-                {table.items.map(item => {
-                  const product = productMap.get(item.productId);
-                  const isEditing = editingNoteId === item.productId;
-                  return (
-                    <div
-                      key={item.productId}
-                      className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4"
-                    >
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <p className="text-white font-semibold">
-                            {product?.name ?? item.productId}
-                          </p>
-                          {isEditing ? (
-                            <input
-                              autoFocus
-                              value={noteDraft}
-                              onChange={(e) => setNoteDraft(e.target.value)}
-                              onBlur={() => saveNote(item.productId)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") saveNote(item.productId);
-                                if (e.key === "Escape") setEditingNoteId(null);
-                              }}
-                              placeholder="Ej: sin arroz, al punto..."
-                              className="mt-1 w-full h-9 rounded-lg bg-slate-800 border border-slate-700 text-white text-sm px-2 outline-none focus:border-cyan-500"
-                            />
-                          ) : (
-                            <>
-                              {item.note && (
-                                <p className="text-amber-400 text-xs mt-1">
-                                  {item.note}
-                                </p>
-                              )}
-                              {!item.note && (
-                                <button
-                                  onClick={() => startEditNote(item.productId)}
-                                  className="text-slate-500 hover:text-slate-300 text-xs mt-1 flex items-center gap-1"
-                                >
-                                  <MessageSquarePlus size={12} />
-                                  Agregar nota
-                                </button>
-                              )}
-                            </>
-                          )}
-                          <p className="text-cyan-400 text-sm">
-                            ${item.price.toLocaleString("es-CO")}
-                          </p>
-                        </div>
-                        <button
-                          disabled={busy}
-                          onClick={() => removeItem(item.productId)}
-                          className="text-red-400 hover:text-red-300 disabled:opacity-40"
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-3 mt-3">
-                        <button
-                          disabled={busy}
-                          onClick={() => decreaseItem(item.productId, item.quantity)}
-                          className="w-8 h-8 rounded-lg bg-slate-700 hover:bg-slate-600 flex items-center justify-center disabled:opacity-40"
-                        >
-                          <Minus size={14} />
-                        </button>
-                        <span className="text-white font-bold w-6 text-center">
-                          {item.quantity}
-                        </span>
-                        <button
-                          disabled={busy}
-                          onClick={() => increaseItem(item.productId, item.quantity)}
-                          className="w-8 h-8 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center justify-center disabled:opacity-40"
-                        >
-                          <Plus size={14} />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Totales */}
-              <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4 space-y-1 flex-shrink-0">
-                <div className="flex justify-between text-slate-400 text-sm">
-                  <span>Subtotal</span>
-                  <span>${table.subtotal.toLocaleString("es-CO")}</span>
-                </div>
-                <div className="flex justify-between text-slate-400 text-sm">
-                  <span>Impuesto</span>
-                  <span>${table.tax.toLocaleString("es-CO")}</span>
-                </div>
-                <div className="flex justify-between text-white font-bold text-lg pt-1 border-t border-slate-800 mt-1">
-                  <span>Total</span>
-                  <span>${table.total.toLocaleString("es-CO")}</span>
-                </div>
-              </div>
-            </div>
-
+          {/* Escritorio/tablet: productos a la izquierda, pedido a la derecha. Móvil: una a la vez. */}
+          <div className="flex-1 min-h-0 flex flex-col md:grid md:grid-cols-[minmax(0,1fr)_340px] lg:grid-cols-[minmax(0,1fr)_400px] md:gap-5 md:p-6 overflow-hidden">
             {/* Catálogo de productos */}
-            <div className="col-span-2 flex flex-col overflow-hidden">
+            <section
+              aria-label="Productos"
+              className={`${mobileTab === "products" ? "flex" : "hidden"} md:flex flex-1 min-h-0 flex-col overflow-hidden p-4 md:p-0`}
+            >
               <div className="flex gap-2 mb-3 flex-shrink-0">
-                <div className="relative flex-1">
-                  <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <div className="relative flex-1 min-w-0">
+                  <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Buscar producto..."
-                    className="w-full h-10 pl-9 pr-4 rounded-xl bg-vimdy-surface border border-slate-700 text-white text-sm outline-none focus:border-cyan-500 transition"
+                    placeholder="Buscar producto o usar voz..."
+                    className="w-full h-12 pl-10 pr-4 rounded-xl bg-vimdy-background border border-slate-700 text-white text-sm outline-none focus:border-cyan-500 transition"
                   />
                 </div>
                 <button
                   onClick={listen}
                   disabled={listening}
-                  className={`h-10 px-4 rounded-xl flex items-center gap-2 text-sm font-bold transition ${
+                  className={`h-12 px-4 sm:px-5 rounded-xl flex items-center gap-2 text-sm font-bold transition ${
                     listening
                       ? "bg-red-500 text-white animate-pulse"
                       : "bg-cyan-500 hover:bg-cyan-400 text-slate-950"
                   }`}
                 >
-                  {listening ? <MicOff size={16} /> : <Mic size={16} />}
+                  {listening ? <MicOff size={18} /> : <Mic size={18} />}
                   {listening ? "Escuchando..." : "Voz"}
                 </button>
               </div>
@@ -552,218 +621,118 @@ export function TableDetailPanel({
                   <button
                     key={cat}
                     onClick={() => setCategory(cat)}
-                    className={`px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition ${
+                    aria-pressed={category === cat}
+                    className={`h-10 px-5 rounded-full border text-sm font-semibold whitespace-nowrap transition ${
                       category === cat
-                        ? "bg-cyan-500 text-slate-950"
-                        : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                        ? "bg-cyan-500 border-cyan-400 text-slate-950"
+                        : "bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500"
                     }`}
                   >
                     {categoryLabel(cat)}
                   </button>
                 ))}
               </div>
-              <div className="flex-1 overflow-y-auto grid grid-cols-3 gap-4 content-start pr-1">
-                {visibleProducts.map(product => (
-                  <button
-                    key={product.id}
-                    disabled={busy}
-                    onClick={() => addProduct(product)}
-                    className="bg-slate-950/60 border border-slate-800 hover:border-cyan-500 rounded-2xl p-4 text-left transition disabled:opacity-40 active:scale-[0.98]"
-                  >
-                    <h4 className="text-white font-semibold">{product.name}</h4>
-                    <p className="text-cyan-400 mt-2 font-bold">
-                      ${product.price.toLocaleString("es-CO")}
-                    </p>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
 
-          {/* Mobile layout */}
-          <div className="md:hidden h-full flex flex-col">
-            {mobileTab === "order" ? (
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                <h3 className="text-slate-300 font-bold text-lg">Pedido actual</h3>
-                {!hasItems && (
+              <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+                {visibleProducts.length === 0 ? (
                   <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-6 text-center text-slate-500">
                     {search.trim() || category !== "Todos"
                       ? "No se encontraron productos con ese filtro."
-                      : "Toca un producto para agregarlo a esta mesa."}
+                      : "Todavía no hay productos para vender."}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-[repeat(auto-fill,minmax(270px,1fr))] gap-3 content-start">
+                    {visibleProducts.map(renderProductCard)}
                   </div>
                 )}
-                {table.items.map(item => {
-                  const product = productMap.get(item.productId);
-                  const isEditing = editingNoteId === item.productId;
-                  return (
-                    <div
-                      key={item.productId}
-                      className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4"
-                    >
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <p className="text-white font-semibold">
-                            {product?.name ?? item.productId}
-                          </p>
-                          {isEditing ? (
-                            <input
-                              autoFocus
-                              value={noteDraft}
-                              onChange={(e) => setNoteDraft(e.target.value)}
-                              onBlur={() => saveNote(item.productId)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") saveNote(item.productId);
-                                if (e.key === "Escape") setEditingNoteId(null);
-                              }}
-                              placeholder="Ej: sin arroz, al punto..."
-                              className="mt-1 w-full h-10 rounded-lg bg-slate-800 border border-slate-700 text-white text-sm px-2 outline-none focus:border-cyan-500"
-                            />
-                          ) : (
-                            <>
-                              {item.note && (
-                                <p className="text-amber-400 text-xs mt-1">
-                                  {item.note}
-                                </p>
-                              )}
-                              {!item.note && (
-                                <button
-                                  onClick={() => startEditNote(item.productId)}
-                                  className="text-slate-500 hover:text-slate-300 text-xs mt-1 flex items-center gap-1"
-                                >
-                                  <MessageSquarePlus size={12} />
-                                  Agregar nota
-                                </button>
-                              )}
-                            </>
-                          )}
-                          <p className="text-cyan-400 text-sm mt-1">
-                            ${item.price.toLocaleString("es-CO")}
-                          </p>
-                        </div>
-                        <button
-                          disabled={busy}
-                          onClick={() => removeItem(item.productId)}
-                          className="text-red-400 hover:text-red-300 disabled:opacity-40 p-2"
-                        >
-                          <Trash2 size={20} />
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-3 mt-3">
-                        <button
-                          disabled={busy}
-                          onClick={() => decreaseItem(item.productId, item.quantity)}
-                          className="w-10 h-10 rounded-lg bg-slate-700 hover:bg-slate-600 flex items-center justify-center disabled:opacity-40 active:scale-95 transition"
-                        >
-                          <Minus size={18} />
-                        </button>
-                        <span className="text-white font-bold text-lg w-8 text-center">
-                          {item.quantity}
-                        </span>
-                        <button
-                          disabled={busy}
-                          onClick={() => increaseItem(item.productId, item.quantity)}
-                          className="w-10 h-10 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center justify-center disabled:opacity-40 active:scale-95 transition"
-                        >
-                          <Plus size={18} />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
+              </div>
+            </section>
 
-                {/* Totales mobile */}
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 space-y-2">
-                  <div className="flex justify-between text-slate-400">
-                    <span>Subtotal</span>
-                    <span>${table.subtotal.toLocaleString("es-CO")}</span>
+            {/* Pedido actual */}
+            <section
+              aria-label="Pedido actual"
+              className={`${mobileTab === "order" ? "flex" : "hidden"} md:flex flex-1 md:flex-none min-h-0 flex-col overflow-hidden md:rounded-2xl md:border md:border-slate-800 md:bg-slate-950/40`}
+            >
+              <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-800 flex-shrink-0">
+                <h3 className="flex items-center gap-2 text-white font-bold text-lg">
+                  <ClipboardList size={20} className="text-slate-300" aria-hidden="true" />
+                  Pedido actual
+                </h3>
+                <span className="px-3 py-1 rounded-full border border-slate-700 bg-slate-900 text-slate-200 text-sm font-semibold">
+                  {itemCount} {itemCount === 1 ? "ítem" : "ítems"}
+                </span>
+              </div>
+
+              <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
+                {!hasItems ? (
+                  <div className="h-full min-h-[200px] flex flex-col items-center justify-center text-center px-6">
+                    <ShoppingBasket size={48} className="text-slate-500 mb-4" aria-hidden="true" />
+                    <p className="text-white font-bold text-lg">Tu pedido está vacío</p>
+                    <p className="text-slate-400 text-sm mt-1">Selecciona productos para agregarlos a la mesa.</p>
                   </div>
-                  <div className="flex justify-between text-slate-400">
-                    <span>Impuesto</span>
-                    <span>${table.tax.toLocaleString("es-CO")}</span>
-                  </div>
-                  <div className="flex justify-between text-white font-bold text-lg pt-2 border-t border-slate-800">
-                    <span>Total</span>
-                    <span>${table.total.toLocaleString("es-CO")}</span>
-                  </div>
+                ) : (
+                  table.items.map(renderOrderItem)
+                )}
+              </div>
+
+              {/* Totales */}
+              <div className="border-t border-slate-800 p-4 space-y-1 flex-shrink-0">
+                <div className="flex justify-between text-slate-400 text-sm">
+                  <span>Subtotal</span>
+                  <span>{money(table.subtotal)}</span>
+                </div>
+                <div className="flex justify-between text-slate-400 text-sm">
+                  <span>Impuestos</span>
+                  <span>{money(table.tax)}</span>
+                </div>
+                <div className="flex justify-between items-baseline text-white font-bold text-xl pt-2 border-t border-slate-800 mt-2">
+                  <span>Total</span>
+                  <span className="text-cyan-400 text-2xl font-black">{money(table.total)}</span>
                 </div>
               </div>
-            ) : (
-              <div className="flex-1 flex flex-col overflow-hidden">
-                <div className="p-4 space-y-3 flex-shrink-0">
-                  <div className="relative">
-                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                      placeholder="Buscar producto..."
-                      className="w-full h-11 pl-9 pr-4 rounded-xl bg-vimdy-surface border border-slate-700 text-white text-sm outline-none focus:border-cyan-500 transition"
-                    />
-                  </div>
-                  <button
-                    onClick={listen}
-                    disabled={listening}
-                    className={`w-full h-11 rounded-xl flex items-center justify-center gap-2 text-sm font-bold transition ${
-                      listening
-                        ? "bg-red-500 text-white animate-pulse"
-                        : "bg-cyan-500 hover:bg-cyan-400 text-slate-950"
-                    }`}
-                  >
-                    {listening ? <MicOff size={16} /> : <Mic size={16} />}
-                    Pedir por voz
-                  </button>
-                  <div className="flex gap-2 overflow-x-auto pb-1">
-                    {categories.map(cat => (
-                      <button
-                        key={cat}
-                        onClick={() => setCategory(cat)}
-                        className={`px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition ${
-                          category === cat
-                            ? "bg-cyan-500 text-slate-950"
-                            : "bg-slate-800 text-slate-300 hover:bg-slate-700"
-                        }`}
-                      >
-                        {categoryLabel(cat)}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="flex-1 overflow-y-auto px-4 pb-4 grid grid-cols-2 gap-3 content-start">
-                  {visibleProducts.map(product => (
-                    <button
-                      key={product.id}
-                      disabled={busy}
-                      onClick={() => addProduct(product)}
-                      className="bg-slate-950/60 border border-slate-800 hover:border-cyan-500 rounded-2xl p-4 text-left transition disabled:opacity-40 active:scale-[0.98]"
-                    >
-                      <h4 className="text-white font-semibold text-base">{product.name}</h4>
-                      <p className="text-cyan-400 mt-2 font-bold">
-                        ${product.price.toLocaleString("es-CO")}
-                      </p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+            </section>
           </div>
         </div>
 
+        {/* Liberar mesa: fila propia, encima de las acciones principales, separada para no pulsarla por error */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4 px-4 sm:px-6 pt-3 pb-3 border-t border-slate-700 bg-slate-950/40 flex-shrink-0">
+          <p className="text-slate-400 text-xs sm:text-sm leading-snug">
+            {!canRelease
+              ? "Esta mesa ya está libre."
+              : hasItems
+                ? "Esta mesa tiene consumo: para liberarla se cancela el pedido (pide motivo y avisa a cocina)."
+                : "Mesa sin consumo: se libera de inmediato y queda disponible."}
+          </p>
+          <button
+            type="button"
+            disabled={busy || !canRelease}
+            onClick={handleReleaseClick}
+            aria-label={`Liberar mesa ${table.name}`}
+            className="w-full sm:w-auto sm:min-w-[220px] h-12 px-6 rounded-xl border-2 border-red-500/60 bg-red-500/10 hover:bg-red-500/20 active:scale-[0.98] disabled:opacity-40 disabled:hover:bg-red-500/10 text-red-200 text-base font-bold flex items-center justify-center gap-2 whitespace-nowrap transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-red-500/30"
+          >
+            <DoorOpen size={20} aria-hidden="true" />
+            Liberar mesa
+          </button>
+        </div>
+
         {/* Acciones principales */}
-        <div className="flex items-center justify-between px-6 py-4 border-t border-slate-700 flex-shrink-0">
-          <div className="flex items-center gap-2">
-            <span className="text-slate-400 text-xs font-semibold uppercase tracking-wide">Prioridad:</span>
-            <div className="flex gap-1">
+        <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3 px-4 sm:px-6 py-3 sm:py-4 border-t border-slate-700 flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <span className="text-slate-400 text-xs font-semibold uppercase tracking-wide">Prioridad</span>
+            <div className="flex gap-1 p-1 rounded-xl bg-slate-900 border border-slate-700">
               {(["NORMAL", "HIGH", "URGENT"] as OrderPriority[]).map(value => (
                 <button
                   key={value}
                   onClick={() => setPriority(value)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                  aria-pressed={priority === value}
+                  className={`h-9 px-3.5 rounded-lg text-xs font-bold transition ${
                     priority === value
                       ? value === "NORMAL"
-                        ? "bg-slate-600 text-white"
+                        ? "bg-cyan-500/20 text-cyan-200 border border-cyan-400/60"
                         : value === "HIGH"
                           ? "bg-orange-500 text-slate-950"
                           : "bg-red-500 text-slate-950"
-                      : "bg-slate-800 text-slate-400 hover:bg-slate-700"
+                      : "text-slate-400 hover:bg-slate-800"
                   }`}
                 >
                   {value === "NORMAL" ? "Normal" : value === "HIGH" ? "Alta" : "Urgente"}
@@ -771,30 +740,30 @@ export function TableDetailPanel({
               ))}
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 w-full sm:w-auto">
             <button
               disabled={busy || !hasKitchenItems}
               onClick={sendToKitchen}
-              className="flex items-center gap-2 h-11 px-5 rounded-xl bg-orange-500 hover:bg-orange-400 disabled:opacity-40 disabled:hover:bg-orange-500 text-slate-950 font-bold transition"
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 h-12 px-3 sm:px-6 rounded-xl whitespace-nowrap text-sm sm:text-base bg-orange-500 hover:bg-orange-400 disabled:opacity-40 disabled:hover:bg-orange-500 text-slate-950 font-bold transition"
             >
-              <ChefHat size={18} />
+              <ChefHat size={20} />
               Enviar a cocina
             </button>
             {canCharge ? (
               <button
                 disabled={busy || !hasItems}
                 onClick={() => setShowCloseDialog(true)}
-                className="flex items-center gap-2 h-11 px-5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-bold transition"
+                className="flex-1 sm:flex-none flex items-center justify-center gap-2 h-12 px-3 sm:px-6 rounded-xl whitespace-nowrap text-sm sm:text-base bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-bold transition"
               >
-                <Wallet size={18} />
-                Cerrar y cobrar
+                <Wallet size={20} />
+                Cobrar cuenta
               </button>
             ) : (
               <div
                 title={TABLE_CHARGE_FORBIDDEN_MESSAGE}
-                className="flex items-center gap-2 h-11 px-4 rounded-xl bg-slate-800 text-slate-400 text-sm font-semibold"
+                className="flex-1 sm:flex-none flex items-center justify-center gap-2 h-12 px-4 rounded-xl bg-slate-800 text-slate-400 text-sm font-semibold"
               >
-                <Wallet size={18} />
+                <Wallet size={20} />
                 Cobra el cajero
               </div>
             )}
@@ -879,6 +848,8 @@ export function TableDetailPanel({
 
       {showReleaseConfirm && (
         <ConfirmReleaseDialog
+          tableName={table.name}
+          linkedNames={tables.filter(t => t.mergedInto === table.id).map(t => t.name)}
           onConfirm={handleRelease}
           onCancel={() => setShowReleaseConfirm(false)}
         />
@@ -896,6 +867,43 @@ export function TableDetailPanel({
 }
 
 const money = (value: number) => `$${Math.round(value).toLocaleString("es-CO")}`;
+
+/** Reloj que se refresca solo: los minutos de la mesa avanzan sin tocar nada. */
+function useNow(intervalMs = 30000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(timer);
+  }, [intervalMs]);
+  return now;
+}
+
+/**
+ * Foto del producto igual que en la Caja (recortada a cuadro, carga diferida).
+ * Si el producto no tiene foto, o la dirección falla, se muestra el plato de
+ * siempre en vez de un icono de imagen rota.
+ */
+function ProductThumb({ image, className = "" }: { image?: string; className?: string }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [image]);
+
+  return (
+    <div className={`${className} bg-vimdy-background border border-slate-800 flex items-center justify-center overflow-hidden`}>
+      {image && !failed ? (
+        <img
+          src={image}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          onError={() => setFailed(true)}
+          className="w-full h-full object-cover"
+        />
+      ) : (
+        <span aria-hidden="true">🍽️</span>
+      )}
+    </div>
+  );
+}
 
 /** Resumen corto de una mesa para elegirla: personas, productos y total. */
 function TableChoiceCard({
@@ -1038,13 +1046,14 @@ function TransferTableDialog({ tables, currentTable, onSelect, onClose }: MoveTa
   );
 }
 
-function ConfirmReleaseDialog({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+function ConfirmReleaseDialog({ onConfirm, onCancel, tableName, linkedNames = [] }: { onConfirm: () => void; onCancel: () => void; tableName: string; linkedNames?: string[] }) {
   return (
     <div className="fixed inset-0 z-[1003] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-vimdy-surface p-6 shadow-2xl">
-        <h3 className="text-white text-lg font-bold mb-2">¿Liberar esta mesa?</h3>
+      <div role="alertdialog" aria-modal="true" className="w-full max-w-sm rounded-2xl border border-slate-700 bg-vimdy-surface p-6 shadow-2xl">
+        <h3 className="text-white text-lg font-bold mb-2">¿Liberar {tableName}?</h3>
         <p className="text-slate-400 text-sm mb-6">
-          Se eliminarán las personas registradas y la mesa volverá a estar disponible.
+          Se liberará <span className="text-white font-semibold">{tableName}</span>: se quitan las personas registradas y la mesa volverá a estar disponible. No se borra ninguna venta ni historial.
+          {linkedNames.length > 0 && ` También quedan libres las mesas unidas: ${linkedNames.join(", ")}.`}
         </p>
         <div className="flex justify-end gap-2">
           <button onClick={onCancel} className="px-4 py-2 rounded-lg bg-slate-700 text-white text-sm">Volver</button>
@@ -1074,10 +1083,10 @@ function ConfirmCancelOrderDialog({
       <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-vimdy-surface p-6 shadow-2xl">
         <div className="flex items-center gap-2 mb-2">
           <AlertTriangle size={20} className="text-red-400" />
-          <h3 className="text-white text-lg font-bold">¿Cancelar este pedido?</h3>
+          <h3 className="text-white text-lg font-bold">¿Liberar {table.name} y cancelar su pedido?</h3>
         </div>
         <p className="text-slate-400 text-sm mb-4">
-          Se cancelan {units} {units === 1 ? "producto" : "productos"} ({money(table.total)}), cocina deja de preparar lo pendiente y {table.name} queda libre.
+          {table.name} tiene consumo sin cobrar, por eso liberarla cancela el pedido (queda registrado con el motivo). Se cancelan {units} {units === 1 ? "producto" : "productos"} ({money(table.total)}), cocina deja de preparar lo pendiente y {table.name} queda libre.
         </p>
         <label className="text-slate-400 text-xs uppercase tracking-wide">Motivo</label>
         <div className="grid grid-cols-2 gap-2 mt-2 mb-6">

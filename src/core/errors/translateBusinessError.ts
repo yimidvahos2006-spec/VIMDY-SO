@@ -76,6 +76,8 @@ const CODE_MESSAGES: Record<string, (detail: string) => string> = {
   TABLE_PEOPLE_INVALID: () => "Indica cuántas personas se suman (1 o más).",
   TABLE_CANCEL_HAS_DELIVERED: () =>
     "Ya se entregó comida de esta cuenta, así que no se puede cancelar. Cóbrala o pide ayuda a un gerente.",
+  TABLE_NOTE_ALREADY_SENT: () =>
+    "Ese producto ya salió a cocina, así que cocina no vería el cambio. Agrégalo de nuevo con la nota (ej. “sin cebolla”) y envíalo.",
   SPLIT_PEOPLE_INVALID: () => "Indica entre cuántas personas se divide (1 o más).",
   TABLE_MERGE_INCONSISTENT: () =>
     "La unión de mesas no se pudo completar y tampoco deshacer. No cobres todavía: revisa las dos mesas y avisa a un administrador.",
