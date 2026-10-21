@@ -16,7 +16,7 @@ import { fileToProductImage } from "../../utils/imageUtils";
 import { ProductionIntelligencePanel } from "./ProductionIntelligencePanel";
 import { parseDecimalInput } from "./importHelpers";
 import { UNIT_OPTIONS } from "./inventoryShared";
-import { CategoryStationEditor } from "./InventoryWidgets";
+import { CategoryStationEditor, collectKnownStations } from "./InventoryWidgets";
 import { NewSupplierModal } from "./NewSupplierModal";
 import { useCanUse } from "../../../hooks/useCanUse";
 
@@ -765,6 +765,7 @@ export function ProductFormModal({
   // "Tamaños y extras" no aplica a productos empacados que se compran y se venden
   // igual (gaseosa, snacks) ni a ingredientes: se oculta por completo.
   const showsOptionsSection = productType !== "ingrediente" && productType !== "inventario";
+  const knownStations = useMemo(() => collectKnownStations(categories, allProducts), [categories, allProducts]);
   const typeHint = PRODUCT_TYPE_CHOICES.find((t) => t.id === productType)?.hint ?? "";
 
   return (
@@ -933,6 +934,7 @@ export function ProductFormModal({
                     <input
                       value={newCategoryPrintStation}
                       onChange={(e) => setNewCategoryPrintStation(e.target.value)}
+                      list="vimdy-known-stations"
                       placeholder="Ej: Cocina"
                       className="w-full h-9 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-xs placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
                     />
@@ -944,6 +946,7 @@ export function ProductFormModal({
                 <CategoryStationEditor
                   key={categoryId}
                   category={categories.find((c) => c.id === categoryId)}
+                  knownStations={knownStations}
                   onUpdated={(updated) =>
                     setCategories((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
                   }
@@ -1404,14 +1407,15 @@ export function ProductFormModal({
                   {isKitchenType && (
                     <div className="sm:col-span-2">
                       <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">
-                        Estación (si es distinta a la de su categoría)
+                        Estación solo para este producto
                         <span className="text-vimdy-text-tertiary font-normal"> (opcional)</span>
                       </label>
                       <input
                         type="text"
                         value={printStationOverride}
                         onChange={(e) => setPrintStationOverride(e.target.value)}
-                        placeholder="Hereda la estación de su categoría"
+                        list="vimdy-known-stations"
+                        placeholder="Igual que su categoría"
                         className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
                       />
                     </div>
@@ -1686,6 +1690,12 @@ export function ProductFormModal({
           </VimdyButton>
         </div>
       </div>
+
+      <datalist id="vimdy-known-stations">
+        {knownStations.map((st) => (
+          <option key={st} value={st} />
+        ))}
+      </datalist>
 
       <NewSupplierModal
         open={showNewSupplierModal}

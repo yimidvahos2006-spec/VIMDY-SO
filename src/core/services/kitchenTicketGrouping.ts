@@ -20,9 +20,15 @@ export function groupOrderItemsByStation(
   items: readonly KitchenOrderItemView[]
 ): Map<string, KitchenOrderItemView[]> {
   const grouped = new Map<string, KitchenOrderItemView[]>();
+  // "Barra" y "barra " son la misma estación: se agrupa sin distinguir
+  // mayúsculas y se muestra con el nombre tal como apareció primero.
+  const displayNameByKey = new Map<string, string>();
 
   for (const item of items) {
-    const station = item.station?.trim() || DEFAULT_PRINT_STATION;
+    const name = item.station?.trim() || DEFAULT_PRINT_STATION;
+    const key = name.toLowerCase();
+    const station = displayNameByKey.get(key) ?? name;
+    displayNameByKey.set(key, station);
     const bucket = grouped.get(station);
 
     if (bucket) {
