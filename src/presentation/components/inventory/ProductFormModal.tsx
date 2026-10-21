@@ -6,8 +6,7 @@ import { parseMoneyInput } from "../../../core/utils/parseMoneyInput";
 import { toMoneyInputValue } from "../../../core/utils/formatMoneyInput";
 import { MoneyInput } from "../ui/MoneyInput";
 import { compatibleUnits, convertQuantity, normalizeUnit } from "../../../core/utils/unitConversion";
-import { X, Plus, ImagePlus, Trash2, Sparkles, ChefHat, Flame, Clock3, UserPlus } from "lucide-react";
-import { generateRecipeWithAI } from "../../../core/ia/RecipeAI";
+import { X, Plus, ImagePlus, Trash2, ChefHat, Flame, Clock3, UserPlus } from "lucide-react";
 import { Product, Category, Supplier, RecipeItem, ProductSizeOption, ProductExtraOption } from "../../../core/entities/Entities";
 import { ProductInput } from "../../../core/engines/InventoryEngine";
 import { ProductType, inferProductType, resolveProductFlags } from "../../../core/types/productType";
@@ -181,17 +180,9 @@ export function ProductFormModal({
     setExtraRows((prev) => prev.filter((r) => r.rowId !== rowId));
   }
 
-  // ✨ Generar receta con IA: el usuario escribe/confirma el nombre del
-  // plato y Claude propone ingredientes (solo del inventario real, ver
-  // RecipeAI.ts), categoría y precio sugerido.
-  const [showRecipeAiPrompt, setShowRecipeAiPrompt] = useState(false);
-
   // Wizard corto de producto: paso 1 = nombre + categoría + precio (obligatorio),
   // pasos 2-4 son opcionales (tipo, receta, variantes).
   const [productWizardStep, setProductWizardStep] = useState<1 | 2 | 3 | 4>(1);
-  const [recipeAiDishName, setRecipeAiDishName] = useState("");
-  const [generatingRecipe, setGeneratingRecipe] = useState(false);
-  const [recipeAiError, setRecipeAiError] = useState<string | null>(null);
 
   // PASO 1 (rediseño formulario de producto): al cambiar el tipo, sincroniza
   // los flags reales que ya usa el resto del formulario y del motor de ventas
@@ -287,72 +278,6 @@ export function ProductFormModal({
     () => allProducts.filter((p) => p.id !== product?.id && p.isIngredient === true),
     [allProducts, product]
   );
-
-  async function handleGenerateRecipeAI() {
-    const dishName = recipeAiDishName.trim() || name.trim();
-
-    if (!dishName) {
-      setRecipeAiError("Escribe el nombre del plato primero.");
-      return;
-    }
-
-    setGeneratingRecipe(true);
-    setRecipeAiError(null);
-
-    try {
-      const result = await generateRecipeWithAI(dishName, ingredientOptions, categories);
-
-      if (result.ingredients.length === 0) {
-        setRecipeAiError(
-          result.unmatchedIngredients.length > 0
-            ? `La IA sugirió ${result.unmatchedIngredients.join(", ")}, pero ninguno existe todavía en tu inventario. Créalos primero en Inventario y vuelve a intentar.`
-            : "La IA no pudo proponer ingredientes para ese plato. Intenta con un nombre más específico."
-        );
-        return;
-      }
-
-      setHasRecipe(true);
-      setRecipeRows(
-        result.ingredients.map((ing) => ({
-          rowId: crypto.randomUUID(),
-          productId: ing.productId,
-          quantity: String(ing.quantity),
-          optional: false,
-          unit: ""
-        }))
-      );
-
-      // Solo se autocompletan categoría y precio si el usuario todavía no
-      // los había definido — la IA nunca pisa un dato que el usuario ya
-      // escribió a mano.
-      if (result.category && !categoryId) {
-        const matched = categories.find((c) => c.name === result.category);
-        if (matched) setCategoryId(matched.id);
-      }
-      if (result.suggestedPrice && !price.trim()) {
-        setPrice(toMoneyInputValue(result.suggestedPrice));
-      }
-
-      if (result.unmatchedIngredients.length > 0) {
-        toast.warning(
-          `Receta generada. La IA también sugirió ${result.unmatchedIngredients.join(", ")}, pero no existen todavía en tu inventario — créalos si quieres agregarlos.`,
-          7000
-        );
-      } else {
-        toast.success("Receta generada con IA. Revisa las cantidades antes de guardar.");
-      }
-
-      setShowRecipeAiPrompt(false);
-    } catch (e: any) {
-      setRecipeAiError(
-        e?.message?.startsWith("RECIPE_AI_UNAVAILABLE")
-          ? "No se pudo generar la receta en este momento. Intenta de nuevo."
-          : "No se pudo generar la receta. Intenta de nuevo."
-      );
-    } finally {
-      setGeneratingRecipe(false);
-    }
-  }
 
   // PASO 2 (Motor de Producción): mientras se arma la receta, se recalcula
   // en vivo con RecipeEngine (mismo motor que usa el resto de VIMDY) sobre
@@ -1098,65 +1023,6 @@ export function ProductFormModal({
                 </p>
               </div>
             )}
-
-            <div className="mb-3">
-              {!showRecipeAiPrompt ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRecipeAiDishName(name.trim());
-                    setRecipeAiError(null);
-                    setShowRecipeAiPrompt(true);
-                  }}
-                  className="h-9 px-3 rounded-vimdy-sm border border-vimdy-recipe/40 bg-vimdy-recipe/10 text-vimdy-recipe text-sm font-medium hover:bg-vimdy-recipe/20 flex items-center gap-2"
-                >
-                  <Sparkles size={14} />
-                  Generar receta con IA
-                </button>
-              ) : (
-                <div className="rounded-vimdy-sm border border-vimdy-recipe/30 bg-vimdy-recipe/5 p-3 space-y-2">
-                  <label className="text-vimdy-text-secondary text-xs font-medium flex items-center gap-1.5">
-                    <Sparkles size={13} className="text-vimdy-recipe" />
-                    ¿Qué plato quieres que la IA proponga?
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={recipeAiDishName}
-                      onChange={(e) => setRecipeAiDishName(e.target.value)}
-                      placeholder="Ej: Hamburguesa doble con tocineta"
-                      disabled={generatingRecipe}
-                      className="flex-1 h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-recipe disabled:opacity-60"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleGenerateRecipeAI}
-                      disabled={generatingRecipe}
-                      className="h-10 px-4 rounded-vimdy-sm bg-vimdy-recipe text-vimdy-text text-sm font-semibold hover:bg-vimdy-recipe-hover disabled:opacity-60 flex items-center gap-2 shrink-0"
-                    >
-                      {generatingRecipe ? "Generando..." : "Generar"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowRecipeAiPrompt(false);
-                        setRecipeAiError(null);
-                      }}
-                      disabled={generatingRecipe}
-                      aria-label="Cancelar sugerencia de receta con IA"
-                      className="h-10 w-10 shrink-0 rounded-vimdy-sm border border-vimdy-border text-vimdy-text-secondary hover:text-vimdy-text flex items-center justify-center disabled:opacity-60"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                  <p className="text-vimdy-text-tertiary text-xs">
-                    Solo usa ingredientes que ya existen en tu inventario. Si sugiere algo que no
-                    tienes todavía, te avisa aparte — nunca lo inventa como si ya existiera.
-                  </p>
-                  {recipeAiError && <p className="text-vimdy-danger text-xs">{recipeAiError}</p>}
-                </div>
-              )}
-            </div>
 
             {hasRecipe && (
               <div className="space-y-2">
