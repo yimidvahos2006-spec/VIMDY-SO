@@ -40,13 +40,23 @@ describe("Smoke: editar un producto con tamaños/extras y cambiar su tipo a Serv
   it("el Servicio resultante no conserva tamaños ni extras viejos", async () => {
     const { inventory } = buildInventory();
 
+    // La receta solo puede usar ingredientes que existan de verdad.
+    const masa = await inventory.createProduct({
+      name: "Masa",
+      categoryId: "cat-comidas",
+      price: 0,
+      stock: 1000,
+      minStock: 0,
+      isIngredient: true
+    });
+
     const pizza = await inventory.createProduct({
       name: "Pizza",
       categoryId: "cat-comidas",
       price: 25000,
       stock: 0,
       minStock: 0,
-      recipe: [{ productId: "ing-masa", quantity: 180 }],
+      recipe: [{ productId: masa.id, quantity: 180 }],
       sizes: [{ id: "s1", name: "Grande", priceDelta: 12000 }],
       extras: [{ id: "e1", name: "Tocineta", priceDelta: 4000 }],
       productionMode: "ON_DEMAND",

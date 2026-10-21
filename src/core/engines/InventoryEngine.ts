@@ -73,22 +73,85 @@ export class InventoryEngine {
     return this.getById(productId);
   }
 
-   public async createProduct(input: ProductInput, performedBy?: string): Promise<Product> {
+   /** Para comparar nombres sin importar mayúsculas, tildes ni espacios de más ("Café" = " cafe "). */
+  private static normalizeName(value: string): string {
+    return value
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  }
+
+  /**
+   * Reglas que valen SIEMPRE, sin importar desde qué pantalla se guarde
+   * (formulario, importación con IA, onboarding...): antes solo las revisaba
+   * la pantalla y el motor aceptaba cualquier cosa.
+   * `selfId` = el producto que se está editando (para no chocar consigo mismo).
+   */
+  private async validateProductInput(input: ProductInput, selfId?: string): Promise<void> {
+    const isNumberOrUndefined = (v: unknown) => v === undefined || v === null || (typeof v === "number" && Number.isFinite(v));
+
+    if (!isNumberOrUndefined(input.price) || (input.price ?? 0) < 0) {
+      throw new Error("PRECIO_INVALIDO");
+    }
+    if (!isNumberOrUndefined(input.purchasePrice) || (input.purchasePrice ?? 0) < 0) {
+      throw new Error("El costo no puede ser negativo ni inválido.");
+    }
+    if (!isNumberOrUndefined(input.minStock) || (input.minStock ?? 0) < 0) {
+      throw new Error("El stock mínimo no puede ser negativo ni inválido.");
+    }
+    if (!isNumberOrUndefined(input.taxRate) || (input.taxRate ?? 0) < 0 || (input.taxRate ?? 0) > 100) {
+      throw new Error("El IVA debe estar entre 0 y 100.");
+    }
+    if (selfId === undefined && (!isNumberOrUndefined(input.stock) || (input.stock ?? 0) < 0)) {
+      throw new Error("El stock inicial no puede ser negativo ni inválido.");
+    }
+
+    const all = await this.getRepository().findAll();
+    const wantedName = InventoryEngine.normalizeName(input.name);
+    const wantsIngredient = input.isIngredient === true;
+    const nameTaken = all.some(
+      (p) =>
+        p.id !== selfId &&
+        p.active !== false &&
+        (p.isIngredient === true) === wantsIngredient &&
+        InventoryEngine.normalizeName(p.name) === wantedName
+    );
+    if (nameTaken) {
+      throw new Error("NOMBRE_DUPLICADO");
+    }
+
+    if (input.recipe && input.recipe.length > 0) {
+      const byId = new Map(all.map((p) => [p.id, p]));
+      const seen = new Set<string>();
+      for (const item of input.recipe) {
+        if (seen.has(item.productId)) {
+          throw new Error("INGREDIENTE_DUPLICADO");
+        }
+        seen.add(item.productId);
+        if (!Number.isFinite(item.quantity) || item.quantity <= 0) {
+          throw new Error("INGREDIENTE_CANTIDAD_INVALIDA");
+        }
+        if (selfId !== undefined && item.productId === selfId) {
+          throw new Error("Un producto no puede usarse a sí mismo en su receta.");
+        }
+        const ingredient = byId.get(item.productId);
+        if (!ingredient) {
+          throw new Error("INGREDIENTE_INEXISTENTE");
+        }
+      }
+    }
+  }
+
+  public async createProduct(input: ProductInput, performedBy?: string): Promise<Product> {
     const name = input.name.trim();
     if (!name) {
       throw new Error('PRODUCT_NAME_REQUIRED');
     }
 
-    // Validate no duplicate ingredients in recipe
-    if (input.recipe && input.recipe.length > 0) {
-      const seen = new Set<string>();
-      for (const item of input.recipe) {
-        if (seen.has(item.productId)) {
-          throw new Error('INGREDIENTE_DUPLICADO');
-        }
-        seen.add(item.productId);
-      }
-    }
+    // Todas las reglas (nombre repetido, precios, receta...) en un solo lugar.
+    await this.validateProductInput(input);
 
     const categoryId = input.categoryId ?? "uncategorized";
     const categoryDefault = input.requiresKitchen === undefined
@@ -175,11 +238,17 @@ export class InventoryEngine {
       throw new Error('PRODUCT_NOT_FOUND');
     }
 
+    await this.validateProductInput(input, id);
+
     const updated: Product = {
       ...existing,
       ...input,
       id,
       name: input.name.trim(),
+      // El stock NUNCA se cambia al editar un producto: el formulario trae el
+      // que tenía al abrirse y pisaría las ventas hechas mientras tanto. Para
+      // cambiarlo existen Aumentar / Disminuir / Ajustar stock (con kardex).
+      stock: existing.stock,
       lastUpdated: new Date(),
     };
 

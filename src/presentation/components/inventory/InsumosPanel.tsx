@@ -707,17 +707,27 @@ function InsumoFormModal({
               />
               <p className="text-vimdy-text-tertiary text-xs mt-1">Precio que te cuesta comprar este insumo.</p>
             </div>
-            <div>
-              <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Stock inicial</label>
-              <input
-                type="number"
-                min={0}
-                step="1"
-                value={stock}
-                onChange={(e) => setStock(Number(e.target.value))}
-                className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-background border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
-              />
-            </div>
+            {insumo ? (
+              <div>
+                <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Stock actual</label>
+                <p className="h-11 px-3 flex items-center rounded-vimdy-md bg-vimdy-background border border-vimdy-border text-vimdy-text text-sm">
+                  {insumo.stock} {insumo.unit ?? "und"}
+                </p>
+                <p className="text-vimdy-text-tertiary text-xs mt-1">Para cambiarlo usa "Registrar compra" o "Ajustar stock".</p>
+              </div>
+            ) : (
+              <div>
+                <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Stock inicial</label>
+                <input
+                  type="number"
+                  min={0}
+                  step="1"
+                  value={stock}
+                  onChange={(e) => setStock(Number(e.target.value))}
+                  className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-background border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
+                />
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
