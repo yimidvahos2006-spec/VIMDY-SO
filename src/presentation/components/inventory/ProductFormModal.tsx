@@ -597,8 +597,10 @@ export function ProductFormModal({
     // PASO 9 (Opciones): filas vacías (sin nombre) se ignoran en silencio en
     // vez de bloquear el guardado -- es común dejar una fila a medio llenar
     // mientras se arma la lista. Solo se valida lo que sí tiene nombre.
-    const sizesValue: ProductSizeOption[] = [];
-    for (const row of sizeRows) {
+    // Si la sección está oculta (tipo "Se compra y se vende igual" o ingrediente)
+    // no se valida ni se modifica nada: se conservan las opciones que ya tuviera.
+    const sizesValue: ProductSizeOption[] = showsOptionsSection ? [] : [...(product?.sizes ?? [])];
+    for (const row of showsOptionsSection ? sizeRows : []) {
       if (!row.name.trim()) continue;
       const delta = row.priceDelta.trim() ? parseMoneyInput(row.priceDelta) : 0;
       if (isNaN(delta)) {
@@ -608,8 +610,8 @@ export function ProductFormModal({
       sizesValue.push({ id: crypto.randomUUID(), name: row.name.trim(), priceDelta: delta });
     }
 
-    const extrasValue: ProductExtraOption[] = [];
-    for (const row of extraRows) {
+    const extrasValue: ProductExtraOption[] = showsOptionsSection ? [] : [...(product?.extras ?? [])];
+    for (const row of showsOptionsSection ? extraRows : []) {
       if (!row.name.trim()) continue;
       const delta = row.priceDelta.trim() ? parseMoneyInput(row.priceDelta) : 0;
       if (isNaN(delta)) {
@@ -760,6 +762,9 @@ export function ProductFormModal({
   const isBatchRecipe = productType === "cocina_receta" && productionMode === "BATCH";
   const showsStockFields = isStockType || isBatchRecipe;
   const showSalePrice = productType !== "ingrediente";
+  // "Tamaños y extras" no aplica a productos empacados que se compran y se venden
+  // igual (gaseosa, snacks) ni a ingredientes: se oculta por completo.
+  const showsOptionsSection = productType !== "ingrediente" && productType !== "inventario";
   const typeHint = PRODUCT_TYPE_CHOICES.find((t) => t.id === productType)?.hint ?? "";
 
   return (
@@ -788,7 +793,7 @@ export function ProductFormModal({
           </div>
         )}
 
-        <div className="space-y-4">
+        <div className="space-y-3">
           {/* Tipo: decide qué campos se muestran. */}
           <div>
             <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">¿Qué vas a crear? *</label>
@@ -801,7 +806,7 @@ export function ProductFormModal({
                     type="button"
                     aria-pressed={selected}
                     onClick={() => handleProductTypeChange(choice.id)}
-                    className={`h-10 px-3 rounded-vimdy-md border text-sm font-medium transition-colors ${
+                    className={`h-9 px-3 rounded-vimdy-md border text-sm font-medium transition-colors ${
                       selected
                         ? "border-vimdy-accent bg-vimdy-accent/10 text-vimdy-accent"
                         : "border-vimdy-border text-vimdy-text-secondary hover:text-vimdy-text hover:bg-vimdy-surface-hover"
@@ -815,20 +820,67 @@ export function ProductFormModal({
             <p className="text-vimdy-text-tertiary text-xs mt-1.5">{typeHint}</p>
           </div>
 
-          {/* Nombre */}
-          <div>
-            <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Nombre *</label>
-            <input
-              autoFocus={!isEditing}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Ej: Hamburguesa Premium"
-              className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
-            />
+          {/* Imagen + Nombre: siempre a la vista, justo debajo de las pestañas de tipo
+              (carga rápida: foto a la izquierda, nombre y botones de foto a la derecha). */}
+          <div className="flex items-start gap-3">
+            <div className="w-[76px] h-[76px] rounded-vimdy-md border border-vimdy-border bg-vimdy-surface flex items-center justify-center overflow-hidden shrink-0">
+              {image ? (
+                <img src={image} alt="Vista previa" className="w-full h-full object-cover" />
+              ) : (
+                <ImagePlus size={22} className="text-vimdy-text-tertiary" />
+              )}
+            </div>
+            <div className="flex-1 min-w-0 space-y-2">
+              <div>
+                <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Nombre *</label>
+                <input
+                  autoFocus={!isEditing}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Ej: Hamburguesa Premium"
+                  className="w-full h-10 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
+                />
+              </div>
+              <div className="flex gap-2 flex-wrap items-center">
+                <label className="h-8 px-3 rounded-vimdy-sm border border-vimdy-border text-vimdy-text-secondary text-xs hover:bg-vimdy-surface cursor-pointer flex items-center gap-1.5">
+                  <ImagePlus size={13} />
+                  {processingImage ? "Procesando..." : "Subir imagen"}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    disabled={processingImage}
+                    onChange={handleImageChange}
+                  />
+                </label>
+                <label className="h-8 px-3 rounded-vimdy-sm border border-vimdy-border text-vimdy-text-secondary text-xs hover:bg-vimdy-surface cursor-pointer flex items-center gap-1.5">
+                  Tomar foto
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="hidden"
+                    disabled={processingImage}
+                    onChange={handleImageChange}
+                  />
+                </label>
+                {image && (
+                  <button
+                    type="button"
+                    onClick={() => setImage(undefined)}
+                    className="h-8 px-3 rounded-vimdy-sm border border-vimdy-danger/30 text-vimdy-danger text-xs hover:bg-vimdy-danger/10 flex items-center gap-1.5"
+                  >
+                    <Trash2 size={13} />
+                    Quitar
+                  </button>
+                )}
+              </div>
+              {imageError && <p className="text-vimdy-danger text-xs">{imageError}</p>}
+            </div>
           </div>
 
           {/* Categoría y precio de venta */}
-          <div className={`grid grid-cols-1 ${showSalePrice ? "sm:grid-cols-2" : ""} gap-4`}>
+          <div className={`grid grid-cols-1 ${showSalePrice ? "sm:grid-cols-2" : ""} gap-4 items-start`}>
             <div>
               <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Categoría *</label>
               <select
@@ -887,7 +939,8 @@ export function ProductFormModal({
                   </div>
                 </div>
               )}
-              {categoryId && categoryId !== "__nueva__" && (
+              {/* La estación de impresión solo importa si el producto pasa por cocina. */}
+              {isKitchenType && categoryId && categoryId !== "__nueva__" && (
                 <CategoryStationEditor
                   key={categoryId}
                   category={categories.find((c) => c.id === categoryId)}
@@ -1302,58 +1355,6 @@ export function ProductFormModal({
 
             {showMore && (
               <div className="space-y-4 px-4 pb-4 border-t border-vimdy-border pt-4">
-          {/* Imagen */}
-          <div>
-            <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Imagen</label>
-            <div className="flex items-center gap-3">
-              <div className="w-20 h-20 rounded-vimdy-md border border-vimdy-border bg-vimdy-surface flex items-center justify-center overflow-hidden shrink-0">
-                {image ? (
-                  <img src={image} alt="Vista previa" className="w-full h-full object-cover" />
-                ) : (
-                  <ImagePlus size={22} className="text-vimdy-text-tertiary" />
-                )}
-              </div>
-              <div className="flex-1 space-y-1">
-                <div className="flex gap-2 flex-wrap">
-                  <label className="h-9 px-3 rounded-vimdy-sm border border-vimdy-border text-vimdy-text-secondary text-sm hover:bg-vimdy-surface cursor-pointer flex items-center gap-2">
-                    <ImagePlus size={14} />
-                    {processingImage ? "Procesando..." : "Subir imagen"}
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      disabled={processingImage}
-                      onChange={handleImageChange}
-                    />
-                  </label>
-                  <label className="h-9 px-3 rounded-vimdy-sm border border-vimdy-border text-vimdy-text-secondary text-sm hover:bg-vimdy-surface cursor-pointer flex items-center gap-2">
-                    Tomar foto
-                    <input
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      className="hidden"
-                      disabled={processingImage}
-                      onChange={handleImageChange}
-                    />
-                  </label>
-                  {image && (
-                    <VimdyButton
-                      type="button"
-                      onClick={() => setImage(undefined)}
-                      variant="danger"
-                      size="sm"
-                      icon={<Trash2 size={14} />}
-                    >
-                      Quitar
-                    </VimdyButton>
-                  )}
-                </div>
-                {imageError && <p className="text-vimdy-danger text-xs">{imageError}</p>}
-              </div>
-            </div>
-          </div>
-
           {/* PASO 2 (Información General): Descripción, siempre visible, opcional. */}
           <div>
             <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">
@@ -1538,7 +1539,7 @@ export function ProductFormModal({
             )}
           </div>
 
-                {productType !== "ingrediente" && (
+                {showsOptionsSection && (
                   <>
           {/* PASO 9 (rediseño formulario de producto — Opciones): Tamaños y
               Extras configurables. Aplica a cualquier tipo de producto (una
