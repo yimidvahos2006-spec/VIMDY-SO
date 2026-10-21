@@ -18,6 +18,8 @@ import { UNIT_OPTIONS } from "./inventoryShared";
 import { CategoryStationEditor, collectKnownStations } from "./InventoryWidgets";
 import { NewSupplierModal } from "./NewSupplierModal";
 import { useCanUse } from "../../../hooks/useCanUse";
+import { useTranslation } from "../../../core/i18n/useTranslation";
+import { filterIngredientOptions, findRecipeRowProblem, normalizeSearch, sanitizeQuantityInput } from "./recipeFormHelpers";
 
 /**
  * Formulario completo de "Nuevo producto" (Parte 1).
@@ -59,6 +61,14 @@ export function ProductFormModal({
   onViewKardex?: (product: Product) => void;
 }) {
   const isEditing = !!product;
+  const { money } = useTranslation();
+  // Receta rápida: buscador de ingredientes + foco automático en la cantidad.
+  const [ingredientQuery, setIngredientQuery] = useState("");
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [suggestIndex, setSuggestIndex] = useState(0);
+  const [focusRowId, setFocusRowId] = useState<string | null>(null);
+  const [invalidRowId, setInvalidRowId] = useState<string | null>(null);
+  const ingredientSearchRef = React.useRef<HTMLInputElement>(null);
   const recipeSectionRef = React.useRef<HTMLDivElement>(null);
 
   // Wizard corto: paso 1 = datos básicos, paso 2 = tipo/precios, paso 3 = receta, paso 4 = extras
@@ -200,7 +210,6 @@ export function ProductFormModal({
       case "cocina_receta":
         setRequiresKitchen(true);
         setHasRecipe(true);
-        if (recipeRows.length === 0) addRecipeRow();
         break;
       case "servicio":
         setRequiresKitchen(false);
@@ -232,11 +241,40 @@ export function ProductFormModal({
     }
   }, [hasRecipe, productType, requiresKitchen]);
 
-  function addRecipeRow() {
-    setRecipeRows((prev) => [
-      ...prev,
-      { rowId: crypto.randomUUID(), productId: "", quantity: "1", optional: false, unit: "" }
-    ]);
+  function addIngredientToRecipe(productId: string) {
+    if (recipeRows.some((r) => r.productId === productId)) return;
+    const rowId = crypto.randomUUID();
+    setRecipeRows((prev) => [...prev, { rowId, productId, quantity: "", optional: false, unit: "" }]);
+    setIngredientQuery("");
+    setSuggestOpen(false);
+    setSuggestIndex(0);
+    setFocusRowId(rowId);
+    setFormError(null);
+  }
+
+  function startCreateIngredient() {
+    const typed = ingredientQuery.trim();
+    if (!typed) return;
+    setQuickIngredientName(typed);
+    setShowQuickIngredient(true);
+    setIngredientQuery("");
+    setSuggestOpen(false);
+  }
+
+  function copyRecipeFrom(sourceId: string) {
+    const source = allProducts.find((p) => p.id === sourceId);
+    if (!source?.recipe?.length) return;
+    const rows = source.recipe
+      .filter((r) => allProducts.some((p) => p.id === r.productId))
+      .map((r) => ({
+        rowId: crypto.randomUUID(),
+        productId: r.productId,
+        quantity: String(r.entryQuantity ?? r.quantity).replace(".", ","),
+        optional: r.optional ?? false,
+        unit: r.entryUnit ?? ""
+      }));
+    setRecipeRows(rows);
+    toast.success(`Receta copiada de "${source.name}". Ajusta las cantidades.`);
   }
 
   function removeRecipeRow(rowId: string) {
@@ -278,6 +316,46 @@ export function ProductFormModal({
     () => allProducts.filter((p) => p.id !== product?.id && p.isIngredient === true),
     [allProducts, product]
   );
+
+  const usedIngredientIds = useMemo(() => new Set(recipeRows.map((r) => r.productId)), [recipeRows]);
+  const ingredientSuggestions = useMemo(
+    () => filterIngredientOptions(ingredientOptions, ingredientQuery, usedIngredientIds),
+    [ingredientOptions, ingredientQuery, usedIngredientIds]
+  );
+  const canCreateIngredient =
+    ingredientQuery.trim().length > 0 &&
+    !ingredientOptions.some((p) => normalizeSearch(p.name) === normalizeSearch(ingredientQuery));
+  const suggestionCount = ingredientSuggestions.items.length + (canCreateIngredient ? 1 : 0);
+  const copyableRecipes = useMemo(
+    () => allProducts.filter((p) => p.id !== product?.id && !p.isIngredient && (p.recipe?.length ?? 0) > 0),
+    [allProducts, product]
+  );
+
+  React.useEffect(() => {
+    if (!focusRowId) return;
+    const el = document.querySelector<HTMLInputElement>(`[data-qty-row="${focusRowId}"]`);
+    el?.focus();
+    el?.select?.();
+    setFocusRowId(null);
+  }, [focusRowId]);
+
+  function handleIngredientSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSuggestOpen(true);
+      setSuggestIndex((i) => (suggestionCount === 0 ? 0 : (i + 1) % suggestionCount));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSuggestIndex((i) => (suggestionCount === 0 ? 0 : (i - 1 + suggestionCount) % suggestionCount));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const picked = ingredientSuggestions.items[Math.min(suggestIndex, suggestionCount - 1)];
+      if (picked && suggestIndex < ingredientSuggestions.items.length) addIngredientToRecipe(picked.id);
+      else if (canCreateIngredient) startCreateIngredient();
+    } else if (e.key === "Escape") {
+      setSuggestOpen(false);
+    }
+  }
 
   // PASO 2 (Motor de Producción): mientras se arma la receta, se recalcula
   // en vivo con RecipeEngine (mismo motor que usa el resto de VIMDY) sobre
@@ -482,12 +560,18 @@ export function ProductFormModal({
 
     let recipeValue: RecipeItem[] | undefined;
     if (hasRecipe) {
-      const validRows = recipeRows.filter((r) => r.productId && r.quantity.trim());
-
-      if (validRows.length === 0) {
-        setFormError("Agrega al menos un ingrediente a la receta, o desactiva \"Producto con receta\".");
+      const problem = findRecipeRowProblem(
+        recipeRows,
+        (id) => allProducts.find((p) => p.id === id)?.name ?? "un ingrediente"
+      );
+      if (problem) {
+        setFormError(problem.message);
+        setInvalidRowId(problem.rowId ?? null);
+        if (problem.rowId) setFocusRowId(problem.rowId);
         return;
       }
+      setInvalidRowId(null);
+      const validRows = recipeRows.filter((r) => r.productId);
 
       const parsedRows: RecipeItem[] = [];
       for (const row of validRows) {
@@ -660,15 +744,9 @@ export function ProductFormModal({
       });
       setAllProducts((prev) => [...prev, created]);
 
-      const emptyRow = recipeRows.find((r) => !r.productId);
-      if (emptyRow) {
-        setRecipeRows((prev) =>
-          prev.map((r) => (r.rowId === emptyRow.rowId ? { ...r, productId: created.id, quantity: "1", unit: "" } : r))
-        );
-      } else {
-        const newRowId = crypto.randomUUID();
-        setRecipeRows((prev) => [...prev, { rowId: newRowId, productId: created.id, quantity: "1", optional: false, unit: "" }]);
-      }
+      const newRowId = crypto.randomUUID();
+      setRecipeRows((prev) => [...prev, { rowId: newRowId, productId: created.id, quantity: "", optional: false, unit: "" }]);
+      setFocusRowId(newRowId);
 
       setShowQuickIngredient(false);
       setQuickIngredientName("");
@@ -974,11 +1052,10 @@ export function ProductFormModal({
           <div ref={recipeSectionRef} className="rounded-vimdy-md border border-vimdy-border bg-vimdy-background/60 p-4">
             <p className="flex items-center gap-1.5 text-vimdy-text text-sm font-medium">
               <ChefHat size={15} className="text-vimdy-recipe" />
-              Receta (ingredientes)
+              Ingredientes
             </p>
             <p className="text-vimdy-text-tertiary text-xs mt-1 mb-3">
-              Al vender este producto NO se descontará su propio stock: se descontará el de
-              cada ingrediente, en la cantidad indicada.
+              Escribe cada ingrediente y la cantidad que lleva <strong>una</strong> unidad de este producto.
             </p>
 
             {hasRecipe && (
@@ -1026,65 +1103,79 @@ export function ProductFormModal({
 
             {hasRecipe && (
               <div className="space-y-2">
+                {recipeRows.length === 0 && copyableRecipes.length > 0 && (
+                  <select
+                    value=""
+                    onChange={(e) => e.target.value && copyRecipeFrom(e.target.value)}
+                    aria-label="Copiar la receta de otro producto"
+                    className="w-full h-9 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text-secondary text-xs focus:outline-none focus:border-vimdy-recipe"
+                  >
+                    <option value="">¿Parecida a otra? Copiar receta de...</option>
+                    {copyableRecipes.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+
                 {recipeRows.map((row) => {
-                  const selectedIngredient = allProducts.find((p) => p.id === row.productId);
+                  const ing = allProducts.find((p) => p.id === row.productId);
+                  const units = compatibleUnits(ing?.unit);
+                  const converted = resolveRecipeRowQuantity(row);
+                  const unitCost = ing?.purchasePrice ?? 0;
+                  const rowInvalid = invalidRowId === row.rowId && !(parseDecimalInput(row.quantity) > 0);
                   return (
-                    <div key={row.rowId} className="flex items-center gap-2">
-                      <div className="flex-1 flex gap-2">
-                        <select
-                          value={row.productId}
-                          onChange={(e) => updateRecipeRow(row.rowId, "productId", e.target.value)}
-                          className="flex-1 h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-recipe"
-                        >
-                          <option value="">Selecciona un ingrediente...</option>
-                          {ingredientOptions.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.name} {p.unit ? `(${p.unit})` : ""}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          type="button"
-                          onClick={() => setShowQuickIngredient(true)}
-                          className="h-10 px-3 rounded-vimdy-sm bg-vimdy-recipe/10 border border-vimdy-border text-vimdy-recipe hover:bg-vimdy-recipe/20 transition text-xs font-medium whitespace-nowrap"
-                          title="Crear nuevo ingrediente"
-                        >
-                          + Nuevo
-                        </button>
+                    <div
+                      key={row.rowId}
+                      className="flex items-center gap-2 rounded-vimdy-sm border border-vimdy-border bg-vimdy-surface px-3 py-2"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-vimdy-text text-sm">{ing?.name ?? "Ingrediente eliminado"}</p>
+                        {converted !== null && converted > 0 && (
+                          <p className={`text-xs ${unitCost > 0 ? "text-vimdy-text-tertiary" : "text-vimdy-warning"}`}>
+                            {unitCost > 0 ? money(converted * unitCost) : "sin costo registrado"}
+                          </p>
+                        )}
                       </div>
                       <input
-                        type="number"
-                        min={0}
-                        step="0.01"
+                        data-qty-row={row.rowId}
+                        type="text"
+                        inputMode="decimal"
                         value={row.quantity}
-                        onChange={(e) => updateRecipeRow(row.rowId, "quantity", e.target.value)}
+                        onChange={(e) => updateRecipeRow(row.rowId, "quantity", sanitizeQuantityInput(e.target.value))}
                         onKeyDown={(e) => {
-                          if (["e", "E", "+", "-"].includes(e.key)) {
+                          if (e.key === "Enter") {
                             e.preventDefault();
+                            ingredientSearchRef.current?.focus();
                           }
                         }}
-                        inputMode="decimal"
                         placeholder="Cant."
-                        className="w-24 h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-recipe"
+                        aria-label={`Cantidad de ${ing?.name ?? "ingrediente"}`}
+                        aria-invalid={rowInvalid}
+                        className={`w-20 h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-recipe ${
+                          rowInvalid ? "border-vimdy-danger" : "border-vimdy-border"
+                        }`}
                       />
-                      {selectedIngredient && (
+                      {units.length > 1 ? (
                         <select
-                          value={row.unit || normalizeUnit(selectedIngredient.unit)}
+                          value={row.unit || normalizeUnit(ing?.unit)}
                           onChange={(e) => updateRecipeRow(row.rowId, "unit", e.target.value)}
-                          disabled={compatibleUnits(selectedIngredient.unit).length <= 1}
                           aria-label="Unidad de la cantidad"
-                          className="w-24 h-10 px-2 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-recipe disabled:opacity-70"
+                          className="w-20 h-10 px-2 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-recipe"
                         >
-                          {compatibleUnits(selectedIngredient.unit).map((u) => (
+                          {units.map((u) => (
                             <option key={u} value={u}>
                               {u}
                             </option>
                           ))}
                         </select>
+                      ) : (
+                        <span className="w-14 text-vimdy-text-secondary text-sm">{normalizeUnit(ing?.unit)}</span>
                       )}
                       <label
-                        title="El cliente puede pedirlo sin este ingrediente, o agregarlo aparte."
-                        className="flex items-center gap-1.5 h-10 px-2.5 shrink-0 rounded-vimdy-sm border border-vimdy-border text-vimdy-text-secondary text-xs cursor-pointer hover:bg-vimdy-surface"
+                        title="El cliente puede pedirlo sin este ingrediente."
+                        className="flex items-center gap-1 text-vimdy-text-tertiary text-xs cursor-pointer select-none"
                       >
                         <input
                           type="checkbox"
@@ -1097,24 +1188,74 @@ export function ProductFormModal({
                       <button
                         type="button"
                         onClick={() => removeRecipeRow(row.rowId)}
-                        aria-label="Quitar ingrediente"
-                        className="h-10 w-10 shrink-0 rounded-vimdy-sm border border-vimdy-danger/30 text-vimdy-danger hover:bg-vimdy-danger/10 flex items-center justify-center"
+                        aria-label={`Quitar ${ing?.name ?? "ingrediente"}`}
+                        className="h-8 w-8 shrink-0 rounded-vimdy-sm text-vimdy-text-tertiary hover:text-vimdy-danger hover:bg-vimdy-danger/10 flex items-center justify-center"
                       >
-                        <Trash2 size={14} />
+                        <X size={15} />
                       </button>
                     </div>
                   );
                 })}
 
-                <VimdyButton
-                  type="button"
-                  onClick={addRecipeRow}
-                  variant="secondary"
-                  size="sm"
-                  icon={<Plus size={14} />}
-                >
-                  Agregar ingrediente
-                </VimdyButton>
+                {/* Un solo campo para agregar: escribe, Enter, cantidad, Enter. */}
+                <div className="relative">
+                  <input
+                    ref={ingredientSearchRef}
+                    value={ingredientQuery}
+                    onChange={(e) => {
+                      setIngredientQuery(e.target.value);
+                      setSuggestOpen(true);
+                      setSuggestIndex(0);
+                    }}
+                    onFocus={() => setSuggestOpen(true)}
+                    onBlur={() => setSuggestOpen(false)}
+                    onKeyDown={handleIngredientSearchKeyDown}
+                    placeholder={recipeRows.length === 0 ? "Escribe un ingrediente (ej: carne)..." : "Agregar otro ingrediente..."}
+                    aria-label="Buscar o crear ingrediente"
+                    autoComplete="off"
+                    className="w-full h-11 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-recipe/40 text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-recipe"
+                  />
+                  {suggestOpen && suggestionCount > 0 && (
+                    <ul
+                      role="listbox"
+                      className="absolute z-20 left-0 right-0 mt-1 max-h-56 overflow-y-auto rounded-vimdy-sm border border-vimdy-border bg-vimdy-surface shadow-lg"
+                    >
+                      {ingredientSuggestions.items.map((p, i) => (
+                        <li
+                          key={p.id}
+                          role="option"
+                          aria-selected={i === suggestIndex}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => addIngredientToRecipe(p.id)}
+                          className={`px-3 py-2 text-sm cursor-pointer flex justify-between gap-2 ${
+                            i === suggestIndex ? "bg-vimdy-recipe/15 text-vimdy-text" : "text-vimdy-text-secondary hover:bg-vimdy-surface-hover"
+                          }`}
+                        >
+                          <span className="truncate">{p.name}</span>
+                          <span className="text-vimdy-text-tertiary text-xs shrink-0">{p.unit}</span>
+                        </li>
+                      ))}
+                      {ingredientSuggestions.total > ingredientSuggestions.items.length && (
+                        <li className="px-3 py-1.5 text-xs text-vimdy-text-tertiary">
+                          Hay {ingredientSuggestions.total - ingredientSuggestions.items.length} más: sigue escribiendo para filtrar.
+                        </li>
+                      )}
+                      {canCreateIngredient && (
+                        <li
+                          role="option"
+                          aria-selected={suggestIndex === ingredientSuggestions.items.length}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={startCreateIngredient}
+                          className={`px-3 py-2 text-sm cursor-pointer border-t border-vimdy-border text-vimdy-recipe ${
+                            suggestIndex === ingredientSuggestions.items.length ? "bg-vimdy-recipe/15" : "hover:bg-vimdy-surface-hover"
+                          }`}
+                        >
+                          + Crear "{ingredientQuery.trim()}" como ingrediente nuevo
+                        </li>
+                      )}
+                    </ul>
+                  )}
+                </div>
 
                 {showQuickIngredient && (
                   <div className="flex items-center gap-2 p-3 rounded-vimdy-sm bg-vimdy-recipe/5 border border-vimdy-recipe/20">
