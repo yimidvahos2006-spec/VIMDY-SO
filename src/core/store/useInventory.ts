@@ -389,6 +389,21 @@ export function useInventory() {
     }
   }
 
+  /** Borra para siempre todos los productos (o todos los insumos). Sin recuperación. */
+  async function deleteAllByKind(kind: "products" | "insumos"): Promise<boolean> {
+    setError(null);
+    try {
+      await container.inventoryEngine.get().deleteAllByKind(kind);
+      await load();
+      await productCatalogStore.refresh();
+      vimdyCore.emit("inventory");
+      return true;
+    } catch (e: any) {
+      setError(e?.message ?? "No se pudieron eliminar. Intenta de nuevo.");
+      return false;
+    }
+  }
+
   /**
    * BLOQUEANTE (auditoría Fase 2 — Panadería): ejecuta una tanda de
    * producción real (ver InventoryEngine.produceBatch). A diferencia de
@@ -446,6 +461,7 @@ export function useInventory() {
     createProduct,
     updateProduct,
     deleteProduct,
+    deleteAllByKind,
     reactivateProduct,
     productsWithCost: kpis.productsWithCost,
   };

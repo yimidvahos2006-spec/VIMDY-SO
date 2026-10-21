@@ -1,5 +1,6 @@
 import React, { lazy, Suspense, useState } from "react";
-import { ChefHat, Package } from "lucide-react";
+import { ChefHat, Package, Trash2 } from "lucide-react";
+import { DeleteItemsModal } from "../components/inventory/DeleteItemsModal";
 import { InventoryDashboard } from "../components/inventory/InventoryDashboard";
 import { InventorySummaryBar } from "../components/inventory/InventorySummaryBar";
 import { RequirePermission } from "../navigation/RequirePermission";
@@ -25,6 +26,7 @@ const InventoryContent: React.FC = () => {
   // Los dos paneles siguen montados; solo se oculta el que no se está viendo,
   // así no se pierde lo que el usuario estaba haciendo al cambiar de pestaña.
   const [side, setSide] = useState<Side>("productos");
+  const [showDelete, setShowDelete] = useState(false);
   const tabClass = (active: boolean) =>
     `flex-1 h-11 text-sm font-semibold rounded-vimdy-md transition flex items-center justify-center gap-2 ${
       active ? "bg-vimdy-accent text-vimdy-background" : "text-vimdy-text-secondary hover:text-vimdy-text"
@@ -35,12 +37,20 @@ const InventoryContent: React.FC = () => {
 
   return (
     <div className="min-h-screen p-4 sm:p-6 xl:p-8 space-y-5">
-      <div>
-        <h1 className="text-3xl font-bold text-vimdy-text">Inventario</h1>
-        <p className="text-vimdy-text-secondary text-sm mt-1">
-          <span className="font-semibold text-vimdy-warning">Insumos</span>: lo que compras y guardas.{" "}
-          <span className="font-semibold text-vimdy-accent">Productos</span>: lo que vendes en Caja.
-        </p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-3xl font-bold text-vimdy-text">Inventario</h1>
+          <p className="text-vimdy-text-secondary text-sm mt-1">
+            <span className="font-semibold text-vimdy-warning">Insumos</span>: lo que compras y guardas.{" "}
+            <span className="font-semibold text-vimdy-accent">Productos</span>: lo que vendes en Caja.
+          </p>
+        </div>
+        <button
+          onClick={() => setShowDelete(true)}
+          className="h-10 px-4 rounded-vimdy-md border border-vimdy-danger/40 text-vimdy-danger text-sm font-semibold flex items-center gap-2 hover:bg-vimdy-danger/10 transition"
+        >
+          <Trash2 size={16} /> Eliminar producto
+        </button>
       </div>
 
       <InventorySummaryBar products={inventory.products} loading={inventory.loading} onGoTo={setSide} />
@@ -64,6 +74,7 @@ const InventoryContent: React.FC = () => {
           <InventoryDashboard inventory={inventory} />
         </section>
       </div>
+      {showDelete && <DeleteItemsModal inventory={inventory} initialKind={side} onClose={() => setShowDelete(false)} />}
     </div>
   );
 };

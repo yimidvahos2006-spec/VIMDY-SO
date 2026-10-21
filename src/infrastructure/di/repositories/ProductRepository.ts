@@ -173,6 +173,15 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
     }
   }
 
+  public async deleteMany(ids: string[]): Promise<void> {
+    await super.deleteMany(ids);
+    try {
+      await this.local.deleteMany(ids);
+    } catch (error) {
+      logWarning("[ProductRepository] No se pudieron eliminar los productos de la caché local", { category: "offline", context: { error: String(error) } });
+    }
+  }
+
   /**
    * Descuenta/aumenta stock en una sola operación SQL atómica (ver función
    * `adjust_product_stock` en supabase/schema.sql) — cierra el riesgo de

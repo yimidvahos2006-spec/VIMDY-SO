@@ -456,6 +456,22 @@ export class InventoryEngine {
     await this.getRepository().delete(id);
   }
 
+  /**
+   * Elimina DEFINITIVAMENTE todos los productos de venta (kind = "products")
+   * o todos los insumos (kind = "insumos"), incluidos los desactivados.
+   * No hace soft-delete ni valida recetas: es el "Eliminar todos" del panel
+   * de eliminación y no se puede deshacer. Devuelve cuántos borró.
+   */
+  public async deleteAllByKind(kind: "products" | "insumos"): Promise<number> {
+    const all = await this.getRepository().findAll();
+    const ids = all
+      .filter((p) => (kind === "insumos" ? p.isIngredient === true : p.isIngredient !== true))
+      .map((p) => p.id);
+    if (ids.length === 0) return 0;
+    await this.getRepository().deleteMany(ids);
+    return ids.length;
+  }
+
   public async increaseStock(
     id: string,
     quantity: number,
