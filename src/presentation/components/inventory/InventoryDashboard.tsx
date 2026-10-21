@@ -4,7 +4,7 @@ import { toast } from "../../../core/store/toastStore";
 import { ConfirmModal } from "../ui/ConfirmModal";
 import { VimdyButton } from "../ui/VimdyButton";
 import { SkeletonCards, SkeletonRows, Skeleton } from "../ui/Skeleton";
-import { Search, X, Plus, Trash2, Pencil, Sparkles, Copy, Flame, RefreshCw, Tag } from "lucide-react";
+import { Search, X, Plus, Trash2, Pencil, Sparkles, Copy, Flame, RefreshCw, Tag, FileSpreadsheet } from "lucide-react";
 import { getStockStatus, StockStatus } from "../../../core/store/useInventory";
 import { useCategories } from "../../../hooks/useCategories";
 import { OfflineStatusBadge } from "../ui/OfflineStatusBadge";
@@ -19,6 +19,7 @@ import type { InventoryState } from "./inventoryShared";
 import { EmptyProductsState } from "./EmptyProductsState";
 import { getProductProfitView } from "./productProfit";
 import { AlertsPanel, CategoryChip, RecentMovementsPanel, SortableHeader } from "./InventoryWidgets";
+import { useAuth } from "../../context/AuthContext";
 
 // Las ventanas (modales) pesan mucho y solo se abren al hacer clic: se descargan
 // aparte. Después del primer pintado se precargan en segundo plano para que al
@@ -31,6 +32,7 @@ const loadCategoriesManagerModal = () => import("./CategoriesManagerModal").then
 const ProductFormModal = lazy(loadProductFormModal);
 const ProductDetailModal = lazy(loadProductDetailModal);
 const AiImportModal = lazy(loadAiImportModal);
+const CsvImportModal = lazy(() => import("./CsvImportModal").then((m) => ({ default: m.CsvImportModal })));
 const ProduceBatchModal = lazy(loadProduceBatchModal);
 const CategoriesManagerModal = lazy(loadCategoriesManagerModal);
 
@@ -69,8 +71,10 @@ export function InventoryDashboard({ inventory }: { inventory: InventoryState })
     updateProduct,
     deleteProduct,
     reactivateProduct,
-    productsWithCost
+    productsWithCost,
+    refresh
   } = inventory;
+  const { user } = useAuth();
 
   const { productCategories: categories } = useCategories();
 
@@ -96,6 +100,7 @@ export function InventoryDashboard({ inventory }: { inventory: InventoryState })
   const [showCategories, setShowCategories] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [showAiImport, setShowAiImport] = useState(false);
+  const [showCsvImport, setShowCsvImport] = useState(false);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   // BLOQUEANTE (auditoría Fase 2 — Panadería): productos elaborados que se
   // producen por tanda (ver Product.productionMode) — son los únicos que
@@ -451,6 +456,13 @@ export function InventoryDashboard({ inventory }: { inventory: InventoryState })
           >
             <Sparkles size={16} />
             Importar con IA
+          </button>
+          <button
+            onClick={() => setShowCsvImport(true)}
+            className="h-10 px-4 rounded-vimdy-md border border-vimdy-border bg-vimdy-surface text-vimdy-text-secondary font-bold hover:border-vimdy-accent hover:text-vimdy-text flex items-center gap-2 text-sm"
+          >
+            <FileSpreadsheet size={16} />
+            Importar Excel
           </button>
         </div>
       </div>
@@ -899,6 +911,17 @@ export function InventoryDashboard({ inventory }: { inventory: InventoryState })
       {showAiImport && (
         <Suspense fallback={null}>
           <AiImportModal onClose={() => setShowAiImport(false)} createProduct={createProduct} />
+        </Suspense>
+      )}
+
+      {showCsvImport && (
+        <Suspense fallback={null}>
+          <CsvImportModal
+            onClose={() => setShowCsvImport(false)}
+            existingProducts={allProducts}
+            performedBy={user?.name}
+            onImported={refresh}
+          />
         </Suspense>
       )}
 

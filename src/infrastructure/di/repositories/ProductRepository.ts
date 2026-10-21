@@ -137,6 +137,20 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
     }
   }
 
+  /**
+   * Igual que `save`: tras confirmar Supabase, el caché local también recibe
+   * los productos (si no, tras una importación masiva el catálogo se vería
+   * vacío hasta el siguiente refresco en segundo plano).
+   */
+  public async saveMany(products: Product[]): Promise<void> {
+    await super.saveMany(products);
+    try {
+      await Promise.all(products.map((product) => this.local.save(product)));
+    } catch (error) {
+      logWarning("[ProductRepository] No se pudo guardar el lote de productos en caché local", { category: "offline", context: { error: String(error) } });
+    }
+  }
+
   public async update(product: Product): Promise<void> {
     await super.update(product);
     // El UPDATE real en Supabase incrementa la versión en el servidor

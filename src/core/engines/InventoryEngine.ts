@@ -16,6 +16,18 @@ import { getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient
 
 export type ProductInput = Partial<Product> & { name: string };
 
+export interface BatchFailure {
+  /** Posición de la fila dentro de la lista enviada (0 = primera). */
+  index: number;
+  name: string;
+  error: string;
+}
+
+export interface BatchCreateResult {
+  created: Product[];
+  failed: BatchFailure[];
+}
+
 export interface SaleStockItem {
   productId: string;
   quantity: number;
@@ -89,7 +101,7 @@ export class InventoryEngine {
    * la pantalla y el motor aceptaba cualquier cosa.
    * `selfId` = el producto que se está editando (para no chocar consigo mismo).
    */
-  private async validateProductInput(input: ProductInput, selfId?: string): Promise<void> {
+  private async validateProductInput(input: ProductInput, selfId?: string, preloaded?: Product[]): Promise<void> {
     const isNumberOrUndefined = (v: unknown) => v === undefined || v === null || (typeof v === "number" && Number.isFinite(v));
 
     if (!isNumberOrUndefined(input.price) || (input.price ?? 0) < 0) {
@@ -108,7 +120,7 @@ export class InventoryEngine {
       throw new Error("El stock inicial no puede ser negativo ni inválido.");
     }
 
-    const all = await this.getRepository().findAll();
+    const all = preloaded ?? (await this.getRepository().findAll());
     const wantedName = InventoryEngine.normalizeName(input.name);
     const wantsIngredient = input.isIngredient === true;
     const nameTaken = all.some(
@@ -232,13 +244,165 @@ export class InventoryEngine {
      return product;
   }
 
-  public async updateProduct(id: string, input: ProductInput): Promise<Product> {
+  /**
+   * Crea muchos productos de una vez (importación CSV). Usa las MISMAS reglas
+   * que `createProduct` (validateProductInput), pero carga el catálogo UNA vez
+   * y guarda por lotes: productos con `saveMany` y stock inicial con el RPC
+   * atómico por lotes (kardex "Stock inicial"). Nunca lanza por una fila mala:
+   * devuelve qué se creó y qué falló, con el motivo.
+   */
+  public async createProductsBatch(
+    inputs: ProductInput[],
+    performedBy?: string,
+    onProgress?: (done: number, total: number) => void
+  ): Promise<BatchCreateResult> {
+    const repository = this.getRepository();
+    const failed: BatchFailure[] = [];
+    const working: Product[] = [...(await repository.findAll())];
+    const accepted: Array<{ index: number; product: Product }> = [];
+    const now = new Date();
+
+    for (let index = 0; index < inputs.length; index += 1) {
+      const input = inputs[index];
+      const name = (input.name ?? "").trim();
+      try {
+        if (!name) throw new Error("PRODUCT_NAME_REQUIRED");
+        await this.validateProductInput({ ...input, name }, undefined, working);
+        const product: Product = {
+          ...input,
+          id: input.id ?? crypto.randomUUID(),
+          name,
+          categoryId: input.categoryId ?? "uncategorized",
+          price: input.price ?? 0,
+          stock: input.stock ?? 0,
+          minStock: input.minStock ?? 0,
+          active: input.active ?? true,
+          trackStock: input.isIngredient ? true : (input.trackStock ?? true),
+          requiresKitchen: input.isIngredient ? false : (input.requiresKitchen ?? false),
+          isIngredient: input.isIngredient ?? false,
+          lastUpdated: now,
+          createdAt: now
+        };
+        accepted.push({ index, product });
+        // Para que dos filas con el mismo nombre dentro del lote se detecten entre sí.
+        working.push(product);
+      } catch (error) {
+        failed.push({ index, name, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
+    const created: Product[] = [];
+    const total = accepted.length;
+    const SAVE_CHUNK = 100;
+    const STOCK_CHUNK = 200;
+    const branchId = getCurrentBranchId() ?? undefined;
+    let done = 0;
+
+    for (let start = 0; start < accepted.length; start += SAVE_CHUNK) {
+      const chunk = accepted.slice(start, start + SAVE_CHUNK);
+
+      // 1) Productos (con stock 0: el stock inicial va por el RPC, que escribe el kardex).
+      try {
+        await repository.saveMany(chunk.map(({ product }) => ({ ...product, stock: 0 })));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        chunk.forEach(({ index, product }) => failed.push({ index, name: product.name, error: message }));
+        done += chunk.length;
+        onProgress?.(done, total);
+        continue;
+      }
+
+      // 2) Stock inicial con kardex, en lotes.
+      const withStock = chunk.filter(({ product }) => product.stock > 0);
+      const stockFailed = new Map<string, string>();
+      for (let s = 0; s < withStock.length; s += STOCK_CHUNK) {
+        const part = withStock.slice(s, s + STOCK_CHUNK);
+        try {
+          if (repository.adjustStockBatchWithKardex) {
+            await repository.adjustStockBatchWithKardex(
+              crypto.randomUUID(),
+              part.map(({ product }) => ({
+                productId: product.id,
+                delta: product.stock,
+                reason: "Stock inicial",
+                type: "INCREASE" as const,
+                branchId
+              }))
+            );
+          } else if (repository.adjustStockWithKardex) {
+            for (const { product } of part) {
+              await repository.adjustStockWithKardex({
+                productId: product.id,
+                delta: product.stock,
+                reason: "Stock inicial",
+                type: "INCREASE",
+                performedBy: performedBy ?? undefined,
+                movementId: crypto.randomUUID(),
+                branchId,
+                allowNegative: false
+              });
+            }
+          } else {
+            throw new Error("INVENTORY_KARDEX_REQUIRED");
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          // No dejar productos a medias (sin stock ni historial): se deshacen para poder reintentar.
+          for (const { product } of part) {
+            try {
+              await repository.delete(product.id);
+            } catch {
+              /* si el rollback falla, el error original es el importante */
+            }
+            stockFailed.set(product.id, message);
+          }
+        }
+      }
+
+      for (const { index, product } of chunk) {
+        const reason = stockFailed.get(product.id);
+        if (reason) failed.push({ index, name: product.name, error: reason });
+        else created.push(product);
+      }
+      done += chunk.length;
+      onProgress?.(done, total);
+    }
+
+    return { created, failed: failed.sort((a, b) => a.index - b.index) };
+  }
+
+  /**
+   * Actualiza muchos productos existentes (importación CSV con "Actualizar").
+   * Pasa el catálogo ya cargado para no volver a pedirlo por cada fila.
+   * El stock NUNCA cambia aquí (updateProduct ya lo protege).
+   */
+  public async updateProductsBatch(
+    updates: Array<{ id: string; input: ProductInput }>,
+    onProgress?: (done: number, total: number) => void
+  ): Promise<{ updated: number; failed: BatchFailure[] }> {
+    const catalog = await this.getRepository().findAll();
+    const failed: BatchFailure[] = [];
+    let updated = 0;
+    for (let index = 0; index < updates.length; index += 1) {
+      const { id, input } = updates[index];
+      try {
+        await this.updateProduct(id, input, catalog);
+        updated += 1;
+      } catch (error) {
+        failed.push({ index, name: input.name, error: error instanceof Error ? error.message : String(error) });
+      }
+      onProgress?.(index + 1, updates.length);
+    }
+    return { updated, failed };
+  }
+
+  public async updateProduct(id: string, input: ProductInput, preloaded?: Product[]): Promise<Product> {
     const existing = await this.getRepository().findById(id);
     if (!existing) {
       throw new Error('PRODUCT_NOT_FOUND');
     }
 
-    await this.validateProductInput(input, id);
+    await this.validateProductInput(input, id, preloaded);
 
     const updated: Product = {
       ...existing,
