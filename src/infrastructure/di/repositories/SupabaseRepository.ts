@@ -318,10 +318,17 @@ export abstract class SupabaseRepository<T extends { id: string; version?: numbe
   public async deleteMany(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
 
-    const { error } = await this.applyScope(this.table().delete())
-      .in("id", ids);
+    // Con miles de ids, `.in("id", ids)` arma una URL gigante y el servidor la
+    // rechaza (por eso "Eliminar todos" fallaba con ~1800 productos). Se borra
+    // en bloques pequeños.
+    const CHUNK_SIZE = 100;
+    for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+      const chunk = ids.slice(i, i + CHUNK_SIZE);
+      const { error } = await this.applyScope(this.table().delete())
+        .in("id", chunk);
 
-    if (error) throw new Error(`SUPABASE_DELETE_MANY_FAILED (${this.tableName}): ${error.message}`);
+      if (error) throw new Error(`SUPABASE_DELETE_MANY_FAILED (${this.tableName}): ${error.message}`);
+    }
   }
 
   public async exists(id: string): Promise<boolean> {
