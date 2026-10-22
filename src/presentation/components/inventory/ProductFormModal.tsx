@@ -1345,7 +1345,9 @@ export function ProductFormModal({
                      <MoneyInput
                        value={quickIngredientPurchasePrice}
                       onValueChange={setQuickIngredientPurchasePrice}
-                      placeholder="Precio compra (opcional)"
+                      placeholder="Precio"
+                      aria-label="Precio de compra (opcional)"
+                      title="Precio de compra (opcional)"
                       className="flex-1 min-w-0 h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-recipe"
                     />
                     <button
