@@ -184,17 +184,30 @@ export class InventoryEngine {
     }
   }
 
-  public async createProduct(input: ProductInput, performedBy?: string): Promise<Product> {
+  /**
+   * `options.knownProducts`: catálogo que la pantalla ya tiene cargado. Evita
+   * volver a bajar TODO el catálogo (con sus fotos) solo para revisar nombres
+   * repetidos; el llamador responde de que esté razonablemente fresco.
+   * `options.deferAudit`: no espera el registro de "Últimos movimientos" (es un
+   * rastro que nunca falla la operación) para devolver el producto creado.
+   */
+  public async createProduct(
+    input: ProductInput,
+    performedBy?: string,
+    options?: { knownProducts?: Product[]; deferAudit?: boolean }
+  ): Promise<Product> {
     const name = input.name.trim();
     if (!name) {
       throw new Error('PRODUCT_NAME_REQUIRED');
     }
 
     // Todas las reglas (nombre repetido, precios, receta...) en un solo lugar.
-    await this.validateProductInput(input);
+    await this.validateProductInput(input, undefined, options?.knownProducts);
 
     const categoryId = input.categoryId ?? "uncategorized";
-    const categoryDefault = input.requiresKitchen === undefined
+    // Un insumo nunca va a cocina (se fuerza false más abajo): no hace falta
+    // consultar la categoría, que era un viaje de red de más.
+    const categoryDefault = input.requiresKitchen === undefined && input.isIngredient !== true
       ? (await this.categoryRepository?.findById(categoryId))?.requiresKitchenByDefault
       : undefined;
     const now = new Date();
@@ -236,7 +249,8 @@ export class InventoryEngine {
            branchId,
            allowNegative: false
          });
-         await this.note(INVENTORY_AUDIT_ACTIONS.created, `Creaste el ${this.kindWord(product)} "${product.name}"`, product.id, performedBy);
+         const noted = this.note(INVENTORY_AUDIT_ACTIONS.created, `Creaste el ${this.kindWord(product)} "${product.name}"`, product.id, performedBy);
+         if (!options?.deferAudit) await noted;
          return { ...product, ...updated, stock: updated?.stock ?? initialStock };
        } catch (error) {
          // No dejar un producto a medias (sin stock ni historial): se deshace
@@ -270,7 +284,8 @@ export class InventoryEngine {
        );
      }
 
-     await this.note(INVENTORY_AUDIT_ACTIONS.created, `Creaste el ${this.kindWord(product)} "${product.name}"`, product.id, performedBy);
+     const noted = this.note(INVENTORY_AUDIT_ACTIONS.created, `Creaste el ${this.kindWord(product)} "${product.name}"`, product.id, performedBy);
+     if (!options?.deferAudit) await noted;
      return product;
   }
 

@@ -758,7 +758,7 @@ export function ProductFormModal({
         unit: quickIngredientUnit,
         isIngredient: true,
         active: true
-      });
+      }, undefined, { knownProducts: allProducts, deferAudit: true });
       setAllProducts((prev) => [...prev, created]);
 
       const newRowId = crypto.randomUUID();
