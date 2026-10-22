@@ -1307,13 +1307,13 @@ export function ProductFormModal({
                 </div>
 
                 {showQuickIngredient && (
-                  <div className="flex items-center gap-2 p-3 rounded-vimdy-sm bg-vimdy-recipe/5 border border-vimdy-recipe/20">
+                  <div className="flex flex-wrap items-center gap-2 p-3 rounded-vimdy-sm bg-vimdy-recipe/5 border border-vimdy-recipe/20">
                     <input
                       autoFocus
                       value={quickIngredientName}
                       onChange={(e) => setQuickIngredientName(e.target.value)}
                       placeholder="Nombre del ingrediente (ej: Leche, Harina...)"
-                      className="flex-1 h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-recipe"
+                      className="basis-full min-w-0 h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-recipe"
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
                           const trimmed = quickIngredientName.trim();
@@ -1330,7 +1330,8 @@ export function ProductFormModal({
                      <select
                        value={quickIngredientUnit}
                        onChange={(e) => setQuickIngredientUnit(e.target.value)}
-                       className="h-10 px-2 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-recipe"
+                       aria-label="Unidad de medida del ingrediente"
+                       className="w-28 shrink-0 h-10 px-2 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-recipe"
                      >
                        <option value="unidad">Unidad</option>
                        <option value="kg">kg</option>
@@ -1345,7 +1346,7 @@ export function ProductFormModal({
                        value={quickIngredientPurchasePrice}
                       onValueChange={setQuickIngredientPurchasePrice}
                       placeholder="Precio compra (opcional)"
-                      className="w-36 h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-recipe"
+                      className="flex-1 min-w-0 h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-recipe"
                     />
                     <button
                       type="button"
@@ -1355,7 +1356,7 @@ export function ProductFormModal({
                         await handleCreateQuickIngredient(trimmed);
                       }}
                       disabled={creatingIngredient || !quickIngredientName.trim()}
-                      className="h-10 px-4 rounded-vimdy-sm bg-vimdy-recipe text-white hover:bg-vimdy-recipe/90 disabled:opacity-40 transition text-sm font-medium whitespace-nowrap"
+                      className="h-10 px-4 rounded-vimdy-sm bg-vimdy-recipe text-white hover:bg-vimdy-recipe/90 disabled:opacity-40 transition text-sm font-medium whitespace-nowrap shrink-0"
                     >
                       {creatingIngredient ? "Creando..." : "Crear y agregar"}
                     </button>
@@ -1366,7 +1367,8 @@ export function ProductFormModal({
                         setQuickIngredientName("");
                         setQuickIngredientPurchasePrice("");
                       }}
-                      className="h-10 w-10 rounded-vimdy-sm border border-vimdy-border text-vimdy-text-secondary hover:bg-vimdy-surface flex items-center justify-center"
+                      aria-label="Cancelar"
+                      className="h-10 w-10 shrink-0 rounded-vimdy-sm border border-vimdy-border text-vimdy-text-secondary hover:bg-vimdy-surface flex items-center justify-center"
                     >
                       <X size={16} />
                     </button>
