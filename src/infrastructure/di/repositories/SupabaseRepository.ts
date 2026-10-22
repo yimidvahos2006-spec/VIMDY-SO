@@ -95,14 +95,33 @@ export abstract class SupabaseRepository<T extends { id: string; version?: numbe
     return { ...reviveDates(row.data as T), version: row.version } as T;
   }
 
+  /**
+   * Trae TODAS las filas del negocio/sucursal. Supabase corta cada consulta en
+   * 1000 filas, asi que se pide por paginas ordenadas por id. Si una pagina
+   * falla, se lanza el error: nunca se devuelve una lista incompleta (el
+   * cache del equipo se reemplaza con esta lista y quedaria truncado).
+   */
   public async findAll(): Promise<T[]> {
-    const { data, error } = await this.applyScope(
-      this.table().select("data, version")
-    );
+    const PAGE_SIZE = 1000;
+    const MAX_PAGES = 200; // tope de seguridad: 200.000 filas
+    const rows: T[] = [];
 
-    if (error) throw new Error(`SUPABASE_FIND_ALL_FAILED (${this.tableName}): ${error.message}`);
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      const from = page * PAGE_SIZE;
+      const { data, error } = await this.applyScope(
+        this.table().select("data, version")
+      )
+        .order("id", { ascending: true })
+        .range(from, from + PAGE_SIZE - 1);
 
-    return (data ?? []).map((row: { data: unknown; version: number }) => this.reviveRow(row));
+      if (error) throw new Error(`SUPABASE_FIND_ALL_FAILED (${this.tableName}): ${error.message}`);
+
+      const batch = (data ?? []) as Array<{ data: unknown; version: number }>;
+      for (const row of batch) rows.push(this.reviveRow(row));
+      if (batch.length < PAGE_SIZE) return rows;
+    }
+
+    throw new Error(`SUPABASE_FIND_ALL_TOO_MANY_ROWS (${this.tableName}): mas de ${PAGE_SIZE * MAX_PAGES} filas`);
   }
 
   /**

@@ -70,6 +70,30 @@ function emitDebounced(event: EventType) {
   );
 }
 
+/** Reemite todos los eventos una vez: sirve para ponerse al día tras una caída de internet o de la pestaña. */
+function resyncAll() {
+  new Set(Object.values(TABLE_EVENT_MAP)).forEach((event) => emitDebounced(event));
+}
+
+/** Reconecta ya (sin esperar los 3s) cuando vuelve el internet o la pestaña vuelve a verse. */
+function reconnectNow() {
+  if (!activeBusinessId) return;
+  openRealtimeChannel(activeBusinessId);
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("online", () => {
+    try {
+      reconnectNow();
+    } catch (error) {
+      console.error("[realtimeSync] No se pudo reconectar al volver el internet", error);
+    }
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && activeBusinessId) resyncAll();
+  });
+}
+
 /**
  * Abre (o reabre) el canal de sincronización para el negocio dado.
  * Llamar justo después de que se conoce el business_id: al restaurar
@@ -129,9 +153,26 @@ function openRealtimeChannel(businessId: string): void {
       },
       () => emitDebounced(TABLE_EVENT_MAP[table])
     );
+
+    // IMPORTANTE: Supabase Realtime NO puede evaluar filtros en eventos DELETE
+    // (la fila borrada solo trae su id), así que con el filtro de arriba un
+    // borrado jamás llegaba a los otros dispositivos. Se escucha aparte, sin
+    // filtro: solo sirve de aviso para recargar (la recarga sí es del negocio
+    // activo por RLS, y el evento no expone datos: solo el id).
+    if (table !== "businesses") {
+      builder = builder.on(
+        "postgres_changes" as any,
+        { event: "DELETE", schema: "public", table },
+        () => emitDebounced(TABLE_EVENT_MAP[table])
+      );
+    }
   }
 
   builder.subscribe((status) => {
+    // Al (re)conectar se pudo perder algo mientras no había señal: recarga todo una vez.
+    if (status === "SUBSCRIBED" && channel === builder && activeBusinessId === businessId) {
+      resyncAll();
+    }
     // Si se cae la conexión (wifi inestable en la tablet, celular con datos
     // móviles, etc), reintentamos solos en 3s en vez de dejar el dispositivo
     // sordo hasta que el usuario recargue manualmente.
