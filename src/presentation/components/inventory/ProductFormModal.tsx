@@ -1106,6 +1106,9 @@ export function ProductFormModal({
             <p className="text-vimdy-text-tertiary text-xs mt-1 mb-3">
               Escribe cada ingrediente y la cantidad que lleva <strong>una</strong> unidad de este producto.
             </p>
+            <p className="text-vimdy-text-tertiary text-xs -mt-2 mb-3">
+              Ej: una tajada de queso → <strong>1</strong> Unidad · carne molida → <strong>150</strong> g. Si no lo pesas, cuéntalo por pieza (tajada, huevo, pan).
+            </p>
 
             {hasRecipe && (
               <div className="mb-4 rounded-vimdy-sm border border-vimdy-border bg-vimdy-surface p-3">
@@ -1200,6 +1203,7 @@ export function ProductFormModal({
                           }
                         }}
                         placeholder="Cant."
+                        title="Cuánto lleva UNA unidad del producto. Ej: 1 (una tajada) o 150 (gramos)."
                         aria-label={`Cantidad de ${ing?.name ?? "ingrediente"}`}
                         aria-invalid={rowInvalid}
                         className={`w-20 h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-recipe ${
@@ -1351,7 +1355,7 @@ export function ProductFormModal({
                       className="flex-1 min-w-0 h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-recipe"
                     />
                     <p className="basis-full text-vimdy-text-tertiary text-xs">
-                      El precio es lo que pagas por una unidad de compra (ej: un kg). La cantidad que lleva el producto la escribes al crearlo.
+                      Unidad: si lo cuentas por pieza (tajada, huevo, pan) deja "Unidad"; si lo pesas o mides, elige kg, g, lt o ml. El precio es lo que pagas por esa unidad (ej: un kg). La cantidad que lleva el producto la escribes al crearlo.
                     </p>
                     <div className="basis-full flex items-center gap-2">
                       <button
