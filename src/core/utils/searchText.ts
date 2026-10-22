@@ -19,3 +19,33 @@ export function matchesSearch(haystack: string | null | undefined, needle: strin
   if (needle === "") return true;
   return normalizeSearchText(haystack).includes(needle);
 }
+/** Campos de un producto que cuentan para la búsqueda (POS e Inventario). */
+export interface SearchableProduct {
+  readonly name: string;
+  readonly categoryId: string;
+  readonly barcode?: string;
+  readonly sku?: string;
+  readonly aliases?: readonly string[];
+}
+
+/**
+ * Regla ÚNICA de búsqueda de productos, compartida por Caja e Inventario para
+ * que nunca vuelvan a comportarse distinto: nombre, SKU, código de barras,
+ * categoría (id y nombre visible) y alias, sin importar tildes ni mayúsculas.
+ * `needle` debe venir ya normalizado con normalizeSearchText().
+ */
+export function productMatchesSearch(
+  product: SearchableProduct,
+  needle: string,
+  categoryName?: string | null
+): boolean {
+  if (needle === "") return true;
+  return (
+    matchesSearch(product.name, needle) ||
+    matchesSearch(product.sku, needle) ||
+    matchesSearch(product.barcode, needle) ||
+    matchesSearch(categoryName, needle) ||
+    matchesSearch(product.categoryId, needle) ||
+    (product.aliases?.some((alias) => matchesSearch(alias, needle)) ?? false)
+  );
+}

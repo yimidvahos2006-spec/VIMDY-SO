@@ -1,6 +1,6 @@
 import { ObservableStore } from "./ObservableStore";
 import { Product } from "../entities/Entities";
-import { normalizeSearchText } from "../utils/searchText";
+import { normalizeSearchText, productMatchesSearch } from "../utils/searchText";
 import { container, productsReady } from "../../infrastructure/di/CompositionRoot";
 import { logWarning } from "../../infrastructure/logging/opsLogger";
 
@@ -133,8 +133,14 @@ class ProductCatalogStore extends ObservableStore<Product[]> {
     );
   }
 
-  /** Mismo comportamiento de búsqueda que tenía productStore.search(). */
-  search(text: string): Product[] {
+  /**
+   * Búsqueda del POS. Sin tildes ni mayúsculas ("cafe" encuentra "Café") y por
+   * nombre, SKU, código de barras, categoría y alias (misma regla que
+   * Inventario, ver productMatchesSearch). `categoryNameById` es opcional: el
+   * store solo conoce el id de la categoría, así que quien llama pasa los
+   * nombres para que escribir "bebidas" también encuentre por categoría.
+   */
+  search(text: string, categoryNameById?: Readonly<Record<string, string>>): Product[] {
     const value = normalizeSearchText(text);
     const sellable = this.getSellableSnapshot();
 
@@ -142,16 +148,9 @@ class ProductCatalogStore extends ObservableStore<Product[]> {
       return [...sellable];
     }
 
-    // Sin tildes ni mayúsculas ("cafe" encuentra "Café"). SKU y código de
-    // barras también cuentan: el cajero puede buscar por cualquiera de los dos.
-    return sellable.filter((product) => {
-      if (normalizeSearchText(product.name).includes(value)) return true;
-      if (normalizeSearchText(product.categoryId).includes(value)) return true;
-      if (normalizeSearchText(product.sku).includes(value)) return true;
-      if (normalizeSearchText(product.barcode).includes(value)) return true;
-      if (product.aliases?.some((alias) => normalizeSearchText(alias).includes(value))) return true;
-      return false;
-    });
+    return sellable.filter((product) =>
+      productMatchesSearch(product, value, categoryNameById?.[product.categoryId])
+    );
   }
 }
 
