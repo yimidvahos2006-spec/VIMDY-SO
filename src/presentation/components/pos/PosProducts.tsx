@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Check } from "lucide-react";
 
 import { useCart } from "../../../core/store/useCart";
@@ -6,6 +6,7 @@ import { useProductCatalog } from "../../../core/store/useProductCatalog";
 import { useSearch } from "../../../core/store/useSearch";
 import { useCategory } from "../../../core/store/useCategory";
 import { useTopSellingProducts } from "../../../hooks/useTopSellingProducts";
+import { useCategories } from "../../../hooks/useCategories";
 import { useTranslation } from "../../../core/i18n/useTranslation";
 import { formatMoney } from "../../../core/utils/formatMoney";
 import { companyConfigStore } from "../../../core/store/companyConfigStore";
@@ -33,6 +34,17 @@ export function PosProducts() {
   // turno de caja empieza mostrando todo).
   const [hideOutOfStock, setHideOutOfStock] = useState(false);
 
+  // Nombre visible de cada categoría, para que la búsqueda también encuentre
+  // escribiendo el nombre de la categoría (el producto solo guarda su id).
+  const { productCategories } = useCategories();
+  const categoryNameById = useMemo(() => {
+    const map: Record<string, string> = {};
+    productCategories.forEach((c) => {
+      map[c.id] = c.name;
+    });
+    return map;
+  }, [productCategories]);
+
   // Se recalcula solo cuando cambia el tamaño del catálogo (eso pasa justo
   // después de cada venta, cuando processSale() refresca el stock real).
   const ranking = useTopSellingProducts(catalog.length);
@@ -40,7 +52,7 @@ export function PosProducts() {
   // El texto de búsqueda manda sobre el filtro de categoría, igual que en
   // cualquier POS: si el cajero está escribiendo, es porque ya sabe qué
   // busca sin importar en qué categoría esté parado.
-  const filtered = search.trim() !== "" ? searchProducts(search) : getByCategory(category);
+  const filtered = search.trim() !== "" ? searchProducts(search, categoryNameById) : getByCategory(category);
 
   // PASO 2 (formulario de producto — Estado): "Agotado" (active === false)
   // es una decisión manual del negocio, independiente del stock (ver

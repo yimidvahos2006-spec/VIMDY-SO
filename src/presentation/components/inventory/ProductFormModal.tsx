@@ -395,7 +395,15 @@ export function ProductFormModal({
 
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [showMore, setShowMore] = useState(false);
+  // Panel lateral ancho: hay espacio de sobra, así que "Más opciones" (IVA,
+  // estado, tamaños y extras) arranca abierto para verlo todo de un vistazo.
+  const [showMore, setShowMore] = useState(true);
+  // Anima la entrada del panel deslizándolo desde la derecha.
+  const [panelEntered, setPanelEntered] = useState(false);
+  React.useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setPanelEntered(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
   const [saveFailed, setSaveFailed] = useState(false);
   const errorBannerRef = React.useRef<HTMLDivElement>(null);
 
@@ -490,8 +498,16 @@ export function ProductFormModal({
     const showsStock =
       productType === "inventario" || isIngredientType || (productType === "cocina_receta" && productionMode === "BATCH");
     const priceValue = isIngredientType && !price.trim() ? 0 : parseMoneyInput(price);
-    const purchasePriceValue = purchasePrice.trim() ? parseMoneyInput(purchasePrice) : undefined;
-    const taxRateValue = taxRate.trim() ? Number(taxRate) : undefined;
+    // "No se controla" (servicio, domicilio, propina, cover) oculta costo, IVA y
+    // estado: lo que el formulario no muestra no se toca. Al editar se
+    // conserva lo que el producto ya tuviera; al crear queda sin definir.
+    const isServiceType = productType === "servicio";
+    const purchasePriceValue = isServiceType
+      ? product?.purchasePrice
+      : purchasePrice.trim()
+        ? parseMoneyInput(purchasePrice)
+        : undefined;
+    const taxRateValue = isServiceType ? product?.taxRate : taxRate.trim() ? Number(taxRate) : undefined;
     const stockValue = isEditing ? product!.stock : showsStock && stock.trim() ? Number(stock) : 0;
     const minStockValue = minStock.trim() ? Number(minStock) : 0;
     const estimatedPrepMinutesValue =
@@ -523,7 +539,7 @@ export function ProductFormModal({
         return;
       }
     }
-    if (isPesos && purchasePriceValue !== undefined && !isNaN(purchasePriceValue) && purchasePriceValue > 0 && purchasePriceValue < 100) {
+    if (!isServiceType && isPesos && purchasePriceValue !== undefined && !isNaN(purchasePriceValue) && purchasePriceValue > 0 && purchasePriceValue < 100) {
       const okCost = window.confirm(
         `El precio de compra es solo $${purchasePriceValue.toLocaleString("es-CO")} pesos. ¿Seguro que es correcto?`
       );
@@ -639,7 +655,8 @@ export function ProductFormModal({
       ok = await onSave({
       name: name.trim(),
       description: description.trim() || undefined,
-      active,
+      // Un servicio nuevo nunca nace "Agotado" (el selector está oculto).
+      active: isServiceType && !isEditing ? true : active,
       categoryId,
       price: priceValue,
       purchasePrice: purchasePriceValue,
@@ -761,6 +778,8 @@ export function ProductFormModal({
   }
 
   const isKitchenType = productType === "cocina" || productType === "cocina_receta";
+  // "No se controla": solo Nombre, Categoría, Precio de venta y Descripción.
+  const isServiceType = productType === "servicio";
   const isStockType = productType === "inventario" || productType === "ingrediente";
   const isBatchRecipe = productType === "cocina_receta" && productionMode === "BATCH";
   const showsStockFields = isStockType || isBatchRecipe;
@@ -771,10 +790,34 @@ export function ProductFormModal({
   const knownStations = useMemo(() => collectKnownStations(categories, allProducts), [categories, allProducts]);
   const typeHint = PRODUCT_TYPE_CHOICES.find((t) => t.id === productType)?.hint ?? "";
 
+  const descriptionField = (
+          <div>
+            <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">
+              Descripción <span className="text-vimdy-text-tertiary font-normal">(opcional)</span>
+            </label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder={
+                productType === "inventario" || productType === "ingrediente"
+                  ? "Ej: Botella 400 ml, sabor manzana"
+                  : "Ej: Carne 150g, queso cheddar, lechuga, tomate y salsa especial"
+              }
+              rows={2}
+              className="w-full px-3 py-2 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent resize-none"
+            />
+          </div>
+  );
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/70 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="w-full max-w-2xl max-h-[92vh] flex flex-col rounded-vimdy-lg border border-vimdy-border bg-vimdy-surface"
+        role="dialog"
+        aria-modal="true"
+        aria-label={isEditing ? "Editar producto" : "Nuevo producto"}
+        className={`w-full lg:w-[min(1100px,92vw)] h-full flex flex-col border-l border-vimdy-border bg-vimdy-surface shadow-2xl transition-transform duration-300 ease-out motion-reduce:transition-none ${
+          panelEntered ? "translate-x-0" : "translate-x-full"
+        }`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between px-6 pt-5 pb-3 shrink-0">
@@ -797,7 +840,8 @@ export function ProductFormModal({
           </div>
         )}
 
-        <div className="space-y-3">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-3 items-start">
+        <div className="space-y-3 min-w-0">
           {/* Tipo: decide qué campos se muestran. */}
           <div>
             <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">¿Qué vas a crear? *</label>
@@ -972,6 +1016,7 @@ export function ProductFormModal({
           </div>
 
           {/* Costo, unidad, stock inicial / tiempo de preparación: solo lo que aplica al tipo. */}
+          {!isServiceType && (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">
@@ -1034,6 +1079,7 @@ export function ProductFormModal({
               </div>
             )}
           </div>
+          )}
 
           {showsStockFields && !isEditing && (!stock.trim() || Number(stock) === 0) && (
             <p className="text-vimdy-warning text-xs -mt-2">
@@ -1047,6 +1093,9 @@ export function ProductFormModal({
             </p>
           )}
 
+        </div>
+
+        <div className="space-y-3 min-w-0">
           {/* Receta: solo para "Preparado con receta". */}
           {productType === "cocina_receta" && (
           <div ref={recipeSectionRef} className="rounded-vimdy-md border border-vimdy-border bg-vimdy-background/60 p-4">
@@ -1351,7 +1400,8 @@ export function ProductFormModal({
           </div>
           )}
 
-          {/* Más opciones: lo menos usado, cerrado por defecto. */}
+          {/* Más opciones (IVA, estado, tamaños y extras). "No se controla" solo lleva descripción. */}
+          {isServiceType ? descriptionField : (
           <div className="rounded-vimdy-md border border-vimdy-border">
             <button
               type="button"
@@ -1365,23 +1415,7 @@ export function ProductFormModal({
 
             {showMore && (
               <div className="space-y-4 px-4 pb-4 border-t border-vimdy-border pt-4">
-          {/* PASO 2 (Información General): Descripción, siempre visible, opcional. */}
-          <div>
-            <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">
-              Descripción <span className="text-vimdy-text-tertiary font-normal">(opcional)</span>
-            </label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder={
-                productType === "inventario" || productType === "ingrediente"
-                  ? "Ej: Botella 400 ml, sabor manzana"
-                  : "Ej: Carne 150g, queso cheddar, lechuga, tomate y salsa especial"
-              }
-              rows={2}
-              className="w-full px-3 py-2 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent resize-none"
-            />
-          </div>
+          {descriptionField}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {showSalePrice && (
@@ -1676,6 +1710,8 @@ export function ProductFormModal({
               </div>
             )}
           </div>
+          )}
+        </div>
         </div>
         </div>
 

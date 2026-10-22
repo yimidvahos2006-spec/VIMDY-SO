@@ -4,13 +4,13 @@ import { toast } from "../../../core/store/toastStore";
 import { ConfirmModal } from "../ui/ConfirmModal";
 import { VimdyButton } from "../ui/VimdyButton";
 import { SkeletonCards, SkeletonRows, Skeleton } from "../ui/Skeleton";
-import { MinusCircle, Search, X, Plus, Trash2, Pencil, Sparkles, Copy, Flame, RefreshCw, Tag, FileSpreadsheet } from "lucide-react";
+import { MinusCircle, Search, X, Plus, Trash2, Pencil, Sparkles, Copy, Flame, RefreshCw, Tag, FileSpreadsheet, ChevronLeft, ChevronRight } from "lucide-react";
 import { getStockStatus, StockStatus } from "../../../core/store/useInventory";
 import { useCategories } from "../../../hooks/useCategories";
 import { OfflineStatusBadge } from "../ui/OfflineStatusBadge";
 import { usePendingInventoryAdjustmentsQueue } from "../../../core/offline/usePendingInventoryAdjustmentsQueue";
 import { Product } from "../../../core/entities/Entities";
-import { normalizeSearchText } from "../../../core/utils/searchText";
+import { normalizeSearchText, productMatchesSearch } from "../../../core/utils/searchText";
 import { ProductType, inferProductType } from "../../../core/types/productType";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { useNavigate } from "react-router-dom";
@@ -97,6 +97,10 @@ export function InventoryDashboard({ inventory }: { inventory: InventoryState })
   const [productTypeFilter, setProductTypeFilter] = useState<ProductType | "todos">("todos");
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  // Paginación por bloques: con catálogos grandes (500+) pintar todas las filas
+  // de golpe vuelve pesada la tabla en celulares y tablets sencillas.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(50);
   const [selected, setSelected] = useState<Product | null>(null);
   const [showNewProduct, setShowNewProduct] = useState(false);
   const [showCategories, setShowCategories] = useState(false);
@@ -247,15 +251,7 @@ export function InventoryDashboard({ inventory }: { inventory: InventoryState })
 
     if (search.trim() !== "") {
       const value = normalizeSearchText(search);
-      list = list.filter(
-        (p) =>
-          normalizeSearchText(p.name).includes(value) ||
-          normalizeSearchText(p.categoryId).includes(value) ||
-          normalizeSearchText(categoryNameById[p.categoryId]).includes(value) ||
-          normalizeSearchText(p.barcode).includes(value) ||
-          normalizeSearchText(p.sku).includes(value) ||
-          (p.aliases?.some((alias) => normalizeSearchText(alias).includes(value)) ?? false)
-      );
+      list = list.filter((p) => productMatchesSearch(p, value, categoryNameById[p.categoryId]));
     }
 
     if (statusFilter !== "todos") {
@@ -291,12 +287,27 @@ export function InventoryDashboard({ inventory }: { inventory: InventoryState })
     categoryNameById
   ]);
 
-  // "Te cuesta / Ganas" de cada fila, calculado una sola vez por cambio de lista
-  // (no en cada tecla que se escribe en el buscador).
+  // Al cambiar búsqueda, filtros u orden se vuelve a la primera página.
+  useEffect(() => {
+    setPage(1);
+  }, [search, statusFilter, categoryFilter, productTypeFilter, showInactive, sortKey, sortDir, pageSize]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  // Si la lista se encoge (ej. se borró un producto en la última página), no
+  // se queda parada en una página que ya no existe.
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = (currentPage - 1) * pageSize;
+  const pageItems = useMemo(
+    () => filtered.slice(pageStart, pageStart + pageSize),
+    [filtered, pageStart, pageSize]
+  );
+
+  // "Te cuesta / Ganas" de cada fila VISIBLE, calculado una sola vez por cambio
+  // de página/lista (no en cada tecla que se escribe en el buscador).
   const profitById = useMemo(() => {
     const engine = container.recipeEngine.get();
-    return new Map(filtered.map((p) => [p.id, getProductProfitView(p, () => engine.getProfitability(p, productMap))]));
-  }, [filtered, productMap]);
+    return new Map(pageItems.map((p) => [p.id, getProductProfitView(p, () => engine.getProfitability(p, productMap))]));
+  }, [pageItems, productMap]);
 
   // Solo mostramos como chip las categorías que de verdad tienen productos,
   // para no llenar la barra de filtros con categorías vacías.
@@ -674,7 +685,7 @@ export function InventoryDashboard({ inventory }: { inventory: InventoryState })
                     </td>
                   </tr>
                 )}
-                {filtered.map((product) => {
+                {pageItems.map((product) => {
                   const status = getStockStatus(product);
                   const capacity =
                     product.recipe && product.recipe.length > 0
@@ -844,6 +855,49 @@ export function InventoryDashboard({ inventory }: { inventory: InventoryState })
               </tbody>
             </table>
           </div>
+
+          {filtered.length > 0 && (
+            <div className="px-4 py-3 border-t border-vimdy-border flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between text-sm text-vimdy-text-secondary">
+              <span>
+                Mostrando {pageStart + 1}–{Math.min(pageStart + pageSize, filtered.length)} de {filtered.length}
+              </span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <label className="flex items-center gap-2">
+                  <span className="text-vimdy-text-tertiary">Por página</span>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => setPageSize(Number(e.target.value))}
+                    aria-label="Productos por página"
+                    className="h-9 px-2 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-accent"
+                  >
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setPage(currentPage - 1)}
+                  disabled={currentPage <= 1}
+                  aria-label="Página anterior"
+                  className="w-9 h-9 rounded-vimdy-md border border-vimdy-border flex items-center justify-center hover:bg-vimdy-surface-hover disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <span className="tabular-nums min-w-[5.5rem] text-center">
+                  Página {currentPage} de {totalPages}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPage(currentPage + 1)}
+                  disabled={currentPage >= totalPages}
+                  aria-label="Página siguiente"
+                  className="w-9 h-9 rounded-vimdy-md border border-vimdy-border flex items-center justify-center hover:bg-vimdy-surface-hover disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Alertas + últimos movimientos */}
