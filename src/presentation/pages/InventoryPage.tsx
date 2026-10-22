@@ -1,5 +1,6 @@
 import React, { lazy, Suspense, useState } from "react";
-import { ChefHat, Package, Trash2 } from "lucide-react";
+import { ChefHat, ClipboardCheck, Package, Trash2 } from "lucide-react";
+import { InventoryCountModal } from "../components/inventory/InventoryCountModal";
 import { DeleteItemsModal } from "../components/inventory/DeleteItemsModal";
 import { InventoryDashboard } from "../components/inventory/InventoryDashboard";
 import { InventorySummaryBar } from "../components/inventory/InventorySummaryBar";
@@ -27,6 +28,7 @@ const InventoryContent: React.FC = () => {
   // así no se pierde lo que el usuario estaba haciendo al cambiar de pestaña.
   const [side, setSide] = useState<Side>("productos");
   const [showDelete, setShowDelete] = useState(false);
+  const [showCount, setShowCount] = useState(false);
   const tabClass = (active: boolean) =>
     `flex-1 h-11 text-sm font-semibold rounded-vimdy-md transition flex items-center justify-center gap-2 ${
       active ? "bg-vimdy-accent text-vimdy-background" : "text-vimdy-text-secondary hover:text-vimdy-text"
@@ -45,12 +47,20 @@ const InventoryContent: React.FC = () => {
             <span className="font-semibold text-vimdy-accent">Productos</span>: lo que vendes en Caja.
           </p>
         </div>
+        <div className="flex items-center gap-2 flex-wrap">
+        <button
+          onClick={() => setShowCount(true)}
+          className="h-10 px-4 rounded-vimdy-md border border-vimdy-border text-vimdy-text text-sm font-semibold flex items-center gap-2 hover:border-vimdy-accent hover:bg-vimdy-accent/10 transition"
+        >
+          <ClipboardCheck size={16} /> Contar inventario
+        </button>
         <button
           onClick={() => setShowDelete(true)}
           className="h-10 px-4 rounded-vimdy-md border border-vimdy-danger/40 text-vimdy-danger text-sm font-semibold flex items-center gap-2 hover:bg-vimdy-danger/10 transition"
         >
           <Trash2 size={16} /> Eliminar producto
         </button>
+        </div>
       </div>
 
       <InventorySummaryBar products={inventory.products} loading={inventory.loading} onGoTo={setSide} />
@@ -74,6 +84,7 @@ const InventoryContent: React.FC = () => {
           <InventoryDashboard inventory={inventory} />
         </section>
       </div>
+      {showCount && <InventoryCountModal inventory={inventory} onClose={() => setShowCount(false)} />}
       {showDelete && <DeleteItemsModal inventory={inventory} initialKind={side} onClose={() => setShowDelete(false)} />}
     </div>
   );

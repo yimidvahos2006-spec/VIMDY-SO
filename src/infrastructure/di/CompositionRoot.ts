@@ -17,6 +17,8 @@ import { AuditLogRepository } from './repositories/AuditLogRepository';
 import { CategoryRepository } from './repositories/CategoryRepository';
 import { SupplierRepository } from './repositories/SupplierRepository';
 import { PurchaseOrderRepository } from './repositories/PurchaseOrderRepository';
+import { InventoryCountRepository } from './repositories/InventoryCountRepository';
+import { InventoryCountEngine } from '../../core/inventoryCount/InventoryCountEngine';
 import { BusinessSnapshotRepository } from './repositories/BusinessSnapshotRepository';
 import { NotificationRepository } from './repositories/NotificationRepository';
 import { WaiterRepository } from './repositories/WaiterRepository';
@@ -99,6 +101,7 @@ const auditLogRepo = new AuditLogRepository();
 const categoryRepo = new CategoryRepository();
 const supplierRepo = new SupplierRepository();
 const purchaseOrderRepo = new PurchaseOrderRepository();
+const inventoryCountRepo = new InventoryCountRepository();
 const businessSnapshotRepo = new BusinessSnapshotRepository();
 const notificationRepo = new NotificationRepository();
 const waiterRepo = new WaiterRepository();
@@ -127,6 +130,7 @@ let accessEngine: AccessEngine | null = null;
 
 let kardexEngine: KardexEngine | null = null;
 let inventoryEngine: InventoryEngine | null = null;
+let inventoryCountEngine: InventoryCountEngine | null = null;
 let recipeEngine: RecipeEngine | null = null;
 let purchaseIntelligenceEngine: PurchaseIntelligenceEngine | null = null;
 let purchaseOrderEngine: PurchaseOrderEngine | null = null;
@@ -227,6 +231,11 @@ function ensureAccessEngine(): AccessEngine {
 function ensureKardexEngine(): KardexEngine {
   if (!kardexEngine) kardexEngine = new KardexEngine(movementRepo);
   return kardexEngine;
+}
+
+function ensureInventoryCountEngine(): InventoryCountEngine {
+  if (!inventoryCountEngine) inventoryCountEngine = new InventoryCountEngine(inventoryCountRepo, ensureInventoryEngine());
+  return inventoryCountEngine;
 }
 
 function ensureInventoryEngine(): InventoryEngine {
@@ -510,6 +519,7 @@ export const container = {
   patternLearningEngine: { get() { return ensurePatternLearningEngine(); } },
   inventoryService: { get() { return ensureInventoryService(); } },
   inventoryEngine: { get() { return ensureInventoryEngine(); } },
+  inventoryCountEngine: { get() { return ensureInventoryCountEngine(); } },
   recipeEngine: { get() { return ensureRecipeEngine(); } },
   purchaseIntelligenceEngine: { get() { return ensurePurchaseIntelligenceEngine(); } },
   purchaseOrderEngine: { get() { return ensurePurchaseOrderEngine(); } },
