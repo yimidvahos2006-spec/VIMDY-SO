@@ -1,5 +1,5 @@
 import { LEGAL_INFO } from "../legal/legalInfo";
-import { ArrowUpRight, Mail, MessageCircle } from "lucide-react";
+import { ArrowUpRight, Mail, MessageCircle, Play, Youtube } from "lucide-react";
 import { VimdyLogo } from "../../presentation/components/ui/VimdyLogo";
 import { VIMDY_CONTACT } from "../../core/config/contact";
 
@@ -82,6 +82,39 @@ export function Footer() {
                 className="transition-transform duration-300 group-hover:-translate-y-0.5 group-hover:translate-x-0.5"
               />
             </a>
+
+            <a
+              href={VIMDY_CONTACT.youtube.link}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Ver el canal de VIMDY en YouTube (se abre en una pestaña nueva)"
+              className="group mt-10 flex max-w-md items-center gap-4 rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4 transition-[border-color,background-color,transform] duration-300 hover:-translate-y-px hover:border-red-500/30 hover:bg-red-500/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/50 focus-visible:ring-offset-4 focus-visible:ring-offset-[#030507]"
+            >
+              <span
+                aria-hidden="true"
+                className="relative flex h-12 w-[68px] shrink-0 items-center justify-center rounded-xl bg-[#ff0000] shadow-[0_10px_30px_rgba(255,0,0,0.25)] transition-transform duration-300 group-hover:scale-105"
+              >
+                <Play size={20} className="ml-0.5 fill-white text-white" />
+              </span>
+
+              <span className="min-w-0 flex-1">
+                <span className="block text-[10px] font-semibold uppercase tracking-[0.24em] text-zinc-600">
+                  Aprende con nosotros
+                </span>
+                <span className="mt-1 block text-[15px] font-semibold text-zinc-100">
+                  VIMDY en YouTube
+                </span>
+                <span className="mt-0.5 block text-xs leading-5 text-zinc-500">
+                  Tutoriales para sacarle el máximo a VIMDY, paso a paso.
+                </span>
+              </span>
+
+              <ArrowUpRight
+                size={16}
+                aria-hidden="true"
+                className="shrink-0 text-zinc-600 transition-[transform,color] duration-300 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-red-300"
+              />
+            </a>
           </div>
 
           {Object.entries(footerLinks).map(([title, links]) => (
@@ -132,6 +165,16 @@ export function Footer() {
             </div>
 
             <div className="flex items-center gap-2">
+              <a
+                href={VIMDY_CONTACT.youtube.link}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex h-10 w-10 items-center justify-center rounded-full border border-white/[0.07] bg-white/[0.02] text-zinc-500 transition-[border-color,background-color,color,transform] duration-300 hover:-translate-y-px hover:border-red-500/30 hover:bg-red-500/[0.08] hover:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/50 focus-visible:ring-offset-4 focus-visible:ring-offset-[#030507]"
+                aria-label="Ver el canal de VIMDY en YouTube"
+              >
+                <Youtube size={18} aria-hidden="true" />
+              </a>
+
               <a
                 href={`mailto:${VIMDY_CONTACT.email.support}`}
                 className="flex h-10 w-10 items-center justify-center rounded-full border border-white/[0.07] bg-white/[0.02] text-zinc-500 transition-[border-color,background-color,color,transform] duration-300 hover:-translate-y-px hover:border-cyan-300/20 hover:bg-white/[0.05] hover:text-cyan-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/50 focus-visible:ring-offset-4 focus-visible:ring-offset-[#030507]"
