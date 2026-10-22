@@ -50,6 +50,16 @@ describe("parseImportCsv", () => {
     expect(rows[0]).toMatchObject({ name: "Jugo", categoryName: "Bebidas", price: 4500, stock: 10, type: "inventario" });
   });
 
+  it('lee "Stock actual" y "Stock mínimo" (si no, todo quedaba en 0 y salía Agotado)', () => {
+    const csv =
+      "SKU,Código de barras,Nombre,Categoría,Marca,Presentación,Costo,Precio de venta,Stock actual,Stock mínimo,Unidad,Proveedor,Estado,Descripción\n" +
+      "VIM-00001,TEST0000000001,Medias NovaCasa Suave 100 g,Ropa y accesorios,NovaCasa,100 g,169400,211400,60,5,unidad,Surtimax,Activo,Prueba";
+    const { rows } = parseImportCsv(csv);
+    expect(rows[0]).toMatchObject({ name: "Medias NovaCasa Suave 100 g", stock: 60, minStock: 5, price: 211400, cost: 169400 });
+    expect(rows[0].errors).toEqual([]);
+    expect(rowToProductInput(rows[0], "c")).toMatchObject({ stock: 60, minStock: 5, trackStock: true });
+  });
+
   it("marca errores por fila con su número de fila de Excel", () => {
     const { rows } = parseImportCsv("Nombre;Tipo;Categoría;Precio de venta;Costo;Stock inicial\n;Producto;A;100;;\nX;Raro;A;100;;\nY;Producto;A;abc;;\nZ;Producto;A;-5;;\nW;Producto;A;;;");
     expect(rows.map((r) => r.line)).toEqual([2, 3, 4, 5, 6]);

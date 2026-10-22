@@ -27,6 +27,13 @@ const InventoryContent: React.FC = () => {
   // Los dos paneles siguen montados; solo se oculta el que no se está viendo,
   // así no se pierde lo que el usuario estaba haciendo al cambiar de pestaña.
   const [side, setSide] = useState<Side>("productos");
+  // Al tocar "Ver productos" se pide a la tabla que filtre por estado
+  // (agotado/bajo). `nonce` hace que el pedido funcione aunque se repita.
+  const [statusRequest, setStatusRequest] = useState<{ status: "bajo" | "agotado"; nonce: number } | null>(null);
+  const goTo = (target: Side, status?: "bajo" | "agotado") => {
+    setSide(target);
+    if (status && target === "productos") setStatusRequest({ status, nonce: Date.now() });
+  };
   const [showDelete, setShowDelete] = useState(false);
   const [showCount, setShowCount] = useState(false);
   const tabClass = (active: boolean) =>
@@ -63,7 +70,7 @@ const InventoryContent: React.FC = () => {
         </div>
       </div>
 
-      <InventorySummaryBar products={inventory.products} loading={inventory.loading} onGoTo={setSide} />
+      <InventorySummaryBar products={inventory.products} loading={inventory.loading} onGoTo={goTo} />
 
       <div className="flex gap-1 p-1 rounded-vimdy-lg border border-vimdy-border bg-vimdy-surface max-w-md" role="tablist">
         <button role="tab" aria-selected={side === "productos"} onClick={() => setSide("productos")} className={tabClass(side === "productos")}>
@@ -81,7 +88,7 @@ const InventoryContent: React.FC = () => {
           </Suspense>
         </section>
         <section aria-label="Productos" className={`${side === "productos" ? "block" : "hidden"} min-w-0`}>
-          <InventoryDashboard inventory={inventory} />
+          <InventoryDashboard inventory={inventory} statusRequest={statusRequest} />
         </section>
       </div>
       {showCount && <InventoryCountModal inventory={inventory} onClose={() => setShowCount(false)} />}

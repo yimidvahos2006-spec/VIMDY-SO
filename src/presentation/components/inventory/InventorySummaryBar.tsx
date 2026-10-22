@@ -23,7 +23,7 @@ export function InventorySummaryBar({
 }: {
   products: Product[];
   loading: boolean;
-  onGoTo: (side: Side) => void;
+  onGoTo: (side: Side, status?: "bajo" | "agotado") => void;
 }) {
   const summary = useMemo(() => {
     const active = products.filter((p) => p.active !== false);
@@ -121,7 +121,7 @@ export function InventorySummaryBar({
             {insTotal > 0 && (
               <button
                 type="button"
-                onClick={() => onGoTo("insumos")}
+                onClick={() => onGoTo("insumos", outIns > 0 ? "agotado" : "bajo")}
                 className="h-9 px-3 rounded-vimdy-md border border-current font-semibold hover:bg-vimdy-surface/40"
               >
                 Ver insumos
@@ -130,7 +130,7 @@ export function InventorySummaryBar({
             {prodTotal > 0 && (
               <button
                 type="button"
-                onClick={() => onGoTo("productos")}
+                onClick={() => onGoTo("productos", outProd > 0 ? "agotado" : "bajo")}
                 className="h-9 px-3 rounded-vimdy-md border border-current font-semibold hover:bg-vimdy-surface/40"
               >
                 Ver productos

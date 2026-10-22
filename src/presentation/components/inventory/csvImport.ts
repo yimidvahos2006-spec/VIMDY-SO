@@ -125,7 +125,7 @@ export function buildTemplateCsv(): string {
 
 /* ------------------------------ Columnas y tipo --------------------------- */
 
-type Field = "name" | "type" | "category" | "unit" | "cost" | "price" | "stock" | "barcode";
+type Field = "name" | "type" | "category" | "unit" | "cost" | "price" | "stock" | "minStock" | "barcode";
 
 const COLUMN_ALIASES: Record<Field, string[]> = {
   name: ["nombre", "producto", "nombredelproducto", "articulo", "item"],
@@ -134,7 +134,8 @@ const COLUMN_ALIASES: Record<Field, string[]> = {
   unit: ["unidad", "unidaddemedida", "um"],
   cost: ["costo", "costodecompra", "preciodecompra", "costounitario"],
   price: ["preciodeventa", "precio", "pvp", "preciopublico", "valorventa"],
-  stock: ["stockinicial", "stock", "existencias", "cantidad", "inventarioinicial"],
+  stock: ["stockinicial", "stock", "stockactual", "existencias", "cantidad", "inventarioinicial"],
+  minStock: ["stockminimo", "minimo", "stockmin", "minimodestock"],
   barcode: ["codigodebarras", "codigobarras", "barras", "ean", "codigo", "barcode"]
 };
 
@@ -197,6 +198,7 @@ export interface ImportRow {
   cost?: number;
   price: number;
   stock: number;
+  minStock?: number;
   barcode?: string;
   errors: string[];
   warnings: string[];
@@ -280,6 +282,7 @@ export function parseImportCsv(text: string): ParsedCsv {
     const price = parseNumberCell(cell(raw, columns.price), "El precio de venta", errors);
     const cost = parseNumberCell(cell(raw, columns.cost), "El costo", errors);
     const stockParsed = parseNumberCell(cell(raw, columns.stock), "El stock inicial", errors);
+    const minStockParsed = parseNumberCell(cell(raw, columns.minStock), "El stock mínimo", errors);
 
     if (type !== "ingrediente" && price === undefined && !errors.some((e) => e.startsWith("El precio"))) {
       errors.push("Falta el precio de venta.");
@@ -310,6 +313,7 @@ export function parseImportCsv(text: string): ParsedCsv {
       cost,
       price: type === "ingrediente" ? 0 : (price ?? 0),
       stock,
+      minStock: minStockParsed,
       barcode,
       errors,
       warnings
@@ -449,7 +453,7 @@ export function rowToProductInput(row: ImportRow, categoryId: string): ProductIn
     price: row.price,
     purchasePrice: row.cost,
     stock: showsStock ? row.stock : 0,
-    minStock: 0,
+    minStock: showsStock ? (row.minStock ?? 0) : 0,
     unit: row.unit,
     barcode: row.barcode,
     active: true,

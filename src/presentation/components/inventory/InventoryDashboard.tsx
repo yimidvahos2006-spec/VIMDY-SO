@@ -38,7 +38,13 @@ const CsvImportModal = lazy(() => import("./CsvImportModal").then((m) => ({ defa
 const ProduceBatchModal = lazy(loadProduceBatchModal);
 const CategoriesManagerModal = lazy(loadCategoriesManagerModal);
 
-export function InventoryDashboard({ inventory }: { inventory: InventoryState }) {
+export function InventoryDashboard({
+  inventory,
+  statusRequest
+}: {
+  inventory: InventoryState;
+  statusRequest?: { status: StockStatus; nonce: number } | null;
+}) {
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -94,6 +100,16 @@ export function InventoryDashboard({ inventory }: { inventory: InventoryState })
   const [statusFilter, setStatusFilter] = useState<StockStatus | "todos">("todos");
   const [showInactive, setShowInactive] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<string>("todos");
+
+  // "Ver productos" (barra de resumen): deja la tabla filtrada por ese estado
+  // y sin otros filtros que escondan los productos.
+  useEffect(() => {
+    if (!statusRequest) return;
+    setStatusFilter(statusRequest.status);
+    setSearch("");
+    setCategoryFilter("todos");
+    setProductTypeFilter("todos");
+  }, [statusRequest]);
   const [productTypeFilter, setProductTypeFilter] = useState<ProductType | "todos">("todos");
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
