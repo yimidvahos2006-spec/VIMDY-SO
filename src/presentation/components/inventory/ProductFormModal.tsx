@@ -1345,35 +1345,40 @@ export function ProductFormModal({
                      <MoneyInput
                        value={quickIngredientPurchasePrice}
                       onValueChange={setQuickIngredientPurchasePrice}
-                      placeholder="Precio"
+                      placeholder="Precio de compra (opcional)"
                       aria-label="Precio de compra (opcional)"
-                      title="Precio de compra (opcional)"
+                      title="Cuánto te cuesta comprar una unidad de este ingrediente"
                       className="flex-1 min-w-0 h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-recipe"
                     />
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const trimmed = quickIngredientName.trim();
-                        if (!trimmed) return;
-                        await handleCreateQuickIngredient(trimmed);
-                      }}
-                      disabled={creatingIngredient || !quickIngredientName.trim()}
-                      className="h-10 px-4 rounded-vimdy-sm bg-vimdy-recipe text-white hover:bg-vimdy-recipe/90 disabled:opacity-40 transition text-sm font-medium whitespace-nowrap shrink-0"
-                    >
-                      {creatingIngredient ? "Creando..." : "Crear y agregar"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowQuickIngredient(false);
-                        setQuickIngredientName("");
-                        setQuickIngredientPurchasePrice("");
-                      }}
-                      aria-label="Cancelar"
-                      className="h-10 w-10 shrink-0 rounded-vimdy-sm border border-vimdy-border text-vimdy-text-secondary hover:bg-vimdy-surface flex items-center justify-center"
-                    >
-                      <X size={16} />
-                    </button>
+                    <p className="basis-full text-vimdy-text-tertiary text-xs">
+                      El precio es lo que pagas por una unidad de compra (ej: un kg). La cantidad que lleva el producto la escribes al crearlo.
+                    </p>
+                    <div className="basis-full flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const trimmed = quickIngredientName.trim();
+                          if (!trimmed) return;
+                          await handleCreateQuickIngredient(trimmed);
+                        }}
+                        disabled={creatingIngredient || !quickIngredientName.trim()}
+                        className="flex-1 h-10 px-4 rounded-vimdy-sm bg-vimdy-recipe text-white hover:bg-vimdy-recipe/90 disabled:opacity-40 transition text-sm font-medium whitespace-nowrap"
+                      >
+                        {creatingIngredient ? "Creando..." : "Crear y agregar"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowQuickIngredient(false);
+                          setQuickIngredientName("");
+                          setQuickIngredientPurchasePrice("");
+                        }}
+                        aria-label="Cancelar"
+                        className="h-10 w-10 shrink-0 rounded-vimdy-sm border border-vimdy-border text-vimdy-text-secondary hover:bg-vimdy-surface flex items-center justify-center"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
                   </div>
                 )}
 
