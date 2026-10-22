@@ -76,10 +76,16 @@ export function describeMovement(
   movement: Pick<InventoryMovement, "type" | "reason">,
   productName: string
 ): MovementDescription {
+  const reason = (movement.reason ?? "").trim().toLowerCase();
+  const isProduction = reason.startsWith("producción") || reason.startsWith("produccion");
   if (movement.type === "INCREASE") {
+    if (isProduction) return { title: `Produjiste ${productName}`, sign: "+", tone: "up" };
+    if (reason.startsWith("transferencia recibida")) return { title: `Recibiste ${productName}`, sign: "+", tone: "up" };
     return { title: `Agregaste ${productName}`, sign: "+", tone: "up" };
   }
   if (movement.type === "DECREASE") {
+    if (isProduction) return { title: `Usaste ${productName} en producción`, sign: "-", tone: "down" };
+    if (reason.startsWith("transferencia enviada")) return { title: `Enviaste ${productName}`, sign: "-", tone: "down" };
     const verb = isSaleReason(movement.reason ?? "") ? "Vendiste" : "Sacaste";
     return { title: `${verb} ${productName}`, sign: "-", tone: "down" };
   }

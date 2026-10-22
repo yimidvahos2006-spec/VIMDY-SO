@@ -78,6 +78,21 @@ export class AuditEngine {
     return logs.filter(log => log.entityId === entityId);
   }
 
+  /**
+   * Últimos eventos de UN módulo (ej. "inventario"), más reciente primero.
+   * Si el repositorio sabe filtrar en el servidor (findByDataField) se pide
+   * solo ese módulo en vez de traer toda la auditoría del negocio.
+   */
+  public async getRecentByModule(module: string, limit: number = 300): Promise<AuditLog[]> {
+    const repo = this.repository as IRepository<AuditLog> & {
+      findByDataField?: (field: string, value: string) => Promise<AuditLog[]>;
+    };
+    const logs = repo.findByDataField
+      ? await repo.findByDataField("module", module)
+      : (await repo.findAll()).filter((log) => log.module === module);
+    return logs.sort((a, b) => b.date.getTime() - a.date.getTime()).slice(0, limit);
+  }
+
   public async getRecent(limit: number = 50): Promise<AuditLog[]> {
     const logs = await this.getAll();
     return logs.slice(0, limit);

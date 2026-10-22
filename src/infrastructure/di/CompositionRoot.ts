@@ -239,7 +239,7 @@ function ensureInventoryCountEngine(): InventoryCountEngine {
 }
 
 function ensureInventoryEngine(): InventoryEngine {
-  if (!inventoryEngine) inventoryEngine = new InventoryEngine(productRepo, ensureKardexEngine(), supplierRepo, categoryRepo);
+  if (!inventoryEngine) inventoryEngine = new InventoryEngine(productRepo, ensureKardexEngine(), supplierRepo, categoryRepo, ensureAuditEngine());
   return inventoryEngine;
 }
 

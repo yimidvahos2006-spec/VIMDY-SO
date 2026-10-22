@@ -69,6 +69,7 @@ export function InventoryDashboard({
     products: allProducts,
     sellableProducts: products,
     recentMovements,
+    recentActivity,
     loading,
     error,
     getHistory,
@@ -919,7 +920,7 @@ export function InventoryDashboard({
         {/* Alertas + últimos movimientos */}
         <div className="space-y-6">
           <AlertsPanel products={products} onSelect={setSelected} />
-          <RecentMovementsPanel movements={recentMovements} products={allProducts} />
+          <RecentMovementsPanel movements={recentMovements} activity={recentActivity} products={allProducts} />
         </div>
       </div>
         </>

@@ -1,7 +1,8 @@
 // src/core/store/useInventory.ts
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { container, productsReady } from "../../infrastructure/di/CompositionRoot";
-import { Product, InventoryMovement, LossCategory, Category } from "../entities/Entities";
+import { Product, InventoryMovement, LossCategory, Category, AuditLog } from "../entities/Entities";
+import { INVENTORY_AUDIT_MODULE } from "../utils/inventoryFeed";
 import { productCatalogStore } from "./productCatalogStore";
 import { ProductInput } from "../engines/InventoryEngine";
 import { vimdyCore } from "../VimdyCore";
@@ -68,17 +69,25 @@ export function useInventory() {
   const performedBy = user?.name ?? "Sistema";
   const [products, setProducts] = useState<Product[]>([]);
   const [recentMovements, setRecentMovements] = useState<InventoryMovement[]>([]);
+  // Eventos del catálogo (crear, editar, eliminar, importar...) para "Últimos movimientos".
+  const [recentActivity, setRecentActivity] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     await productsReady;
-    const [all, movements] = await Promise.all([
+    const [all, movements, activity] = await Promise.all([
       container.inventoryEngine.get().listAll(),
-      container.kardexEngine.get().getRecentHistory(15),
+      // 300 y no 15: el panel agrupa tandas (ej. una importación) y filtra por
+      // los últimos 30 días; con pocas filas una importación taparía todo lo demás.
+      container.kardexEngine.get().getRecentHistory(300),
+      // Solo pueden leer la auditoría ciertos roles; sin permiso (o sin red) el
+      // panel simplemente no muestra esos eventos, no se rompe Inventario.
+      container.auditEngine.get().getRecentByModule(INVENTORY_AUDIT_MODULE, 300).catch(() => [] as AuditLog[]),
     ]);
     setProducts(all);
     setRecentMovements(movements);
+    setRecentActivity(activity);
     // Mantiene sincronizado el catálogo que usa la Caja, para que un ajuste
     // hecho desde Inventario se vea de inmediato al volver a vender.
     await productCatalogStore.refresh();
@@ -449,6 +458,7 @@ export function useInventory() {
     sellableProducts,
     insumos,
     recentMovements,
+    recentActivity,
     kpis,
     lowStockProducts,
     loading,

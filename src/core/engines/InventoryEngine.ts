@@ -13,6 +13,15 @@ import type { IProductRepository } from "../../infrastructure/di/repositories/IP
 import { KardexEngine } from "./KardexEngine";
 import { companyConfigStore } from "../store/companyConfigStore";
 import { getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
+import { INVENTORY_AUDIT_ACTIONS, INVENTORY_AUDIT_MODULE } from "../utils/inventoryFeed";
+
+/** Lo mínimo que InventoryEngine necesita del registro de auditoría (AuditEngine lo cumple). */
+export interface InventoryAuditSink {
+  log(actorId: string, action: string, module: string, description: string, entityId?: string): Promise<unknown>;
+}
+
+const money = (value: number | undefined): string =>
+  value === undefined ? "sin dato" : `$${value.toLocaleString("es-CO")}`;
 
 export type ProductInput = Partial<Product> & { name: string };
 
@@ -40,8 +49,27 @@ export class InventoryEngine {
     private readonly repository?: IProductRepository,
     private readonly kardex?: KardexEngine,
     private readonly supplierRepository?: IRepository<Supplier>,
-    private readonly categoryRepository?: IRepository<Category>
+    private readonly categoryRepository?: IRepository<Category>,
+    private readonly audit?: InventoryAuditSink
   ) {}
+
+  /**
+   * Deja constancia en "Últimos movimientos" de algo que pasó en el catálogo
+   * (crear, editar, eliminar, importar...). Es un rastro: si falla, la
+   * operación ya hecha NO se deshace ni se interrumpe.
+   */
+  private async note(action: string, description: string, entityId?: string, actor?: string): Promise<void> {
+    if (!this.audit) return;
+    try {
+      await this.audit.log(actor ?? "Sistema", action, INVENTORY_AUDIT_MODULE, description, entityId);
+    } catch {
+      /* el rastro nunca debe tumbar la operación */
+    }
+  }
+
+  private kindWord(product: Pick<Product, "isIngredient">): string {
+    return product.isIngredient === true ? "insumo" : "producto";
+  }
 
   private getRepository(): IProductRepository {
     if (!this.repository) {
@@ -208,6 +236,7 @@ export class InventoryEngine {
            branchId,
            allowNegative: false
          });
+         await this.note(INVENTORY_AUDIT_ACTIONS.created, `Creaste el ${this.kindWord(product)} "${product.name}"`, product.id, performedBy);
          return { ...product, ...updated, stock: updated?.stock ?? initialStock };
        } catch (error) {
          // No dejar un producto a medias (sin stock ni historial): se deshace
@@ -241,6 +270,7 @@ export class InventoryEngine {
        );
      }
 
+     await this.note(INVENTORY_AUDIT_ACTIONS.created, `Creaste el ${this.kindWord(product)} "${product.name}"`, product.id, performedBy);
      return product;
   }
 
@@ -368,6 +398,15 @@ export class InventoryEngine {
       onProgress?.(done, total);
     }
 
+    if (created.length > 0) {
+      const failNote = failed.length > 0 ? ` (${failed.length.toLocaleString("es-CO")} filas con problemas)` : "";
+      await this.note(
+        INVENTORY_AUDIT_ACTIONS.imported,
+        `Importaste ${created.length.toLocaleString("es-CO")} ${created.length === 1 ? "producto nuevo" : "productos nuevos"}${failNote}`,
+        undefined,
+        performedBy
+      );
+    }
     return { created, failed: failed.sort((a, b) => a.index - b.index) };
   }
 
@@ -386,17 +425,28 @@ export class InventoryEngine {
     for (let index = 0; index < updates.length; index += 1) {
       const { id, input } = updates[index];
       try {
-        await this.updateProduct(id, input, catalog);
+        await this.updateProduct(id, input, catalog, { silent: true });
         updated += 1;
       } catch (error) {
         failed.push({ index, name: input.name, error: error instanceof Error ? error.message : String(error) });
       }
       onProgress?.(index + 1, updates.length);
     }
+    if (updated > 0) {
+      await this.note(
+        INVENTORY_AUDIT_ACTIONS.importUpdated,
+        `Actualizaste ${updated.toLocaleString("es-CO")} ${updated === 1 ? "producto" : "productos"} desde un archivo`
+      );
+    }
     return { updated, failed };
   }
 
-  public async updateProduct(id: string, input: ProductInput, preloaded?: Product[]): Promise<Product> {
+  public async updateProduct(
+    id: string,
+    input: ProductInput,
+    preloaded?: Product[],
+    options?: { silent?: boolean }
+  ): Promise<Product> {
     const existing = await this.getRepository().findById(id);
     if (!existing) {
       throw new Error('PRODUCT_NOT_FOUND');
@@ -427,10 +477,35 @@ export class InventoryEngine {
     }
 
     await this.getRepository().update(updated);
+
+    if (!options?.silent) {
+      const label = `"${existing.name}"`;
+      const wasActive = existing.active !== false;
+      const isActive = updated.active !== false;
+      if (wasActive && !isActive) {
+        await this.note(INVENTORY_AUDIT_ACTIONS.deactivated, `Desactivaste el ${this.kindWord(existing)} ${label}`, id);
+      } else if (!wasActive && isActive) {
+        await this.note(INVENTORY_AUDIT_ACTIONS.reactivated, `Reactivaste el ${this.kindWord(existing)} ${label}`, id);
+      }
+
+      const changes: string[] = [];
+      if (existing.name !== updated.name) changes.push(`nombre: "${existing.name}" → "${updated.name}"`);
+      if ((existing.price ?? 0) !== (updated.price ?? 0)) changes.push(`precio: ${money(existing.price)} → ${money(updated.price)}`);
+      if (existing.purchasePrice !== updated.purchasePrice) {
+        changes.push(`costo: ${money(existing.purchasePrice)} → ${money(updated.purchasePrice)}`);
+      }
+      if ((existing.minStock ?? 0) !== (updated.minStock ?? 0)) {
+        changes.push(`stock mínimo: ${existing.minStock ?? 0} → ${updated.minStock ?? 0}`);
+      }
+      if (existing.categoryId !== updated.categoryId) changes.push("categoría");
+      if (changes.length > 0) {
+        await this.note(INVENTORY_AUDIT_ACTIONS.updated, `Editaste ${label}: ${changes.join(", ")}`, id);
+      }
+    }
     return updated;
   }
 
-  public async deleteProduct(id: string): Promise<void> {
+  public async deleteProduct(id: string): Promise<"deleted" | "deactivated"> {
     if (!(await this.getRepository().exists(id))) {
       throw new Error('PRODUCT_NOT_FOUND');
     }
@@ -449,11 +524,20 @@ export class InventoryEngine {
       const hasMovements = await this.kardex.hasMovements(id);
       if (hasMovements) {
         await this.getRepository().update({ ...product, active: false });
-        return;
+        await this.note(
+          INVENTORY_AUDIT_ACTIONS.deactivated,
+          `Eliminaste el ${this.kindWord(product)} "${product.name}" (quedó desactivado porque tiene historial)`,
+          id
+        );
+        return "deactivated";
       }
     }
 
     await this.getRepository().delete(id);
+    if (product) {
+      await this.note(INVENTORY_AUDIT_ACTIONS.deleted, `Eliminaste el ${this.kindWord(product)} "${product.name}"`, id);
+    }
+    return "deleted";
   }
 
   /**
@@ -469,6 +553,10 @@ export class InventoryEngine {
       .map((p) => p.id);
     if (ids.length === 0) return 0;
     await this.getRepository().deleteMany(ids);
+    await this.note(
+      INVENTORY_AUDIT_ACTIONS.deletedAll,
+      `Eliminaste todos los ${kind === "insumos" ? "insumos" : "productos"} (${ids.length.toLocaleString("es-CO")})`
+    );
     return ids.length;
   }
 

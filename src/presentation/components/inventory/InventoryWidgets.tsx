@@ -1,16 +1,16 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { toast } from "../../../core/store/toastStore";
-import { AlertTriangle, History, ArrowUpCircle, ArrowDownCircle, ChevronUp, ChevronDown } from "lucide-react";
+import { AlertTriangle, History, ArrowUpCircle, ArrowDownCircle, ChevronUp, ChevronDown, Pencil } from "lucide-react";
 import { getStockStatus } from "../../../core/store/useInventory";
-import { Product, InventoryMovement, Category } from "../../../core/entities/Entities";
+import { Product, InventoryMovement, Category, AuditLog } from "../../../core/entities/Entities";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { companyConfigStore } from "../../../core/store/companyConfigStore";
 import {
   MOVEMENT_VISIBLE_DAYS,
-  describeMovement,
-  filterVisibleMovements,
+  businessDaysAgo,
   getRelativeMovementTime
 } from "../../../core/utils/movementDisplay";
+import { buildInventoryFeed } from "../../../core/utils/inventoryFeed";
 
 export function KpiCard({
   icon,
@@ -288,9 +288,12 @@ export function AlertsPanel({
 
 export function RecentMovementsPanel({
   movements,
+  activity = [],
   products
 }: {
   movements: InventoryMovement[];
+  /** Eventos del catálogo (crear, editar, eliminar, importar...) guardados en la auditoría. */
+  activity?: AuditLog[];
   products: Product[];
 }) {
   // Orden de prioridad: 1) el nombre real guardado en el propio movimiento
@@ -314,9 +317,15 @@ export function RecentMovementsPanel({
 
   // El historial completo sigue guardado en el Kardex (lo usan Pérdidas y el
   // Kardex de cada producto); aquí solo se muestran los últimos 30 días.
+  // Junta stock (Kardex) + eventos del catálogo, resume las tandas (ej. una
+  // importación) y deja solo lo de los últimos 30 días.
   const visible = useMemo(
-    () => filterVisibleMovements(movements, now, timezone),
-    [movements, now, timezone]
+    () =>
+      buildInventoryFeed(movements, activity, nameOf).filter(
+        (item) => businessDaysAgo(item.date, now, timezone) <= MOVEMENT_VISIBLE_DAYS
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [movements, activity, products, now, timezone]
   );
 
   return (
@@ -326,7 +335,7 @@ export function RecentMovementsPanel({
         <h2 className="text-vimdy-text font-bold">Últimos movimientos</h2>
       </div>
 
-      {movements.length === 0 ? (
+      {movements.length === 0 && activity.length === 0 ? (
         <p className="text-vimdy-text-tertiary text-sm">Todavía no hay movimientos registrados.</p>
       ) : visible.length === 0 ? (
         <p className="text-vimdy-text-tertiary text-sm">
@@ -335,35 +344,36 @@ export function RecentMovementsPanel({
       ) : (
         <>
           <ul className="space-y-2 max-h-72 overflow-y-auto">
-            {visible.map((m) => {
-              const info = describeMovement(m, nameOf(m));
+            {visible.map((item) => {
               const toneClass =
-                info.tone === "up"
+                item.tone === "up"
                   ? "text-vimdy-success"
-                  : info.tone === "down"
+                  : item.tone === "down"
                   ? "text-vimdy-danger"
                   : "text-vimdy-text-secondary";
+              const iconClass = `${toneClass} mt-0.5 shrink-0`;
               return (
-                <li key={m.id} className="flex items-start gap-2 text-sm">
-                  {info.tone === "up" ? (
-                    <ArrowUpCircle size={16} className="text-vimdy-success mt-0.5 shrink-0" />
+                <li key={item.id} className="flex items-start gap-2 text-sm">
+                  {item.kind === "event" && item.tone === "neutral" ? (
+                    <Pencil size={16} className={iconClass} />
+                  ) : item.tone === "up" ? (
+                    <ArrowUpCircle size={16} className={iconClass} />
                   ) : (
-                    <ArrowDownCircle
-                      size={16}
-                      className={`${info.tone === "down" ? "text-vimdy-danger" : "text-vimdy-text-secondary"} mt-0.5 shrink-0`}
-                    />
+                    <ArrowDownCircle size={16} className={iconClass} />
                   )}
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-vimdy-text">
-                      {info.title}{" "}
-                      <span className={toneClass}>
-                        {info.sign}
-                        {m.quantity}
-                      </span>
+                      {item.title}
+                      {item.amount ? (
+                        <>
+                          {" "}
+                          <span className={toneClass}>{item.amount}</span>
+                        </>
+                      ) : null}
                     </p>
                     <p className="text-vimdy-text-tertiary text-xs">
-                      {getRelativeMovementTime(m.date, now, timezone, language)}
-                      {m.reason ? ` · ${m.reason}` : ""}
+                      {getRelativeMovementTime(item.date, now, timezone, language)}
+                      {item.detail ? ` · ${item.detail}` : ""}
                     </p>
                   </div>
                 </li>
@@ -371,7 +381,7 @@ export function RecentMovementsPanel({
             })}
           </ul>
           <p className="text-vimdy-text-tertiary text-xs mt-3">
-            Se muestran los últimos {MOVEMENT_VISIBLE_DAYS} días. El historial completo sigue en el Kardex de cada producto.
+            Se muestran los últimos {MOVEMENT_VISIBLE_DAYS} días. Aquí ves lo que pasa en el inventario: stock, ventas, creaciones, cambios, eliminaciones e importaciones. El historial completo de stock sigue en el Kardex de cada producto.
           </p>
         </>
       )}
