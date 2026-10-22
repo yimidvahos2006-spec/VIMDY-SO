@@ -42,6 +42,8 @@ export interface UseCategoriesResult {
 function friendlyError(rawCode: string): string {
   // El servidor también protege el borrado: su mensaje trae el código dentro del texto.
   const code = rawCode.includes("CATEGORY_IN_USE") ? "CATEGORY_IN_USE" : rawCode;
+  // El motor manda "CATEGORY_IN_USE:<n>" con cuántos productos activos la usan.
+  const activeCount = Number(/CATEGORY_IN_USE:(\d+)/.exec(rawCode)?.[1] ?? 0);
   switch (code) {
     case "CATEGORY_NAME_REQUIRED":
       return "El nombre de la categoría es obligatorio.";
@@ -50,7 +52,9 @@ function friendlyError(rawCode: string): string {
     case "CATEGORY_NOT_FOUND":
       return "La categoría ya no existe.";
     case "CATEGORY_IN_USE":
-      return "No puedes eliminar esta categoría: hay productos que la usan.";
+      return activeCount > 0
+        ? `No puedes eliminar esta categoría: ${activeCount} ${activeCount === 1 ? "producto activo la usa" : "productos activos la usan"}. Muévelos a otra categoría o elimínalos primero.`
+        : "No puedes eliminar esta categoría: hay productos que la usan.";
     default:
       return "No se pudo completar la operación. Intenta de nuevo.";
   }
@@ -134,6 +138,8 @@ export function useCategories(): UseCategoriesResult {
         return true;
       } catch (e: any) {
         setError(friendlyError(e?.message ?? ""));
+        // Refresca la pantalla con lo último del servidor, por si el bloqueo venía de datos viejos.
+        vimdyCore.emit("inventory");
         return false;
       }
     },

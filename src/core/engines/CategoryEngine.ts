@@ -6,6 +6,9 @@ import { isDuplicateNameError } from '../errors/DuplicateNameError';
  * Para detectar repetidas: ignora mayúsculas, tildes y espacios de más
  * ("Café", "cafe" y "  CAFÉ " son la misma categoría).
  */
+/** Valor que ya usa InventoryEngine para un producto sin categoría. */
+export const UNCATEGORIZED_ID = 'uncategorized';
+
 function normalizeCategoryName(value: string): string {
   return value
     .normalize('NFD')
@@ -173,7 +176,14 @@ export class CategoryEngine {
     return updated;
   }
 
-  /** No se puede borrar una categoría mientras algún producto la esté usando. */
+  /**
+   * Borra una categoría.
+   * - Si algún producto ACTIVO la usa: se bloquea con "CATEGORY_IN_USE:<n>"
+   *   (n = cuántos productos activos la usan).
+   * - Si solo la usan productos desactivados (los que quedan tras borrar un
+   *   producto que ya tuvo movimientos: se conservan por el historial), esos
+   *   productos pasan a "Sin categoría" ("uncategorized") y la categoría se borra.
+   */
   public async delete(id: string): Promise<void> {
     const category = await this.repository.findById(id);
 
@@ -182,10 +192,17 @@ export class CategoryEngine {
     }
 
     const products = await this.productRepository.findAll();
-    const inUse = products.some((p) => p.categoryId === id);
+    const using = products.filter((p) => p.categoryId === id);
+    const activeCount = using.filter((p) => p.active !== false).length;
 
-    if (inUse) {
-      throw new Error('CATEGORY_IN_USE');
+    if (activeCount > 0) {
+      throw new Error(`CATEGORY_IN_USE:${activeCount}`);
+    }
+
+    // Solo quedan productos desactivados: se sueltan de la categoría antes de
+    // borrarla (la base de datos también exige que no quede ninguno apuntando).
+    for (const product of using) {
+      await this.productRepository.update({ ...product, categoryId: UNCATEGORIZED_ID });
     }
 
     await this.repository.delete(id);

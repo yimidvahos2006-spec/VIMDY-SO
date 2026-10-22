@@ -6,6 +6,22 @@ import { ProductLocalRepository } from "./ProductLocalRepository";
 import { connectionStore } from "../../../core/store/connectionStore";
 import { logWarning } from "../../logging/opsLogger";
 import { getCurrentBusinessId, getCurrentBranchId } from "../../supabase/supabaseClient";
+import { vimdyCore } from "../../../core/VimdyCore";
+import { RecentDeletes } from "../../../core/utils/recentDeletes";
+
+/** Huella barata del catálogo: sirve para saber si lo que llegó del servidor cambió algo en pantalla. */
+function catalogSignature(list: Product[]): string {
+  return [...list]
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((p) => {
+      const updated = p.lastUpdated instanceof Date ? p.lastUpdated.getTime() : String(p.lastUpdated ?? "");
+      return `${p.id}|${p.version ?? 0}|${p.stock}|${p.active}|${p.price}|${p.name}|${updated}`;
+    })
+    .join(";");
+}
+
+/** Máximo que findAll() espera al servidor antes de pintar con el caché (red lenta no debe congelar la pantalla). */
+const FRESH_WAIT_MS = 2500;
 
 /**
  * ProductRepository
@@ -55,26 +71,99 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
    * la actualización — eso es responsabilidad de Paso 1.6
    * (productCatalogStore), no de este repositorio.
    */
-  public async findAll(): Promise<Product[]> {
-    const cached = await this.local.findAll();
+  /**
+   * Contador de escrituras locales. Si mientras un fetch al servidor estaba
+   * en vuelo se hizo un guardado/borrado, ese fetch pudo leer ANTES del
+   * cambio: se descarta para no pisar el caché con datos viejos (así un
+   * producto recién creado no "desaparece" ni uno borrado "resucita").
+   */
+  private writeEpoch = 0;
+  private inflightFresh: Promise<Product[] | null> | null = null;
+  /** Ids borrados hace poco: una lista vieja del servidor no puede traerlos de vuelta. */
+  private readonly recentDeletes = new RecentDeletes();
 
-    if (connectionStore.isOnline()) {
-      void super
-        .findAll()
-        .then((fresh) => this.local.replaceAll(fresh))
-        .catch((error) => {
-          logWarning("[ProductRepository] No se pudo refrescar el catálogo desde Supabase", { category: "offline", context: { error: String(error) } });
-        });
-    }
+  private touchLocal(): void {
+    this.writeEpoch += 1;
+  }
 
+  /** Un solo fetch a la vez; null = el resultado quedó viejo (hubo una escritura en medio). */
+  private fetchFresh(): Promise<Product[] | null> {
+    if (this.inflightFresh) return this.inflightFresh;
+    const epoch = this.writeEpoch;
+    const run = (async () => {
+      const fresh = this.recentDeletes.filter(await super.findAll());
+      if (epoch !== this.writeEpoch) return null;
+      await this.local.replaceAll(fresh);
+      if (epoch !== this.writeEpoch) {
+        // Hubo un borrado mientras se escribía el caché: se quitan de nuevo los borrados.
+        const stale = fresh.filter((item) => this.recentDeletes.has(item.id)).map((item) => item.id);
+        if (stale.length > 0) await this.local.deleteMany(stale);
+        return null;
+      }
+      return fresh;
+    })().finally(() => {
+      this.inflightFresh = null;
+    });
+    this.inflightFresh = run;
+    return run;
+  }
+
+  private scopeToCurrent(list: Product[]): Product[] {
     const currentBusinessId = getCurrentBusinessId();
     const currentBranchId = getCurrentBranchId();
-
-    return cached.filter((product) => {
+    return list.filter((product) => {
       if (currentBusinessId && product.businessId && product.businessId !== currentBusinessId) return false;
       if (currentBranchId && product.branchId && product.branchId !== currentBranchId) return false;
       return true;
     });
+  }
+
+  /**
+   * Con internet: espera el dato fresco del servidor hasta FRESH_WAIT_MS
+   * (lo normal: <1s), así lo que ves es lo que hay en la base de datos —
+   * un producto creado o borrado desde otro dispositivo aparece/desaparece
+   * en el acto. Si el servidor tarda más, se pinta con el caché local y,
+   * cuando llegue la respuesta, si algo cambió se avisa con el evento
+   * "inventory" para que las pantallas se recarguen solas (antes se
+   * actualizaba el caché en silencio y la pantalla quedaba un paso atrás
+   * hasta recargar la página).
+   * Sin internet (o si el servidor falla): caché local, sin esperar nada.
+   */
+  public async findAll(): Promise<Product[]> {
+    if (!connectionStore.isOnline()) {
+      return this.scopeToCurrent(await this.local.findAll());
+    }
+
+    const cached = this.scopeToCurrent(await this.local.findAll());
+    const pending = this.fetchFresh().catch((error) => {
+      logWarning("[ProductRepository] No se pudo refrescar el catálogo desde Supabase", { category: "offline", context: { error: String(error) } });
+      return null;
+    });
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = Symbol("timeout");
+    const winner = await Promise.race([
+      pending,
+      new Promise<typeof timedOut>((resolve) => {
+        timer = setTimeout(() => resolve(timedOut), FRESH_WAIT_MS);
+      })
+    ]);
+    if (timer) clearTimeout(timer);
+
+    if (winner === timedOut) {
+      const cachedSignature = catalogSignature(cached);
+      void pending.then((fresh) => {
+        if (fresh && catalogSignature(this.scopeToCurrent(fresh)) !== cachedSignature) {
+          vimdyCore.emit("inventory", { source: "cache-refresh" });
+        }
+      });
+      return cached;
+    }
+
+    if (winner) return this.scopeToCurrent(winner);
+
+    // Falló el fetch o quedó viejo por una escritura en medio: lo local manda.
+    return this.scopeToCurrent(await this.local.findAll());
   }
 
   /**
@@ -130,6 +219,7 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
    */
   public async save(product: Product): Promise<void> {
     await super.save(product);
+    this.touchLocal();
     try {
       await this.local.save(product);
     } catch (error) {
@@ -144,6 +234,7 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
    */
   public async saveMany(products: Product[]): Promise<void> {
     await super.saveMany(products);
+    this.touchLocal();
     try {
       await Promise.all(products.map((product) => this.local.save(product)));
     } catch (error) {
@@ -153,6 +244,7 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
 
   public async update(product: Product): Promise<void> {
     await super.update(product);
+    this.touchLocal();
     // El UPDATE real en Supabase incrementa la versión en el servidor
     // (ver SupabaseRepository.update); se refleja el mismo +1 acá para
     // que el caché local no quede una versión atrás.
@@ -166,6 +258,8 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
 
   public async delete(id: string): Promise<void> {
     await super.delete(id);
+    this.recentDeletes.mark([id]);
+    this.touchLocal();
     try {
       await this.local.delete(id);
     } catch (error) {
@@ -175,6 +269,8 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
 
   public async deleteMany(ids: string[]): Promise<void> {
     await super.deleteMany(ids);
+    this.recentDeletes.mark(ids);
+    this.touchLocal();
     try {
       await this.local.deleteMany(ids);
     } catch (error) {
@@ -214,6 +310,7 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
     }
 
     const result = reviveDates(data as Product);
+    this.touchLocal();
 
     // Mismo fix que save/update/delete: sin esto, un descuento de stock
     // por venta (o un ajuste manual) quedaba correcto en Supabase pero el
@@ -267,6 +364,7 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
     }
 
     const result = reviveDates(data as Product);
+    this.touchLocal();
     try {
       await this.local.save(result);
     } catch (cacheError) {
@@ -305,6 +403,7 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
       throw new Error(`SUPABASE_ADJUST_STOCK_BATCH_FAILED: ${error.message}`);
     }
 
+    this.touchLocal();
     const products = Array.isArray(data)
       ? data.map((product) => reviveDates(product as Product))
       : [];
@@ -344,6 +443,7 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
       throw new Error(`SUPABASE_TRANSFER_STOCK_FAILED: ${error.message}`);
     }
 
+    this.touchLocal();
     const products = Array.isArray(data) ? data.map((product) => reviveDates(product as Product)) : [];
     await Promise.all(products.map(async (product) => {
       try {
@@ -379,6 +479,7 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
       throw new Error(`SUPABASE_PRODUCE_BATCH_FAILED: ${error.message}`);
     }
 
+    this.touchLocal();
     const products = Array.isArray(data) ? data.map((product) => reviveDates(product as Product)) : [];
     await Promise.all(products.map(async (product) => {
       try {
