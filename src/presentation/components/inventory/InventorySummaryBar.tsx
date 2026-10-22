@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Product } from "../../../core/entities/Entities";
 import { getStockStatus } from "../../../core/store/useInventory";
-import { calculateInventoryCostValuation } from "../../../core/utils/inventoryValuation";
+import { calculateInventoryCostValuation, type InventoryCostValuation } from "../../../core/utils/inventoryValuation";
 import { money } from "./inventoryShared";
 
 type Side = "insumos" | "productos";
@@ -31,31 +31,40 @@ export function InventorySummaryBar({
       active.filter((p) => (p.isIngredient === true) === ingredient && getStockStatus(p) === status).length;
 
     const valuation = calculateInventoryCostValuation(products);
+    const valuationIns = calculateInventoryCostValuation(products.filter((p) => p.isIngredient === true));
+    const valuationProd = calculateInventoryCostValuation(products.filter((p) => p.isIngredient !== true));
     return {
       total: active.length,
       lowIns: count(true, "bajo"),
       outIns: count(true, "agotado"),
       lowProd: count(false, "bajo"),
       outProd: count(false, "agotado"),
-      valuation
+      valuation,
+      valuationIns,
+      valuationProd
     };
   }, [products]);
 
   if (!loading && products.length === 0) return null;
 
-  const { lowIns, outIns, lowProd, outProd, valuation } = summary;
+  const { lowIns, outIns, lowProd, outProd, valuation, valuationIns, valuationProd } = summary;
   const low = lowIns + lowProd;
   const out = outIns + outProd;
   const insTotal = lowIns + outIns;
   const prodTotal = lowProd + outProd;
 
-  const valueText = loading
-    ? "—"
-    : valuation.valuationStatus === "COMPLETE"
-      ? money(valuation.stockCostValue ?? 0)
-      : valuation.valuationStatus === "INCOMPLETE"
-        ? `Costo incompleto (${valuation.unvaluedProductCount})`
-        : "Sin stock controlado";
+  const formatValue = (v: InventoryCostValuation) =>
+    loading
+      ? "—"
+      : v.valuationStatus === "COMPLETE"
+        ? money(v.stockCostValue ?? 0)
+        : v.valuationStatus === "INCOMPLETE"
+          ? `Costo incompleto (${v.unvaluedProductCount})`
+          : "Sin stock controlado";
+
+  const valueText = formatValue(valuation);
+  const valueInsText = formatValue(valuationIns);
+  const valueProdText = formatValue(valuationProd);
 
   const cardClass = "rounded-vimdy-md border border-vimdy-border bg-vimdy-surface px-4 py-3";
   const labelClass = "text-xs text-vimdy-text-secondary";
@@ -68,7 +77,7 @@ export function InventorySummaryBar({
 
   return (
     <div className="space-y-3" aria-label="Resumen del inventario">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
         <div className={cardClass}>
           <p className={labelClass}>Por acabarse</p>
           <p className={`text-2xl font-bold ${!loading && low > 0 ? "text-vimdy-warning" : "text-vimdy-text"}`}>
@@ -84,6 +93,14 @@ export function InventorySummaryBar({
         <div className={cardClass}>
           <p className={labelClass}>Valor del inventario</p>
           <p className="text-2xl font-bold text-vimdy-text">{valueText}</p>
+        </div>
+        <div className={cardClass}>
+          <p className={labelClass}>Valor en insumos</p>
+          <p className="text-2xl font-bold text-vimdy-text">{valueInsText}</p>
+        </div>
+        <div className={cardClass}>
+          <p className={labelClass}>Valor en productos</p>
+          <p className="text-2xl font-bold text-vimdy-text">{valueProdText}</p>
         </div>
       </div>
 
