@@ -10,6 +10,7 @@ import { useCategories } from "../../../hooks/useCategories";
 import { OfflineStatusBadge } from "../ui/OfflineStatusBadge";
 import { usePendingInventoryAdjustmentsQueue } from "../../../core/offline/usePendingInventoryAdjustmentsQueue";
 import { Product } from "../../../core/entities/Entities";
+import { normalizeSearchText } from "../../../core/utils/searchText";
 import { ProductType, inferProductType } from "../../../core/types/productType";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { useNavigate } from "react-router-dom";
@@ -245,14 +246,15 @@ export function InventoryDashboard({ inventory }: { inventory: InventoryState })
     }
 
     if (search.trim() !== "") {
-      const value = search.trim().toLowerCase();
+      const value = normalizeSearchText(search);
       list = list.filter(
         (p) =>
-          p.name.toLowerCase().includes(value) ||
-          p.categoryId.toLowerCase().includes(value) ||
-          (categoryNameById[p.categoryId] ?? "").toLowerCase().includes(value) ||
-          (p.barcode ?? "").toLowerCase().includes(value) ||
-          (p.sku ?? "").toLowerCase().includes(value)
+          normalizeSearchText(p.name).includes(value) ||
+          normalizeSearchText(p.categoryId).includes(value) ||
+          normalizeSearchText(categoryNameById[p.categoryId]).includes(value) ||
+          normalizeSearchText(p.barcode).includes(value) ||
+          normalizeSearchText(p.sku).includes(value) ||
+          (p.aliases?.some((alias) => normalizeSearchText(alias).includes(value)) ?? false)
       );
     }
 

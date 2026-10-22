@@ -1,5 +1,6 @@
 import { ObservableStore } from "./ObservableStore";
 import { Product } from "../entities/Entities";
+import { normalizeSearchText } from "../utils/searchText";
 import { container, productsReady } from "../../infrastructure/di/CompositionRoot";
 import { logWarning } from "../../infrastructure/logging/opsLogger";
 
@@ -134,18 +135,21 @@ class ProductCatalogStore extends ObservableStore<Product[]> {
 
   /** Mismo comportamiento de búsqueda que tenía productStore.search(). */
   search(text: string): Product[] {
-    const value = text.trim().toLowerCase();
+    const value = normalizeSearchText(text);
     const sellable = this.getSellableSnapshot();
 
     if (value === "") {
       return [...sellable];
     }
 
+    // Sin tildes ni mayúsculas ("cafe" encuentra "Café"). SKU y código de
+    // barras también cuentan: el cajero puede buscar por cualquiera de los dos.
     return sellable.filter((product) => {
-      if (product.name.toLowerCase().includes(value)) return true;
-      if (product.categoryId.toLowerCase().includes(value)) return true;
-      if (product.barcode && product.barcode.includes(value)) return true;
-      if (product.aliases?.some((alias) => alias.toLowerCase().includes(value))) return true;
+      if (normalizeSearchText(product.name).includes(value)) return true;
+      if (normalizeSearchText(product.categoryId).includes(value)) return true;
+      if (normalizeSearchText(product.sku).includes(value)) return true;
+      if (normalizeSearchText(product.barcode).includes(value)) return true;
+      if (product.aliases?.some((alias) => normalizeSearchText(alias).includes(value))) return true;
       return false;
     });
   }

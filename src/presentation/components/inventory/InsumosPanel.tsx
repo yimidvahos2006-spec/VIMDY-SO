@@ -12,6 +12,9 @@ import { Product, Category, Supplier, LossCategory } from "../../../core/entitie
 import { ProductInput } from "../../../core/engines/InventoryEngine";
 import { ProductType, resolveProductFlags } from "../../../core/types/productType";
 import { formatMoney } from "../../../core/utils/formatMoney";
+import { parseMoneyInput } from "../../../core/utils/parseMoneyInput";
+import { toMoneyInputValue } from "../../../core/utils/formatMoneyInput";
+import { MoneyInput } from "../ui/MoneyInput";
 import { companyConfigStore } from "../../../core/store/companyConfigStore";
 import { getBranches, getCurrentBranchId, getCurrentBusinessId } from "../../../infrastructure/supabase/supabaseClient";
 import {
@@ -170,7 +173,7 @@ export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
       toast.error("Ingresa una cantidad mayor que 0.");
       return;
     }
-    const cost = purchaseCost.trim() === "" ? undefined : Number(purchaseCost);
+    const cost = purchaseCost.trim() === "" ? undefined : parseMoneyInput(purchaseCost);
     if (cost !== undefined && (!Number.isFinite(cost) || cost < 0)) {
       toast.error("El costo unitario no es válido.");
       return;
@@ -330,7 +333,7 @@ export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex items-center justify-end gap-1">
-                              <button onClick={() => { setPurchaseTarget(insumo); setPurchaseCost(insumo.purchasePrice !== undefined ? String(insumo.purchasePrice) : ""); }} className="h-8 px-3 rounded-vimdy-sm bg-vimdy-success/15 text-vimdy-success border border-vimdy-success/30 text-xs font-bold hover:bg-vimdy-success/25 transition whitespace-nowrap">+ Compré</button>
+                              <button onClick={() => { setPurchaseTarget(insumo); setPurchaseCost(insumo.purchasePrice !== undefined ? toMoneyInputValue(insumo.purchasePrice) : ""); }} className="h-8 px-3 rounded-vimdy-sm bg-vimdy-success/15 text-vimdy-success border border-vimdy-success/30 text-xs font-bold hover:bg-vimdy-success/25 transition whitespace-nowrap">+ Compré</button>
                               {insumo.stock > 0 && (
                                 <button onClick={() => setWasteTarget(insumo)} className="h-8 px-3 rounded-vimdy-sm border border-vimdy-warning/30 text-vimdy-warning text-xs font-bold hover:bg-vimdy-warning/10 transition whitespace-nowrap">Merma</button>
                               )}
@@ -368,7 +371,7 @@ export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
               <input type="number" min="0" step="any" autoFocus value={purchaseQty} onChange={(e) => setPurchaseQty(e.target.value)} className="mt-1 w-full h-10 px-3 rounded-vimdy-md bg-vimdy-background border border-vimdy-border text-vimdy-text text-sm" />
             </label>
             <label className="block text-xs font-semibold text-vimdy-text-secondary">Costo por {purchaseTarget.unit ?? "und"} (opcional)
-              <input type="number" min="0" step="any" value={purchaseCost} onChange={(e) => setPurchaseCost(e.target.value)} className="mt-1 w-full h-10 px-3 rounded-vimdy-md bg-vimdy-background border border-vimdy-border text-vimdy-text text-sm" />
+              <MoneyInput value={purchaseCost} onValueChange={setPurchaseCost} placeholder="0" className="mt-1 w-full h-10 px-3 rounded-vimdy-md bg-vimdy-background border border-vimdy-border text-vimdy-text text-sm" />
             </label>
             <div className="flex justify-end gap-2">
               <VimdyButton variant="secondary" onClick={() => setPurchaseTarget(null)}>Cancelar</VimdyButton>
@@ -498,7 +501,7 @@ function InsumoFormModal({
   const [name, setName] = useState(insumo?.name ?? "");
   const [categoryId, setCategoryId] = useState(insumo?.categoryId ?? categories[0]?.id ?? "");
   const [price, setPrice] = useState(insumo?.price ?? 0);
-  const [purchasePrice, setPurchasePrice] = useState(insumo?.purchasePrice ?? 0);
+  const [purchasePrice, setPurchasePrice] = useState(toMoneyInputValue(insumo?.purchasePrice ?? 0));
   const [stock, setStock] = useState(insumo?.stock ?? 0);
   const [minStock, setMinStock] = useState(insumo?.minStock ?? 0);
   const [unit, setUnit] = useState(insumo?.unit ?? "");
@@ -554,8 +557,9 @@ function InsumoFormModal({
       setError("Selecciona o crea una categoría.");
       return;
     }
-    if (purchasePrice < 0) {
-      setError("El precio de compra no puede ser negativo.");
+    const purchasePriceValue = purchasePrice.trim() === "" ? 0 : parseMoneyInput(purchasePrice);
+    if (!Number.isFinite(purchasePriceValue) || purchasePriceValue < 0) {
+      setError("El precio de compra no es válido.");
       return;
     }
 
@@ -565,7 +569,7 @@ function InsumoFormModal({
         name: trimmedName,
         categoryId,
         price,
-        purchasePrice,
+        purchasePrice: purchasePriceValue,
         stock,
         minStock,
         unit: unit.trim() || undefined,
@@ -709,13 +713,10 @@ function InsumoFormModal({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Precio de compra *</label>
-              <input
-                type="number"
-                min={0}
-                step="0.01"
+              <MoneyInput
                 value={purchasePrice}
-                onChange={(e) => setPurchasePrice(Number(e.target.value))}
-                placeholder="0.00"
+                onValueChange={setPurchasePrice}
+                placeholder="0"
                 className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-background border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
               />
               <p className="text-vimdy-text-tertiary text-xs mt-1">Precio que te cuesta comprar este insumo.</p>
