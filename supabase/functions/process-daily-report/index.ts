@@ -579,7 +579,7 @@ async function buildSnapshot(job: JobRow): Promise<Record<string, unknown>> {
     .eq("branch_id", job.branch_id)
     .eq("movement_type", "DECREASE")
     .gte("movement_date", dayStartIso)
-    .lt("movement_date", dayEndIso)
+    .lt("movement_date", reportEndIso)
     .limit(10000);
   if (!wasteError) {
     for (const row of wasteRows ?? []) {
