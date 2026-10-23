@@ -698,6 +698,140 @@ function reportText(snapshot: Record<string, unknown>): string {
   ].join("\n");
 }
 
+// ---------------------------------------------------------------------------
+// Correo HTML con la marca VIMDY. Los clientes de correo no ejecutan CSS
+// animado ni JavaScript, por eso el logo en movimiento es un GIF alojado en
+// el sitio (public/assets/email/vimdy-reporte-v1.gif). Todo el resto usa
+// tablas y estilos en línea para que se vea igual en Gmail, Outlook y móvil.
+// ---------------------------------------------------------------------------
+const EMAIL_LOGO_URL = Deno.env.get("DAILY_REPORT_LOGO_URL") ?? "https://vimdy.co/assets/email/vimdy-reporte-v1.gif";
+const FONT_STACK = "'Inter','Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+
+function esc(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function emailShell(inner: string, preheader: string): string {
+  return `<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="supported-color-schemes" content="dark">
+<title>VIMDY — Tu reporte</title>
+</head>
+<body style="margin:0;padding:0;background-color:#0A0A0C;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#0A0A0C;">${esc(preheader)}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#0A0A0C" style="background-color:#0A0A0C;">
+<tr><td align="center" style="padding:0;">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;">
+<tr><td align="center" bgcolor="#0A0A0C" style="padding:0;line-height:0;font-size:0;">
+<img src="${esc(EMAIL_LOGO_URL)}" width="600" alt="VIMDY — Tu reporte" style="display:block;width:100%;max-width:600px;height:auto;border:0;outline:none;text-decoration:none;">
+</td></tr>
+${inner}
+<tr><td align="center" style="padding:28px 24px 36px 24px;font-family:${FONT_STACK};font-size:12px;line-height:18px;color:#5C5C64;">
+Este resumen se genera automáticamente cuando cierras tu turno.<br>
+VIMDY · Gestión inteligente para tu negocio
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>`;
+}
+
+function infoRow(label: string, value: string, valueColor = "#F5F5F4"): string {
+  return `<tr>
+<td style="padding:10px 0;border-bottom:1px solid #27272F;font-family:${FONT_STACK};font-size:14px;line-height:20px;color:#A1A1AA;">${esc(label)}</td>
+<td align="right" style="padding:10px 0;border-bottom:1px solid #27272F;font-family:${FONT_STACK};font-size:14px;line-height:20px;font-weight:600;color:${valueColor};">${esc(value)}</td>
+</tr>`;
+}
+
+function sectionCard(title: string, body: string): string {
+  return `<tr><td style="padding:0 20px 14px 20px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#18181B" style="background-color:#18181B;border:1px solid #27272F;border-radius:16px;">
+<tr><td style="padding:18px 20px 8px 20px;font-family:${FONT_STACK};font-size:12px;line-height:16px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;color:#38BDF8;">${esc(title)}</td></tr>
+<tr><td style="padding:0 20px 12px 20px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${body}</table>
+</td></tr>
+</table>
+</td></tr>`;
+}
+
+function reportHtml(snapshot: Record<string, unknown>): string {
+  const currency = String(snapshot.currency ?? "COP");
+  const money = (value: unknown) => formatMoney(num(value), currency);
+  const topProducts = Array.isArray(snapshot.topProducts) ? snapshot.topProducts as Array<Record<string, unknown>> : [];
+  const cashDiff = num(snapshot.cashDifference);
+  const pending = num(snapshot.pendingSyncCount);
+  const aiSummary = String(snapshot.aiSummary ?? "").trim();
+
+  const cashStatus = cashDiff === 0
+    ? { text: "Caja cuadrada", color: "#22C55E" }
+    : cashDiff < 0
+      ? { text: `Faltante de ${money(Math.abs(cashDiff))}`, color: "#EF4444" }
+      : { text: `Sobrante de ${money(cashDiff)}`, color: "#22C55E" };
+
+  const header = `<tr><td style="padding:8px 24px 18px 24px;font-family:${FONT_STACK};">
+<div style="font-size:22px;line-height:28px;font-weight:700;color:#F5F5F4;">${esc(snapshot.businessName)}</div>
+<div style="font-size:14px;line-height:22px;color:#A1A1AA;">${esc(snapshot.branchName)} · ${esc(snapshot.businessDate)}</div>
+</td></tr>`;
+
+  const tile = (label: string, value: string) => `<td width="50%" valign="top" style="padding:0 6px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#18181B" style="background-color:#18181B;border:1px solid #27272F;border-radius:16px;">
+<tr><td style="padding:16px 16px 4px 16px;font-family:${FONT_STACK};font-size:12px;line-height:16px;color:#A1A1AA;">${esc(label)}</td></tr>
+<tr><td style="padding:0 16px 16px 16px;font-family:${FONT_STACK};font-size:24px;line-height:30px;font-weight:700;color:#F5F5F4;">${esc(value)}</td></tr>
+</table></td>`;
+
+  const tiles = `<tr><td style="padding:0 14px 14px 14px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+${tile("Ventas netas del día", money(snapshot.salesNetToday))}
+${tile("Transacciones del día", String(num(snapshot.transactionCountToday)))}
+</tr></table>
+</td></tr>`;
+
+  const shift = sectionCard("Este turno",
+    infoRow("Ventas netas cobradas", money(snapshot.salesNet)) +
+    infoRow("Transacciones", String(num(snapshot.transactionCount))));
+
+  const cash = sectionCard("Caja",
+    infoRow("Efectivo contado", money(snapshot.cashCounted)) +
+    infoRow("Efectivo esperado", money(snapshot.cashExpected)) +
+    infoRow("Resultado", cashStatus.text, cashStatus.color));
+
+  const productsBody = topProducts.length
+    ? topProducts.map((product, index) => infoRow(`${index + 1}. ${String(product.name)}`, `${num(product.quantity)} uds.`)).join("")
+    : infoRow("Sin productos vendidos", "—");
+  const products = sectionCard("Más vendidos", productsBody);
+
+  const profit = snapshot.profitToday == null ? "No disponible" : money(snapshot.profitToday);
+  const summary = sectionCard("Resumen del día",
+    infoRow("Ganancia estimada", profit) +
+    infoRow("Productos distintos vendidos", String(num(snapshot.distinctProductsSold))) +
+    infoRow("Merma registrada", money(snapshot.wasteToday)) +
+    infoRow("Reembolsos", money(snapshot.refundsProcessedToday)) +
+    infoRow("Productos con stock bajo", String(num(snapshot.lowStockCount)), num(snapshot.lowStockCount) > 0 ? "#F59E0B" : "#F5F5F4") +
+    infoRow("Ventas offline pendientes", pending > 0 ? String(pending) : "Ninguna", pending > 0 ? "#F59E0B" : "#22C55E"));
+
+  const ai = aiSummary
+    ? `<tr><td style="padding:0 20px 14px 20px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#0F1B33" style="background-color:#0F1B33;border:1px solid #1D3A73;border-left:4px solid #2563EB;border-radius:12px;">
+<tr><td style="padding:16px 18px;font-family:${FONT_STACK};">
+<div style="font-size:12px;line-height:16px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;color:#38BDF8;padding-bottom:6px;">VIMDY IA</div>
+<div style="font-size:15px;line-height:23px;color:#F5F5F4;">${esc(aiSummary)}</div>
+</td></tr></table>
+</td></tr>`
+    : "";
+
+  const preheader = `${String(snapshot.businessName)} · Ventas del día ${money(snapshot.salesNetToday)} · ${cashStatus.text}`;
+  return emailShell(header + tiles + shift + cash + products + summary + ai, preheader);
+}
+
 async function ensureDeliveries(job: JobRow, settings: SettingsRow): Promise<void> {
   const { data: existing, error } = await admin.from("daily_report_deliveries").select("id,channel,recipient,status").eq("job_id", job.id);
   if (error) throw new Error(`DELIVERIES_READ_FAILED: ${error.message}`);
@@ -737,14 +871,14 @@ async function ensureDeliveries(job: JobRow, settings: SettingsRow): Promise<voi
   }
 }
 
-async function sendEmail(recipient: string, subject: string, text: string): Promise<string | null> {
+async function sendEmail(recipient: string, subject: string, text: string, html?: string): Promise<string | null> {
   if (!RESEND_API_KEY || !RESEND_FROM) {
     throw Object.assign(new Error("RESEND_NOT_CONFIGURED"), { code: "CONFIG" });
   }
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from: RESEND_FROM, to: [recipient], subject, text }),
+    body: JSON.stringify({ from: RESEND_FROM, to: [recipient], subject, text, ...(html ? { html } : {}) }),
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -810,7 +944,9 @@ async function ensureEmailFallback(jobId: string, businessId: string, settings: 
 
 async function processDelivery(delivery: DeliveryRow, snapshot: Record<string, unknown>, subject: string, text: string, settings: SettingsRow) {
   try {
-    const providerId = delivery.channel === "EMAIL" ? await sendEmail(delivery.recipient, subject, text) : await sendWhatsApp(delivery.recipient, snapshot, text);
+    const providerId = delivery.channel === "EMAIL"
+      ? await sendEmail(delivery.recipient, subject, text, reportHtml(snapshot))
+      : await sendWhatsApp(delivery.recipient, snapshot, text);
     await admin.from("daily_report_deliveries").update({ status: "SENT", provider_message_id: providerId, sent_at: new Date().toISOString(), locked_until: null, last_error: null, updated_at: new Date().toISOString() }).eq("id", delivery.id);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -923,7 +1059,15 @@ Deno.serve(async (req) => {
         "",
         "— VIMDY",
       ].join("\n");
-      const providerId = await sendEmail(recipient, subject, text);
+      const testHtml = emailShell(
+        `<tr><td style="padding:8px 28px 8px 28px;font-family:${FONT_STACK};font-size:16px;line-height:26px;color:#F5F5F4;">
+<p style="margin:0 0 14px 0;">Hola,</p>
+<p style="margin:0 0 14px 0;">Este es un correo de prueba de VIMDY. Tu correo está correctamente configurado para recibir los cierres diarios de tu negocio.</p>
+<p style="margin:0;color:#A1A1AA;">Cuando cierres un turno, VIMDY preparará el resumen del día y lo enviará automáticamente a este correo.</p>
+</td></tr>`,
+        "Tu correo está listo para recibir los cierres diarios de VIMDY.",
+      );
+      const providerId = await sendEmail(recipient, subject, text, testHtml);
       return json({ ok: true, recipient, providerId });
     }
 
