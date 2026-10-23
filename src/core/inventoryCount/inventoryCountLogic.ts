@@ -51,6 +51,26 @@ export interface InventoryCountSession {
 
 export const DEFAULT_TOP_LIMIT = 20;
 
+/** Segundos que se calculan por cada cosa contada (mirar, contar y digitar). Es una estimación, no una promesa. */
+export const SECONDS_PER_COUNTED_ITEM = 15;
+
+/** Minutos aproximados que toma un conteo de `itemCount` cosas. 0 si no hay nada que contar; mínimo 1. */
+export function estimateCountMinutes(itemCount: number): number {
+  if (!Number.isFinite(itemCount) || itemCount <= 0) return 0;
+  return Math.max(1, Math.ceil((itemCount * SECONDS_PER_COUNTED_ITEM) / 60));
+}
+
+/**
+ * Una diferencia "sospechosa" casi siempre es un error al digitar (1000 en vez de 100):
+ * conviene volver a contar ese producto antes de cerrar. Es una alerta, no un bloqueo.
+ */
+export function isSuspiciousDifference(systemStock: number, counted: number): boolean {
+  const diff = Math.abs(counted - systemStock);
+  if (diff === 0) return false;
+  if (systemStock <= 0) return counted >= 10; // aparece "de la nada"
+  return diff >= 2 && diff / systemStock >= 0.5;
+}
+
 export const round4 = (n: number) => Math.round(n * 10000) / 10000;
 
 export function inventoryValue(p: Pick<Product, "stock" | "purchasePrice">): number {

@@ -3,6 +3,8 @@ import {
   buildCountLines,
   computeDifferences,
   countProgress,
+  estimateCountMinutes,
+  isSuspiciousDifference,
   parseCountInput,
   selectProductsForCount,
   type InventoryCountSession,
@@ -163,5 +165,42 @@ describe("InventoryCountEngine", () => {
   it("no abre un conteo sin productos", async () => {
     const { engine } = setupEngine([]);
     await expect(engine.startSession({ kind: "todo", scope: { mode: "all" }, scopeLabel: "t", blind: true, createdBy: "A" })).rejects.toThrow("COUNT_NO_PRODUCTS");
+  });
+});
+
+describe("estimateCountMinutes", () => {
+  it("no estima nada cuando no hay qué contar", () => {
+    expect(estimateCountMinutes(0)).toBe(0);
+    expect(estimateCountMinutes(-3)).toBe(0);
+    expect(estimateCountMinutes(Number.NaN)).toBe(0);
+  });
+
+  it("redondea hacia arriba y nunca baja de 1 minuto", () => {
+    expect(estimateCountMinutes(1)).toBe(1);
+    expect(estimateCountMinutes(4)).toBe(1);
+    expect(estimateCountMinutes(5)).toBe(2);
+  });
+
+  it("20 cosas son unos 5 minutos", () => {
+    expect(estimateCountMinutes(20)).toBe(5);
+  });
+});
+
+describe("isSuspiciousDifference", () => {
+  it("no alerta cuando coincide o la diferencia es pequeña", () => {
+    expect(isSuspiciousDifference(10, 10)).toBe(false);
+    expect(isSuspiciousDifference(10, 9)).toBe(false);
+    expect(isSuspiciousDifference(1, 0)).toBe(false);
+  });
+
+  it("alerta cuando cambia a la mitad o más (posible error al digitar)", () => {
+    expect(isSuspiciousDifference(100, 1000)).toBe(true);
+    expect(isSuspiciousDifference(10, 4)).toBe(true);
+    expect(isSuspiciousDifference(4, 2)).toBe(true);
+  });
+
+  it("alerta cuando el sistema decía 0 y aparecen 10 o más", () => {
+    expect(isSuspiciousDifference(0, 12)).toBe(true);
+    expect(isSuspiciousDifference(0, 3)).toBe(false);
   });
 });

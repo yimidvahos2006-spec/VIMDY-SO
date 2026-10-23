@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, ArrowLeft, CheckCircle2, ClipboardCheck, Search, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, ClipboardCheck, Search, X } from "lucide-react";
 import { toast } from "../../../core/store/toastStore";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { useAuth } from "../../context/AuthContext";
@@ -10,6 +10,8 @@ import {
   DEFAULT_TOP_LIMIT,
   computeDifferences,
   countProgress,
+  estimateCountMinutes,
+  isSuspiciousDifference,
   parseCountInput,
   selectProductsForCount,
   type CountKind,
@@ -26,6 +28,16 @@ type View = "list" | "new" | "count" | "review";
 const MISSING_REASONS: LossCategory[] = ["AJUSTE_ADMINISTRATIVO", "MERMA", "VENCIDO", "DAÑO", "CONSUMO_INTERNO", "OTRO"];
 
 const engine = () => container.inventoryCountEngine.get();
+
+const formatMinutes = (min: number) => {
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return m ? `${h} h ${m} min` : `${h} h`;
+};
+
+// Texto escrito que no se entiende como número (ej. "12a"): se marca en rojo en vez de ignorarlo en silencio.
+const isInvalidCount = (raw: string) => raw.trim() !== "" && parseCountInput(raw) === null;
 
 const fmt = (n: number) => String(Math.round(n * 100) / 100);
 const dateText = (d: Date | string) =>
@@ -54,12 +66,23 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
   const [search, setSearch] = useState("");
   const [showSystem, setShowSystem] = useState(false);
   const dirty = useRef(false);
+  const countInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   // Nuevo conteo
   const [kind, setKind] = useState<CountKind>("todo");
   const [scopeMode, setScopeMode] = useState<CountScope["mode"]>("top");
   const [categoryId, setCategoryId] = useState("");
   const [blind, setBlind] = useState(true);
+
+  // Vista previa de lo que se va a contar: usa la misma regla que el motor al abrir el conteo.
+  const countPreview = useMemo(() => {
+    const scope: CountScope =
+      scopeMode === "category" ? { mode: "category", categoryId } : scopeMode === "top" ? { mode: "top", limit: DEFAULT_TOP_LIMIT } : { mode: "all" };
+    const count = selectProductsForCount(inventory.products, kind, scope).length;
+    return { count, minutes: estimateCountMinutes(count) };
+  }, [inventory.products, kind, scopeMode, categoryId]);
+  const needsCategory = scopeMode === "category" && !categoryId;
+  const nothingToCount = !needsCategory && countPreview.count === 0;
 
   const refreshList = useCallback(async () => {
     setLoading(true);
@@ -143,6 +166,10 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
   }
 
   async function goReview() {
+    if (lines.some((l) => isInvalidCount(inputs[l.productId] ?? ""))) {
+      toast.error("Hay números que no se entienden (en rojo). Escribe solo el número, por ejemplo 12 o 2,5.");
+      return;
+    }
     const saved = await persist(true);
     if (!saved) return;
     await inventory.refresh();
@@ -172,6 +199,9 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
   const matching = diffs.length - withDiff.length;
   const notCounted = session ? session.lines.length - diffs.length : 0;
   const totalValue = withDiff.reduce((sum, d) => sum + d.value, 0);
+  const suspiciousCount = withDiff.filter((d) => isSuspiciousDifference(d.systemStock, d.counted)).length;
+  // Lo que más plata mueve va primero: es lo que más conviene revisar.
+  const sortedDiffs = [...withDiff].sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
 
   async function closeCount() {
     if (!session || busy) return;
@@ -201,6 +231,24 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
     return q ? lines.filter((l) => l.name.toLowerCase().includes(q)) : lines;
   }, [lines, search]);
   const progress = countProgress(linesFromInputs());
+
+  // Enter (o "Siguiente" en el teclado del celular) pasa al siguiente producto sin tocar la pantalla.
+  function focusNextCountInput(productId: string) {
+    const idx = shown.findIndex((l) => l.productId === productId);
+    const next = shown[idx + 1];
+    if (next) countInputRefs.current[next.productId]?.focus();
+    else countInputRefs.current[productId]?.blur();
+  }
+
+  // Al abrir la lista, el cursor queda en el primer producto sin contar: se empieza a digitar de una vez.
+  useEffect(() => {
+    if (view !== "count" || !session) return;
+    const target = search.trim() ? shown[0] : (shown.find((l) => (inputs[l.productId] ?? "").trim() === "") ?? shown[0]);
+    if (!target) return;
+    const timer = window.setTimeout(() => countInputRefs.current[target.productId]?.focus(), 60);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, session?.id]);
 
   const chip = (active: boolean) =>
     `h-10 px-4 rounded-vimdy-md border text-sm font-semibold transition ${
@@ -295,6 +343,25 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
                   ))}
                 </select>
               )}
+              <p
+                aria-live="polite"
+                className={`mt-3 inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs ${
+                  nothingToCount ? "border-vimdy-warning/40 bg-vimdy-warning/10 text-vimdy-warning" : "border-vimdy-border bg-vimdy-background/60 text-vimdy-text-secondary"
+                }`}
+              >
+                {needsCategory ? (
+                  <>⏱️ Elige una categoría y te digo cuánto tarda</>
+                ) : nothingToCount ? (
+                  <>No hay nada para contar con esta selección</>
+                ) : (
+                  <>
+                    ⏱️ Tiempo estimado: <strong className="text-vimdy-text">≈ {formatMinutes(countPreview.minutes)}</strong> · {countPreview.count} por contar
+                  </>
+                )}
+              </p>
+              {scopeMode === "all" && countPreview.minutes >= 30 && (
+                <p className="text-xs text-vimdy-text-tertiary mt-2">Es un conteo largo. Si prefieres, cuéntalo por categorías y termina más rápido cada vez.</p>
+              )}
               {scopeMode === "top" && <p className="text-xs text-vimdy-text-tertiary mt-2">Los que más plata tienen guardada (cantidad × costo). Lo ideal para contar cada semana.</p>}
             </div>
             <label className="flex items-start gap-3 rounded-vimdy-md border border-vimdy-border p-3 cursor-pointer">
@@ -305,8 +372,26 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
               </span>
             </label>
             <p className="text-xs text-vimdy-text-tertiary">Lo mejor es contar cuando no se esté vendiendo mucho.</p>
-            <button onClick={createSession} disabled={busy} className="w-full h-12 rounded-vimdy-md bg-vimdy-accent text-vimdy-background font-bold text-sm disabled:opacity-60">
-              {busy ? "Abriendo..." : "Empezar a contar"}
+            <button
+              onClick={createSession}
+              disabled={busy || nothingToCount}
+              className="group w-full rounded-vimdy-md bg-vimdy-accent px-4 py-3 text-vimdy-background transition active:scale-[0.99] disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <span className="flex items-center justify-center gap-2 text-sm font-bold">
+                {busy ? "Abriendo..." : "Empezar a contar"}
+                {!busy && <ArrowRight size={16} className="motion-safe:transition-transform motion-safe:group-hover:translate-x-1" />}
+              </span>
+              <span className="mt-0.5 block text-xs font-normal opacity-80">
+                {busy
+                  ? "Preparando tu lista..."
+                  : needsCategory
+                    ? "Primero elige la categoría"
+                    : nothingToCount
+                      ? "Cambia la selección para poder empezar"
+                      : blind
+                        ? "Se abrirá la lista rápida para digitar lo que cuentes (sin ver el stock del sistema). Se guarda solo."
+                        : "Se abrirá la lista rápida para digitar lo que cuentes. Se guarda solo."}
+              </span>
             </button>
           </div>
         )}
@@ -338,14 +423,29 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
                     <input
                       type="text"
                       inputMode="decimal"
+                      ref={(el) => {
+                        countInputRefs.current[l.productId] = el;
+                      }}
+                      enterKeyHint="next"
                       value={inputs[l.productId] ?? ""}
+                      onFocus={(e) => e.currentTarget.select()}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          focusNextCountInput(l.productId);
+                        }
+                      }}
                       onChange={(e) => {
                         dirty.current = true;
                         setInputs((prev) => ({ ...prev, [l.productId]: e.target.value }));
                       }}
                       placeholder="—"
                       aria-label={`Cantidad contada de ${l.name}`}
-                      className="w-24 h-10 px-3 text-right rounded-vimdy-md bg-vimdy-background border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-accent"
+                      aria-invalid={isInvalidCount(inputs[l.productId] ?? "")}
+                      title={isInvalidCount(inputs[l.productId] ?? "") ? "Escribe solo el número, por ejemplo 12 o 2,5" : undefined}
+                      className={`w-24 h-10 px-3 text-right rounded-vimdy-md bg-vimdy-background border text-vimdy-text text-sm focus:outline-none ${
+                        isInvalidCount(inputs[l.productId] ?? "") ? "border-vimdy-danger focus:border-vimdy-danger" : "border-vimdy-border focus:border-vimdy-accent"
+                      }`}
                     />
                     <span className="w-10 text-xs text-vimdy-text-tertiary">{l.unit ?? "und"}</span>
                   </div>
@@ -385,9 +485,10 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
               {withDiff.length === 0 ? (
                 <p className="p-8 text-center text-sm text-vimdy-text-tertiary">Todo lo contado coincide con el sistema.</p>
               ) : (
-                withDiff.map((d) => {
+                sortedDiffs.map((d) => {
                   const unit = d.line.unit ?? "und";
                   const short = d.difference < 0;
+                  const suspicious = isSuspiciousDifference(d.systemStock, d.counted);
                   return (
                     <div key={d.line.productId} className="px-4 py-3 space-y-1.5">
                       <div className="flex items-center justify-between gap-3">
@@ -400,6 +501,21 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
                         Sistema {fmt(d.systemStock)} · Contado {fmt(d.counted)}
                         {d.value !== 0 && ` · ${money(Math.abs(d.value))}`}
                       </p>
+                      {suspicious && !readOnly && !session.prepared && (
+                        <div className="flex items-center justify-between gap-2 rounded-vimdy-sm bg-vimdy-warning/10 px-2.5 py-1.5">
+                          <p className="text-xs text-vimdy-warning">⚠️ Diferencia grande. ¿Contaste bien?</p>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSearch(d.line.name);
+                              setView("count");
+                            }}
+                            className="shrink-0 text-xs font-semibold text-vimdy-accent hover:underline"
+                          >
+                            Volver a contar
+                          </button>
+                        </div>
+                      )}
                       {short && !readOnly && !session.prepared && (
                         <select
                           value={reasons[d.line.productId] ?? "AJUSTE_ADMINISTRATIVO"}
@@ -453,6 +569,11 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
               Se van a ajustar <b className="text-slate-200">{withDiff.length}</b> {withDiff.length === 1 ? "producto" : "productos"} para que el inventario quede como lo contaste
               {totalValue !== 0 ? ` (diferencia de ${money(Math.abs(totalValue))})` : ""}. Después el conteo ya no se puede editar.
             </p>
+            {suspiciousCount > 0 && (
+              <p className="text-amber-400 text-xs mb-6 -mt-3">
+                ⚠️ {suspiciousCount} {suspiciousCount === 1 ? "tiene una diferencia muy grande" : "tienen una diferencia muy grande"}. Si ves un error al digitar, cancela y vuelve a contarlo.
+              </p>
+            )}
             <div className="flex justify-end gap-2">
               <button onClick={() => setConfirmClose(false)} disabled={busy} className="h-10 px-4 rounded-lg border border-slate-700 text-slate-300 text-sm font-medium hover:bg-slate-700/50">
                 Cancelar
