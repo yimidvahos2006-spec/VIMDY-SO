@@ -20,6 +20,7 @@ import { NewSupplierModal } from "./NewSupplierModal";
 import { useCanUse } from "../../../hooks/useCanUse";
 import { useTranslation } from "../../../core/i18n/useTranslation";
 import { discardQuickIngredients } from "./quickIngredientCleanup";
+import { QuickIngredientCard, QuickIngredientPayload } from "./QuickIngredientCard";
 import { vimdyCore } from "../../../core/VimdyCore";
 import { filterIngredientOptions, findRecipeRowProblem, normalizeSearch, sanitizeQuantityInput } from "./recipeFormHelpers";
 
@@ -135,8 +136,6 @@ export function ProductFormModal({
   const [creatingSupplier, setCreatingSupplier] = useState(false);
   const [showQuickIngredient, setShowQuickIngredient] = useState(false);
   const [quickIngredientName, setQuickIngredientName] = useState("");
-  const [quickIngredientPurchasePrice, setQuickIngredientPurchasePrice] = useState("");
-  const [quickIngredientUnit, setQuickIngredientUnit] = useState("unidad");
   const [creatingIngredient, setCreatingIngredient] = useState(false);
   // Insumos creados con "ingrediente rápido" en esta sesión del formulario.
   // Si el producto no se guarda, se borran al cerrar para no dejar basura.
@@ -761,8 +760,8 @@ export function ProductFormModal({
   };
   React.useEffect(() => () => cleanupOnUnmountRef.current(), []);
 
-  async function handleCreateQuickIngredient(name: string) {
-    const purchasePrice = quickIngredientPurchasePrice.trim() ? parseMoneyInput(quickIngredientPurchasePrice) : undefined;
+  async function handleCreateQuickIngredient(payload: QuickIngredientPayload) {
+    const { name, purchasePrice, storedUnit, quantity, recipeUnit } = payload;
     setCreatingIngredient(true);
     try {
       // El insumo nuevo va a una categoría de INSUMOS, nunca a la del producto.
@@ -793,7 +792,7 @@ export function ProductFormModal({
         purchasePrice,
         stock: 0,
         minStock: 0,
-        unit: quickIngredientUnit,
+        unit: storedUnit,
         isIngredient: true,
         active: true
       }, undefined, { knownProducts: allProducts, deferAudit: true });
@@ -801,13 +800,14 @@ export function ProductFormModal({
       setAllProducts((prev) => [...prev, created]);
 
       const newRowId = crypto.randomUUID();
-      setRecipeRows((prev) => [...prev, { rowId: newRowId, productId: created.id, quantity: "", optional: false, unit: "" }]);
-      setFocusRowId(newRowId);
+      // Si ya escribió la cantidad en la tarjeta, la fila nace completa (sin otro paso).
+      setRecipeRows((prev) => [...prev, { rowId: newRowId, productId: created.id, quantity, optional: false, unit: recipeUnit }]);
+      // Con cantidad lista, el foco vuelve al buscador para seguir con el siguiente ingrediente.
+      if (quantity) ingredientSearchRef.current?.focus();
+      else setFocusRowId(newRowId);
 
       setShowQuickIngredient(false);
       setQuickIngredientName("");
-      setQuickIngredientPurchasePrice("");
-      setQuickIngredientUnit("unidad");
       toast.success(`"${name}" agregado a la receta. Se guardará en tus Insumos cuando guardes el producto.`);
     } catch {
       toast.error("No se pudo crear el ingrediente.");
@@ -1224,8 +1224,8 @@ export function ProductFormModal({
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-vimdy-text text-sm">{ing?.name ?? "Ingrediente eliminado"}</p>
                         {converted !== null && converted > 0 && (
-                          <p className={`text-xs ${unitCost > 0 ? "text-vimdy-text-tertiary" : "text-vimdy-warning"}`}>
-                            {unitCost > 0 ? money(converted * unitCost) : "sin costo registrado"}
+                          <p className={`text-xs ${unitCost > 0 ? "text-vimdy-text-tertiary" : "text-vimdy-accent"}`}>
+                            {unitCost > 0 ? money(converted * unitCost) : "✨ agrega su precio para ver el costo"}
                           </p>
                         )}
                       </div>
@@ -1353,79 +1353,15 @@ export function ProductFormModal({
                 </p>
 
                 {showQuickIngredient && (
-                  <div className="flex flex-wrap items-center gap-2 p-3 rounded-vimdy-sm bg-vimdy-recipe/5 border border-vimdy-recipe/20">
-                    <input
-                      autoFocus
-                      value={quickIngredientName}
-                      onChange={(e) => setQuickIngredientName(e.target.value)}
-                      placeholder="Nombre del ingrediente (ej: Leche, Harina...)"
-                      className="basis-full min-w-0 h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-recipe"
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          const trimmed = quickIngredientName.trim();
-                          if (!trimmed) return;
-                          handleCreateQuickIngredient(trimmed);
-                        }
-                        if (e.key === "Escape") {
-                          setShowQuickIngredient(false);
-                          setQuickIngredientName("");
-                          setQuickIngredientPurchasePrice("");
-                        }
-                      }}
-                     />
-                     <select
-                       value={quickIngredientUnit}
-                       onChange={(e) => setQuickIngredientUnit(e.target.value)}
-                       aria-label="Unidad de medida del ingrediente"
-                       className="w-28 shrink-0 h-10 px-2 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-recipe"
-                     >
-                       <option value="unidad">Unidad</option>
-                       <option value="kg">kg</option>
-                       <option value="g">g</option>
-                       <option value="lt">lt</option>
-                       <option value="ml">ml</option>
-                       <option value="lb">lb</option>
-                       <option value="paquete">Paquete</option>
-                       <option value="caja">Caja</option>
-                     </select>
-                     <MoneyInput
-                       value={quickIngredientPurchasePrice}
-                      onValueChange={setQuickIngredientPurchasePrice}
-                      placeholder="Precio de compra (opcional)"
-                      aria-label="Precio de compra (opcional)"
-                      title="Cuánto te cuesta comprar una unidad de este ingrediente"
-                      className="flex-1 min-w-0 h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-recipe"
-                    />
-                    <p className="basis-full text-vimdy-text-tertiary text-xs">
-                      Unidad: si lo cuentas por pieza (tajada, huevo, pan) deja "Unidad"; si lo pesas o mides, elige kg, g, lt o ml. El precio es lo que pagas por esa unidad (ej: un kg). La cantidad que lleva el producto la escribes al crearlo.
-                    </p>
-                    <div className="basis-full flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const trimmed = quickIngredientName.trim();
-                          if (!trimmed) return;
-                          await handleCreateQuickIngredient(trimmed);
-                        }}
-                        disabled={creatingIngredient || !quickIngredientName.trim()}
-                        className="flex-1 h-10 px-4 rounded-vimdy-sm bg-vimdy-recipe text-white hover:bg-vimdy-recipe/90 disabled:opacity-40 transition text-sm font-medium whitespace-nowrap"
-                      >
-                        {creatingIngredient ? "Creando..." : "Crear y agregar"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowQuickIngredient(false);
-                          setQuickIngredientName("");
-                          setQuickIngredientPurchasePrice("");
-                        }}
-                        aria-label="Cancelar"
-                        className="h-10 w-10 shrink-0 rounded-vimdy-sm border border-vimdy-border text-vimdy-text-secondary hover:bg-vimdy-surface flex items-center justify-center"
-                      >
-                        <X size={16} />
-                      </button>
-                    </div>
-                  </div>
+                  <QuickIngredientCard
+                    initialName={quickIngredientName}
+                    creating={creatingIngredient}
+                    onSubmit={handleCreateQuickIngredient}
+                    onCancel={() => {
+                      setShowQuickIngredient(false);
+                      setQuickIngredientName("");
+                    }}
+                  />
                 )}
 
                 {recipeSummary && (

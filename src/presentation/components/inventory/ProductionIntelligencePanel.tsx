@@ -24,7 +24,8 @@ import {
   ChefHat,
   ShoppingCart,
   History,
-  Clock3
+  Clock3,
+  Sparkles
 } from "lucide-react";
 import { RecipeCost, Profitability, ProductionCapacity, ProductionLevel } from "../../../core/engines/RecipeEngine";
 
@@ -138,12 +139,19 @@ export function ProductionIntelligencePanel({
         <h3 className="text-vimdy-text font-semibold text-sm">Producción Inteligente</h3>
       </div>
 
+      {/* Asistente financiero: invita, no alarma. No bloquea nada ni usa rojo. */}
       {profitability.costUnreliable && (
-        <p className="text-vimdy-warning text-xs flex items-center gap-1.5">
-          <AlertTriangle size={12} className="shrink-0" />
-          Costo no confiable: falta precio de compra de {cost.missingCostIngredients.join(", ")}. Las cifras de
-          abajo asumen $0 para ese ingrediente.
-        </p>
+        <div
+          role="status"
+          className="rounded-vimdy-sm border border-vimdy-accent/25 bg-gradient-to-r from-vimdy-accent/10 to-vimdy-recipe/10 px-3 py-2.5 flex items-start gap-2"
+        >
+          <Sparkles size={14} className="text-vimdy-accent shrink-0 mt-0.5" aria-hidden />
+          <p className="text-vimdy-text-secondary text-xs leading-relaxed">
+            <strong className="text-vimdy-text">Tip:</strong> agrega el precio de compra de{" "}
+            <strong className="text-vimdy-text">{cost.missingCostIngredients.join(", ")}</strong> para ver tu ganancia neta
+            exacta. Mientras tanto, la ganancia que ves es una estimación.
+          </p>
+        </div>
       )}
 
       {/* Tarjetas principales */}
@@ -159,14 +167,14 @@ export function ProductionIntelligencePanel({
         )}
         <MetricCard
           icon={<TrendingUp size={13} />}
-          label="Ganancia"
-          value={money(profitability.profit)}
+          label={profitability.costUnreliable ? "Ganancia estimada" : "Ganancia"}
+          value={`${profitability.costUnreliable ? "~" : ""}${money(profitability.profit)}`}
           valueClassName={profitability.profit >= 0 ? "text-vimdy-success" : "text-vimdy-danger"}
         />
         <MetricCard
           icon={<Percent size={13} />}
-          label="Margen"
-          value={`${Math.round(profitability.marginPercent)}%`}
+          label={profitability.costUnreliable ? "Margen estimado" : "Margen"}
+          value={`${profitability.costUnreliable ? "~" : ""}${Math.round(profitability.marginPercent)}%`}
           valueClassName={profitability.marginPercent >= 0 ? "text-vimdy-success" : "text-vimdy-danger"}
         />
         <MetricCard icon={<Boxes size={13} />} label="Capacidad actual" value={`${capacity.maxUnits} unidades`} />
@@ -226,8 +234,8 @@ export function ProductionIntelligencePanel({
                     {row.quantity}
                     {row.unit ? ` ${row.unit}` : ""}
                   </td>
-                  <td className="px-3 py-2">{row.missingCost ? "Sin costo" : money(row.unitCost)}</td>
-                  <td className="px-3 py-2">{row.missingCost ? "Sin costo" : money(row.subtotal)}</td>
+                  <td className="px-3 py-2">{row.missingCost ? <span className="text-vimdy-accent">✨ Pendiente</span> : money(row.unitCost)}</td>
+                  <td className="px-3 py-2">{row.missingCost ? <span className="text-vimdy-text-tertiary">—</span> : money(row.subtotal)}</td>
                   <td className="px-3 py-2 text-center">{ROW_DOT[row.rowLevel]}</td>
                 </tr>
               ))}

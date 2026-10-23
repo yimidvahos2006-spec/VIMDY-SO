@@ -66,7 +66,7 @@ export function ProductionSection({
           ? `Costo ${money(recipeSummary.cost.costPerPortion)} · Margen ${Math.round(
               recipeSummary.profitability.marginPercent
             )}% · ${recipeSummary.capacity.maxUnits} unidades posibles`
-          : "Agrega ingredientes con precio de compra en la receta para ver costo, ganancia y capacidad de producción."
+          : "Agrega ingredientes a la receta y VIMDY calcula costo, ganancia y capacidad por ti."
       }
       defaultOpen={!!recipeSummary}
     >
@@ -89,9 +89,9 @@ export function ProductionSection({
         />
       ) : (
         <p className="text-vimdy-text-tertiary text-sm">
-          Agrega al menos un ingrediente en "Consumo de ingredientes" con precio de compra
-          cargado para ver aquí el costo, la ganancia, el margen y cuántas unidades puedes
-          preparar hoy con el inventario actual.
+          Agrega al menos un ingrediente a la receta y aquí verás el costo, la ganancia, el margen y
+          cuántas unidades puedes preparar hoy. Si además registras el precio de compra, los números
+          quedan exactos.
         </p>
       )}
     </FormSectionCard>
