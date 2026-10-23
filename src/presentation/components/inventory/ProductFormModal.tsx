@@ -73,6 +73,8 @@ export function ProductFormModal({
   const [invalidRowId, setInvalidRowId] = useState<string | null>(null);
   const ingredientSearchRef = React.useRef<HTMLInputElement>(null);
   const recipeSectionRef = React.useRef<HTMLDivElement>(null);
+  // Se marca al elegir "Con receta" para llevar el cursor al buscador de ingredientes.
+  const pendingRecipeFocusRef = React.useRef(false);
 
   // Wizard corto: paso 1 = datos básicos, paso 2 = tipo/precios, paso 3 = receta, paso 4 = extras
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3 | 4>(1);
@@ -135,6 +137,16 @@ export function ProductFormModal({
   const [showNewSupplierModal, setShowNewSupplierModal] = useState(false);
   const [creatingSupplier, setCreatingSupplier] = useState(false);
   const [showQuickIngredient, setShowQuickIngredient] = useState(false);
+  // Resplandor temporal del buscador de ingredientes justo al elegir "Con receta".
+  const [highlightSearch, setHighlightSearch] = useState(false);
+  // Consejo "ten tus insumos listos": se puede cerrar y se recuerda en este dispositivo.
+  const [showRecipeTip, setShowRecipeTip] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("vimdy:recipe-tip-dismissed") !== "1";
+    } catch {
+      return true;
+    }
+  });
   const [quickIngredientName, setQuickIngredientName] = useState("");
   const [creatingIngredient, setCreatingIngredient] = useState(false);
   // Insumos creados con "ingrediente rápido" en esta sesión del formulario.
@@ -215,6 +227,7 @@ export function ProductFormModal({
       case "cocina_receta":
         setRequiresKitchen(true);
         setHasRecipe(true);
+        pendingRecipeFocusRef.current = true;
         break;
       case "servicio":
         setRequiresKitchen(false);
@@ -246,6 +259,36 @@ export function ProductFormModal({
     }
   }, [hasRecipe, productType, requiresKitchen]);
 
+  // UX: al elegir "Con receta", los ingredientes son lo primero: la pantalla baja
+  // hasta la tarjeta, el cursor queda en el buscador y este brilla un instante.
+  React.useEffect(() => {
+    if (!pendingRecipeFocusRef.current) return;
+    if (productType !== "cocina_receta" || !hasRecipe) return;
+    pendingRecipeFocusRef.current = false;
+    const reduceMotion =
+      typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const frame = requestAnimationFrame(() => {
+      recipeSectionRef.current?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+      ingredientSearchRef.current?.focus({ preventScroll: true });
+    });
+    setHighlightSearch(true);
+    const timer = window.setTimeout(() => setHighlightSearch(false), 2400);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+      setHighlightSearch(false);
+    };
+  }, [productType, hasRecipe]);
+
+  function dismissRecipeTip() {
+    setShowRecipeTip(false);
+    try {
+      localStorage.setItem("vimdy:recipe-tip-dismissed", "1");
+    } catch {
+      /* sin almacenamiento: solo se oculta por ahora */
+    }
+  }
+
   function addIngredientToRecipe(productId: string) {
     if (recipeRows.some((r) => r.productId === productId)) return;
     const rowId = crypto.randomUUID();
@@ -258,8 +301,8 @@ export function ProductFormModal({
   }
 
   function startCreateIngredient() {
+    // Con texto escrito, el nombre llega listo; sin texto (botón "Crear insumo rápido"), la tarjeta abre vacía.
     const typed = ingredientQuery.trim();
-    if (!typed) return;
     setQuickIngredientName(typed);
     setShowQuickIngredient(true);
     setIngredientQuery("");
@@ -1194,6 +1237,40 @@ export function ProductFormModal({
 
             {hasRecipe && (
               <div className="space-y-2">
+                {recipeRows.length === 0 && !showQuickIngredient && (ingredientOptions.length === 0 || showRecipeTip) && (
+                  <div
+                    role="note"
+                    className="flex items-start gap-2.5 rounded-vimdy-sm border border-vimdy-recipe/30 bg-vimdy-recipe/10 px-3 py-2.5"
+                  >
+                    <span aria-hidden="true" className="text-base leading-5">💡</span>
+                    <p className="min-w-0 flex-1 text-xs leading-5 text-vimdy-text-secondary">
+                      {ingredientOptions.length === 0 ? (
+                        <>
+                          <strong className="text-vimdy-text">Empieza por tus ingredientes.</strong> Aún no tienes insumos
+                          creados: escribe el primero abajo o toca <strong>Crear insumo rápido</strong>. Quedará guardado para
+                          todos tus platos.
+                        </>
+                      ) : (
+                        <>
+                          <strong className="text-vimdy-text">Consejo Pro:</strong> te recomendamos tener tus insumos creados
+                          primero en la pestaña de Insumos para que armar esta receta sea inmediato y fluido. Si te falta
+                          alguno, créalo aquí mismo sin perder lo que llevas.
+                        </>
+                      )}
+                    </p>
+                    {ingredientOptions.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={dismissRecipeTip}
+                        aria-label="Cerrar consejo"
+                        className="h-6 w-6 shrink-0 rounded-vimdy-sm text-vimdy-text-tertiary hover:text-vimdy-text flex items-center justify-center"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 {recipeRows.length === 0 && copyableRecipes.length > 0 && (
                   <select
                     value=""
@@ -1290,7 +1367,8 @@ export function ProductFormModal({
                 })}
 
                 {/* Un solo campo para agregar: escribe, Enter, cantidad, Enter. */}
-                <div className="relative">
+                <div className="flex items-stretch gap-2">
+                <div className="relative min-w-0 flex-1">
                   <input
                     ref={ingredientSearchRef}
                     value={ingredientQuery}
@@ -1305,7 +1383,13 @@ export function ProductFormModal({
                     placeholder={recipeRows.length === 0 ? "Escribe un ingrediente (ej: carne)..." : "Agregar otro ingrediente..."}
                     aria-label="Buscar o crear ingrediente"
                     autoComplete="off"
-                    className="w-full h-11 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-recipe/40 text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-recipe"
+                    className={`w-full h-11 px-3 rounded-vimdy-sm bg-vimdy-surface border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-recipe transition-shadow duration-500 ${
+                      highlightSearch
+                        ? "border-vimdy-recipe ring-2 ring-vimdy-recipe/40 shadow-lg shadow-vimdy-recipe/25"
+                        : recipeRows.length === 0
+                          ? "border-vimdy-recipe/70"
+                          : "border-vimdy-recipe/40"
+                    }`}
                   />
                   {suggestOpen && suggestionCount > 0 && (
                     <ul
@@ -1347,6 +1431,18 @@ export function ProductFormModal({
                       )}
                     </ul>
                   )}
+                </div>
+                {!showQuickIngredient && (
+                  <button
+                    type="button"
+                    onClick={startCreateIngredient}
+                    className="h-11 shrink-0 px-3 rounded-vimdy-sm border border-vimdy-recipe/40 bg-vimdy-recipe/10 text-vimdy-recipe text-sm font-medium hover:bg-vimdy-recipe/20 transition-colors flex items-center gap-1.5"
+                  >
+                    <Plus size={16} />
+                    <span className="hidden sm:inline">Crear insumo rápido</span>
+                    <span className="sm:hidden">Nuevo</span>
+                  </button>
+                )}
                 </div>
                 <p className="text-vimdy-text-tertiary text-xs mt-1.5">
                   ¿No lo encuentras? Escríbelo y créalo al instante. Los ingredientes nuevos que dejes en la receta se guardan en tus Insumos al guardar el producto, para que los reutilices en otros platos. Si cancelas, no se guardan.

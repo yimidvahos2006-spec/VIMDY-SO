@@ -502,8 +502,8 @@ function InsumoFormModal({
   const [categoryId, setCategoryId] = useState(insumo?.categoryId ?? categories[0]?.id ?? "");
   const [price, setPrice] = useState(insumo?.price ?? 0);
   const [purchasePrice, setPurchasePrice] = useState(toMoneyInputValue(insumo?.purchasePrice ?? 0));
-  const [stock, setStock] = useState(insumo?.stock ?? 0);
-  const [minStock, setMinStock] = useState(insumo?.minStock ?? 0);
+  const [stock, setStock] = useState(insumo?.stock ? String(insumo.stock) : "");
+  const [minStock, setMinStock] = useState(insumo?.minStock ? String(insumo.minStock) : "");
   const [unit, setUnit] = useState(insumo?.unit ?? "");
   const [sku, setSku] = useState(insumo?.sku ?? "");
   const [barcode, setBarcode] = useState(insumo?.barcode ?? "");
@@ -562,6 +562,18 @@ function InsumoFormModal({
       setError("El precio de compra no es válido.");
       return;
     }
+    // Los campos de stock se guardan como texto para poder borrarlos por completo;
+    // vacío = 0 solo al momento de guardar.
+    const stockValue = stock.trim() === "" ? 0 : Number(stock.replace(",", "."));
+    const minStockValue = minStock.trim() === "" ? 0 : Number(minStock.replace(",", "."));
+    if (!Number.isFinite(stockValue) || stockValue < 0) {
+      setError("El stock inicial no es válido.");
+      return;
+    }
+    if (!Number.isFinite(minStockValue) || minStockValue < 0) {
+      setError("El stock mínimo no es válido.");
+      return;
+    }
 
     setSaving(true);
     try {
@@ -570,8 +582,8 @@ function InsumoFormModal({
         categoryId,
         price,
         purchasePrice: purchasePriceValue,
-        stock,
-        minStock,
+        stock: stockValue,
+        minStock: minStockValue,
         unit: unit.trim() || undefined,
         sku: sku.trim() || undefined,
         barcode: barcode.trim() || undefined,
@@ -734,10 +746,12 @@ function InsumoFormModal({
                 <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Stock inicial</label>
                 <input
                   type="number"
+                  inputMode="decimal"
                   min={0}
-                  step="1"
+                  step="any"
                   value={stock}
-                  onChange={(e) => setStock(Number(e.target.value))}
+                  onChange={(e) => setStock(e.target.value)}
+                  placeholder="0"
                   className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-background border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
                 />
               </div>
@@ -749,10 +763,12 @@ function InsumoFormModal({
               <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Stock mínimo</label>
               <input
                 type="number"
+                inputMode="decimal"
                 min={0}
-                step="1"
+                step="any"
                 value={minStock}
-                onChange={(e) => setMinStock(Number(e.target.value))}
+                onChange={(e) => setMinStock(e.target.value)}
+                placeholder="0"
                 className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-background border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
               />
             </div>
