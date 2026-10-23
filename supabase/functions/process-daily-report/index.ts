@@ -2,7 +2,8 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, content-type, x-daily-report-secret",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-daily-report-secret",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
 const MAX_ATTEMPTS = 8;
@@ -726,7 +727,7 @@ async function ensureDeliveries(job: JobRow, settings: SettingsRow): Promise<voi
   if (settings.whatsapp_enabled && WHATSAPP_ACCESS_TOKEN && WHATSAPP_PHONE_NUMBER_ID && WHATSAPP_GRAPH_VERSION && WHATSAPP_TEMPLATE_NAME) {
     await admin.from("daily_report_deliveries").update({ status: "PENDING", last_error: null, next_attempt_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("job_id", job.id).eq("channel", "WHATSAPP").eq("status", "WAITING_CONFIGURATION");
   }
-  if (settings.email_enabled && RESEND_API_KEY) {
+  if (settings.email_enabled && RESEND_API_KEY && RESEND_FROM) {
     await admin.from("daily_report_deliveries").update({ status: "PENDING", last_error: null, next_attempt_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("job_id", job.id).eq("channel", "EMAIL").eq("status", "WAITING_CONFIGURATION");
   }
 

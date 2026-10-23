@@ -19,6 +19,8 @@ import { CategoryStationEditor, collectKnownStations } from "./InventoryWidgets"
 import { NewSupplierModal } from "./NewSupplierModal";
 import { useCanUse } from "../../../hooks/useCanUse";
 import { useTranslation } from "../../../core/i18n/useTranslation";
+import { discardQuickIngredients } from "./quickIngredientCleanup";
+import { vimdyCore } from "../../../core/VimdyCore";
 import { filterIngredientOptions, findRecipeRowProblem, normalizeSearch, sanitizeQuantityInput } from "./recipeFormHelpers";
 
 /**
@@ -136,6 +138,10 @@ export function ProductFormModal({
   const [quickIngredientPurchasePrice, setQuickIngredientPurchasePrice] = useState("");
   const [quickIngredientUnit, setQuickIngredientUnit] = useState("unidad");
   const [creatingIngredient, setCreatingIngredient] = useState(false);
+  // Insumos creados con "ingrediente rápido" en esta sesión del formulario.
+  // Si el producto no se guarda, se borran al cerrar para no dejar basura.
+  const quickIngredientIdsRef = React.useRef<string[]>([]);
+  const productSavedRef = React.useRef(false);
   // stock, se descuenta cada ingrediente (ver InventoryEngine.consumeForSale).
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [hasRecipe, setHasRecipe] = useState<boolean>(!!product?.recipe && product.recipe.length > 0);
@@ -700,6 +706,14 @@ export function ProductFormModal({
     }
 
     if (ok) {
+      // Guardó: se conservan los insumos usados en alguna receta; los que se
+      // creó y luego se quitaron de la receta se borran.
+      productSavedRef.current = true;
+      const used = new Set<string>();
+      for (const r of recipeValue ?? []) used.add(r.productId);
+      for (const sz of sizesValue ?? []) for (const r of sz.recipe ?? []) used.add(r.productId);
+      for (const ex of extrasValue ?? []) for (const r of ex.recipe ?? []) used.add(r.productId);
+      await cleanupQuickIngredients(used);
       onClose();
     } else {
       setSaveFailed(true);
@@ -722,6 +736,30 @@ export function ProductFormModal({
       errorBannerRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
     }
   }, [formError, saveFailed, saveError]);
+
+  /** Borra los insumos rápidos que no quedaron en una receta guardada (nunca lanza). */
+  async function cleanupQuickIngredients(keepIds: ReadonlySet<string>) {
+    const pending = quickIngredientIdsRef.current;
+    quickIngredientIdsRef.current = [];
+    if (pending.length === 0) return;
+    const removed = await discardQuickIngredients(pending, keepIds, (id) =>
+      container.inventoryEngine.get().deleteProduct(id)
+    );
+    if (removed > 0) vimdyCore.emit("inventory");
+  }
+
+  // Cierre sin guardar (Cancelar, X o clic afuera).
+  function handleCancel() {
+    void cleanupQuickIngredients(new Set());
+    onClose();
+  }
+
+  // Si el formulario se desmonta por cualquier otro motivo sin haber guardado.
+  const cleanupOnUnmountRef = React.useRef<() => void>(() => {});
+  cleanupOnUnmountRef.current = () => {
+    if (!productSavedRef.current) void cleanupQuickIngredients(new Set());
+  };
+  React.useEffect(() => () => cleanupOnUnmountRef.current(), []);
 
   async function handleCreateQuickIngredient(name: string) {
     const purchasePrice = quickIngredientPurchasePrice.trim() ? parseMoneyInput(quickIngredientPurchasePrice) : undefined;
@@ -759,6 +797,7 @@ export function ProductFormModal({
         isIngredient: true,
         active: true
       }, undefined, { knownProducts: allProducts, deferAudit: true });
+      quickIngredientIdsRef.current = [...quickIngredientIdsRef.current, created.id];
       setAllProducts((prev) => [...prev, created]);
 
       const newRowId = crypto.randomUUID();
@@ -810,7 +849,7 @@ export function ProductFormModal({
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/70 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/70 backdrop-blur-sm" onClick={handleCancel}>
       <div
         role="dialog"
         aria-modal="true"
@@ -824,7 +863,7 @@ export function ProductFormModal({
           <h2 className="text-xl font-bold text-vimdy-text">
             {isEditing ? "Editar producto" : "Nuevo producto"}
           </h2>
-          <button onClick={onClose} aria-label="Cerrar" className="text-vimdy-text-secondary hover:text-vimdy-text">
+          <button onClick={handleCancel} aria-label="Cerrar" className="text-vimdy-text-secondary hover:text-vimdy-text">
             <X size={20} />
           </button>
         </div>
@@ -1739,7 +1778,7 @@ export function ProductFormModal({
           </VimdyButton>
           <VimdyButton
             disabled={saving}
-            onClick={onClose}
+            onClick={handleCancel}
             variant="secondary"
           >
             Cancelar
