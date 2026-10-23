@@ -705,7 +705,8 @@ function reportText(snapshot: Record<string, unknown>): string {
 // tablas y estilos en línea para que se vea igual en Gmail, Outlook y móvil.
 // ---------------------------------------------------------------------------
 const EMAIL_LOGO_URL = Deno.env.get("DAILY_REPORT_LOGO_URL") ?? "https://vimdy.co/assets/email/vimdy-reporte-v1.gif";
-const FONT_STACK = "'Inter','Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+const EMAIL_TEST_LOGO_URL = Deno.env.get("DAILY_REPORT_TEST_LOGO_URL") ?? "https://vimdy.co/assets/email/vimdy-prueba-v1.gif";
+const FONT_STACK ="'Inter','Segoe UI',Roboto,Helvetica,Arial,sans-serif";
 
 function esc(value: unknown): string {
   return String(value ?? "")
@@ -715,7 +716,7 @@ function esc(value: unknown): string {
     .replace(/"/g, "&quot;");
 }
 
-function emailShell(inner: string, preheader: string): string {
+function emailShell(inner: string, preheader: string, logoUrl: string = EMAIL_LOGO_URL, logoAlt = "VIMDY — Tu reporte"): string {
   return `<!doctype html>
 <html lang="es">
 <head>
@@ -731,7 +732,7 @@ function emailShell(inner: string, preheader: string): string {
 <tr><td align="center" style="padding:0;">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;">
 <tr><td align="center" bgcolor="#0A0A0C" style="padding:0;line-height:0;font-size:0;">
-<img src="${esc(EMAIL_LOGO_URL)}" width="600" alt="VIMDY — Tu reporte" style="display:block;width:100%;max-width:600px;height:auto;border:0;outline:none;text-decoration:none;">
+<img src="${esc(logoUrl)}" width="600" alt="${esc(logoAlt)}" style="display:block;width:100%;max-width:600px;height:auto;border:0;outline:none;text-decoration:none;">
 </td></tr>
 ${inner}
 <tr><td align="center" style="padding:28px 24px 36px 24px;font-family:${FONT_STACK};font-size:12px;line-height:18px;color:#5C5C64;">
@@ -1047,7 +1048,7 @@ Deno.serve(async (req) => {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
         return json({ error: "INVALID_EMAIL" }, 400);
       }
-      const subject = "VIMDY — Correo de prueba del Cierre Inteligente";
+      const subject = "VIMDY prueba ✅ Tu correo está listo";
       const text = [
         "Hola,",
         "",
@@ -1060,12 +1061,24 @@ Deno.serve(async (req) => {
         "— VIMDY",
       ].join("\n");
       const testHtml = emailShell(
-        `<tr><td style="padding:8px 28px 8px 28px;font-family:${FONT_STACK};font-size:16px;line-height:26px;color:#F5F5F4;">
-<p style="margin:0 0 14px 0;">Hola,</p>
-<p style="margin:0 0 14px 0;">Este es un correo de prueba de VIMDY. Tu correo está correctamente configurado para recibir los cierres diarios de tu negocio.</p>
-<p style="margin:0;color:#A1A1AA;">Cuando cierres un turno, VIMDY preparará el resumen del día y lo enviará automáticamente a este correo.</p>
+        `<tr><td style="padding:8px 24px 18px 24px;font-family:${FONT_STACK};">
+<div style="font-size:22px;line-height:28px;font-weight:700;color:#F5F5F4;">¡Todo funciona!</div>
+<div style="font-size:15px;line-height:24px;color:#A1A1AA;padding-top:4px;">Este es un correo de prueba de VIMDY. Tu correo está listo para recibir los cierres diarios de tu negocio.</div>
+</td></tr>` +
+        sectionCard("Lo que acabamos de verificar",
+          infoRow("Remitente", "VIMDY", "#22C55E") +
+          infoRow("Entrega a este correo", "Correcta", "#22C55E") +
+          infoRow("Cierre inteligente", "Activo", "#22C55E")) +
+        `<tr><td style="padding:0 20px 14px 20px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#0F1B33" style="background-color:#0F1B33;border:1px solid #1D3A73;border-left:4px solid #2563EB;border-radius:12px;">
+<tr><td style="padding:16px 18px;font-family:${FONT_STACK};">
+<div style="font-size:12px;line-height:16px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;color:#38BDF8;padding-bottom:6px;">¿Qué sigue?</div>
+<div style="font-size:15px;line-height:23px;color:#F5F5F4;">Cuando cierres un turno, VIMDY preparará el resumen del día con tus ventas, caja y productos más vendidos, y lo enviará automáticamente a este correo.</div>
+</td></tr></table>
 </td></tr>`,
-        "Tu correo está listo para recibir los cierres diarios de VIMDY.",
+        "VIMDY prueba — tu correo está listo para recibir los cierres diarios.",
+        EMAIL_TEST_LOGO_URL,
+        "VIMDY prueba",
       );
       const providerId = await sendEmail(recipient, subject, text, testHtml);
       return json({ ok: true, recipient, providerId });
