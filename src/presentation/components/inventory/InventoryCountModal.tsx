@@ -71,6 +71,8 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
   const countInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   // Los guardados se hacen de uno en uno y en orden, para que ninguno pise al anterior.
   const saveChain = useRef<Promise<unknown>>(Promise.resolve());
+  // Productos en cuyo campo la persona escribió desde el último guardado (aunque quede el mismo número).
+  const typedIds = useRef<Set<string>>(new Set());
 
   // Nuevo conteo
   const [kind, setKind] = useState<CountKind>("todo");
@@ -105,6 +107,8 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
   }, [refreshList]);
 
   const readOnly = session?.status === "CLOSED";
+  // Conteo a ciegas en curso y quien lo ve no es administrador: no se le muestran cifras del sistema ni diferencias.
+  const blindLocked = !!session && session.blind && !canPeekSystem && session.status !== "CLOSED" && !session.prepared;
 
   function openSession(s: InventoryCountSession) {
     setSession(s);
@@ -134,15 +138,18 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
   function persist(silent = false): Promise<InventoryCountSession | null> {
     if (!session || readOnly) return Promise.resolve(session);
     const toSave = linesFromInputs();
+    const recountedIds = Array.from(typedIds.current);
+    typedIds.current.clear();
     dirty.current = false;
     const run = saveChain.current.then(async () => {
       try {
-        const saved = await engine().saveCounts(session, toSave);
+        const saved = await engine().saveCounts(session, toSave, { recountedIds });
         setSession(saved);
         if (!silent) toast.success("Conteo guardado.");
         return saved;
       } catch (e) {
         dirty.current = true;
+        recountedIds.forEach((id) => typedIds.current.add(id));
         toast.error("No se pudo guardar el conteo. Intenta de nuevo.");
         return null;
       }
@@ -453,6 +460,11 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
                         countInputRefs.current[l.productId] = el;
                       }}
                       enterKeyHint="next"
+                      onInput={() => {
+                        // Cada vez que la persona escribe, se marca: así un reconteo con el mismo número también cuenta.
+                        dirty.current = true;
+                        typedIds.current.add(l.productId);
+                      }}
                       value={inputs[l.productId] ?? ""}
                       onFocus={(e) => e.currentTarget.select()}
                       onBlur={() => {
@@ -487,14 +499,38 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
                 Guardar y seguir después
               </button>
               <button onClick={goReview} disabled={progress.counted === 0} className="flex-1 h-11 rounded-vimdy-md bg-vimdy-accent text-vimdy-background text-sm font-bold disabled:opacity-50">
-                Terminar y revisar
+                {session.blind && !canPeekSystem ? "Terminar conteo" : "Terminar y revisar"}
               </button>
             </div>
           </>
         )}
 
+        {/* ---------------- CONTEO A CIEGAS: SOLO EL ADMINISTRADOR VE LAS DIFERENCIAS ---------------- */}
+        {view === "review" && session && blindLocked && (
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
+            <div className="rounded-vimdy-md border border-vimdy-border p-5 text-center space-y-2">
+              <CheckCircle2 size={28} className="mx-auto text-vimdy-success" />
+              <p className="text-base font-bold text-vimdy-text">Conteo guardado</p>
+              <p className="text-sm text-vimdy-text-secondary">
+                Contaste {progress.counted} de {progress.total} productos. Es un conteo a ciegas: un administrador revisa las diferencias y aplica el ajuste.
+              </p>
+              {progress.counted < progress.total && (
+                <p className="text-xs text-vimdy-text-tertiary">Quedan {progress.total - progress.counted} sin contar. Puedes volver y terminarlos.</p>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <button onClick={back} className="h-11 px-4 rounded-vimdy-md border border-vimdy-border text-vimdy-text-secondary text-sm font-semibold hover:text-vimdy-text">
+                Volver a contar
+              </button>
+              <button onClick={onClose} className="flex-1 h-11 rounded-vimdy-md bg-vimdy-accent text-vimdy-background text-sm font-bold">
+                Listo
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ---------------- REVISAR / CERRADO ---------------- */}
-        {view === "review" && session && (
+        {view === "review" && session && !blindLocked && (
           <>
             <div className="grid grid-cols-3 gap-2 text-center">
               <div className="rounded-vimdy-md border border-vimdy-border p-2">

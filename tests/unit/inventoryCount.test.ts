@@ -301,3 +301,30 @@ describe("computeDifferences con foto del momento", () => {
     expect(d.movedSince).toBe(-3);
   });
 });
+
+describe("InventoryCountEngine: recontar con el mismo número", () => {
+  const start = (engine: InventoryCountEngine) =>
+    engine.startSession({ kind: "insumos", scope: { mode: "all" }, scopeLabel: "t", blind: true, createdBy: "Ana" });
+  const countOnly = (s: InventoryCountSession, id: string, n: number) =>
+    s.lines.map((l) => ({ ...l, counted: l.productId === id ? n : null }));
+  const snap = (s: InventoryCountSession) => s.lines.find((l) => l.productId === "carne")?.systemStockAtCount;
+
+  it("si la persona vuelve a escribir el mismo número, la foto se refresca", async () => {
+    const { engine, stock } = setupEngine(catalog);
+    const s = await start(engine);
+    const first = await engine.saveCounts(s, countOnly(s, "carne", 8));
+    expect(snap(first)).toBe(10);
+    stock.set("carne", 7);
+    const again = await engine.saveCounts(first, countOnly(first, "carne", 8), { recountedIds: ["carne"] });
+    expect(snap(again)).toBe(7);
+  });
+
+  it("pasar por el campo sin escribir NO refresca la foto", async () => {
+    const { engine, stock } = setupEngine(catalog);
+    const s = await start(engine);
+    const first = await engine.saveCounts(s, countOnly(s, "carne", 8));
+    stock.set("carne", 7);
+    const again = await engine.saveCounts(first, countOnly(first, "carne", 8), { recountedIds: [] });
+    expect(snap(again)).toBe(10);
+  });
+});

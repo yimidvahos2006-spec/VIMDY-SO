@@ -62,7 +62,11 @@ export class InventoryCountEngine {
   }
 
   /** Guarda lo contado. Una sesión cerrada no se edita. */
-  public async saveCounts(session: InventoryCountSession, lines: CountLine[]): Promise<InventoryCountSession> {
+  public async saveCounts(
+    session: InventoryCountSession,
+    lines: CountLine[],
+    options: { recountedIds?: readonly string[] } = {}
+  ): Promise<InventoryCountSession> {
     const current = await this.repository.findById(session.id);
     if (!current) throw new Error("COUNT_SESSION_NOT_FOUND");
     if (current.status === "CLOSED") throw new Error("COUNT_SESSION_CLOSED");
@@ -71,6 +75,10 @@ export class InventoryCountEngine {
     // Por cada cantidad nueva o cambiada se guarda "la foto" de lo que decía el sistema en ese
     // instante (leída de la base, no de la pantalla). Las fotos nunca vienen de afuera: las
     // cantidades que no cambiaron conservan la suya y las que se borran la pierden.
+    // `recountedIds`: productos en cuyo campo la persona volvió a escribir (aunque sea el mismo número).
+    // Solo esos refrescan la foto; pasar por un campo sin escribir nada NO la cambia, porque el conteo
+    // de hace un rato sigue siendo cierto para ese momento.
+    const recounted = new Set(options.recountedIds ?? []);
     const storedById = new Map(current.lines.map((l) => [l.productId, l]));
     let stockById: Map<string, number> | null = null;
     const now = new Date().toISOString();
@@ -81,7 +89,12 @@ export class InventoryCountEngine {
       delete next.countedAt;
       if (incoming.counted !== null) {
         const stored = storedById.get(incoming.productId);
-        if (stored && stored.counted === incoming.counted && stored.systemStockAtCount !== undefined) {
+        if (
+          stored &&
+          stored.counted === incoming.counted &&
+          stored.systemStockAtCount !== undefined &&
+          !recounted.has(incoming.productId)
+        ) {
           next.systemStockAtCount = stored.systemStockAtCount;
           if (stored.countedAt) next.countedAt = stored.countedAt;
         } else {
