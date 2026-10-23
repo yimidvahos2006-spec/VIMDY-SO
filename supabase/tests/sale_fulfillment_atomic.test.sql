@@ -403,22 +403,24 @@ BEGIN
       AND data->>'productId' = v_ingredient_id::text AND (data->>'delta')::numeric = -1
   ) THEN RAISE EXCEPTION 'FAIL recipe inventory/Kardex was not consumed exactly once'; END IF;
 
-  -- Insufficient stock must roll back sale, details, ledger, and all Kardex.
+  -- Sin stock la venta NO se bloquea: pasa, el insumo queda en -1 y el Kardex lo marca.
   v_sale_id := gen_random_uuid();
   v_result := public.create_sale_fulfillment_atomic(
     v_business_id, v_branch_id, 'gate1-insufficient-' || v_sale_id::text,
     jsonb_build_object('id', v_sale_id, 'type', 'QUICK',
       'items', jsonb_build_array(jsonb_build_object('productId', v_recipe_product_id, 'quantity', 1)))
   );
-  IF v_result->>'success' IS DISTINCT FROM 'false' OR v_result->>'error' NOT LIKE '%INSUFFICIENT_STOCK%' THEN
-    RAISE EXCEPTION 'FAIL insufficient stock was not rejected: %', v_result;
+  IF v_result->>'success' IS DISTINCT FROM 'true' THEN
+    RAISE EXCEPTION 'FAIL sale without stock was blocked: %', v_result;
   END IF;
-  IF EXISTS (SELECT 1 FROM public.sales WHERE id = v_sale_id)
-     OR EXISTS (SELECT 1 FROM public.sale_items WHERE sale_id = v_sale_id)
-     OR EXISTS (SELECT 1 FROM public.sale_fulfillment_operations WHERE sale_id = v_sale_id)
-     OR EXISTS (SELECT 1 FROM public.inventory_movements WHERE data->>'saleId' = v_sale_id::text) THEN
-    RAISE EXCEPTION 'FAIL insufficient stock left partial sale side effects';
-  END IF;
+  SELECT (data->>'stock')::numeric INTO v_stock FROM public.products WHERE id = v_ingredient_id;
+  IF v_stock <> -1 OR NOT EXISTS (
+    SELECT 1 FROM public.inventory_movements
+    WHERE business_id = v_business_id AND data->>'saleId' = v_sale_id::text
+      AND data->>'productId' = v_ingredient_id::text AND (data->>'delta')::numeric = -1
+      AND (data->>'stockBefore')::numeric = 0 AND (data->>'stockAfter')::numeric = -1
+      AND (data->>'negative')::boolean IS TRUE
+  ) THEN RAISE EXCEPTION 'FAIL negative stock Kardex was not recorded (stock=%)', v_stock; END IF;
 
   -- Malformed recipe is a validation error, not an untracked successful sale.
   UPDATE public.products SET data = jsonb_set(data, '{recipe}', '{"bad":"recipe"}'::jsonb)

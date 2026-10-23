@@ -144,46 +144,37 @@ BEGIN
           jsonb_build_object('productId',v_flour,'quantity',0.5),
           jsonb_build_object('productId',v_sugar,'quantity',0.2))));
 
-  -- 10 pasteles piden 2 kg de azucar pero hay 1: la RPC debe rechazarse.
-  -- create_sale_fulfillment_atomic NO lanza excepcion: captura el error y lo
-  -- devuelve como { success:false, code, error }. Por eso se verifica el
-  -- resultado devuelto, no un sqlerrm.
+  -- 10 pasteles piden 2 kg de azucar pero hay 1: la venta PASA y el azucar queda en -1.
   v_result := public.create_sale_fulfillment_atomic(
     v_business_id, v_branch_id, 'p4-rollback-01',
     jsonb_build_object('id',gen_random_uuid(),'type','QUICK',
       'items',jsonb_build_array(jsonb_build_object('productId',v_cake,'quantity',10))));
 
-  IF COALESCE((v_result->>'success')::boolean, true) IS NOT FALSE THEN
-    RAISE EXCEPTION 'FAIL: la venta debio rechazarse por stock insuficiente; resultado: %', v_result::text;
+  IF COALESCE((v_result->>'success')::boolean, false) IS NOT TRUE THEN
+    RAISE EXCEPTION 'FAIL: la venta no debe bloquearse por stock; resultado: %', v_result::text;
   END IF;
 
-  IF strpos(COALESCE(v_result->>'error',''), 'INSUFFICIENT_STOCK') = 0 THEN
-    RAISE EXCEPTION 'FAIL: se esperaba INSUFFICIENT_STOCK, resultado: %', v_result::text;
-  END IF;
-
-  -- ROLLBACK: ni la harina (que era suficiente) debe haber consumido, ni la
-  -- venta debe existir. Este es el punto clave de atomicidad.
   SELECT (data->>'stock')::numeric INTO v_flour_stock FROM products WHERE id = v_flour;
-  IF v_flour_stock <> 100 THEN
-    RAISE EXCEPTION 'FAIL: rollback incompleto: la harina se desconto a % pese al fallo', v_flour_stock;
+  IF v_flour_stock <> 95 THEN
+    RAISE EXCEPTION 'FAIL: la harina debia quedar en 95 y quedo en %', v_flour_stock;
   END IF;
 
   SELECT (data->>'stock')::numeric INTO v_sugar_stock FROM products WHERE id = v_sugar;
-  IF v_sugar_stock <> 1 THEN
-    RAISE EXCEPTION 'FAIL: rollback incompleto: el azucar quedo en %', v_sugar_stock;
+  IF v_sugar_stock <> -1 THEN
+    RAISE EXCEPTION 'FAIL: el azucar debia quedar en -1 y quedo en %', v_sugar_stock;
   END IF;
 
   SELECT count(*) INTO v_sales FROM sales WHERE business_id = v_business_id;
-  IF v_sales <> 0 THEN
-    RAISE EXCEPTION 'FAIL: la venta fallida quedo persistida (% ventas)', v_sales;
+  IF v_sales <> 1 THEN
+    RAISE EXCEPTION 'FAIL: se esperaba 1 venta y hay %', v_sales;
   END IF;
 
   SELECT count(*) INTO v_movements FROM inventory_movements WHERE business_id = v_business_id;
-  IF v_movements <> 0 THEN
-    RAISE EXCEPTION 'FAIL: rollback incompleto: quedaron % movimientos de Kardex', v_movements;
+  IF v_movements <> 2 THEN
+    RAISE EXCEPTION 'FAIL: se esperaban 2 movimientos de Kardex y hay %', v_movements;
   END IF;
 
-  RAISE NOTICE 'PASS: rollback por stock insuficiente (harina intacta 100, azucar 1, 0 ventas, 0 movimientos)';
+  RAISE NOTICE 'PASS: venta sin stock suficiente pasa (harina 95, azucar -1, 1 venta, 2 movimientos)';
 
   DELETE FROM kitchen_orders WHERE business_id = v_business_id;
   DELETE FROM inventory_movements WHERE business_id = v_business_id;

@@ -1000,7 +1000,7 @@ BEGIN
       RAISE NOTICE '[FAIL] 10_FULFILLMENT_IDEMPOTENCY — %', SQLERRM;
   END;
 
-  -- 11_FULFILLMENT_ROLLBACK_STOCK -------------------------------------------
+  -- 11_FULFILLMENT_NEGATIVE_STOCK -------------------------------------------
   BEGIN
     v_sale_id := gen_random_uuid();
     v_payment_id := 'sale-fulfillment-stock-failure-' || gen_random_uuid()::text;
@@ -1024,12 +1024,8 @@ BEGIN
       v_payload
     );
 
-    IF v_result->>'success' IS DISTINCT FROM 'false' THEN
-      RAISE EXCEPTION 'Se esperaba success=false: %', v_result;
-    END IF;
-
-    IF strpos(COALESCE(v_result->>'error', ''), 'INSUFFICIENT_STOCK') = 0 THEN
-      RAISE EXCEPTION 'Error inesperado: %', v_result;
+    IF v_result->>'success' IS DISTINCT FROM 'true' THEN
+      RAISE EXCEPTION 'La venta no debe bloquearse por stock: %', v_result;
     END IF;
 
     SELECT count(*) INTO v_sale_count
@@ -1063,30 +1059,21 @@ BEGIN
     FROM public.products
     WHERE id = v_low_stock_product_id;
 
-    IF v_sale_count <> 0
-       OR v_sale_item_count <> 0
-       OR v_inventory_count <> 0
-       OR v_kitchen_count <> 0
-       OR v_operation_count <> 0 THEN
-      RAISE EXCEPTION
-        'Rollback incompleto sales=% items=% inventory=% kitchen=% operation=%',
-        v_sale_count,
-        v_sale_item_count,
-        v_inventory_count,
-        v_kitchen_count,
-        v_operation_count;
+    IF v_sale_count <> 1 OR v_sale_item_count <> 1 OR v_inventory_count <> 1 OR v_operation_count <> 1 THEN
+      RAISE EXCEPTION 'Venta sin stock incompleta sales=% items=% inventory=% operation=%',
+        v_sale_count, v_sale_item_count, v_inventory_count, v_operation_count;
     END IF;
 
-    IF abs(v_stock_after) > 0.005 THEN
-      RAISE EXCEPTION 'Stock cambió de 0 a %', v_stock_after;
+    IF abs(v_stock_after - (-1)) > 0.005 THEN
+      RAISE EXCEPTION 'Stock debia quedar en -1 y quedo en %', v_stock_after;
     END IF;
 
     v_pass := v_pass + 1;
-    RAISE NOTICE '[PASS] 11_FULFILLMENT_ROLLBACK_STOCK — stock insuficiente revierte venta, detalle, Kardex, operación y cocina.';
+    RAISE NOTICE '[PASS] 11_FULFILLMENT_NEGATIVE_STOCK — la venta sin stock pasa y deja stock -1 con Kardex.';
   EXCEPTION
     WHEN OTHERS THEN
       v_fail := v_fail + 1;
-      RAISE NOTICE '[FAIL] 11_FULFILLMENT_ROLLBACK_STOCK — %', SQLERRM;
+      RAISE NOTICE '[FAIL] 11_FULFILLMENT_NEGATIVE_STOCK — %', SQLERRM;
   END;
 
   -- 12_FULFILLMENT_ROLLBACK_KITCHEN -----------------------------------------
