@@ -808,7 +808,7 @@ export function ProductFormModal({
       setQuickIngredientName("");
       setQuickIngredientPurchasePrice("");
       setQuickIngredientUnit("unidad");
-      toast.success(`Ingrediente "${name}" creado.`);
+      toast.success(`"${name}" agregado a la receta. Se guardará en tus Insumos cuando guardes el producto.`);
     } catch {
       toast.error("No se pudo crear el ingrediente.");
     } finally {
@@ -1348,6 +1348,9 @@ export function ProductFormModal({
                     </ul>
                   )}
                 </div>
+                <p className="text-vimdy-text-tertiary text-xs mt-1.5">
+                  ¿No lo encuentras? Escríbelo y créalo al instante. Los ingredientes nuevos que dejes en la receta se guardan en tus Insumos al guardar el producto, para que los reutilices en otros platos. Si cancelas, no se guardan.
+                </p>
 
                 {showQuickIngredient && (
                   <div className="flex flex-wrap items-center gap-2 p-3 rounded-vimdy-sm bg-vimdy-recipe/5 border border-vimdy-recipe/20">
