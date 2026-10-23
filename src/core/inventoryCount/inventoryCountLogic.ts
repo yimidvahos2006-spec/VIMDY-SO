@@ -21,6 +21,14 @@ export interface CountLine {
   systemStockAtStart: number;
   /** Lo que se contó. `null` = todavía no contado (no se ajusta). */
   counted: number | null;
+  /**
+   * Lo que decía el sistema en el momento en que se digitó esta cantidad. Es la base para
+   * calcular la diferencia: así las ventas o compras que ocurran después no se confunden
+   * con sobrantes o faltantes. Lo pone el motor al guardar, nunca la pantalla.
+   */
+  systemStockAtCount?: number;
+  /** Cuándo se guardó esta cantidad (ISO). */
+  countedAt?: string;
   /** Se llenan al cerrar: stock del sistema en ese momento y diferencia aplicada. */
   systemStockAtClose?: number;
   difference?: number;
@@ -120,7 +128,12 @@ export function parseCountInput(raw: string): number | null {
 
 export interface CountDifference {
   line: CountLine;
+  /** Base de comparación: lo que decía el sistema cuando se contó (o el stock actual si el conteo es antiguo y no lo guardó). */
   systemStock: number;
+  /** Stock actual del sistema. */
+  stockNow: number;
+  /** Cuánto cambió el stock desde que se contó (negativo = salieron unidades por ventas u otros movimientos). */
+  movedSince: number;
   counted: number;
   /** contado − sistema. Positivo = sobra, negativo = falta. */
   difference: number;
@@ -140,12 +153,17 @@ export function computeDifferences(
   const result: CountDifference[] = [];
   for (const line of lines) {
     if (line.counted === null) continue;
-    const systemStock = currentStock.get(line.productId);
-    if (systemStock === undefined) continue; // el producto ya no existe
+    const stockNow = currentStock.get(line.productId);
+    if (stockNow === undefined) continue; // el producto ya no existe
+    // Se compara contra lo que decía el sistema AL CONTAR; el ajuste se suma/resta al stock de hoy,
+    // así las ventas posteriores se respetan. Conteos viejos sin esa foto usan el stock actual.
+    const systemStock = line.systemStockAtCount ?? stockNow;
     const difference = round4(line.counted - systemStock);
     result.push({
       line,
       systemStock,
+      stockNow,
+      movedSince: round4(stockNow - systemStock),
       counted: line.counted,
       difference,
       value: round4(difference * (line.unitCost ?? 0))

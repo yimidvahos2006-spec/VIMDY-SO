@@ -68,8 +68,39 @@ export class InventoryCountEngine {
     if (current.status === "CLOSED") throw new Error("COUNT_SESSION_CLOSED");
     if (current.prepared) throw new Error("COUNT_SESSION_CLOSING");
 
-    await this.repository.update({ ...current, lines });
-    return (await this.repository.findById(session.id)) ?? { ...current, lines };
+    // Por cada cantidad nueva o cambiada se guarda "la foto" de lo que decía el sistema en ese
+    // instante (leída de la base, no de la pantalla). Las fotos nunca vienen de afuera: las
+    // cantidades que no cambiaron conservan la suya y las que se borran la pierden.
+    const storedById = new Map(current.lines.map((l) => [l.productId, l]));
+    let stockById: Map<string, number> | null = null;
+    const now = new Date().toISOString();
+    const merged: CountLine[] = [];
+    for (const incoming of lines) {
+      const next: CountLine = { ...incoming };
+      delete next.systemStockAtCount;
+      delete next.countedAt;
+      if (incoming.counted !== null) {
+        const stored = storedById.get(incoming.productId);
+        if (stored && stored.counted === incoming.counted && stored.systemStockAtCount !== undefined) {
+          next.systemStockAtCount = stored.systemStockAtCount;
+          if (stored.countedAt) next.countedAt = stored.countedAt;
+        } else {
+          if (!stockById) {
+            const products = await this.inventory.listAll();
+            stockById = new Map(products.map((p) => [p.id, p.stock]));
+          }
+          const stockNow = stockById.get(incoming.productId);
+          if (stockNow !== undefined) {
+            next.systemStockAtCount = stockNow;
+            next.countedAt = now;
+          }
+        }
+      }
+      merged.push(next);
+    }
+
+    await this.repository.update({ ...current, lines: merged });
+    return (await this.repository.findById(session.id)) ?? { ...current, lines: merged };
   }
 
   /**
@@ -100,7 +131,7 @@ export class InventoryCountEngine {
         if (!d) return line;
         return {
           ...line,
-          systemStockAtClose: d.systemStock,
+          systemStockAtClose: d.stockNow,
           difference: d.difference,
           ...(d.difference < 0 ? { reason: reasons[line.productId] ?? "AJUSTE_ADMINISTRATIVO" } : {}),
           ...(d.difference !== 0 ? { movementId: line.movementId ?? crypto.randomUUID() } : {})

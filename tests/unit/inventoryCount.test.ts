@@ -204,3 +204,100 @@ describe("isSuspiciousDifference", () => {
     expect(isSuspiciousDifference(0, 3)).toBe(false);
   });
 });
+
+describe("InventoryCountEngine: ventas durante el conteo", () => {
+  const start = (engine: InventoryCountEngine) =>
+    engine.startSession({ kind: "insumos", scope: { mode: "all" }, scopeLabel: "t", blind: true, createdBy: "Ana" });
+  const countOnly = (s: InventoryCountSession, id: string, n: number) =>
+    s.lines.map((l) => ({ ...l, counted: l.productId === id ? n : null }));
+
+  it("contar justo lo que dice el sistema no ajusta nada, aunque después se venda", async () => {
+    const { engine, stock, calls } = setupEngine(catalog);
+    const s = await start(engine);
+    await engine.saveCounts(s, countOnly(s, "carne", 10)); // sistema decía 10
+    stock.set("carne", 7); // se venden 3 mientras se sigue contando
+    const { session, failures } = await engine.closeSession(s.id, "Ana");
+    expect(failures).toEqual([]);
+    expect(session.status).toBe("CLOSED");
+    expect(stock.get("carne")).toBe(7); // las ventas se respetan
+    expect(calls.filter((x) => x.id === "carne")).toEqual([]);
+  });
+
+  it("si se vendió ANTES de digitar y lo contado cuadra, la diferencia es 0", async () => {
+    const { engine, stock, calls } = setupEngine(catalog);
+    const s = await start(engine);
+    stock.set("carne", 8); // se venden 2 después de abrir el conteo
+    await engine.saveCounts(s, countOnly(s, "carne", 8)); // y se cuentan 8 en la nevera
+    await engine.closeSession(s.id, "Ana");
+    expect(stock.get("carne")).toBe(8);
+    expect(calls.filter((x) => x.id === "carne")).toEqual([]);
+  });
+
+  it("un faltante real se descuenta y las ventas posteriores se conservan", async () => {
+    const { engine, stock } = setupEngine(catalog);
+    const s = await start(engine);
+    stock.set("carne", 8); // venta antes de contar
+    await engine.saveCounts(s, countOnly(s, "carne", 7)); // sistema 8, hay 7 → falta 1
+    stock.set("carne", 7); // se vende 1 más después de contar
+    await engine.closeSession(s.id, "Ana");
+    expect(stock.get("carne")).toBe(6); // 7 contados − 1 vendido después
+  });
+
+  it("recontar cambia la foto al stock de ese momento", async () => {
+    const { engine, stock } = setupEngine(catalog);
+    const s = await start(engine);
+    const first = await engine.saveCounts(s, countOnly(s, "carne", 8));
+    expect(first.lines.find((l) => l.productId === "carne")?.systemStockAtCount).toBe(10);
+    stock.set("carne", 9);
+    const second = await engine.saveCounts(first, countOnly(first, "carne", 7));
+    expect(second.lines.find((l) => l.productId === "carne")?.systemStockAtCount).toBe(9);
+  });
+
+  it("una cantidad que no cambia conserva su foto original", async () => {
+    const { engine, stock } = setupEngine(catalog);
+    const s = await start(engine);
+    const first = await engine.saveCounts(s, countOnly(s, "carne", 10));
+    stock.set("carne", 6);
+    const again = await engine.saveCounts(first, countOnly(first, "carne", 10));
+    expect(again.lines.find((l) => l.productId === "carne")?.systemStockAtCount).toBe(10);
+  });
+
+  it("la pantalla no puede imponer su propia foto", async () => {
+    const { engine } = setupEngine(catalog);
+    const s = await start(engine);
+    const forged = s.lines.map((l) => ({ ...l, counted: l.productId === "carne" ? 5 : null, systemStockAtCount: 999 }));
+    const saved = await engine.saveCounts(s, forged);
+    expect(saved.lines.find((l) => l.productId === "carne")?.systemStockAtCount).toBe(10);
+  });
+
+  it("al borrar la cantidad se borra su foto", async () => {
+    const { engine } = setupEngine(catalog);
+    const s = await start(engine);
+    const first = await engine.saveCounts(s, countOnly(s, "carne", 4));
+    const cleared = await engine.saveCounts(first, countOnly(first, "carne", null as unknown as number).map((l) => ({ ...l, counted: null })));
+    const line = cleared.lines.find((l) => l.productId === "carne");
+    expect(line?.counted).toBeNull();
+    expect(line?.systemStockAtCount).toBeUndefined();
+  });
+
+  it("un conteo antiguo sin foto se calcula contra el stock actual, como antes", async () => {
+    const { engine, stock, store } = setupEngine(catalog);
+    const s = await start(engine);
+    const saved = await engine.saveCounts(s, countOnly(s, "carne", 8));
+    const old = store.get(s.id)!;
+    store.set(s.id, { ...old, lines: saved.lines.map((l) => ({ ...l, systemStockAtCount: undefined })) });
+    await engine.closeSession(s.id, "Ana");
+    expect(stock.get("carne")).toBe(8);
+  });
+});
+
+describe("computeDifferences con foto del momento", () => {
+  it("compara contra la foto y reporta cuánto cambió el stock desde entonces", () => {
+    const line = { productId: "a", name: "A", categoryId: "c", systemStockAtStart: 10, counted: 8, systemStockAtCount: 10 } as any;
+    const [d] = computeDifferences([line], new Map([["a", 7]]));
+    expect(d.systemStock).toBe(10);
+    expect(d.difference).toBe(-2);
+    expect(d.stockNow).toBe(7);
+    expect(d.movedSince).toBe(-3);
+  });
+});

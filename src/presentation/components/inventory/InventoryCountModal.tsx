@@ -49,9 +49,11 @@ const dateText = (d: Date | string) =>
  * movimientos con motivo. Un conteo cerrado ya no se puede editar.
  */
 export function InventoryCountModal({ inventory, onClose }: { inventory: InventoryState; onClose: () => void }) {
-  const { user, can } = useAuth();
+  const { user, can, role } = useAuth();
   const performedBy = user?.name ?? "Sistema";
   const canApply = can("inventory.adjust");
+  // Ver "lo que dice el sistema" mientras se cuenta le quita el sentido al conteo a ciegas: solo el administrador.
+  const canPeekSystem = role?.id === "ADMIN";
   const { categories } = useCategories();
 
   const [view, setView] = useState<View>("list");
@@ -67,6 +69,8 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
   const [showSystem, setShowSystem] = useState(false);
   const dirty = useRef(false);
   const countInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  // Los guardados se hacen de uno en uno y en orden, para que ninguno pise al anterior.
+  const saveChain = useRef<Promise<unknown>>(Promise.resolve());
 
   // Nuevo conteo
   const [kind, setKind] = useState<CountKind>("todo");
@@ -114,21 +118,37 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
   }
 
   function linesFromInputs(): CountLine[] {
-    return lines.map((l) => ({ ...l, counted: parseCountInput(inputs[l.productId] ?? "") }));
+    // La "foto" del sistema la pone el motor al guardar; aquí solo se conserva la ya guardada para mostrar la revisión.
+    const saved = new Map((session?.lines ?? []).map((l) => [l.productId, l]));
+    return lines.map((l) => {
+      const s = saved.get(l.productId);
+      return {
+        ...l,
+        counted: parseCountInput(inputs[l.productId] ?? ""),
+        ...(s?.systemStockAtCount !== undefined ? { systemStockAtCount: s.systemStockAtCount } : {}),
+        ...(s?.countedAt ? { countedAt: s.countedAt } : {}),
+      };
+    });
   }
 
-  async function persist(silent = false): Promise<InventoryCountSession | null> {
-    if (!session || readOnly) return session;
-    try {
-      const saved = await engine().saveCounts(session, linesFromInputs());
-      setSession(saved);
-      dirty.current = false;
-      if (!silent) toast.success("Conteo guardado.");
-      return saved;
-    } catch (e) {
-      toast.error("No se pudo guardar el conteo. Intenta de nuevo.");
-      return null;
-    }
+  function persist(silent = false): Promise<InventoryCountSession | null> {
+    if (!session || readOnly) return Promise.resolve(session);
+    const toSave = linesFromInputs();
+    dirty.current = false;
+    const run = saveChain.current.then(async () => {
+      try {
+        const saved = await engine().saveCounts(session, toSave);
+        setSession(saved);
+        if (!silent) toast.success("Conteo guardado.");
+        return saved;
+      } catch (e) {
+        dirty.current = true;
+        toast.error("No se pudo guardar el conteo. Intenta de nuevo.");
+        return null;
+      }
+    });
+    saveChain.current = run;
+    return run;
   }
 
   // Guardado automático: si alguien deja el conteo a la mitad no pierde lo contado.
@@ -182,13 +202,19 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
     if (readOnly || session.prepared) {
       return session.lines
         .filter((l) => l.counted !== null && l.difference !== undefined)
-        .map((l) => ({
-          line: l,
-          systemStock: l.systemStockAtClose ?? l.systemStockAtStart,
-          counted: l.counted as number,
-          difference: l.difference as number,
-          value: Math.round((l.difference as number) * (l.unitCost ?? 0) * 10000) / 10000,
-        }));
+        .map((l) => {
+          const baseline = l.systemStockAtCount ?? l.systemStockAtClose ?? l.systemStockAtStart;
+          const stockNow = l.systemStockAtClose ?? baseline;
+          return {
+            line: l,
+            systemStock: baseline,
+            stockNow,
+            movedSince: Math.round((stockNow - baseline) * 10000) / 10000,
+            counted: l.counted as number,
+            difference: l.difference as number,
+            value: Math.round((l.difference as number) * (l.unitCost ?? 0) * 10000) / 10000,
+          };
+        });
     }
     const stockById = new Map(inventory.products.map((p) => [p.id, p.stock]));
     return computeDifferences(linesFromInputs(), stockById);
@@ -406,7 +432,7 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
               </div>
               <span className="text-sm font-semibold text-vimdy-text whitespace-nowrap">{progress.counted} de {progress.total}</span>
             </div>
-            {session.blind && (
+            {session.blind && canPeekSystem && (
               <label className="flex items-center gap-2 text-xs text-vimdy-text-secondary">
                 <input type="checkbox" checked={showSystem} onChange={(e) => setShowSystem(e.target.checked)} className="accent-vimdy-accent" />
                 Mostrar lo que dice el sistema
@@ -429,6 +455,10 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
                       enterKeyHint="next"
                       value={inputs[l.productId] ?? ""}
                       onFocus={(e) => e.currentTarget.select()}
+                      onBlur={() => {
+                        // Se guarda apenas sales del campo: la "foto" del sistema queda tomada en ese momento.
+                        if (dirty.current) void persist(true);
+                      }}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
                           e.preventDefault();
@@ -498,9 +528,15 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
                         </p>
                       </div>
                       <p className="text-xs text-vimdy-text-tertiary">
-                        Sistema {fmt(d.systemStock)} · Contado {fmt(d.counted)}
+                        {d.line.systemStockAtCount !== undefined ? "Sistema al contar" : "Sistema"} {fmt(d.systemStock)} · Contado {fmt(d.counted)}
                         {d.value !== 0 && ` · ${money(Math.abs(d.value))}`}
                       </p>
+                      {d.movedSince !== 0 && (
+                        <p className="text-xs text-vimdy-text-tertiary">
+                          💡 Desde que lo contaste {d.movedSince < 0 ? "salieron" : "entraron"} {fmt(Math.abs(d.movedSince))} {unit} (ventas, compras u otros movimientos).
+                          El ajuste ya lo tiene en cuenta.
+                        </p>
+                      )}
                       {suspicious && !readOnly && !session.prepared && (
                         <div className="flex items-center justify-between gap-2 rounded-vimdy-sm bg-vimdy-warning/10 px-2.5 py-1.5">
                           <p className="text-xs text-vimdy-warning">⚠️ Diferencia grande. ¿Contaste bien?</p>
