@@ -16,6 +16,9 @@
 =========================================================================== */
 
 export const ROLE_PERMISSIONS: Record<string, string[]> = {
+  // "inventory.viewCosts" (ver costos y valor del inventario) es SOLO de ADMIN:
+  // lo cubre el "*". Ningún otro rol lo lleva a propósito; para dárselo a otro
+  // rol hay que agregarlo de forma explícita en su lista.
   ADMIN: ["*"],
 
   GERENTE: [

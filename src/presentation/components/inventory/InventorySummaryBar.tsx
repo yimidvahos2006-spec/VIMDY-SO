@@ -4,6 +4,8 @@ import { Product } from "../../../core/entities/Entities";
 import { getStockStatus } from "../../../core/store/useInventory";
 import { calculateInventoryCostValuation, type InventoryCostValuation } from "../../../core/utils/inventoryValuation";
 import { money } from "./inventoryShared";
+import { hasMaskedStock } from "../../../core/utils/stockMask";
+import { useAuth } from "../../context/AuthContext";
 
 type Side = "insumos" | "productos";
 
@@ -25,6 +27,10 @@ export function InventorySummaryBar({
   loading: boolean;
   onGoTo: (side: Side, status?: "bajo" | "agotado") => void;
 }) {
+  // Valor del inventario: solo quien tenga inventory.viewCosts (ADMIN).
+  const { can } = useAuth();
+  const canViewCosts = can("inventory.viewCosts");
+
   const summary = useMemo(() => {
     const active = products.filter((p) => p.active !== false);
     const count = (ingredient: boolean, status: "bajo" | "agotado") =>
@@ -53,10 +59,16 @@ export function InventorySummaryBar({
   const insTotal = lowIns + outIns;
   const prodTotal = lowProd + outProd;
 
+  // Conteo a ciegas activo: el costo no llega del servidor, así que el valor del
+  // inventario no se puede calcular (ni debe mostrarse como "incompleto").
+  const costsHidden = hasMaskedStock(products);
+
   const formatValue = (v: InventoryCostValuation) =>
     loading
       ? "—"
-      : v.valuationStatus === "COMPLETE"
+      : costsHidden
+        ? "Oculto durante el conteo"
+        : v.valuationStatus === "COMPLETE"
         ? money(v.stockCostValue ?? 0)
         : v.valuationStatus === "INCOMPLETE"
           ? `Costo incompleto (${v.unvaluedProductCount})`
@@ -77,7 +89,7 @@ export function InventorySummaryBar({
 
   return (
     <div className="space-y-3" aria-label="Resumen del inventario">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 ${canViewCosts ? "lg:grid-cols-5" : ""}`}>
         <div className={cardClass}>
           <p className={labelClass}>Por acabarse</p>
           <p className={`text-2xl font-bold ${!loading && low > 0 ? "text-vimdy-warning" : "text-vimdy-text"}`}>
@@ -90,6 +102,7 @@ export function InventorySummaryBar({
             {loading ? "—" : out}
           </p>
         </div>
+        {canViewCosts && (<>
         <div className={cardClass}>
           <p className={labelClass}>Valor del inventario</p>
           <p className="text-2xl font-bold text-vimdy-text">{valueText}</p>
@@ -102,6 +115,7 @@ export function InventorySummaryBar({
           <p className={labelClass}>Valor en productos</p>
           <p className="text-2xl font-bold text-vimdy-text">{valueProdText}</p>
         </div>
+        </>)}
       </div>
 
       {!loading && parts.length > 0 && (

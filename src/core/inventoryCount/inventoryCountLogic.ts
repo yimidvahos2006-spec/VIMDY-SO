@@ -2,7 +2,14 @@ import type { LossCategory, Product } from "../entities/Entities";
 
 /**
  * Lógica pura del conteo guiado (sin base de datos ni pantalla), para poder
- * probarla sola. El motor (InventoryCountEngine) y la pantalla la reutilizan.
+ * probarla sola.
+ *
+ * OJO (conteo a ciegas): las cifras del sistema ya NO se calculan en el cliente.
+ * `selectProductsForCount` solo sirve para la vista previa ("≈ 5 min · 20 por
+ * contar"); la selección real, las fotos de stock y las diferencias las hace el
+ * servidor. `buildCountLines` y `computeDifferences` se conservan por
+ * compatibilidad con las pruebas existentes, pero la pantalla ya no los usa
+ * para datos reales.
  */
 
 export type CountKind = "todo" | "insumos" | "productos";
@@ -17,8 +24,12 @@ export interface CountLine {
   name: string;
   unit?: string;
   categoryId: string;
-  /** Lo que decía el sistema al abrir el conteo (solo referencia). */
-  systemStockAtStart: number;
+  /**
+   * Lo que decía el sistema al abrir el conteo (solo referencia).
+   * SOLO LO RECIBEN los roles autorizados a ver diferencias: para quien cuenta el
+   * servidor no la entrega (llega `undefined`). Ver inventoryCountAccess.ts.
+   */
+  systemStockAtStart?: number;
   /** Lo que se contó. `null` = todavía no contado (no se ajusta). */
   counted: number | null;
   /**
@@ -55,6 +66,29 @@ export interface InventoryCountSession {
   closedAt?: Date;
   closedBy?: string;
   lines: CountLine[];
+}
+
+/**
+ * Una diferencia ya calculada por el SERVIDOR (rpc inventory_count_review). Solo la
+ * reciben los roles autorizados a ver diferencias; para los demás el servidor
+ * responde COUNT_FORBIDDEN.
+ */
+export interface CountReviewEntry {
+  productId: string;
+  name: string;
+  unit?: string;
+  counted: number;
+  /** Base de comparación: lo que decía el sistema cuando se contó. */
+  systemStock: number;
+  /** true si `systemStock` es la foto tomada al contar; false si es el stock actual (conteo antiguo). */
+  hasCountSnapshot: boolean;
+  stockNow: number;
+  movedSince: number;
+  /** contado − sistema. Positivo = sobra, negativo = falta. */
+  difference: number;
+  /** Valor de la diferencia al costo (0 si no hay costo). */
+  value: number;
+  reason?: LossCategory;
 }
 
 export const DEFAULT_TOP_LIMIT = 20;

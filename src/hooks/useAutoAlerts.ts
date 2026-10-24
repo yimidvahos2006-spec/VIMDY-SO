@@ -7,6 +7,7 @@ import { notificationStore, type NotificationCategory } from "../core/store/noti
 import { productCatalogStore } from "../core/store/productCatalogStore";
 import { InventoryAI } from "../core/ia/InventoryAI";
 import type { SmartAlert } from "../core/types/CopilotTypes";
+import { maskedStatusText } from "../core/utils/stockMask";
 
 /** Cada cuánto se revisa el negocio para detectar alertas que dependen del tiempo (ej. un pedido que se retrasa) aunque no haya entrado ninguna venta nueva. */
 const REFRESH_INTERVAL_MS = 60_000;
@@ -85,7 +86,9 @@ export function useAutoAlerts() {
       const products = productCatalogStore.getSnapshot();
       inventoryAI.generatePurchaseRecommendations(products).forEach((rec) => {
         if (rec.priority !== "CRITICAL" && rec.priority !== "HIGH") return;
-        const message = `Comprar ${rec.recommendedPurchase} u. de "${rec.productName}" (quedan ${rec.currentStock})`;
+        const message = rec.stockMasked
+          ? `Reponer "${rec.productName}" (${maskedStatusText(rec.priority === "CRITICAL" ? "OUT" : "LOW")})`
+          : `Comprar ${rec.recommendedPurchase} u. de "${rec.productName}" (quedan ${rec.currentStock})`;
         notificationStore.addPurchaseRecommendation(message, `IA_COMPRA:${rec.productId}`);
       });
     }

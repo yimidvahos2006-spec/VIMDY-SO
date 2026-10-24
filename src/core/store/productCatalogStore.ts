@@ -1,6 +1,7 @@
 import { ObservableStore } from "./ObservableStore";
 import { Product } from "../entities/Entities";
 import { normalizeSearchText, productMatchesSearch } from "../utils/searchText";
+import { isStockMasked } from "../utils/stockMask";
 import { container, productsReady } from "../../infrastructure/di/CompositionRoot";
 import { logWarning } from "../../infrastructure/logging/opsLogger";
 
@@ -94,11 +95,14 @@ class ProductCatalogStore extends ObservableStore<Product[]> {
    * valor real desde IndexedDB/Supabase y reemplaza este valor optimista.
    */
   applyStockDelta(productId: string, delta: number): void {
-    const next = this.snapshot.map((product) =>
-      product.id === productId
-        ? { ...product, stock: product.stock + delta, lastUpdated: new Date() }
-        : product
-    );
+    const next = this.snapshot.map((product) => {
+      if (product.id !== productId) return product;
+      // Enmascarado (conteo a ciegas): `stock` es un valor de banda, no la
+      // cantidad real. Sumarle el delta inventaría una cifra que además podría
+      // cambiar el estado (🟢/🟡/🔴). Se deja tal cual hasta el próximo refresh().
+      if (isStockMasked(product)) return product;
+      return { ...product, stock: product.stock + delta, lastUpdated: new Date() };
+    });
     this.publish(next);
   }
 

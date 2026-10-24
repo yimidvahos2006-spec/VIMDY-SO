@@ -6,16 +6,18 @@ import { useAuth } from "../../context/AuthContext";
 import { useCategories } from "../../../hooks/useCategories";
 import type { LossCategory } from "../../../core/entities/Entities";
 import { LOSS_CATEGORY_LABEL } from "../../../core/engines/lossCategoryLabels";
+import { canSeeCountDifferences } from "../../../core/config/inventoryCountAccess";
 import {
   DEFAULT_TOP_LIMIT,
-  computeDifferences,
   countProgress,
   estimateCountMinutes,
   isSuspiciousDifference,
   parseCountInput,
   selectProductsForCount,
+  type CountDifference,
   type CountKind,
   type CountLine,
+  type CountReviewEntry,
   type CountScope,
   type InventoryCountSession,
 } from "../../../core/inventoryCount/inventoryCountLogic";
@@ -28,6 +30,22 @@ type View = "list" | "new" | "count" | "review";
 const MISSING_REASONS: LossCategory[] = ["AJUSTE_ADMINISTRATIVO", "MERMA", "VENCIDO", "DAÑO", "CONSUMO_INTERNO", "OTRO"];
 
 const engine = () => container.inventoryCountEngine.get();
+
+// Mensajes para los errores del servidor. COUNT_FORBIDDEN: el servidor rechazó la acción por el rol.
+function countErrorMessage(e: any, fallback: string): string {
+  switch (e?.message) {
+    case "COUNT_FORBIDDEN":
+      return "Tu rol no puede hacer esto. Solo el administrador revisa las diferencias y cierra el conteo.";
+    case "COUNT_SESSION_CLOSED":
+      return "Este conteo ya estaba cerrado.";
+    case "COUNT_SESSION_CLOSING":
+      return "Este conteo ya está en revisión y no se puede editar.";
+    case "COUNT_NO_PRODUCTS":
+      return "No hay nada para contar con esa selección.";
+    default:
+      return fallback;
+  }
+}
 
 const formatMinutes = (min: number) => {
   if (min < 60) return `${min} min`;
@@ -52,8 +70,10 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
   const { user, can, role } = useAuth();
   const performedBy = user?.name ?? "Sistema";
   const canApply = can("inventory.adjust");
-  // Ver "lo que dice el sistema" mientras se cuenta le quita el sentido al conteo a ciegas: solo el administrador.
-  const canPeekSystem = role?.id === "ADMIN";
+  // Ver "lo que dice el sistema" mientras se cuenta le quita el sentido al conteo a ciegas.
+  // IMPORTANTE: esto es solo para pintar la pantalla. La barrera real está en el servidor, que a los demás roles
+  // ni siquiera les entrega esas cifras (ver inventoryCountAccess.ts y la migración inventory_count_blind_security).
+  const canPeekSystem = canSeeCountDifferences(role?.id);
   const { categories } = useCategories();
 
   const [view, setView] = useState<View>("list");
@@ -67,6 +87,8 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
   const [confirmClose, setConfirmClose] = useState(false);
   const [search, setSearch] = useState("");
   const [showSystem, setShowSystem] = useState(false);
+  // Diferencias calculadas por el servidor al pasar a la revisión (solo roles autorizados; nunca del caché de la pantalla).
+  const [reviewEntries, setReviewEntries] = useState<CountReviewEntry[] | null>(null);
   const dirty = useRef(false);
   const countInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   // Los guardados se hacen de uno en uno y en orden, para que ninguno pise al anterior.
@@ -107,8 +129,9 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
   }, [refreshList]);
 
   const readOnly = session?.status === "CLOSED";
-  // Conteo a ciegas en curso y quien lo ve no es administrador: no se le muestran cifras del sistema ni diferencias.
-  const blindLocked = !!session && session.blind && !canPeekSystem && session.status !== "CLOSED" && !session.prepared;
+  // Quien no es administrador NUNCA ve cifras del sistema ni diferencias (ni en curso ni cerrado):
+  // el servidor tampoco se las entrega.
+  const blindLocked = !!session && !canPeekSystem;
 
   function openSession(s: InventoryCountSession) {
     setSession(s);
@@ -116,6 +139,7 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
     setInputs(Object.fromEntries(s.lines.map((l) => [l.productId, l.counted === null ? "" : String(l.counted)])));
     setReasons(Object.fromEntries(s.lines.filter((l) => l.reason).map((l) => [l.productId, l.reason as LossCategory])));
     setShowSystem(!s.blind);
+    setReviewEntries(null);
     setSearch("");
     dirty.current = false;
     setView(s.status === "CLOSED" || s.prepared ? "review" : "count");
@@ -147,10 +171,10 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
         setSession(saved);
         if (!silent) toast.success("Conteo guardado.");
         return saved;
-      } catch (e) {
+      } catch (e: any) {
         dirty.current = true;
         recountedIds.forEach((id) => typedIds.current.add(id));
-        toast.error("No se pudo guardar el conteo. Intenta de nuevo.");
+        toast.error(countErrorMessage(e, "Sin conexión con el servidor: lo que escribiste sigue en pantalla pero todavía NO está guardado. Revisa tu conexión e intenta de nuevo."));
         return null;
       }
     });
@@ -184,9 +208,18 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
     setBusy(true);
     try {
       const created = await engine().startSession({ kind, scope, scopeLabel, blind, createdBy: performedBy });
+      // Desde este momento el servidor puede entregarme el stock enmascarado, pero mi caché local
+      // (IndexedDB) y la pantalla todavía tienen las cifras reales de antes. Se recarga el catálogo
+      // desde el servidor, que reemplaza el caché, y luego se repinta Inventario y Caja con lo nuevo.
+      try {
+        await container.inventoryEngine.get().reloadFromServer();
+      } catch {
+        toast.warning("El conteo se abrió, pero no se pudo actualizar el catálogo guardado en este equipo. Revisa tu conexión.");
+      }
+      await inventory.refresh();
       openSession(created);
     } catch (e: any) {
-      toast.error(e?.message === "COUNT_NO_PRODUCTS" ? "No hay nada para contar con esa selección." : "No se pudo abrir el conteo. Intenta de nuevo.");
+      toast.error(countErrorMessage(e, "No se pudo abrir el conteo. Revisa tu conexión e intenta de nuevo."));
     } finally {
       setBusy(false);
     }
@@ -199,6 +232,15 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
     }
     const saved = await persist(true);
     if (!saved) return;
+    // Quien no puede ver diferencias solo termina de contar: no se le pide (ni se le entrega) nada del sistema.
+    if (canPeekSystem) {
+      try {
+        setReviewEntries(await engine().reviewSession(saved.id));
+      } catch (e: any) {
+        toast.error(countErrorMessage(e, "No se pudieron calcular las diferencias en el servidor. Revisa tu conexión e intenta de nuevo."));
+        return;
+      }
+    }
     await inventory.refresh();
     setView("review");
   }
@@ -210,7 +252,7 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
       return session.lines
         .filter((l) => l.counted !== null && l.difference !== undefined)
         .map((l) => {
-          const baseline = l.systemStockAtCount ?? l.systemStockAtClose ?? l.systemStockAtStart;
+          const baseline = l.systemStockAtCount ?? l.systemStockAtClose ?? l.systemStockAtStart ?? 0;
           const stockNow = l.systemStockAtClose ?? baseline;
           return {
             line: l,
@@ -223,10 +265,21 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
           };
         });
     }
-    const stockById = new Map(inventory.products.map((p) => [p.id, p.stock]));
-    return computeDifferences(linesFromInputs(), stockById);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, readOnly, inventory.products, inputs, lines]);
+    // Diferencias calculadas por el SERVIDOR al pasar a la revisión (el cliente ya no calcula contra stock local).
+    const lineById = new Map(session.lines.map((l) => [l.productId, l]));
+    return (reviewEntries ?? []).map((e): CountDifference => {
+      const base: CountLine = lineById.get(e.productId) ?? { productId: e.productId, name: e.name, categoryId: "", counted: e.counted, ...(e.unit ? { unit: e.unit } : {}) };
+      return {
+        line: e.hasCountSnapshot ? { ...base, systemStockAtCount: e.systemStock } : base,
+        systemStock: e.systemStock,
+        stockNow: e.stockNow,
+        movedSince: e.movedSince,
+        counted: e.counted,
+        difference: e.difference,
+        value: e.value,
+      };
+    });
+  }, [session, readOnly, reviewEntries]);
 
   const withDiff = diffs.filter((d) => d.difference !== 0);
   const matching = diffs.length - withDiff.length;
@@ -253,7 +306,7 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
       }
     } catch (e: any) {
       setConfirmClose(false);
-      toast.error(e?.message === "COUNT_SESSION_CLOSED" ? "Este conteo ya estaba cerrado." : "No se pudo cerrar el conteo. Intenta de nuevo.");
+      toast.error(countErrorMessage(e, "No se pudo cerrar el conteo y no se ajustó nada. Revisa tu conexión e intenta de nuevo."));
     } finally {
       setBusy(false);
     }
@@ -450,7 +503,7 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
                 <div key={l.productId} className="flex items-center justify-between gap-3 px-4 py-2.5">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-vimdy-text truncate">{l.name}</p>
-                    {showSystem && <p className="text-xs text-vimdy-text-tertiary">Sistema: {fmt(l.systemStockAtStart)} {l.unit ?? "und"}</p>}
+                    {showSystem && l.systemStockAtStart !== undefined && <p className="text-xs text-vimdy-text-tertiary">Sistema: {fmt(l.systemStockAtStart)} {l.unit ?? "und"}</p>}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <input
@@ -499,7 +552,7 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
                 Guardar y seguir después
               </button>
               <button onClick={goReview} disabled={progress.counted === 0} className="flex-1 h-11 rounded-vimdy-md bg-vimdy-accent text-vimdy-background text-sm font-bold disabled:opacity-50">
-                {session.blind && !canPeekSystem ? "Terminar conteo" : "Terminar y revisar"}
+                {!canPeekSystem ? "Terminar conteo" : "Terminar y revisar"}
               </button>
             </div>
           </>
@@ -510,18 +563,22 @@ export function InventoryCountModal({ inventory, onClose }: { inventory: Invento
           <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
             <div className="rounded-vimdy-md border border-vimdy-border p-5 text-center space-y-2">
               <CheckCircle2 size={28} className="mx-auto text-vimdy-success" />
-              <p className="text-base font-bold text-vimdy-text">Conteo guardado</p>
+              <p className="text-base font-bold text-vimdy-text">{readOnly ? "Conteo cerrado" : "Conteo guardado"}</p>
               <p className="text-sm text-vimdy-text-secondary">
-                Contaste {progress.counted} de {progress.total} productos. Es un conteo a ciegas: un administrador revisa las diferencias y aplica el ajuste.
+                {readOnly
+                  ? `Este conteo ya fue cerrado${session.closedAt ? ` el ${dateText(session.closedAt)}` : ""}. Las diferencias solo las ve el administrador.`
+                  : `Contaste ${progress.counted} de ${progress.total} productos. Es un conteo a ciegas: un administrador revisa las diferencias y aplica el ajuste.`}
               </p>
-              {progress.counted < progress.total && (
+              {!readOnly && !session.prepared && progress.counted < progress.total && (
                 <p className="text-xs text-vimdy-text-tertiary">Quedan {progress.total - progress.counted} sin contar. Puedes volver y terminarlos.</p>
               )}
             </div>
             <div className="flex gap-2">
-              <button onClick={back} className="h-11 px-4 rounded-vimdy-md border border-vimdy-border text-vimdy-text-secondary text-sm font-semibold hover:text-vimdy-text">
-                Volver a contar
-              </button>
+              {!readOnly && !session.prepared && (
+                <button onClick={back} className="h-11 px-4 rounded-vimdy-md border border-vimdy-border text-vimdy-text-secondary text-sm font-semibold hover:text-vimdy-text">
+                  Volver a contar
+                </button>
+              )}
               <button onClick={onClose} className="flex-1 h-11 rounded-vimdy-md bg-vimdy-accent text-vimdy-background text-sm font-bold">
                 Listo
               </button>

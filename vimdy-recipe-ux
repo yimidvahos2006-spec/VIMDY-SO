@@ -1,0 +1,556 @@
+diff -ruN --strip-trailing-cr orig/src/presentation/components/inventory/ProductFormModal.tsx src_proj/src/presentation/components/inventory/ProductFormModal.tsx
+--- orig/src/presentation/components/inventory/ProductFormModal.tsx	2026-10-23 17:03:42.000000000 +0000
++++ src_proj/src/presentation/components/inventory/ProductFormModal.tsx	2026-10-23 18:02:51.942877281 +0000
+@@ -20,6 +20,7 @@
+ import { useCanUse } from "../../../hooks/useCanUse";
+ import { useTranslation } from "../../../core/i18n/useTranslation";
+ import { discardQuickIngredients } from "./quickIngredientCleanup";
++import { QuickIngredientCard, QuickIngredientPayload } from "./QuickIngredientCard";
+ import { vimdyCore } from "../../../core/VimdyCore";
+ import { filterIngredientOptions, findRecipeRowProblem, normalizeSearch, sanitizeQuantityInput } from "./recipeFormHelpers";
+ 
+@@ -135,8 +136,6 @@
+   const [creatingSupplier, setCreatingSupplier] = useState(false);
+   const [showQuickIngredient, setShowQuickIngredient] = useState(false);
+   const [quickIngredientName, setQuickIngredientName] = useState("");
+-  const [quickIngredientPurchasePrice, setQuickIngredientPurchasePrice] = useState("");
+-  const [quickIngredientUnit, setQuickIngredientUnit] = useState("unidad");
+   const [creatingIngredient, setCreatingIngredient] = useState(false);
+   // Insumos creados con "ingrediente rápido" en esta sesión del formulario.
+   // Si el producto no se guarda, se borran al cerrar para no dejar basura.
+@@ -761,8 +760,8 @@
+   };
+   React.useEffect(() => () => cleanupOnUnmountRef.current(), []);
+ 
+-  async function handleCreateQuickIngredient(name: string) {
+-    const purchasePrice = quickIngredientPurchasePrice.trim() ? parseMoneyInput(quickIngredientPurchasePrice) : undefined;
++  async function handleCreateQuickIngredient(payload: QuickIngredientPayload) {
++    const { name, purchasePrice, storedUnit, quantity, recipeUnit } = payload;
+     setCreatingIngredient(true);
+     try {
+       // El insumo nuevo va a una categoría de INSUMOS, nunca a la del producto.
+@@ -793,7 +792,7 @@
+         purchasePrice,
+         stock: 0,
+         minStock: 0,
+-        unit: quickIngredientUnit,
++        unit: storedUnit,
+         isIngredient: true,
+         active: true
+       }, undefined, { knownProducts: allProducts, deferAudit: true });
+@@ -801,13 +800,14 @@
+       setAllProducts((prev) => [...prev, created]);
+ 
+       const newRowId = crypto.randomUUID();
+-      setRecipeRows((prev) => [...prev, { rowId: newRowId, productId: created.id, quantity: "", optional: false, unit: "" }]);
+-      setFocusRowId(newRowId);
++      // Si ya escribió la cantidad en la tarjeta, la fila nace completa (sin otro paso).
++      setRecipeRows((prev) => [...prev, { rowId: newRowId, productId: created.id, quantity, optional: false, unit: recipeUnit }]);
++      // Con cantidad lista, el foco vuelve al buscador para seguir con el siguiente ingrediente.
++      if (quantity) ingredientSearchRef.current?.focus();
++      else setFocusRowId(newRowId);
+ 
+       setShowQuickIngredient(false);
+       setQuickIngredientName("");
+-      setQuickIngredientPurchasePrice("");
+-      setQuickIngredientUnit("unidad");
+       toast.success(`"${name}" agregado a la receta. Se guardará en tus Insumos cuando guardes el producto.`);
+     } catch {
+       toast.error("No se pudo crear el ingrediente.");
+@@ -1224,8 +1224,8 @@
+                       <div className="min-w-0 flex-1">
+                         <p className="truncate text-vimdy-text text-sm">{ing?.name ?? "Ingrediente eliminado"}</p>
+                         {converted !== null && converted > 0 && (
+-                          <p className={`text-xs ${unitCost > 0 ? "text-vimdy-text-tertiary" : "text-vimdy-warning"}`}>
+-                            {unitCost > 0 ? money(converted * unitCost) : "sin costo registrado"}
++                          <p className={`text-xs ${unitCost > 0 ? "text-vimdy-text-tertiary" : "text-vimdy-accent"}`}>
++                            {unitCost > 0 ? money(converted * unitCost) : "✨ agrega su precio para ver el costo"}
+                           </p>
+                         )}
+                       </div>
+@@ -1353,79 +1353,15 @@
+                 </p>
+ 
+                 {showQuickIngredient && (
+-                  <div className="flex flex-wrap items-center gap-2 p-3 rounded-vimdy-sm bg-vimdy-recipe/5 border border-vimdy-recipe/20">
+-                    <input
+-                      autoFocus
+-                      value={quickIngredientName}
+-                      onChange={(e) => setQuickIngredientName(e.target.value)}
+-                      placeholder="Nombre del ingrediente (ej: Leche, Harina...)"
+-                      className="basis-full min-w-0 h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-recipe"
+-                      onKeyDown={(e) => {
+-                        if (e.key === "Enter") {
+-                          const trimmed = quickIngredientName.trim();
+-                          if (!trimmed) return;
+-                          handleCreateQuickIngredient(trimmed);
+-                        }
+-                        if (e.key === "Escape") {
+-                          setShowQuickIngredient(false);
+-                          setQuickIngredientName("");
+-                          setQuickIngredientPurchasePrice("");
+-                        }
+-                      }}
+-                     />
+-                     <select
+-                       value={quickIngredientUnit}
+-                       onChange={(e) => setQuickIngredientUnit(e.target.value)}
+-                       aria-label="Unidad de medida del ingrediente"
+-                       className="w-28 shrink-0 h-10 px-2 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-recipe"
+-                     >
+-                       <option value="unidad">Unidad</option>
+-                       <option value="kg">kg</option>
+-                       <option value="g">g</option>
+-                       <option value="lt">lt</option>
+-                       <option value="ml">ml</option>
+-                       <option value="lb">lb</option>
+-                       <option value="paquete">Paquete</option>
+-                       <option value="caja">Caja</option>
+-                     </select>
+-                     <MoneyInput
+-                       value={quickIngredientPurchasePrice}
+-                      onValueChange={setQuickIngredientPurchasePrice}
+-                      placeholder="Precio de compra (opcional)"
+-                      aria-label="Precio de compra (opcional)"
+-                      title="Cuánto te cuesta comprar una unidad de este ingrediente"
+-                      className="flex-1 min-w-0 h-10 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-recipe"
+-                    />
+-                    <p className="basis-full text-vimdy-text-tertiary text-xs">
+-                      Unidad: si lo cuentas por pieza (tajada, huevo, pan) deja "Unidad"; si lo pesas o mides, elige kg, g, lt o ml. El precio es lo que pagas por esa unidad (ej: un kg). La cantidad que lleva el producto la escribes al crearlo.
+-                    </p>
+-                    <div className="basis-full flex items-center gap-2">
+-                      <button
+-                        type="button"
+-                        onClick={async () => {
+-                          const trimmed = quickIngredientName.trim();
+-                          if (!trimmed) return;
+-                          await handleCreateQuickIngredient(trimmed);
+-                        }}
+-                        disabled={creatingIngredient || !quickIngredientName.trim()}
+-                        className="flex-1 h-10 px-4 rounded-vimdy-sm bg-vimdy-recipe text-white hover:bg-vimdy-recipe/90 disabled:opacity-40 transition text-sm font-medium whitespace-nowrap"
+-                      >
+-                        {creatingIngredient ? "Creando..." : "Crear y agregar"}
+-                      </button>
+-                      <button
+-                        type="button"
+-                        onClick={() => {
+-                          setShowQuickIngredient(false);
+-                          setQuickIngredientName("");
+-                          setQuickIngredientPurchasePrice("");
+-                        }}
+-                        aria-label="Cancelar"
+-                        className="h-10 w-10 shrink-0 rounded-vimdy-sm border border-vimdy-border text-vimdy-text-secondary hover:bg-vimdy-surface flex items-center justify-center"
+-                      >
+-                        <X size={16} />
+-                      </button>
+-                    </div>
+-                  </div>
++                  <QuickIngredientCard
++                    initialName={quickIngredientName}
++                    creating={creatingIngredient}
++                    onSubmit={handleCreateQuickIngredient}
++                    onCancel={() => {
++                      setShowQuickIngredient(false);
++                      setQuickIngredientName("");
++                    }}
++                  />
+                 )}
+ 
+                 {recipeSummary && (
+diff -ruN --strip-trailing-cr orig/src/presentation/components/inventory/ProductionIntelligencePanel.tsx src_proj/src/presentation/components/inventory/ProductionIntelligencePanel.tsx
+--- orig/src/presentation/components/inventory/ProductionIntelligencePanel.tsx	2026-08-21 20:20:23.000000000 +0000
++++ src_proj/src/presentation/components/inventory/ProductionIntelligencePanel.tsx	2026-10-23 18:02:51.943681286 +0000
+@@ -24,7 +24,8 @@
+   ChefHat,
+   ShoppingCart,
+   History,
+-  Clock3
++  Clock3,
++  Sparkles
+ } from "lucide-react";
+ import { RecipeCost, Profitability, ProductionCapacity, ProductionLevel } from "../../../core/engines/RecipeEngine";
+ 
+@@ -138,12 +139,19 @@
+         <h3 className="text-vimdy-text font-semibold text-sm">Producción Inteligente</h3>
+       </div>
+ 
++      {/* Asistente financiero: invita, no alarma. No bloquea nada ni usa rojo. */}
+       {profitability.costUnreliable && (
+-        <p className="text-vimdy-warning text-xs flex items-center gap-1.5">
+-          <AlertTriangle size={12} className="shrink-0" />
+-          Costo no confiable: falta precio de compra de {cost.missingCostIngredients.join(", ")}. Las cifras de
+-          abajo asumen $0 para ese ingrediente.
+-        </p>
++        <div
++          role="status"
++          className="rounded-vimdy-sm border border-vimdy-accent/25 bg-gradient-to-r from-vimdy-accent/10 to-vimdy-recipe/10 px-3 py-2.5 flex items-start gap-2"
++        >
++          <Sparkles size={14} className="text-vimdy-accent shrink-0 mt-0.5" aria-hidden />
++          <p className="text-vimdy-text-secondary text-xs leading-relaxed">
++            <strong className="text-vimdy-text">Tip:</strong> agrega el precio de compra de{" "}
++            <strong className="text-vimdy-text">{cost.missingCostIngredients.join(", ")}</strong> para ver tu ganancia neta
++            exacta. Mientras tanto, la ganancia que ves es una estimación.
++          </p>
++        </div>
+       )}
+ 
+       {/* Tarjetas principales */}
+@@ -159,14 +167,14 @@
+         )}
+         <MetricCard
+           icon={<TrendingUp size={13} />}
+-          label="Ganancia"
+-          value={money(profitability.profit)}
++          label={profitability.costUnreliable ? "Ganancia estimada" : "Ganancia"}
++          value={`${profitability.costUnreliable ? "~" : ""}${money(profitability.profit)}`}
+           valueClassName={profitability.profit >= 0 ? "text-vimdy-success" : "text-vimdy-danger"}
+         />
+         <MetricCard
+           icon={<Percent size={13} />}
+-          label="Margen"
+-          value={`${Math.round(profitability.marginPercent)}%`}
++          label={profitability.costUnreliable ? "Margen estimado" : "Margen"}
++          value={`${profitability.costUnreliable ? "~" : ""}${Math.round(profitability.marginPercent)}%`}
+           valueClassName={profitability.marginPercent >= 0 ? "text-vimdy-success" : "text-vimdy-danger"}
+         />
+         <MetricCard icon={<Boxes size={13} />} label="Capacidad actual" value={`${capacity.maxUnits} unidades`} />
+@@ -226,8 +234,8 @@
+                     {row.quantity}
+                     {row.unit ? ` ${row.unit}` : ""}
+                   </td>
+-                  <td className="px-3 py-2">{row.missingCost ? "Sin costo" : money(row.unitCost)}</td>
+-                  <td className="px-3 py-2">{row.missingCost ? "Sin costo" : money(row.subtotal)}</td>
++                  <td className="px-3 py-2">{row.missingCost ? <span className="text-vimdy-accent">✨ Pendiente</span> : money(row.unitCost)}</td>
++                  <td className="px-3 py-2">{row.missingCost ? <span className="text-vimdy-text-tertiary">—</span> : money(row.subtotal)}</td>
+                   <td className="px-3 py-2 text-center">{ROW_DOT[row.rowLevel]}</td>
+                 </tr>
+               ))}
+diff -ruN --strip-trailing-cr orig/src/presentation/components/inventory/QuickIngredientCard.tsx src_proj/src/presentation/components/inventory/QuickIngredientCard.tsx
+--- orig/src/presentation/components/inventory/QuickIngredientCard.tsx	1970-01-01 00:00:00.000000000 +0000
++++ src_proj/src/presentation/components/inventory/QuickIngredientCard.tsx	2026-10-23 18:02:34.378458287 +0000
+@@ -0,0 +1,300 @@
++// src/presentation/components/inventory/QuickIngredientCard.tsx
++//
++// Tarjeta para crear un ingrediente nuevo SIN salir de la receta.
++//
++// Problema de UX que resuelve: el campo "Precio de compra" aparecía antes que
++// la cantidad y los dueños escribían lo que cuestan los 200 g del plato en
++// vez de lo que cuesta el kilo completo del supermercado.
++//
++// Orden nuevo (de lo más natural a lo secundario):
++//   1. Nombre                       -> "¿Qué ingrediente es?"
++//   2. Cantidad que lleva el plato  -> "200 [g]"            (PRINCIPAL)
++//   3. ¿Cómo lo compras?            -> chips Kilo/Litro/...  (1 toque)
++//   4. Precio del formato completo  -> con microcopy y preview en vivo (OPCIONAL)
++//
++// Es solo presentación: no toca el motor. Devuelve un payload y el padre
++// (ProductFormModal) crea el insumo y agrega la fila a la receta.
++
++import React, { useMemo, useRef, useState } from "react";
++import { Sparkles, X } from "lucide-react";
++import { MoneyInput } from "../ui/MoneyInput";
++import { parseMoneyInput } from "../../../core/utils/parseMoneyInput";
++import { compatibleUnits, convertQuantity, normalizeUnit } from "../../../core/utils/unitConversion";
++import { parseDecimalInput } from "./importHelpers";
++import { sanitizeQuantityInput } from "./recipeFormHelpers";
++
++export interface QuickIngredientPayload {
++  name: string;
++  /** Unidad en la que se compra/guarda el insumo (kg, lt, lb, unidad...). El precio es POR esta unidad. */
++  storedUnit: string;
++  /** Precio de compra de UNA `storedUnit` completa. undefined si no lo escribió. */
++  purchasePrice?: number;
++  /** Cantidad que lleva el plato, tal cual la escribió ("200"). Puede venir vacía. */
++  quantity: string;
++  /** Unidad en la que escribió la cantidad ("g"). "" = misma que storedUnit. */
++  recipeUnit: string;
++}
++
++interface Props {
++  initialName: string;
++  creating: boolean;
++  onSubmit: (payload: QuickIngredientPayload) => void | Promise<void>;
++  onCancel: () => void;
++}
++
++/** Formatos de compra más comunes: un toque en vez de un <select> con 8 opciones. */
++const PURCHASE_FORMATS: ReadonlyArray<{ value: string; label: string; emoji: string }> = [
++  { value: "kg", label: "Kilo", emoji: "⚖️" },
++  { value: "lt", label: "Litro", emoji: "🥛" },
++  { value: "lb", label: "Libra", emoji: "🧺" },
++  { value: "unidad", label: "Unidad", emoji: "🥚" }
++];
++const OTHER_FORMATS: ReadonlyArray<{ value: string; label: string }> = [
++  { value: "paquete", label: "Paquete" },
++  { value: "caja", label: "Caja" }
++];
++
++/** Cómo se llama el formato completo en lenguaje de tienda. */
++function formatNoun(unit: string): { noun: string; article: string; label: string } {
++  switch (normalizeUnit(unit)) {
++    case "kg": return { noun: "kilo", article: "el", label: "del kilo completo" };
++    case "litro": return { noun: "litro", article: "el", label: "del litro completo" };
++    case "libra": return { noun: "libra", article: "la", label: "de la libra completa" };
++    case "paquete": return { noun: "paquete", article: "el", label: "del paquete completo" };
++    case "caja": return { noun: "caja", article: "la", label: "de la caja completa" };
++    default: return { noun: "unidad", article: "cada", label: "de cada unidad" };
++  }
++}
++
++const UNIT_WORD: Record<string, string> = { g: "gramos", kg: "kilos", libra: "libras", ml: "mililitros", litro: "litros", unidad: "unidades" };
++const money = (v: number) => `$${Math.round(v).toLocaleString("es-CO")}`;
++
++const fieldBase =
++  "h-11 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-recipe";
++
++export function QuickIngredientCard({ initialName, creating, onSubmit, onCancel }: Props) {
++  const [name, setName] = useState(initialName);
++  const [storedUnit, setStoredUnit] = useState("kg");
++  const [quantity, setQuantity] = useState("");
++  const [recipeUnit, setRecipeUnit] = useState("g");
++  const [price, setPrice] = useState("");
++
++  const qtyRef = useRef<HTMLInputElement>(null);
++  const priceWrapRef = useRef<HTMLDivElement>(null);
++
++  const unitChoices = useMemo(() => compatibleUnits(storedUnit), [storedUnit]);
++  const { noun, article, label } = formatNoun(storedUnit);
++  const isCountable = !["kg", "litro", "libra"].includes(normalizeUnit(storedUnit));
++
++  // Al cambiar el formato de compra, la unidad de la receta pasa a la más natural:
++  // kilo/libra -> gramos, litro -> mililitros, el resto -> la misma unidad.
++  function pickFormat(value: string) {
++    setStoredUnit(value);
++    const norm = normalizeUnit(value);
++    setRecipeUnit(norm === "kg" || norm === "libra" ? "g" : norm === "litro" ? "ml" : norm);
++  }
++
++  // Preview en vivo: demuestra que VIMDY hace la conversión, no el usuario.
++  const preview = useMemo(() => {
++    const qty = parseDecimalInput(quantity);
++    const p = parseMoneyInput(price);
++    if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(p) || p <= 0) return null;
++    const converted = convertQuantity(qty, recipeUnit, storedUnit);
++    if (converted === null) return null;
++    return { cost: converted * p, qty, unitWord: UNIT_WORD[normalizeUnit(recipeUnit)] ?? recipeUnit };
++  }, [quantity, price, recipeUnit, storedUnit]);
++
++  // Sanity check amistoso (no bloquea): precio por kilo de un solo dígito suele ser el precio de los gramos.
++  const priceLooksTooLow = (() => {
++    const p = parseMoneyInput(price);
++    return Number.isFinite(p) && p > 0 && p < 100 && !isCountable;
++  })();
++
++  function submit() {
++    const trimmed = name.trim();
++    if (!trimmed || creating) return;
++    const parsedPrice = price.trim() ? parseMoneyInput(price) : undefined;
++    void onSubmit({
++      name: trimmed,
++      storedUnit,
++      purchasePrice: parsedPrice !== undefined && Number.isFinite(parsedPrice) && parsedPrice > 0 ? parsedPrice : undefined,
++      quantity: quantity.trim(),
++      recipeUnit: normalizeUnit(recipeUnit) === normalizeUnit(storedUnit) ? "" : recipeUnit
++    });
++  }
++
++  return (
++    <div
++      className="p-3 sm:p-4 rounded-vimdy-md bg-vimdy-recipe/5 border border-vimdy-recipe/20 space-y-3"
++      onKeyDown={(e) => {
++        if (e.key === "Escape") onCancel();
++      }}
++    >
++      {/* 1 · Nombre */}
++      <input
++        autoFocus
++        value={name}
++        onChange={(e) => setName(e.target.value)}
++        onKeyDown={(e) => {
++          if (e.key === "Enter") {
++            e.preventDefault();
++            qtyRef.current?.focus();
++          }
++        }}
++        placeholder="¿Qué ingrediente es? (ej: Arroz, Leche...)"
++        aria-label="Nombre del ingrediente"
++        className={`w-full ${fieldBase}`}
++      />
++
++      {/* 2 · Cantidad que lleva el plato (PRINCIPAL) */}
++      <div>
++        <label className="block text-vimdy-text text-xs font-semibold mb-1.5">
++          ¿Cuánto lleva <span className="text-vimdy-recipe">cada plato</span>?
++        </label>
++        <div className="flex items-center gap-2">
++          <input
++            ref={qtyRef}
++            type="text"
++            inputMode="decimal"
++            value={quantity}
++            onChange={(e) => setQuantity(sanitizeQuantityInput(e.target.value))}
++            onKeyDown={(e) => {
++              if (e.key === "Enter") {
++                e.preventDefault();
++                priceWrapRef.current?.querySelector<HTMLInputElement>("input")?.focus();
++              }
++            }}
++            placeholder="200"
++            aria-label="Cantidad que lleva el plato"
++            className={`w-28 text-lg font-semibold ${fieldBase} h-12`}
++          />
++          {unitChoices.length > 1 ? (
++            <div role="radiogroup" aria-label="Unidad de la cantidad" className="flex gap-1">
++              {unitChoices.map((u) => (
++                <button
++                  key={u}
++                  type="button"
++                  role="radio"
++                  aria-checked={recipeUnit === u}
++                  onClick={() => setRecipeUnit(u)}
++                  className={`h-12 min-w-12 px-3 rounded-vimdy-sm border text-sm font-medium transition ${
++                    recipeUnit === u
++                      ? "bg-vimdy-recipe text-white border-vimdy-recipe"
++                      : "bg-vimdy-surface text-vimdy-text-secondary border-vimdy-border hover:bg-vimdy-surface-hover"
++                  }`}
++                >
++                  {u === "libra" ? "lb" : u === "litro" ? "lt" : u}
++                </button>
++              ))}
++            </div>
++          ) : (
++            <span className="text-vimdy-text-secondary text-sm">{normalizeUnit(storedUnit)}</span>
++          )}
++        </div>
++      </div>
++
++      {/* 3 · ¿Cómo lo compras? */}
++      <div>
++        <p className="text-vimdy-text-secondary text-xs font-medium mb-1.5">¿Cómo lo compras?</p>
++        <div className="flex flex-wrap gap-1.5">
++          {PURCHASE_FORMATS.map((f) => {
++            const active = normalizeUnit(storedUnit) === normalizeUnit(f.value);
++            return (
++              <button
++                key={f.value}
++                type="button"
++                aria-pressed={active}
++                onClick={() => pickFormat(f.value)}
++                className={`h-9 px-3 rounded-full border text-xs font-medium transition flex items-center gap-1.5 ${
++                  active
++                    ? "bg-vimdy-recipe/15 text-vimdy-recipe border-vimdy-recipe/50"
++                    : "bg-vimdy-surface text-vimdy-text-secondary border-vimdy-border hover:bg-vimdy-surface-hover"
++                }`}
++              >
++                <span aria-hidden>{f.emoji}</span>
++                {f.label}
++              </button>
++            );
++          })}
++          <select
++            value={OTHER_FORMATS.some((o) => o.value === storedUnit) ? storedUnit : ""}
++            onChange={(e) => e.target.value && pickFormat(e.target.value)}
++            aria-label="Otro formato de compra"
++            className="h-9 px-2 rounded-full bg-vimdy-surface border border-vimdy-border text-vimdy-text-secondary text-xs focus:outline-none focus:border-vimdy-recipe"
++          >
++            <option value="">Otro…</option>
++            {OTHER_FORMATS.map((o) => (
++              <option key={o.value} value={o.value}>
++                {o.label}
++              </option>
++            ))}
++          </select>
++        </div>
++      </div>
++
++      {/* 4 · Precio del formato COMPLETO (secundario, con ayuda) */}
++      <div className="rounded-vimdy-sm bg-vimdy-surface/70 border border-vimdy-border-subtle p-3 space-y-2">
++        <div className="flex items-center justify-between gap-2">
++          <label className="text-vimdy-text-secondary text-xs font-medium">
++            Precio {label}{" "}
++            <span className="text-vimdy-text-tertiary font-normal">(opcional)</span>
++          </label>
++        </div>
++        <div ref={priceWrapRef}>
++        <MoneyInput
++          value={price}
++          onValueChange={setPrice}
++          onKeyDown={(e) => {
++            if (e.key === "Enter") {
++              e.preventDefault();
++              submit();
++            }
++          }}
++          placeholder="Ej: 6.500"
++          aria-label={`Precio de compra de ${article === "cada" ? "cada" : article} ${noun}`}
++          className={`w-full ${fieldBase}`}
++        />
++        </div>
++        <p className="text-vimdy-text-tertiary text-xs leading-relaxed">
++          {isCountable
++            ? `Escribe cuánto te cuesta ${article === "cada" ? "cada" : article} ${noun}. VIMDY lo multiplica por las que lleva el plato.`
++            : `Escribe cuánto te costó ${article} ${noun} completo en el supermercado. VIMDY calcula solo los ${
++                UNIT_WORD[normalizeUnit(recipeUnit)] ?? "gramos"
++              }.`}
++        </p>
++
++        {preview && (
++          <p className="text-vimdy-accent text-xs flex items-center gap-1.5" aria-live="polite">
++            <Sparkles size={12} className="shrink-0" />
++            {preview.qty.toLocaleString("es-CO")} {preview.unitWord} de {name.trim() || "este ingrediente"} te cuestan{" "}
++            <strong>≈ {money(preview.cost)}</strong> por plato
++          </p>
++        )}
++        {priceLooksTooLow && (
++          <p className="text-vimdy-text-tertiary text-xs">
++            💡 Recuerda: es el precio del {noun} completo, no de los {UNIT_WORD[normalizeUnit(recipeUnit)] ?? "gramos"} del plato.
++          </p>
++        )}
++      </div>
++
++      <div className="flex items-center gap-2">
++        <button
++          type="button"
++          onClick={submit}
++          disabled={creating || !name.trim()}
++          className="flex-1 h-11 px-4 rounded-vimdy-sm bg-vimdy-recipe text-white hover:bg-vimdy-recipe/90 disabled:opacity-40 transition text-sm font-medium whitespace-nowrap"
++        >
++          {creating ? "Creando..." : "Crear y agregar a la receta"}
++        </button>
++        <button
++          type="button"
++          onClick={onCancel}
++          aria-label="Cancelar"
++          className="h-11 w-11 shrink-0 rounded-vimdy-sm border border-vimdy-border text-vimdy-text-secondary hover:bg-vimdy-surface flex items-center justify-center"
++        >
++          <X size={16} />
++        </button>
++      </div>
++    </div>
++  );
++}
+diff -ruN --strip-trailing-cr orig/src/presentation/components/products/ProductionSection.tsx src_proj/src/presentation/components/products/ProductionSection.tsx
+--- orig/src/presentation/components/products/ProductionSection.tsx	2026-09-29 05:30:43.000000000 +0000
++++ src_proj/src/presentation/components/products/ProductionSection.tsx	2026-10-23 18:02:51.943987222 +0000
+@@ -66,7 +66,7 @@
+           ? `Costo ${money(recipeSummary.cost.costPerPortion)} · Margen ${Math.round(
+               recipeSummary.profitability.marginPercent
+             )}% · ${recipeSummary.capacity.maxUnits} unidades posibles`
+-          : "Agrega ingredientes con precio de compra en la receta para ver costo, ganancia y capacidad de producción."
++          : "Agrega ingredientes a la receta y VIMDY calcula costo, ganancia y capacidad por ti."
+       }
+       defaultOpen={!!recipeSummary}
+     >
+@@ -89,9 +89,9 @@
+         />
+       ) : (
+         <p className="text-vimdy-text-tertiary text-sm">
+-          Agrega al menos un ingrediente en "Consumo de ingredientes" con precio de compra
+-          cargado para ver aquí el costo, la ganancia, el margen y cuántas unidades puedes
+-          preparar hoy con el inventario actual.
++          Agrega al menos un ingrediente a la receta y aquí verás el costo, la ganancia, el margen y
++          cuántas unidades puedes preparar hoy. Si además registras el precio de compra, los números
++          quedan exactos.
+         </p>
+       )}
+     </FormSectionCard>

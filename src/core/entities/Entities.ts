@@ -55,6 +55,17 @@ export interface Product {
   readonly price: number;
   readonly stock: number;
   readonly minStock: number;
+  /**
+   * STOCK ENMASCARADO (conteo a ciegas activo). Cuando el servidor marca
+   * `stockMasked`, `stock` NO es la cantidad real: es un valor de "banda" que
+   * solo sirve para que `getStockStatus()` siga dando el estado correcto
+   * (agotado / bajo / normal), y `purchasePrice` no viene. Nunca se debe mostrar
+   * ni usar como cantidad real: mostrar `stockStatus` en su lugar. Lo pone el
+   * servidor (inventory_products_read) y jamás se guarda en la base.
+   */
+  readonly stockMasked?: boolean;
+  /** Estado calculado por el servidor para un producto enmascarado. */
+  readonly stockStatus?: "AVAILABLE" | "LOW" | "OUT";
   readonly barcode?: string;
   /** Código interno del negocio (Stock Keeping Unit). Único si se define. */
   readonly sku?: string;

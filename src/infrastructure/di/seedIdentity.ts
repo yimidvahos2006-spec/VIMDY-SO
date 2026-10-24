@@ -36,6 +36,7 @@ async function doSeed(
     { id: "inventory.edit", module: "inventory", description: "Editar productos y precios" },
     { id: "inventory.delete", module: "inventory", description: "Eliminar productos" },
     { id: "inventory.adjust", module: "inventory", description: "Ajustar stock manualmente" },
+    { id: "inventory.viewCosts", module: "inventory", description: "Ver costos y valor del inventario" },
     { id: "customers.view", module: "customers", description: "Ver clientes" },
     { id: "customers.create", module: "customers", description: "Crear clientes" },
     { id: "customers.edit", module: "customers", description: "Editar clientes" },

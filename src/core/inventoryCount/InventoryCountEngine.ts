@@ -1,39 +1,39 @@
 import type { LossCategory } from "../entities/Entities";
-import type { IRepository } from "../../infrastructure/di/repositories/IRepository";
-import type { InventoryEngine } from "../engines/InventoryEngine";
-import { getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
-import {
-  buildCountLines,
-  computeDifferences,
-  selectProductsForCount,
-  type CountKind,
-  type CountLine,
-  type CountScope,
-  type InventoryCountSession
+import { companyConfigStore } from "../store/companyConfigStore";
+import type { ApplyFailure, IInventoryCountGateway } from "./IInventoryCountGateway";
+import type {
+  CountKind,
+  CountLine,
+  CountReviewEntry,
+  CountScope,
+  InventoryCountSession
 } from "./inventoryCountLogic";
 
-export interface ApplyFailure {
-  name: string;
-  error: string;
-}
+export type { ApplyFailure } from "./IInventoryCountGateway";
 
 /**
  * Sesiones de conteo guiado: abrir, guardar lo contado y cerrar aplicando las
  * diferencias al inventario con movimientos de Kardex.
+ *
+ * REGLA P0 (conteo a ciegas): este motor YA NO lee ni calcula stock. Toda cifra
+ * del sistema (foto al abrir, foto al contar, diferencias) la toma y la protege
+ * el SERVIDOR (ver supabase/migrations/20261023120000_inventory_count_blind_security.sql):
+ *   · Quien cuenta recibe solo producto + lo que contó; nunca stock ni diferencias.
+ *   · Revisar y cerrar es exclusivo de los roles autorizados en el servidor;
+ *     para el resto estas operaciones lanzan COUNT_FORBIDDEN.
+ *   · Si el servidor no responde, la operación falla (COUNT_SERVER_ERROR) y la
+ *     sesión queda como estaba: jamás se improvisa con datos locales.
  */
 export class InventoryCountEngine {
-  constructor(
-    private readonly repository: IRepository<InventoryCountSession>,
-    private readonly inventory: InventoryEngine
-  ) {}
+  constructor(private readonly gateway: IInventoryCountGateway) {}
 
   public async listSessions(): Promise<InventoryCountSession[]> {
-    const all = await this.repository.findAll();
+    const all = await this.gateway.list();
     return [...all].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
   }
 
   public async getSession(id: string): Promise<InventoryCountSession | null> {
-    return this.repository.findById(id);
+    return this.gateway.get(id);
   }
 
   public async startSession(params: {
@@ -43,146 +43,50 @@ export class InventoryCountEngine {
     blind: boolean;
     createdBy: string;
   }): Promise<InventoryCountSession> {
-    const products = await this.inventory.listAll();
-    const selected = selectProductsForCount(products, params.kind, params.scope);
-    if (selected.length === 0) throw new Error("COUNT_NO_PRODUCTS");
-
-    const session: InventoryCountSession = {
-      id: crypto.randomUUID(),
-      status: "OPEN",
-      blind: params.blind,
-      scopeLabel: params.scopeLabel,
-      kind: params.kind,
-      createdAt: new Date(),
-      createdBy: params.createdBy,
-      lines: buildCountLines(selected)
-    };
-    await this.repository.save(session);
-    return (await this.repository.findById(session.id)) ?? session;
+    return this.gateway.start(params);
   }
 
-  /** Guarda lo contado. Una sesión cerrada no se edita. */
+  /**
+   * Guarda lo contado. Una sesión cerrada no se edita (el servidor lo rechaza).
+   * Solo se envían `productId` y `counted`: la "foto" de lo que decía el sistema
+   * la pone el servidor, leyendo la base en ese instante.
+   * `recountedIds`: productos en cuyo campo la persona volvió a escribir (aunque
+   * sea el mismo número); solo esos refrescan su foto.
+   */
   public async saveCounts(
     session: InventoryCountSession,
     lines: CountLine[],
     options: { recountedIds?: readonly string[] } = {}
   ): Promise<InventoryCountSession> {
-    const current = await this.repository.findById(session.id);
-    if (!current) throw new Error("COUNT_SESSION_NOT_FOUND");
-    if (current.status === "CLOSED") throw new Error("COUNT_SESSION_CLOSED");
-    if (current.prepared) throw new Error("COUNT_SESSION_CLOSING");
+    return this.gateway.save(
+      session.id,
+      lines.map((l) => ({ productId: l.productId, counted: l.counted })),
+      options.recountedIds ?? []
+    );
+  }
 
-    // Por cada cantidad nueva o cambiada se guarda "la foto" de lo que decía el sistema en ese
-    // instante (leída de la base, no de la pantalla). Las fotos nunca vienen de afuera: las
-    // cantidades que no cambiaron conservan la suya y las que se borran la pierden.
-    // `recountedIds`: productos en cuyo campo la persona volvió a escribir (aunque sea el mismo número).
-    // Solo esos refrescan la foto; pasar por un campo sin escribir nada NO la cambia, porque el conteo
-    // de hace un rato sigue siendo cierto para ese momento.
-    const recounted = new Set(options.recountedIds ?? []);
-    const storedById = new Map(current.lines.map((l) => [l.productId, l]));
-    let stockById: Map<string, number> | null = null;
-    const now = new Date().toISOString();
-    const merged: CountLine[] = [];
-    for (const incoming of lines) {
-      const next: CountLine = { ...incoming };
-      delete next.systemStockAtCount;
-      delete next.countedAt;
-      if (incoming.counted !== null) {
-        const stored = storedById.get(incoming.productId);
-        if (
-          stored &&
-          stored.counted === incoming.counted &&
-          stored.systemStockAtCount !== undefined &&
-          !recounted.has(incoming.productId)
-        ) {
-          next.systemStockAtCount = stored.systemStockAtCount;
-          if (stored.countedAt) next.countedAt = stored.countedAt;
-        } else {
-          if (!stockById) {
-            const products = await this.inventory.listAll();
-            stockById = new Map(products.map((p) => [p.id, p.stock]));
-          }
-          const stockNow = stockById.get(incoming.productId);
-          if (stockNow !== undefined) {
-            next.systemStockAtCount = stockNow;
-            next.countedAt = now;
-          }
-        }
-      }
-      merged.push(next);
-    }
-
-    await this.repository.update({ ...current, lines: merged });
-    return (await this.repository.findById(session.id)) ?? { ...current, lines: merged };
+  /** Diferencias para revisar antes de cerrar. Solo roles autorizados (si no: COUNT_FORBIDDEN). */
+  public async reviewSession(sessionId: string): Promise<CountReviewEntry[]> {
+    return this.gateway.review(sessionId);
   }
 
   /**
-   * Cierra el conteo: calcula las diferencias contra el stock actual, las
-   * guarda en la sesión (con un id de movimiento por línea) y las aplica al
-   * inventario. Si algo falla a medias, la sesión queda abierta y se puede
-   * volver a intentar: los movimientos ya hechos no se duplican porque cada
-   * uno lleva su id.
+   * Cierra el conteo: el servidor calcula las diferencias contra el stock actual,
+   * las guarda en la sesión (con un id de movimiento por línea) y las aplica con
+   * Kardex. Si algo falla a medias, la sesión queda abierta y se puede reintentar:
+   * los movimientos ya hechos no se duplican porque cada uno lleva su id.
+   * Solo roles autorizados (si no: COUNT_FORBIDDEN).
    */
   public async closeSession(
     sessionId: string,
     performedBy: string,
     reasons: Record<string, LossCategory> = {}
   ): Promise<{ session: InventoryCountSession; failures: ApplyFailure[] }> {
-    let session = await this.repository.findById(sessionId);
-    if (!session) throw new Error("COUNT_SESSION_NOT_FOUND");
-    if (session.status === "CLOSED") throw new Error("COUNT_SESSION_CLOSED");
-
-    // 1) Preparar (solo la primera vez): fija diferencias y ids de movimiento.
-    if (!session.prepared) {
-      const products = await this.inventory.listAll();
-      const stockById = new Map(products.map((p) => [p.id, p.stock]));
-      const diffs = computeDifferences(session.lines, stockById);
-      const diffByProduct = new Map(diffs.map((d) => [d.line.productId, d]));
-
-      const lines: CountLine[] = session.lines.map((line) => {
-        const d = diffByProduct.get(line.productId);
-        if (!d) return line;
-        return {
-          ...line,
-          systemStockAtClose: d.stockNow,
-          difference: d.difference,
-          ...(d.difference < 0 ? { reason: reasons[line.productId] ?? "AJUSTE_ADMINISTRATIVO" } : {}),
-          ...(d.difference !== 0 ? { movementId: line.movementId ?? crypto.randomUUID() } : {})
-        };
-      });
-      await this.repository.update({ ...session, lines, prepared: true });
-      session = (await this.repository.findById(sessionId)) ?? { ...session, lines, prepared: true };
-    }
-
-    // 2) Aplicar al inventario con Kardex.
-    const failures: ApplyFailure[] = [];
-    const branchId = getCurrentBranchId();
-    const shortId = session.id.slice(0, 8);
-    for (const line of session.lines) {
-      const diff = line.difference ?? 0;
-      if (diff === 0 || !line.movementId) continue;
-      try {
-        if (diff > 0) {
-          await this.inventory.increaseStock(
-            line.productId, diff, `Conteo ${shortId}: sobraba`, performedBy,
-            undefined, undefined, line.movementId, branchId
-          );
-        } else {
-          await this.inventory.decreaseStock(
-            line.productId, Math.abs(diff), `Conteo ${shortId}: faltaba`, performedBy,
-            line.reason ?? "AJUSTE_ADMINISTRATIVO", line.movementId, branchId
-          );
-        }
-      } catch (error) {
-        failures.push({ name: line.name, error: error instanceof Error ? error.message : String(error) });
-      }
-    }
-
-    // 3) Solo se cierra si todo se aplicó; si no, queda abierta para reintentar.
-    if (failures.length > 0) return { session, failures };
-
-    await this.repository.update({ ...session, status: "CLOSED", closedAt: new Date(), closedBy: performedBy });
-    const closed = (await this.repository.findById(sessionId)) ?? session;
-    return { session: closed, failures };
+    return this.gateway.close({
+      sessionId,
+      performedBy,
+      reasons,
+      allowNegative: companyConfigStore.get().allowNegativeStock
+    });
   }
 }

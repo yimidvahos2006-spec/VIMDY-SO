@@ -118,9 +118,12 @@ const pt: Record<TranslationKey, string> = {
   "priority.production.criticalNoIngredient": "Você não pode preparar mais \"{product}\".",
   "priority.production.warningWithIngredient": "Compre {ingredient} em breve: só dá para {maxUnits} \"{product}\" a mais.",
   "priority.production.warningNoIngredient": "Você só pode preparar mais {maxUnits} \"{product}\".",
+  "priority.production.limitedWithIngredient": "Confira {ingredient}: está acabando e limita \"{product}\".",
+  "priority.production.limitedNoIngredient": "Sua capacidade de preparar \"{product}\" está limitada.",
 
   "priority.purchase.urgent": "Restam {stock} \"{name}\": acabam em ~{days} dia(s). Consiga mais em breve.",
   "priority.purchase.simple": "Restam apenas {stock} \"{name}\".",
+  "priority.purchase.masked": "\"{name}\" está em {status}. Consiga mais em breve.",
 
   "priority.profit.message": "Seu produto mais rentável é \"{name}\": rende {amount} de lucro. Hoje é um bom dia para impulsioná-lo.",
 

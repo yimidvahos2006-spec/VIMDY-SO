@@ -11,6 +11,7 @@ import {
   getRelativeMovementTime
 } from "../../../core/utils/movementDisplay";
 import { buildInventoryFeed } from "../../../core/utils/inventoryFeed";
+import { isStockMasked, stockMaskBadge } from "../../../core/utils/stockMask";
 
 export function KpiCard({
   icon,
@@ -264,7 +265,9 @@ export function AlertsPanel({
                 <div>
                   <p className="text-vimdy-text text-sm font-medium">{product.name}</p>
                   <p className="text-vimdy-text-tertiary text-xs">
-                    Stock: {product.stock} / mínimo {product.minStock}
+                    {isStockMasked(product)
+                      ? stockMaskBadge(product).text
+                      : `Stock: ${product.stock} / mínimo ${product.minStock}`}
                   </p>
                 </div>
                 <button

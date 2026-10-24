@@ -1,6 +1,7 @@
 import { pendingInventoryAdjustmentsStore } from "../offline/pendingInventoryAdjustmentsStore";
 import { productCatalogStore } from "../store/productCatalogStore";
 import { toast } from "../store/toastStore";
+import { isStockMasked } from "../utils/stockMask";
 import { LossCategory } from "../entities/Entities";
 import { ProductLocalRepository } from "../../infrastructure/di/repositories/ProductLocalRepository";
 import { logWarning } from "../../infrastructure/logging/opsLogger";
@@ -55,7 +56,9 @@ export async function queueIncreaseStockOffline(params: {
   try {
     const localRepository = new ProductLocalRepository();
     const product = await localRepository.findById(params.productId);
-    if (product) {
+    // Enmascarado (conteo a ciegas): su `stock` es un valor de banda; sumarle el
+    // delta lo dejaría guardado en el caché como si fuera una cantidad real.
+    if (product && !isStockMasked(product)) {
       await localRepository.save({
         ...product,
         stock: product.stock + params.quantity,
@@ -99,7 +102,8 @@ export async function queueDecreaseStockOffline(params: {
   try {
     const localRepository = new ProductLocalRepository();
     const product = await localRepository.findById(params.productId);
-    if (product) {
+    // Enmascarado (conteo a ciegas): ver queueIncreaseStockOffline.
+    if (product && !isStockMasked(product)) {
       await localRepository.save({
         ...product,
         stock: product.stock - params.quantity,

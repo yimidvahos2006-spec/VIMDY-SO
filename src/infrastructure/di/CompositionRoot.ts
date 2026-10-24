@@ -234,7 +234,7 @@ function ensureKardexEngine(): KardexEngine {
 }
 
 function ensureInventoryCountEngine(): InventoryCountEngine {
-  if (!inventoryCountEngine) inventoryCountEngine = new InventoryCountEngine(inventoryCountRepo, ensureInventoryEngine());
+  if (!inventoryCountEngine) inventoryCountEngine = new InventoryCountEngine(inventoryCountRepo);
   return inventoryCountEngine;
 }
 

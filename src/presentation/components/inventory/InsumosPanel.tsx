@@ -32,6 +32,8 @@ import {
 } from "lucide-react";
 import { ConfirmModal } from "../ui/ConfirmModal";
 import { QuickWasteModal } from "./QuickWasteModal";
+import { useAuth } from "../../context/AuthContext";
+import { hasMaskedStock, isStockMasked, stockMaskBadge } from "../../../core/utils/stockMask";
 
 const money = (value: number) => {
   const currency = companyConfigStore.get().currency;
@@ -52,6 +54,9 @@ const ADJUST_REASONS: ReadonlyArray<{ id: LossCategory; label: string }> = [
 ];
 
 export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
+  // Costos: solo quien tenga inventory.viewCosts (ADMIN).
+  const { can } = useAuth();
+  const canViewCosts = can("inventory.viewCosts");
   const {
     products,
     loading,
@@ -87,6 +92,10 @@ export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
   const insumos = useMemo(() => {
     return products.filter((p) => p.isIngredient === true);
   }, [products]);
+
+  // Conteo a ciegas activo: el servidor entrega stock y costo enmascarados.
+  // Se muestra solo el estado (🟢 / 🟡 / 🔴), nunca cantidades ni costos.
+  const countMasked = useMemo(() => hasMaskedStock(products), [products]);
 
   // Categorías propias de insumos (Carnes, Verduras, Lácteos, Empaques...).
   // Se suman las categorías que ya usan insumos creados antes de existir esta
@@ -250,6 +259,12 @@ export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
         </div>
       </div>
 
+      {countMasked && (
+        <div role="status" className="rounded-vimdy-md border border-vimdy-warning/30 bg-vimdy-warning/10 px-4 py-3 text-sm text-vimdy-text-secondary">
+          Tienes un conteo a ciegas abierto: aquí ves solo el estado de cada insumo (🟢 Disponible, 🟡 Stock bajo, 🔴 Agotado), sin cantidades ni costos. Se muestran de nuevo cuando se cierre el conteo.
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row gap-2">
         <div className="relative flex-1">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-vimdy-text-tertiary" />
@@ -296,7 +311,7 @@ export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
                       <th className="px-4 py-2 font-medium">Insumo</th>
                       <th className="px-4 py-2 font-medium">Stock actual</th>
                       <th className="px-4 py-2 font-medium">Mínimo</th>
-                      <th className="px-4 py-2 font-medium">Costo</th>
+                      {canViewCosts && <th className="px-4 py-2 font-medium">Costo</th>}
                       <th className="px-4 py-2 font-medium">Usado en</th>
                       <th className="px-4 py-2 font-medium text-right">Acciones</th>
                     </tr>
@@ -306,6 +321,7 @@ export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
                       const status = getStockStatus(insumo);
                       const unit = insumo.unit || "und";
                       const uses = usedIn.get(insumo.id) ?? [];
+                      const rowMasked = isStockMasked(insumo);
                       return (
                         <tr key={insumo.id} className="hover:bg-vimdy-background/30 transition">
                           <td className="px-4 py-3">
@@ -315,13 +331,21 @@ export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
                           <td className="px-4 py-3 whitespace-nowrap">
                             <span className="inline-flex items-center gap-2 font-medium text-vimdy-text">
                               <span className={`w-2 h-2 rounded-full ${status === "normal" ? "bg-vimdy-success" : status === "bajo" ? "bg-vimdy-warning" : "bg-vimdy-danger"}`} />
-                              {insumo.stock} {unit}
+                              {rowMasked ? stockMaskBadge(insumo).text : `${insumo.stock} ${unit}`}
                             </span>
                           </td>
                           <td className="px-4 py-3 text-vimdy-text-secondary whitespace-nowrap">{insumo.minStock} {unit}</td>
+                          {canViewCosts && (
                           <td className="px-4 py-3 text-vimdy-text whitespace-nowrap">
-                            {insumo.purchasePrice !== undefined ? `${money(insumo.purchasePrice)} / ${unit}` : <span className="text-vimdy-warning text-xs">Sin costo</span>}
+                            {rowMasked ? (
+                              <span className="text-vimdy-text-tertiary text-xs">Oculto durante el conteo</span>
+                            ) : insumo.purchasePrice !== undefined ? (
+                              `${money(insumo.purchasePrice)} / ${unit}`
+                            ) : (
+                              <span className="text-vimdy-warning text-xs">Sin costo</span>
+                            )}
                           </td>
+                          )}
                           <td className="px-4 py-3">
                             {uses.length > 0 ? (
                               <span title={uses.join(", ")} className="text-xs px-2 py-0.5 rounded-vimdy-sm bg-vimdy-recipe/20 text-vimdy-recipe border border-vimdy-recipe/30">
@@ -332,8 +356,11 @@ export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
                             )}
                           </td>
                           <td className="px-4 py-3">
+                            {rowMasked ? (
+                              <div className="text-right text-xs text-vimdy-text-tertiary">Solo lectura</div>
+                            ) : (
                             <div className="flex items-center justify-end gap-1">
-                              <button onClick={() => { setPurchaseTarget(insumo); setPurchaseCost(insumo.purchasePrice !== undefined ? toMoneyInputValue(insumo.purchasePrice) : ""); }} className="h-8 px-3 rounded-vimdy-sm bg-vimdy-success/15 text-vimdy-success border border-vimdy-success/30 text-xs font-bold hover:bg-vimdy-success/25 transition whitespace-nowrap">+ Compré</button>
+                              <button onClick={() => { setPurchaseTarget(insumo); setPurchaseCost(canViewCosts && insumo.purchasePrice !== undefined ? toMoneyInputValue(insumo.purchasePrice) : ""); }} className="h-8 px-3 rounded-vimdy-sm bg-vimdy-success/15 text-vimdy-success border border-vimdy-success/30 text-xs font-bold hover:bg-vimdy-success/25 transition whitespace-nowrap">+ Compré</button>
                               {insumo.stock > 0 && (
                                 <button onClick={() => setWasteTarget(insumo)} className="h-8 px-3 rounded-vimdy-sm border border-vimdy-warning/30 text-vimdy-warning text-xs font-bold hover:bg-vimdy-warning/10 transition whitespace-nowrap">Merma</button>
                               )}
@@ -345,6 +372,7 @@ export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
                                 <Trash2 size={16} />
                               </button>
                             </div>
+                            )}
                           </td>
                         </tr>
                       );
@@ -370,9 +398,11 @@ export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
             <label className="block text-xs font-semibold text-vimdy-text-secondary">Cantidad que entra ({purchaseTarget.unit ?? "und"})
               <input type="number" min="0" step="any" autoFocus value={purchaseQty} onChange={(e) => setPurchaseQty(e.target.value)} className="mt-1 w-full h-10 px-3 rounded-vimdy-md bg-vimdy-background border border-vimdy-border text-vimdy-text text-sm" />
             </label>
+            {canViewCosts && (
             <label className="block text-xs font-semibold text-vimdy-text-secondary">Costo por {purchaseTarget.unit ?? "und"} (opcional)
               <MoneyInput value={purchaseCost} onValueChange={setPurchaseCost} placeholder="0" className="mt-1 w-full h-10 px-3 rounded-vimdy-md bg-vimdy-background border border-vimdy-border text-vimdy-text text-sm" />
             </label>
+            )}
             <div className="flex justify-end gap-2">
               <VimdyButton variant="secondary" onClick={() => setPurchaseTarget(null)}>Cancelar</VimdyButton>
               <VimdyButton onClick={confirmPurchase}>Guardar compra</VimdyButton>
@@ -498,6 +528,8 @@ function InsumoFormModal({
   onSave: (input: ProductInput) => Promise<boolean>;
   onCreateSupplier: (input: { name: string; phone?: string; email?: string; address?: string }) => Promise<Supplier>;
 }) {
+  const { can } = useAuth();
+  const canViewCosts = can("inventory.viewCosts");
   const [name, setName] = useState(insumo?.name ?? "");
   const [categoryId, setCategoryId] = useState(insumo?.categoryId ?? categories[0]?.id ?? "");
   const [price, setPrice] = useState(insumo?.price ?? 0);
@@ -723,6 +755,7 @@ function InsumoFormModal({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {canViewCosts && (
             <div>
               <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Precio de compra *</label>
               <MoneyInput
@@ -733,6 +766,7 @@ function InsumoFormModal({
               />
               <p className="text-vimdy-text-tertiary text-xs mt-1">Precio que te cuesta comprar este insumo.</p>
             </div>
+            )}
             {insumo ? (
               <div>
                 <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Stock actual</label>

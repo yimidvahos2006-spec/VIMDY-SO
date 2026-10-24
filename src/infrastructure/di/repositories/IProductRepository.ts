@@ -12,6 +12,25 @@ import { IRepository } from "./IRepository";
  * directorio.
  */
 export interface IProductRepository extends IRepository<Product> {
+  /**
+   * Lectura AUTORITATIVA del catálogo: va directo a la base de datos en este
+   * instante. A diferencia de `findAll()`, NUNCA responde con el caché local
+   * (ni sin red, ni por lentitud del servidor, ni porque el fetch falló) y
+   * nunca reutiliza una lectura que ya venía en vuelo: si no hay respuesta
+   * real del servidor, LANZA error. Es la única lectura válida para tomar
+   * "fotos" de stock que luego se usan para calcular diferencias (conteo).
+   */
+  findAllAuthoritative(): Promise<Product[]>;
+
+  /**
+   * Recarga el catálogo desde el servidor y REEMPLAZA el caché local con lo que
+   * este usuario recibe ahora. Se usa cuando cambia lo que el servidor le
+   * entrega (ej. se abre un conteo a ciegas y su stock pasa a llegar enmascarado):
+   * el caché guardado antes todavía tendría las cifras reales. Si el servidor no
+   * responde LANZA error y el caché queda como estaba (nunca se improvisa).
+   */
+  reloadCatalogFromServer(): Promise<Product[]>;
+
   transferStock?(input: {
     operationId: string;
     productId: string;

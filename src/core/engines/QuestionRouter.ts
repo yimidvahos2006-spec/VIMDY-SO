@@ -1,6 +1,7 @@
 import { BusinessAnalyzer } from "./BusinessAnalyzer";
 import { BusinessSnapshot } from "../types/CopilotTypes";
 import { formatMoney } from "../utils/formatMoney";
+import { maskedStatusText } from "../utils/stockMask";
 
 /**
  * QuestionRouter
@@ -68,7 +69,9 @@ const HANDLERS: QuestionHandler[] = [
       const lines = s.purchaseSuggestions
         .slice(0, 5)
         .map((item) =>
-          item.hasSalesHistory
+          item.stockMasked
+            ? `- ${item.name}: ${maskedStatusText(item.stockStatus ?? "LOW")} — conviene reponerlo (la cantidad exacta está oculta mientras haya un conteo a ciegas abierto)`
+            : item.hasSalesHistory
             ? `- ${item.name}: comprar ${item.suggestedQuantity} unidades${
                 item.daysUntilStockout !== null ? ` (se agota en ~${item.daysUntilStockout} día(s))` : ""
               }`
@@ -86,7 +89,11 @@ const HANDLERS: QuestionHandler[] = [
       if (s.lowStockProducts.length === 0) return "No hay productos con inventario bajo en este momento.";
       const lines = s.lowStockProducts
         .slice(0, 8)
-        .map((p) => `- ${p.name}: stock ${p.stock} (mínimo ${p.minStock})`);
+        .map((p) =>
+          p.stockMasked
+            ? `- ${p.name}: ${maskedStatusText(p.stockStatus ?? "LOW")}`
+            : `- ${p.name}: stock ${p.stock} (mínimo ${p.minStock})`
+        );
       return `Productos con inventario bajo:\n${lines.join("\n")}`;
     }
   },
@@ -106,8 +113,11 @@ const HANDLERS: QuestionHandler[] = [
         .slice(0, 8)
         .map((p) => {
           const icon = p.level === "CRITICO" ? "🔴" : "🟠";
-          const capacity =
-            p.maxUnits > 0
+          const capacity = p.stockMasked
+            ? p.level === "CRITICO"
+              ? "no puedes preparar ninguna unidad"
+              : "tu capacidad está limitada (la cantidad exacta está oculta mientras haya un conteo a ciegas abierto)"
+            : p.maxUnits > 0
               ? `puedes preparar ${p.maxUnits} unidad(es)`
               : "no puedes preparar ninguna unidad";
           const limiting = p.limitingIngredientName ? ` — te falta ${p.limitingIngredientName}` : "";

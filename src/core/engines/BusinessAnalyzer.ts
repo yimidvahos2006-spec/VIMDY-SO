@@ -21,6 +21,7 @@ import { RecommendationAI } from "../ia/RecommendationAI";
 import { companyConfigStore } from "../store/companyConfigStore";
 import { getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
 import { getSaleNetTotal, getSaleNetItems, isRevenueSaleStatus } from "../utils/saleRefunds";
+import { isStockMasked, maskedStockStatus } from "../utils/stockMask";
 import {
   buildWeightedAverageCostMap,
   buildWeightedAverageCostTimeline,
@@ -447,14 +448,19 @@ export class BusinessAnalyzer {
         (status): status is NonNullable<typeof status> =>
           status !== null && status.level !== "OK"
       )
-      .map((status) => ({
-        productId: status.productId,
-        productName: status.productName,
-        status: status.status,
-        level: status.level as "ADVERTENCIA" | "CRITICO",
-        maxUnits: status.maxUnits,
-        limitingIngredientName: status.limitingIngredient?.name ?? null
-      }));
+      .map((status) => {
+        // Con stock enmascarado `maxUnits` sale de valores de banda: no es una cantidad real.
+        const masked = isStockMasked(productById.get(status.productId));
+        return {
+          productId: status.productId,
+          productName: status.productName,
+          status: status.status,
+          level: status.level as "ADVERTENCIA" | "CRITICO",
+          maxUnits: masked ? 0 : status.maxUnits,
+          limitingIngredientName: status.limitingIngredient?.name ?? null,
+          ...(masked ? { stockMasked: true } : {})
+        };
+      });
 
     const employeeAgg = new Map<string, { salesCount: number; revenue: number }>();
     for (const sale of summary.sales) {
@@ -514,6 +520,22 @@ export class BusinessAnalyzer {
       .map((product) => {
         const sold30d = productAgg30d.get(product.id) ?? 0;
         const avgDailySales = sold30d / RECENT_WINDOW_DAYS;
+        // Conteo a ciegas: `stock` es un valor de banda, no la cantidad real. Con él no se puede
+        // calcular cuánto queda, en cuántos días se agota ni cuánto comprar: solo el estado.
+        if (isStockMasked(product)) {
+          return {
+            productId: product.id,
+            name: product.name,
+            currentStock: 0,
+            avgDailySales: Math.round(avgDailySales * 10) / 10,
+            daysUntilStockout: null,
+            suggestedQuantity: 0,
+            hasSalesHistory: avgDailySales > 0,
+            supplierId: product.supplierId,
+            stockMasked: true,
+            stockStatus: maskedStockStatus(product)
+          };
+        }
         const daysUntilStockout = avgDailySales > 0
           ? Math.floor(product.stock / avgDailySales)
           : null;
@@ -540,6 +562,8 @@ export class BusinessAnalyzer {
       .filter(
         (product) =>
           product.trackStock !== false &&
+          // Con stock enmascarado no se sabe si el stock es "alto": no se lista como estancado.
+          !isStockMasked(product) &&
           (product.stock ?? 0) > 0 &&
           (product.active ?? true)
       )
@@ -747,7 +771,8 @@ export class BusinessAnalyzer {
     let starProductCapacity: BusinessSnapshot["starProductCapacity"] = null;
     if (todayTopProductEntry) {
       const starProduct = productById.get(todayTopProductEntry[0]);
-      if (starProduct) {
+      // Con stock enmascarado la capacidad saldría de valores de banda: se omite en vez de inventarla.
+      if (starProduct && !isStockMasked(starProduct)) {
         const capacity = this.recipeEngine.getProductionCapacity(
           starProduct,
           productById
@@ -854,11 +879,22 @@ export class BusinessAnalyzer {
       outOfStockProducts,
       bestDayOfWeek,
       topProducts,
-      lowStockProducts: lowStock.slice(0, 10).map((product) => ({
-        name: product.name,
-        stock: product.stock,
-        minStock: product.minStock
-      })),
+      lowStockProducts: lowStock.slice(0, 10).map((product) =>
+        isStockMasked(product)
+          ? {
+              name: product.name,
+              stock: 0,
+              minStock: 0,
+              stockMasked: true,
+              stockStatus: maskedStockStatus(product)
+            }
+          : {
+              name: product.name,
+              stock: product.stock,
+              minStock: product.minStock
+            }
+      ),
+      stockMasked: catalogSnapshot.some((product) => isStockMasked(product)),
       productionAlerts,
       topProfitProducts,
       lossSummary,

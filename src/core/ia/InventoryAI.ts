@@ -1,4 +1,5 @@
 import { Product } from "../entities/Entities";
+import { isStockMasked } from "../utils/stockMask";
 
 export interface InventoryStatus {
   totalProducts: number;
@@ -14,6 +15,8 @@ export interface PurchaseRecommendation {
   currentStock: number;
   recommendedPurchase: number;
   priority: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  /** true con stock enmascarado (conteo a ciegas): `currentStock` y `recommendedPurchase` vienen en 0 y no son reales. */
+  stockMasked?: boolean;
 }
 
 export class InventoryAI {
@@ -134,9 +137,11 @@ export class InventoryAI {
       .map(product => ({
         productId: product.id,
         productName: product.name,
-        currentStock: product.stock,
-        recommendedPurchase: this.calculatePurchaseQuantity(product),
-        priority: this.calculatePriority(product)
+        // Con stock enmascarado no se puede calcular cuánto comprar: solo la prioridad (sale del estado).
+        currentStock: isStockMasked(product) ? 0 : product.stock,
+        recommendedPurchase: isStockMasked(product) ? 0 : this.calculatePurchaseQuantity(product),
+        priority: this.calculatePriority(product),
+        ...(isStockMasked(product) ? { stockMasked: true } : {})
       }))
       .sort((a, b) => {
         const priority = {

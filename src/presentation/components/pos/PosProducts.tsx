@@ -13,6 +13,7 @@ import { companyConfigStore } from "../../../core/store/companyConfigStore";
 import { weightEntryStore } from "../../../core/store/weightEntryStore";
 import { variantSelectorStore } from "../../../core/store/variantSelectorStore";
 import { isVariableQuantityUnit } from "../../../core/utils/weightUnits";
+import { isStockMasked, stockMaskBadge } from "../../../core/utils/stockMask";
 
 export function PosProducts() {
 
@@ -150,6 +151,7 @@ export function PosProducts() {
               price={product.price}
               stock={product.stock}
               trackStock={product.trackStock}
+              maskedBadge={isStockMasked(product) && product.trackStock !== false ? stockMaskBadge(product) : undefined}
               image={product.image}
               unit={isVariableQuantityUnit(product.unit) ? product.unit : undefined}
               opensModal={variantSelectorStore.needsSelector(product)}
@@ -212,6 +214,7 @@ const ProductCard = React.memo(function ProductCard({
   price,
   stock,
   trackStock,
+  maskedBadge,
   image,
   unit,
   opensModal,
@@ -221,6 +224,8 @@ const ProductCard = React.memo(function ProductCard({
   price: number;
   stock: number;
   trackStock?: boolean;
+  /** Solo con conteo a ciegas activo: estado amigable en vez de cualquier cifra. */
+  maskedBadge?: { emoji: string; label: string; text: string };
   image?: string;
   unit?: string;
   opensModal?: boolean;
@@ -287,12 +292,20 @@ const ProductCard = React.memo(function ProductCard({
       </span>
 
       <div className="mt-1 flex items-center justify-center gap-1.5">
-        <span
-          className={`w-1.5 h-1.5 rounded-full ${available ? "bg-vimdy-success" : "bg-vimdy-danger"}`}
-        />
-        <span className={`text-vimdy-micro ${available ? "text-vimdy-text-tertiary" : "text-vimdy-danger"}`}>
-          {available ? t("pos.products.available") : t("pos.products.outOfStock")}
-        </span>
+        {maskedBadge ? (
+          <span className={`text-vimdy-micro ${available ? "text-vimdy-text-tertiary" : "text-vimdy-danger"}`}>
+            {available ? maskedBadge.text : `🔴 ${t("pos.products.outOfStock")}`}
+          </span>
+        ) : (
+          <>
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${available ? "bg-vimdy-success" : "bg-vimdy-danger"}`}
+            />
+            <span className={`text-vimdy-micro ${available ? "text-vimdy-text-tertiary" : "text-vimdy-danger"}`}>
+              {available ? t("pos.products.available") : t("pos.products.outOfStock")}
+            </span>
+          </>
+        )}
       </div>
     </button>
   );

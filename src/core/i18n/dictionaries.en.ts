@@ -118,9 +118,12 @@ const en: Record<TranslationKey, string> = {
   "priority.production.criticalNoIngredient": "You can't make any more \"{product}\".",
   "priority.production.warningWithIngredient": "Buy {ingredient} soon: you only have enough for {maxUnits} more \"{product}\".",
   "priority.production.warningNoIngredient": "You can only make {maxUnits} more \"{product}\".",
+  "priority.production.limitedWithIngredient": "Check {ingredient}: it's running low and limits \"{product}\".",
+  "priority.production.limitedNoIngredient": "Your capacity to make \"{product}\" is limited.",
 
   "priority.purchase.urgent": "You have {stock} \"{name}\" left: it runs out in ~{days} day(s). Get more soon.",
   "priority.purchase.simple": "You only have {stock} \"{name}\" left.",
+  "priority.purchase.masked": "\"{name}\" is {status}. Get more soon.",
 
   "priority.profit.message": "Your most profitable product is \"{name}\": it earns you {amount} in profit. Today's a good day to push it.",
 

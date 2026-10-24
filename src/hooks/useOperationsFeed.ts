@@ -5,6 +5,7 @@ import { productCatalogStore } from "../core/store/productCatalogStore";
 import { dashboardStore } from "../core/store/dashboardStore";
 import { container, tablesReady } from "../infrastructure/di/CompositionRoot";
 import { Table } from "../core/entities/Entities";
+import { isStockMasked, stockMaskBadge } from "../core/utils/stockMask";
 
 export type FeedKind =
   | "sale"
@@ -168,7 +169,10 @@ export function useOperationsFeed() {
               emoji: "🔴",
               color: "var(--vimdy-danger)", // Fase 3: antes hex suelto
               title: "Producto agotándose",
-              message: `${product.name}: quedan ${product.stock} unidades.`
+              // Conteo a ciegas: `stock` es un valor de banda, nunca la cantidad real. Solo el estado.
+              message: isStockMasked(product)
+                ? `${product.name}: ${stockMaskBadge(product).text}.`
+                : `${product.name}: quedan ${product.stock} unidades.`
             });
           }
         } else if (!isLow && alertedProducts.current.has(product.id)) {

@@ -130,9 +130,12 @@ const es = {
   "priority.production.criticalNoIngredient": "Ya no puedes preparar más \"{product}\".",
   "priority.production.warningWithIngredient": "Compra {ingredient} pronto: solo te alcanza para {maxUnits} \"{product}\" más.",
   "priority.production.warningNoIngredient": "Solo puedes preparar {maxUnits} \"{product}\" más.",
+  "priority.production.limitedWithIngredient": "Revisa {ingredient}: se está acabando y limita \"{product}\".",
+  "priority.production.limitedNoIngredient": "Tu capacidad para preparar \"{product}\" está limitada.",
 
   "priority.purchase.urgent": "Te quedan {stock} \"{name}\": se agotan en ~{days} día(s). Consíguelos pronto.",
   "priority.purchase.simple": "Te quedan solo {stock} \"{name}\".",
+  "priority.purchase.masked": "\"{name}\" está en {status}. Consíguelo pronto.",
 
   "priority.profit.message": "Tu producto más rentable es \"{name}\": te deja {amount} de ganancia. Hoy es un buen día para impulsarlo.",
 

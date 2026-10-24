@@ -1,4 +1,5 @@
 import { Product } from "../entities/Entities";
+import { isStockMasked, maskedStatusText, maskedStockStatus } from "../utils/stockMask";
 
 export class AIEngine {
 
@@ -18,6 +19,11 @@ export class AIEngine {
     }
 
     return lowStockProducts.map(product => {
+
+      // Conteo a ciegas: `stock` es un valor de banda, no la cantidad real. Solo el estado.
+      if (isStockMasked(product)) {
+        return `Reponer "${product.name}" (${maskedStatusText(maskedStockStatus(product))}).`;
+      }
 
       const faltantes = Math.max(
         product.minStock - product.stock,

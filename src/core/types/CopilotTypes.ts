@@ -75,6 +75,13 @@ export interface CopilotPurchaseSuggestion {
   readonly hasSalesHistory: boolean;
   /** Proveedor principal del producto, si tiene uno asignado (para precargar "Crear orden"). */
   readonly supplierId?: string;
+  /**
+   * true cuando el stock llegó enmascarado (conteo a ciegas abierto): `currentStock`,
+   * `daysUntilStockout` y `suggestedQuantity` NO son reales (0 / null / 0) y los mensajes
+   * deben hablar solo del estado (`stockStatus`), nunca de cifras.
+   */
+  readonly stockMasked?: boolean;
+  readonly stockStatus?: "AVAILABLE" | "LOW" | "OUT";
 }
 
 export interface CopilotSlowMover {
@@ -93,6 +100,9 @@ export interface CopilotLowStockProduct {
   readonly name: string;
   readonly stock: number;
   readonly minStock: number;
+  /** true con stock enmascarado: `stock` y `minStock` vienen en 0 y solo vale `stockStatus`. */
+  readonly stockMasked?: boolean;
+  readonly stockStatus?: "AVAILABLE" | "LOW" | "OUT";
 }
 
 /**
@@ -111,6 +121,8 @@ export interface CopilotProductionAlert {
   readonly maxUnits: number;
   /** Nombre del ingrediente que frena la producción. Null solo si la receta está vacía (no debería pasar aquí). */
   readonly limitingIngredientName: string | null;
+  /** true con stock enmascarado: `maxUnits` viene en 0 y no es una cantidad real. */
+  readonly stockMasked?: boolean;
 }
 
 /**
@@ -244,6 +256,8 @@ export interface CopilotContextSnapshot {
   readonly criticalAlertsCount: number;
   readonly kitchenPendingCount: number;
   readonly outOfStockCount: number;
+  /** true si el servidor entrega el stock enmascarado a esta persona (conteo a ciegas abierto). */
+  readonly stockMasked?: boolean;
   readonly smartAlerts: SmartAlert[];
 
   readonly healthScore: number;

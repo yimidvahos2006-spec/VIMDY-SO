@@ -2,6 +2,7 @@ import { CopilotEngine } from "../../core/engines/CopilotEngine";
 import { CopilotApiClient } from "../../infrastructure/di/CopilotApiClient";
 import { CopilotContextSnapshot, CopilotMessage } from "../../core/types/CopilotTypes";
 import { formatMoney } from "../../core/utils/formatMoney";
+import { maskedStatusText } from "../../core/utils/stockMask";
 
 /**
  * Cuántos mensajes previos de la conversación se reenvían a Claude junto
@@ -19,7 +20,7 @@ const MAX_HISTORY_MESSAGES = 16;
  * Convierte el snapshot de contexto en texto plano legible, que es lo que
  * de verdad entiende un modelo de lenguaje mejor que JSON crudo.
  */
-function snapshotToPrompt(snapshot: CopilotContextSnapshot): string {
+export function snapshotToPrompt(snapshot: CopilotContextSnapshot): string {
   const lines: string[] = [];
 
   lines.push(`Negocio: ${snapshot.businessName} (moneda: ${snapshot.currency})`);
@@ -59,11 +60,20 @@ function snapshotToPrompt(snapshot: CopilotContextSnapshot): string {
 
   lines.push("");
   lines.push("=== INVENTARIO BAJO ===");
+  if (snapshot.stockMasked) {
+    lines.push(
+      "NOTA: hay un conteo de inventario a ciegas abierto, así que las cantidades exactas de stock están ocultas para esta persona. Solo se conoce el estado de cada producto (Disponible / Stock bajo / Agotado). No des, estimes ni inventes cantidades de stock; si te las piden, explica que están ocultas hasta que cierre el conteo."
+    );
+  }
   if (snapshot.lowStockProducts.length === 0) {
     lines.push("No hay productos con inventario bajo en este momento.");
   } else {
     snapshot.lowStockProducts.forEach((product) => {
-      lines.push(`- ${product.name}: stock actual ${product.stock}, mínimo ${product.minStock}`);
+      lines.push(
+        product.stockMasked
+          ? `- ${product.name}: ${maskedStatusText(product.stockStatus ?? "LOW")}`
+          : `- ${product.name}: stock actual ${product.stock}, mínimo ${product.minStock}`
+      );
     });
   }
 
@@ -111,6 +121,10 @@ function snapshotToPrompt(snapshot: CopilotContextSnapshot): string {
     lines.push("No hay productos que necesiten reposición urgente ahora mismo.");
   } else {
     snapshot.purchaseSuggestions.forEach((item) => {
+      if (item.stockMasked) {
+        lines.push(`- ${item.name}: ${maskedStatusText(item.stockStatus ?? "LOW")}. Conviene reponerlo (cantidad exacta oculta).`);
+        return;
+      }
       const eta =
         item.daysUntilStockout === null
           ? "sin ventas recientes para estimar cuándo se agota"

@@ -37,6 +37,7 @@ import { isOptimisticLockError } from "../errors/OptimisticLockError";
 
 import { HealthResult } from "../types/HealthTypes";
 import { companyConfigStore } from "../store/companyConfigStore";
+import { isStockMasked, stockCoversQuantity } from "../utils/stockMask";
 import { InvoiceFactory } from "../invoicing/InvoiceFactory";
 import type { InvoiceRequest, InvoiceCustomer } from "../invoicing/models/InvoiceModels";
 import { roundMoney } from "../config/globalization";
@@ -730,9 +731,13 @@ export class SalesEngine {
         return;
       }
 
-      if (product.stock < item.quantity) {
+      if (!stockCoversQuantity(product, item.quantity)) {
+        // Enmascarado (conteo a ciegas): `stock` es un valor de banda, jamás
+        // se muestra ni se usa como cantidad. Solo se avisa que está agotado.
         errors.push(
-          `Stock insuficiente para "${product.name}". Disponible: ${product.stock}, solicitado: ${item.quantity}.`
+          isStockMasked(product)
+            ? `"${product.name}" está agotado.`
+            : `Stock insuficiente para "${product.name}". Disponible: ${product.stock}, solicitado: ${item.quantity}.`
         );
       }
     });
@@ -752,10 +757,12 @@ export class SalesEngine {
         return;
       }
 
-      if (ingredient.stock < need.quantity) {
+      if (!stockCoversQuantity(ingredient, need.quantity)) {
         errors.push(
-          `No puedes vender "${[...need.requiredBy].join(", ")}": falta ${ingredient.name}. ` +
-            `Disponible: ${ingredient.stock}, necesario: ${need.quantity}.`
+          isStockMasked(ingredient)
+            ? `No puedes vender "${[...need.requiredBy].join(", ")}": ${ingredient.name} está agotado.`
+            : `No puedes vender "${[...need.requiredBy].join(", ")}": falta ${ingredient.name}. ` +
+                `Disponible: ${ingredient.stock}, necesario: ${need.quantity}.`
         );
       }
     });

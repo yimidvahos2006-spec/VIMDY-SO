@@ -47,6 +47,7 @@ const PERMISSION_LABELS: Record<string, string> = {
   "inventory.edit": "Cambiar productos y precios",
   "inventory.delete": "Borrar productos",
   "inventory.adjust": "Corregir las cantidades del inventario",
+  "inventory.viewCosts": "Ver los costos y el valor del inventario",
   "inventory.transfer": "Pasar productos entre sucursales",
   "customers.view": "Ver clientes",
   "customers.create": "Crear clientes",

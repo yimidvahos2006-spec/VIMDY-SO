@@ -96,6 +96,16 @@ export class FakeProductRepository
     return updated;
   }
 
+  /** En memoria no hay caché: lo que hay aquí ES la verdad (equivale a leer la base de datos). */
+  public async findAllAuthoritative(): Promise<Product[]> {
+    return this.findAll();
+  }
+
+  /** En memoria no hay caché que reemplazar: equivale a leer la base de datos. */
+  public async reloadCatalogFromServer(): Promise<Product[]> {
+    return this.findAll();
+  }
+
   public async findBySkuAndBranch(sku: string, branchId: string): Promise<Product | null> {
     const all = await this.all();
     return all.find((p) => p.sku === sku && p.branchId === branchId) ?? null;

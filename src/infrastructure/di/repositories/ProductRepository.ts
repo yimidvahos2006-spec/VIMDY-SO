@@ -23,6 +23,26 @@ function catalogSignature(list: Product[]): string {
 /** Máximo que findAll() espera al servidor antes de pintar con el caché (red lenta no debe congelar la pantalla). */
 const FRESH_WAIT_MS = 2500;
 
+/** Máximo que findAllAuthoritative() espera al servidor. Pasado este tiempo falla (nunca cae al caché). */
+const AUTHORITATIVE_WAIT_MS = 15000;
+
+/** Productos que se piden por página a la función segura de lectura (máximo del servidor: 1000). */
+const SAFE_READ_PAGE_SIZE = 1000;
+const SAFE_READ_MAX_PAGES = 200; // tope de seguridad: 200.000 productos
+
+/**
+ * Mensaje cuando el servidor tiene a esta persona en "stock enmascarado" (conteo a
+ * ciegas abierto): su sesión no ve las filas reales de products, así que
+ * editar/borrar no haría nada o sobrescribiría con valores de banda.
+ */
+const COUNT_MASKED_WRITE_MESSAGE =
+  "Tienes un conteo a ciegas abierto: mientras siga abierto no puedes modificar productos. Pide a un administrador que lo cierre.";
+
+/** La función no existe todavía en la base (migración sin aplicar): PostgREST PGRST202 o Postgres 42883. */
+function isMissingFunctionError(error: { code?: string; message?: string }): boolean {
+  return error.code === "PGRST202" || error.code === "42883" || /could not find the function/i.test(error.message ?? "");
+}
+
 /**
  * ProductRepository
  * ---------------------------------------------------------------------------
@@ -86,12 +106,87 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
     this.writeEpoch += 1;
   }
 
+  /** true cuando la última lectura completa llegó con el stock enmascarado por el servidor. */
+  private catalogMasked = false;
+
+  /** false = la base no tiene inventory_products_read todavía (se lee la tabla como antes). */
+  private safeReadAvailable = true;
+
+  /**
+   * ÚNICO camino de lectura del catálogo hacia el servidor.
+   *
+   * Pide los productos a la función inventory_products_read, que decide EN EL
+   * SERVIDOR si esta persona ve el stock/costo reales o una copia enmascarada
+   * (conteo a ciegas abierto). Así el navegador, su caché local (IndexedDB) y la
+   * pantalla nunca reciben la cifra real cuando no deben.
+   *
+   * Si la función aún no existe (migración sin aplicar) cae a la lectura directa
+   * de la tabla, que es el comportamiento anterior.
+   */
+  private async readFromServer(productIds?: string[]): Promise<Product[]> {
+    const businessId = getCurrentBusinessId();
+    const legacy = () => (productIds ? super.findMany(productIds) : super.findAll());
+    if (!businessId || !this.safeReadAvailable) return legacy();
+
+    const branchId = getCurrentBranchId() ?? null;
+    const rows: Product[] = [];
+    let afterId: string | null = null;
+
+    for (let page = 0; page < SAFE_READ_MAX_PAGES; page += 1) {
+      const { data, error } = await supabase.rpc("inventory_products_read", {
+        p_business_id: businessId,
+        p_branch_id: branchId,
+        p_product_ids: productIds ?? null,
+        p_after_id: afterId,
+        p_limit: SAFE_READ_PAGE_SIZE
+      });
+
+      if (error) {
+        if (isMissingFunctionError(error)) {
+          this.safeReadAvailable = false;
+          logWarning("[ProductRepository] inventory_products_read no existe en la base: se lee la tabla directamente", {
+            category: "offline",
+            context: { error: error.message }
+          });
+          return legacy();
+        }
+        throw new Error(`SUPABASE_FIND_ALL_FAILED (products): ${error.message}`);
+      }
+
+      const batch = (data ?? []) as Array<{ id: string; data: unknown; version: number }>;
+      for (const row of batch) rows.push(this.reviveRow(row));
+      if (batch.length < SAFE_READ_PAGE_SIZE) break;
+      afterId = batch[batch.length - 1].id;
+    }
+
+    if (!productIds) this.catalogMasked = rows.some((product) => product.stockMasked === true);
+    return rows;
+  }
+
+  /**
+   * Antes de escribir en products: si la última lectura llegó enmascarada se
+   * confirma con el servidor que SIGUE enmascarado (puede haberse cerrado el
+   * conteo desde otro equipo). Si lo sigue, no se escribe nada.
+   */
+  private async assertCatalogWritable(): Promise<void> {
+    if (!this.catalogMasked) return;
+    const businessId = getCurrentBusinessId();
+    if (businessId) {
+      const { data, error } = await supabase.rpc("inventory_count_user_is_masked", { p_business_id: businessId });
+      if (!error && data === false) {
+        this.catalogMasked = false;
+        return;
+      }
+    }
+    throw new Error(COUNT_MASKED_WRITE_MESSAGE);
+  }
+
   /** Un solo fetch a la vez; null = el resultado quedó viejo (hubo una escritura en medio). */
   private fetchFresh(): Promise<Product[] | null> {
     if (this.inflightFresh) return this.inflightFresh;
     const epoch = this.writeEpoch;
     const run = (async () => {
-      const fresh = this.recentDeletes.filter(await super.findAll());
+      const fresh = this.recentDeletes.filter(await this.readFromServer());
       if (epoch !== this.writeEpoch) return null;
       await this.local.replaceAll(fresh);
       if (epoch !== this.writeEpoch) {
@@ -167,6 +262,59 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
   }
 
   /**
+   * Lectura AUTORITATIVA (ver IProductRepository.findAllAuthoritative).
+   *
+   * Por qué NO reutiliza `fetchFresh()` ni `findAll()`:
+   *  - `findAll()` puede devolver el caché local (sin red, servidor lento >2,5 s,
+   *    fetch fallido o descartado por una escritura en medio).
+   *  - `fetchFresh()` comparte un fetch que ya venía en vuelo: esa lectura pudo
+   *    empezar ANTES de una venta/compra reciente, o sea que no sería "ahora".
+   *  - `fetchFresh()` devuelve null si hubo una escritura local en medio; aquí
+   *    la lectura al servidor sigue siendo válida (la escritura ya está en la base).
+   *
+   * Tampoco depende de `connectionStore.isOnline()` (es una heurística con ping
+   * cada 20 s): el intento real contra el servidor es la única verdad. Si falla,
+   * se lanza el error; jamás se responde con datos locales.
+   *
+   * A propósito no escribe en el caché: no toca el estado que usan las pantallas.
+   */
+  public async findAllAuthoritative(): Promise<Product[]> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const fromServer = await Promise.race([
+        this.readFromServer(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("AUTHORITATIVE_READ_TIMEOUT")), AUTHORITATIVE_WAIT_MS);
+        })
+      ]);
+      return this.scopeToCurrent(fromServer);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Recarga el catálogo desde el servidor y reemplaza el caché local (IndexedDB).
+   *
+   * Cuándo: cuando cambia lo que el servidor entrega a esta persona. Caso real:
+   * al abrir un conteo a ciegas su stock/costo pasa a llegar enmascarado, pero el
+   * caché guardado ANTES aún tiene las cifras reales y `findAll()` lo serviría si
+   * el servidor tarda o no hay red.
+   *
+   * - `touchLocal()` invalida cualquier lectura que ya venía en vuelo: esa pudo
+   *   empezar antes del cambio y, al terminar, volvería a escribir cifras viejas
+   *   en el caché.
+   * - Lee con `findAllAuthoritative()`: si el servidor no responde LANZA y el
+   *   caché queda intacto.
+   */
+  public async reloadCatalogFromServer(): Promise<Product[]> {
+    this.touchLocal();
+    const fresh = this.recentDeletes.filter(await this.findAllAuthoritative());
+    await this.local.replaceAll(fresh);
+    return fresh;
+  }
+
+  /**
    * Hueco detectado en la revisión de Prioridad 1: `findById()` seguía
    * yendo directo a Supabase (heredado de SupabaseRepository) aunque
    * `findAll()` ya tuviera caché local. Sin internet, esto dejaba
@@ -185,7 +333,7 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
   public async findById(id: string): Promise<Product | null> {
     if (connectionStore.isOnline()) {
       try {
-        const fresh = await super.findById(id);
+        const fresh = id ? ((await this.readFromServer([id]))[0] ?? null) : null;
 
         if (fresh) {
           void this.local.save(fresh).catch((error) => {
@@ -218,6 +366,7 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
    * ya devuelve el dato correcto sin esperar nada ni recargar nada.
    */
   public async save(product: Product): Promise<void> {
+    await this.assertCatalogWritable();
     await super.save(product);
     this.touchLocal();
     try {
@@ -233,6 +382,7 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
    * vacío hasta el siguiente refresco en segundo plano).
    */
   public async saveMany(products: Product[]): Promise<void> {
+    await this.assertCatalogWritable();
     await super.saveMany(products);
     this.touchLocal();
     try {
@@ -243,6 +393,7 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
   }
 
   public async update(product: Product): Promise<void> {
+    await this.assertCatalogWritable();
     await super.update(product);
     this.touchLocal();
     // El UPDATE real en Supabase incrementa la versión en el servidor
@@ -257,6 +408,7 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
   }
 
   public async delete(id: string): Promise<void> {
+    await this.assertCatalogWritable();
     await super.delete(id);
     this.recentDeletes.mark([id]);
     this.touchLocal();
@@ -268,6 +420,7 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
   }
 
   public async deleteMany(ids: string[]): Promise<void> {
+    await this.assertCatalogWritable();
     await super.deleteMany(ids);
     this.recentDeletes.mark(ids);
     this.touchLocal();
@@ -492,6 +645,12 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
       }
     }));
     return products;
+  }
+
+  /** Igual que findById: por la función segura de lectura (respeta el stock enmascarado). */
+  public async findMany(ids: string[]): Promise<Product[]> {
+    if (ids.length === 0) return [];
+    return this.readFromServer(ids);
   }
 
   public async findBySkuAndBranch(sku: string, branchId: string): Promise<Product | null> {

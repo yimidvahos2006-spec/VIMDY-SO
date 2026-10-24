@@ -89,6 +89,26 @@ export class InventoryEngine {
     return this.getRepository().findAll();
   }
 
+  /**
+   * Catálogo leído DIRECTO de la base de datos en este instante (nunca del caché
+   * local). Lanza error si el servidor no responde. Úsalo siempre que el stock
+   * leído se convierta en una "foto" para calcular diferencias (ej. conteo de
+   * inventario); `listAll()` es solo para pintar pantallas y puede venir del caché.
+   */
+  public async listAllAuthoritative(): Promise<Product[]> {
+    return this.getRepository().findAllAuthoritative();
+  }
+
+  /**
+   * Recarga el catálogo desde el servidor y reemplaza el caché local. Úsalo cuando
+   * cambia lo que el servidor le entrega a esta persona (ej. al abrir un conteo a
+   * ciegas su stock llega enmascarado y el caché anterior tendría cifras reales).
+   * Lanza error si el servidor no responde.
+   */
+  public async reloadFromServer(): Promise<Product[]> {
+    return this.getRepository().reloadCatalogFromServer();
+  }
+
   public async search(query: string): Promise<Product[]> {
     const needle = query.trim().toLowerCase();
     if (!needle) return this.listAll();

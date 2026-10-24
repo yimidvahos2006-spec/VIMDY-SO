@@ -3,6 +3,7 @@ import type { TranslationKey } from "../../../core/i18n/dictionaries";
 import { getBusinessHour } from "../../../core/utils/businessTime";
 import { companyConfigStore } from "../../../core/store/companyConfigStore";
 import { formatMoney } from "../../../core/utils/formatMoney";
+import { maskedStatusText } from "../../../core/utils/stockMask";
 
 type TFunction = (key: TranslationKey, vars?: Record<string, string | number>) => string;
 
@@ -108,6 +109,10 @@ export function buildManagerPriorities(snapshot: BusinessSnapshot, t: TFunction)
         ? alert.limitingIngredientName
           ? t("priority.production.criticalWithIngredient", { ingredient: alert.limitingIngredientName, product: alert.productName })
           : t("priority.production.criticalNoIngredient", { product: alert.productName })
+        : alert.stockMasked
+        ? alert.limitingIngredientName
+          ? t("priority.production.limitedWithIngredient", { ingredient: alert.limitingIngredientName, product: alert.productName })
+          : t("priority.production.limitedNoIngredient", { product: alert.productName })
         : alert.limitingIngredientName
         ? t("priority.production.warningWithIngredient", { ingredient: alert.limitingIngredientName, maxUnits: alert.maxUnits, product: alert.productName })
         : t("priority.production.warningNoIngredient", { maxUnits: alert.maxUnits, product: alert.productName });
@@ -127,10 +132,11 @@ export function buildManagerPriorities(snapshot: BusinessSnapshot, t: TFunction)
   if (topPurchase && priorities.length < 5) {
     priorities.push({
       key: "purchase",
-      color: topPurchase.daysUntilStockout !== null && topPurchase.daysUntilStockout <= 2 ? "red" : "yellow",
+      color: topPurchase.stockStatus === "OUT" || (topPurchase.daysUntilStockout !== null && topPurchase.daysUntilStockout <= 2) ? "red" : "yellow",
       icon: "📦",
-      message:
-        topPurchase.daysUntilStockout !== null
+      message: topPurchase.stockMasked
+        ? t("priority.purchase.masked", { name: topPurchase.name, status: maskedStatusText(topPurchase.stockStatus ?? "LOW") })
+        : topPurchase.daysUntilStockout !== null
           ? t("priority.purchase.urgent", { stock: topPurchase.currentStock, name: topPurchase.name, days: topPurchase.daysUntilStockout })
           : t("priority.purchase.simple", { stock: topPurchase.currentStock, name: topPurchase.name }),
       actionLabel: t("route.viewProduct"),

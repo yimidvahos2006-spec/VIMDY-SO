@@ -22,6 +22,7 @@ import { getProductProfitView } from "./productProfit";
 import { AlertsPanel, CategoryChip, RecentMovementsPanel, SortableHeader } from "./InventoryWidgets";
 import { useAuth } from "../../context/AuthContext";
 import { QuickWasteModal } from "./QuickWasteModal";
+import { describeStock, hasMaskedStock, isStockMasked, maskedStockStatus, stockMaskBadge } from "../../../core/utils/stockMask";
 
 // Las ventanas (modales) pesan mucho y solo se abren al hacer clic: se descargan
 // aparte. Después del primer pintado se precargan en segundo plano para que al
@@ -83,7 +84,9 @@ export function InventoryDashboard({
     productsWithCost,
     refresh
   } = inventory;
-  const { user } = useAuth();
+  const { user, can } = useAuth();
+  // Costos, ganancia y precio de compra: solo quien tenga inventory.viewCosts (ADMIN).
+  const canViewCosts = can("inventory.viewCosts");
 
   const { productCategories: categories } = useCategories();
 
@@ -96,6 +99,10 @@ export function InventoryDashboard({
   // RecipeEngine para resolver costo/capacidad sin volver a consultar el
   // repositorio en cada fila de la tabla.
   const productMap = useMemo(() => new Map(allProducts.map((p) => [p.id, p])), [allProducts]);
+
+  // Conteo a ciegas activo: el servidor entrega el stock y el costo enmascarados.
+  // Mientras tanto la pantalla muestra solo el estado (🟢 / 🟡 / 🔴), nunca cifras.
+  const countMasked = useMemo(() => hasMaskedStock(allProducts), [allProducts]);
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StockStatus | "todos">("todos");
@@ -286,7 +293,13 @@ export function InventoryDashboard({
     const sorted = [...list].sort((a, b) => {
       let diff = 0;
       if (sortKey === "name") diff = a.name.localeCompare(b.name);
-      if (sortKey === "stock") diff = a.stock - b.stock;
+      if (sortKey === "stock") {
+        const rank = { OUT: 0, LOW: 1, AVAILABLE: 2 } as const;
+        diff =
+          isStockMasked(a) || isStockMasked(b)
+            ? rank[maskedStockStatus(a)] - rank[maskedStockStatus(b)]
+            : a.stock - b.stock;
+      }
       if (sortKey === "price") diff = a.price - b.price;
       return sortDir === "asc" ? diff : -diff;
     });
@@ -371,19 +384,20 @@ export function InventoryDashboard({
   }
 
   function exportInventoryToCsv() {
-    const headers = ["nombre", "sku", "categoria", "stockActual", "stockMinimo", "precioCompra", "precioVenta", "estado"];
+    const headers = ["nombre", "sku", "categoria", "stockActual", "stockMinimo", ...(canViewCosts ? ["precioCompra"] : []), "precioVenta", "estado"];
     const activeProducts = products.filter((p) => p.active !== false);
     const rows = activeProducts.map((p) => {
       const status = getStockStatus(p);
+      const masked = isStockMasked(p);
       return [
         p.name,
         p.sku ?? "",
         categoryNameById[p.categoryId] ?? p.categoryId,
-        p.stock,
-        p.minStock,
-        p.purchasePrice ?? 0,
+        masked ? "" : p.stock,
+        masked ? "" : p.minStock,
+        ...(canViewCosts ? [masked ? "" : (p.purchasePrice ?? 0)] : []),
         p.price,
-        STATUS_LABEL[status]
+        masked ? stockMaskBadge(p).label : STATUS_LABEL[status]
       ];
     });
 
@@ -524,7 +538,7 @@ export function InventoryDashboard({
               </button>
             </div>
             <p className="text-vimdy-text-secondary text-sm mb-4">
-              {transferProduct.name} — Stock disponible: {transferProduct.stock}
+              {transferProduct.name} — Stock disponible: {describeStock(transferProduct, String(transferProduct.stock))}
             </p>
             <div className="space-y-4">
               <div>
@@ -557,7 +571,7 @@ export function InventoryDashboard({
                 <input
                   type="number"
                   min={1}
-                  max={transferProduct.stock}
+                  max={isStockMasked(transferProduct) ? undefined : transferProduct.stock}
                   value={transferQuantity}
                   onChange={(e) => setTransferQuantity(Number(e.target.value))}
                   className="w-full h-11 px-3 rounded-vimdy-md border border-vimdy-border bg-vimdy-background text-vimdy-text"
@@ -572,7 +586,7 @@ export function InventoryDashboard({
                 </button>
                 <VimdyButton
                   onClick={confirmTransfer}
-                  disabled={!transferTargetBranchId || transferQuantity <= 0 || transferQuantity > transferProduct.stock}
+                  disabled={!transferTargetBranchId || transferQuantity <= 0 || (!isStockMasked(transferProduct) && transferQuantity > transferProduct.stock)}
                   variant="primary"
                 >
                   Confirmar transferencia
@@ -667,6 +681,12 @@ export function InventoryDashboard({
             </div>
           )}
 
+          {countMasked && (
+            <div role="status" className="mx-4 mt-4 rounded-vimdy-md border border-vimdy-warning/30 bg-vimdy-warning/10 px-4 py-3 text-sm text-vimdy-text-secondary">
+              Tienes un conteo a ciegas abierto: aquí ves solo el estado de cada producto (🟢 Disponible, 🟡 Stock bajo, 🔴 Agotado), sin cantidades ni costos. Se muestran de nuevo cuando se cierre el conteo.
+            </div>
+          )}
+
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -704,15 +724,18 @@ export function InventoryDashboard({
                 )}
                 {pageItems.map((product) => {
                   const status = getStockStatus(product);
+                  const rowMasked = isStockMasked(product);
                   const capacity =
-                    product.recipe && product.recipe.length > 0
+                    !rowMasked && product.recipe && product.recipe.length > 0
                       ? container.recipeEngine.get().getProductionCapacity(product, productMap)
                       : null;
                   return (
                     <tr
                       key={product.id}
-                      onClick={() => setSelected(product)}
-                      className="border-b border-vimdy-border-subtle hover:bg-vimdy-surface-hover/50 cursor-pointer transition-colors"
+                      onClick={() => {
+                        if (!rowMasked) setSelected(product);
+                      }}
+                      className={`border-b border-vimdy-border-subtle transition-colors ${rowMasked ? "" : "hover:bg-vimdy-surface-hover/50 cursor-pointer"}`}
                     >
                       <td className="px-4 py-3 text-vimdy-text font-medium">
                         <div className="flex flex-col gap-1">
@@ -771,11 +794,12 @@ export function InventoryDashboard({
                           <span className="text-xs text-vimdy-text-tertiary">{product.trackStock === false && !product.requiresKitchen ? "No aplica" : "Sin receta"}</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-vimdy-text">{product.stock}</td>
+                      <td className="px-4 py-3 text-vimdy-text whitespace-nowrap">{rowMasked ? stockMaskBadge(product).text : product.stock}</td>
                       <td className="px-4 py-3 text-vimdy-text-secondary">{product.minStock}</td>
                       <td className="px-4 py-3">
                         <p className="text-vimdy-accent font-semibold">{money(product.price)}</p>
                         {(() => {
+                          if (rowMasked || !canViewCosts) return null;
                           const profit = profitById.get(product.id);
                           if (!profit || profit.kind === "none") return null;
                           if (profit.kind === "missing-cost") {
@@ -803,6 +827,9 @@ export function InventoryDashboard({
                         </span>
                       </td>
                       <td className="px-4 py-3">
+                        {rowMasked ? (
+                          <span className="text-xs text-vimdy-text-tertiary">Solo lectura</span>
+                        ) : (
                         <div className="flex items-center gap-1">
                           <button
                             onClick={(e) => {
@@ -865,6 +892,7 @@ export function InventoryDashboard({
                             </button>
                           )}
                         </div>
+                        )}
                       </td>
                     </tr>
                   );
