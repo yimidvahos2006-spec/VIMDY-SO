@@ -2,10 +2,18 @@ import React, { useId } from "react";
 
 import "./CopilotOrb.css";
 
-export type CopilotOrbState = "idle" | "listening" | "thinking" | "responding";
+export type CopilotOrbState =
+  | "idle"
+  | "listening"
+  | "thinking"
+  | "responding"
+  | "angry"
+  | "wink"
+  | "success"
+  | "warning";
 
 interface CopilotOrbProps {
-  /** Estado visual: reposo, escuchando, pensando o respondiendo. */
+  /** Estado visual: reposo, escuchando, pensando, respondiendo o una reacción (angry, wink, success, warning). */
   state?: CopilotOrbState;
   /** Diámetro total en px (incluye el espacio del anillo y las ondas). */
   size?: number;
@@ -28,8 +36,12 @@ const BAR_COUNT = 5;
  *
  *  - idle       → respiración suave
  *  - listening  → pulsación activa + ondas que se expanden
- *  - thinking   → anillo de partículas girando
+ *  - thinking   → anillo de partículas girando (violeta)
  *  - responding → barras de audio + ondas suaves
+ *  - angry      → rojo intenso, parpadeo rápido y vibración
+ *  - wink       → destello lateral rápido (felicitación / venta récord)
+ *  - success    → verde brillante con pulso (buenas noticias)
+ *  - warning    → amarillo con pulso lento (alertas)
  *
  * Es decorativo (aria-hidden): el estado en texto lo anuncia la página.
  */
@@ -60,6 +72,16 @@ export function CopilotOrb({ state = "idle", size = 120, animated = true, classN
         <span className="copilot-orb__blob copilot-orb__blob--b" />
         <span className="copilot-orb__blob copilot-orb__blob--c" />
         <span className="copilot-orb__gloss" />
+        {animated && (
+          <span className="copilot-orb__face">
+            <span className="copilot-orb__brow copilot-orb__brow--l" />
+            <span className="copilot-orb__brow copilot-orb__brow--r" />
+            <span className="copilot-orb__eye copilot-orb__eye--l" />
+            <span className="copilot-orb__eye copilot-orb__eye--r" />
+            <span className="copilot-orb__mouth" />
+          </span>
+        )}
+        {animated && <span className="copilot-orb__flash" />}
         {animated && (
           <span className="copilot-orb__bars">
             {Array.from({ length: BAR_COUNT }, (_, i) => (

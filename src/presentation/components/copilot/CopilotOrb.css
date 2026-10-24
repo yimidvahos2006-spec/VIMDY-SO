@@ -2,7 +2,7 @@
    CopilotOrb — avatar animado de VIMDY IA
    -----------------------------------------------------------
    Todo en CSS/SVG. El estado se controla con data-state:
-     idle | listening | thinking | responding
+     idle | listening | thinking | responding | angry | wink | success | warning
    y data-animated="false" apaga todas las animaciones
    (avatares pequeños dentro de cada mensaje).
    Colores: cian/azul de marca + un toque de violeta, los mismos
@@ -13,6 +13,7 @@
   --orb-cyan: 34 211 238;
   --orb-blue: 37 99 235;
   --orb-violet: 139 92 246;
+  --orb-deep: #0b1a4a;
 
   /* Valores por estado (se sobrescriben abajo) */
   --orb-spin: 14s;
@@ -45,6 +46,58 @@
   --orb-breath: 2.2s;
   --orb-scale: 1.03;
   --orb-halo-opacity: 0.8;
+  /* violeta */
+  --orb-cyan: 167 139 250;
+  --orb-blue: 109 40 217;
+  --orb-violet: 216 180 254;
+  --orb-deep: #1e0b4a;
+}
+
+/* Enojado: rojo intenso, parpadeo rápido y vibración */
+.copilot-orb[data-state="angry"] {
+  --orb-spin: 2s;
+  --orb-breath: 0.35s;
+  --orb-scale: 1.08;
+  --orb-halo-opacity: 1;
+  --orb-ripple: 0.9s;
+  --orb-cyan: 248 113 113;
+  --orb-blue: 220 38 38;
+  --orb-violet: 153 27 27;
+  --orb-deep: #450a0a;
+  animation: copilot-orb-shake 0.4s linear infinite;
+}
+
+/* Guiño: mismos colores de marca, con un destello lateral */
+.copilot-orb[data-state="wink"] {
+  --orb-breath: 1.2s;
+  --orb-scale: 1.05;
+  --orb-halo-opacity: 1;
+}
+
+/* Éxito: verde brillante con pulso */
+.copilot-orb[data-state="success"] {
+  --orb-spin: 6s;
+  --orb-breath: 1.1s;
+  --orb-scale: 1.09;
+  --orb-halo-opacity: 1;
+  --orb-ripple: 1.6s;
+  --orb-cyan: 74 222 128;
+  --orb-blue: 22 163 74;
+  --orb-violet: 190 242 100;
+  --orb-deep: #052e16;
+}
+
+/* Alerta: amarillo con pulso más lento */
+.copilot-orb[data-state="warning"] {
+  --orb-spin: 9s;
+  --orb-breath: 1.8s;
+  --orb-scale: 1.07;
+  --orb-halo-opacity: 0.95;
+  --orb-ripple: 2.4s;
+  --orb-cyan: 250 204 21;
+  --orb-blue: 217 119 6;
+  --orb-violet: 251 146 60;
+  --orb-deep: #451a03;
 }
 
 .copilot-orb[data-state="responding"] {
@@ -80,12 +133,41 @@
     circle at 30% 24%,
     rgb(var(--orb-cyan) / 0.95),
     rgb(var(--orb-blue)) 55%,
-    #0b1a4a 100%
+    var(--orb-deep) 100%
   );
   box-shadow:
     inset 0 0 calc(var(--orb-size) * 0.1) rgb(255 255 255 / 0.28),
     0 0 calc(var(--orb-size) * 0.16) rgb(var(--orb-blue) / 0.5);
   animation: copilot-orb-breathe var(--orb-breath) ease-in-out infinite;
+}
+
+.copilot-orb[data-state="angry"] .copilot-orb__body {
+  animation:
+    copilot-orb-breathe var(--orb-breath) ease-in-out infinite,
+    copilot-orb-blink 0.3s steps(1, end) infinite;
+}
+
+.copilot-orb[data-state="angry"] .copilot-orb__halo {
+  animation: copilot-orb-blink 0.3s steps(1, end) infinite;
+}
+
+.copilot-orb[data-state="wink"] .copilot-orb__body {
+  animation: copilot-orb-wink 0.7s ease-in-out 2;
+}
+
+/* Destello lateral (solo se ve en wink) */
+.copilot-orb__flash {
+  inset: 0;
+  border-radius: 50%;
+  background: linear-gradient(105deg, transparent 32%, rgb(255 255 255 / 0.9) 50%, transparent 68%);
+  opacity: 0;
+  transform: translateX(-120%);
+  pointer-events: none;
+}
+
+.copilot-orb[data-state="wink"] .copilot-orb__flash {
+  opacity: 1;
+  animation: copilot-orb-flash 0.7s ease-in-out 2;
 }
 
 /* Manchas de color que orbitan dentro de la esfera (efecto fluido) */
@@ -132,6 +214,138 @@
   border-radius: 50%;
   background: radial-gradient(ellipse at 30% 18%, rgb(255 255 255 / 0.55), transparent 42%);
   pointer-events: none;
+}
+
+/* ---------- Cara (ojos, cejas y boca) ---------- */
+.copilot-orb__face {
+  inset: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.copilot-orb__face > * {
+  position: absolute;
+  transition: all 0.25s ease;
+}
+
+.copilot-orb__eye {
+  top: 36%;
+  width: 11%;
+  height: 17%;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.95);
+  box-shadow: 0 0 calc(var(--orb-size) * 0.04) rgb(255 255 255 / 0.7);
+  transform-origin: center;
+  animation: copilot-orb-eye-blink 4.5s ease-in-out infinite;
+}
+
+.copilot-orb__eye--l { left: 27%; }
+.copilot-orb__eye--r { left: 62%; }
+
+.copilot-orb__mouth {
+  top: 62%;
+  left: 36%;
+  width: 28%;
+  height: 12%;
+  border: calc(var(--orb-size) * 0.022) solid rgb(255 255 255 / 0.95);
+  border-top-color: transparent;
+  border-left-color: transparent;
+  border-right-color: transparent;
+  border-radius: 0 0 999px 999px;
+  box-sizing: border-box;
+}
+
+.copilot-orb__brow {
+  top: 27%;
+  width: 17%;
+  height: calc(var(--orb-size) * 0.024);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.95);
+  opacity: 0;
+}
+
+.copilot-orb__brow--l { left: 24%; }
+.copilot-orb__brow--r { left: 59%; }
+
+/* La cara se oculta mientras responde (ahí van las barras de audio) */
+.copilot-orb[data-state="responding"] .copilot-orb__face { opacity: 0; }
+
+/* escuchando: ojos grandes y boca en "o" */
+.copilot-orb[data-state="listening"] .copilot-orb__eye { transform: scale(1.2); }
+.copilot-orb[data-state="listening"] .copilot-orb__mouth {
+  left: 44%;
+  top: 63%;
+  width: 12%;
+  height: 12%;
+  border-color: rgb(255 255 255 / 0.95);
+  border-radius: 50%;
+}
+
+/* pensando: ojos que miran de lado a lado y boca recta */
+.copilot-orb[data-state="thinking"] .copilot-orb__eye { animation: copilot-orb-eye-look 2.4s ease-in-out infinite; }
+.copilot-orb[data-state="thinking"] .copilot-orb__mouth {
+  height: 0;
+  left: 40%;
+  width: 20%;
+  border-radius: 0;
+}
+
+/* enojado: cejas hacia adentro, ojos entrecerrados y boca triste */
+.copilot-orb[data-state="angry"] .copilot-orb__brow { opacity: 1; }
+.copilot-orb[data-state="angry"] .copilot-orb__brow--l { transform: rotate(22deg); }
+.copilot-orb[data-state="angry"] .copilot-orb__brow--r { transform: rotate(-22deg); }
+.copilot-orb[data-state="angry"] .copilot-orb__eye { top: 40%; transform: scaleY(0.6); animation: none; }
+.copilot-orb[data-state="angry"] .copilot-orb__mouth {
+  top: 68%;
+  border-color: transparent;
+  border-top-color: rgb(255 255 255 / 0.95);
+  border-radius: 999px 999px 0 0;
+}
+
+/* guiño: un ojo se cierra y sonrisa grande */
+.copilot-orb[data-state="wink"] .copilot-orb__eye--r {
+  animation: copilot-orb-eye-wink 0.7s ease-in-out 2 forwards;
+}
+.copilot-orb[data-state="wink"] .copilot-orb__mouth { width: 34%; left: 33%; height: 15%; }
+
+/* éxito: ojos felices "^" y sonrisa ancha */
+.copilot-orb[data-state="success"] .copilot-orb__eye {
+  height: 12%;
+  top: 38%;
+  background: transparent;
+  box-shadow: none;
+  border: calc(var(--orb-size) * 0.03) solid transparent;
+  border-top-color: rgb(255 255 255 / 0.95);
+  border-radius: 999px 999px 0 0;
+  animation: none;
+}
+.copilot-orb[data-state="success"] .copilot-orb__mouth { width: 36%; left: 32%; height: 16%; }
+
+/* alerta: cejas preocupadas y boca recta */
+.copilot-orb[data-state="warning"] .copilot-orb__brow { opacity: 1; }
+.copilot-orb[data-state="warning"] .copilot-orb__brow--l { transform: rotate(-16deg); }
+.copilot-orb[data-state="warning"] .copilot-orb__brow--r { transform: rotate(16deg); }
+.copilot-orb[data-state="warning"] .copilot-orb__mouth {
+  height: 0;
+  left: 38%;
+  width: 24%;
+  top: 68%;
+  border-radius: 0;
+}
+
+@keyframes copilot-orb-eye-blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  95% { transform: scaleY(0.1); }
+}
+
+@keyframes copilot-orb-eye-look {
+  0%, 100% { transform: translateX(-30%); }
+  50% { transform: translateX(30%); }
+}
+
+@keyframes copilot-orb-eye-wink {
+  0%, 100% { transform: scaleY(1); }
+  35%, 65% { transform: scaleY(0.08); }
 }
 
 /* ---------- Barras de audio (responding) ---------- */
@@ -184,7 +398,10 @@
 }
 
 .copilot-orb[data-state="listening"] .copilot-orb__ripple,
-.copilot-orb[data-state="responding"] .copilot-orb__ripple {
+.copilot-orb[data-state="responding"] .copilot-orb__ripple,
+.copilot-orb[data-state="angry"] .copilot-orb__ripple,
+.copilot-orb[data-state="success"] .copilot-orb__ripple,
+.copilot-orb[data-state="warning"] .copilot-orb__ripple {
   animation: copilot-orb-ripple var(--orb-ripple) ease-out infinite;
 }
 
@@ -246,6 +463,29 @@
 @keyframes copilot-orb-bar {
   0%, 100% { transform: scaleY(0.3); }
   50% { transform: scaleY(1); }
+}
+
+@keyframes copilot-orb-shake {
+  0%, 100% { transform: translate(0, 0); }
+  20% { transform: translate(-2.5%, 1%); }
+  40% { transform: translate(2.5%, -1%); }
+  60% { transform: translate(-2%, -1.5%); }
+  80% { transform: translate(2%, 1.5%); }
+}
+
+@keyframes copilot-orb-blink {
+  0% { filter: brightness(1); opacity: 1; }
+  50% { filter: brightness(1.3); opacity: 0.75; }
+}
+
+@keyframes copilot-orb-wink {
+  0%, 100% { transform: scale(1, 1); }
+  40% { transform: scale(1.06, 0.8); }
+}
+
+@keyframes copilot-orb-flash {
+  from { transform: translateX(-120%); }
+  to { transform: translateX(120%); }
 }
 
 @keyframes copilot-orb-rotate {

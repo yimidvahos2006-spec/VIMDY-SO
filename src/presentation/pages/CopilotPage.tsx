@@ -14,13 +14,21 @@ import { useAuth } from "../context/AuthContext";
 import { CopilotOrb, type CopilotOrbState } from "../components/copilot/CopilotOrb";
 import { CopilotMessageBubble, CopilotThinkingBubble } from "../components/copilot/CopilotMessageBubble";
 import { CopilotSuggestions } from "../components/copilot/CopilotSuggestions";
+import { detectReplyReaction, detectUserReaction, type CopilotReaction } from "../components/copilot/copilotMood";
 
 const STATUS_LABEL: Record<CopilotOrbState, string> = {
   idle: "En línea",
   listening: "Te escucho…",
   thinking: "Analizando tu negocio…",
-  responding: "Respondiendo…"
+  responding: "Respondiendo…",
+  angry: "Eso no me gustó…",
+  wink: "¡Gracias! 😉",
+  success: "Buenas noticias",
+  warning: "Ojo con esto"
 };
+
+/** Cuánto dura una reacción del orbe antes de volver a su estado normal. */
+const REACTION_MS = 3500;
 
 /**
  * CopilotPage — "/ia"
@@ -41,9 +49,24 @@ function CopilotPageContent() {
   const [draft, setDraft] = useState("");
   const [isListening, setIsListening] = useState(false);
   const [isResponding, setIsResponding] = useState(false);
+  const [reaction, setReaction] = useState<CopilotReaction | null>(null);
+  const reactionRef = useRef<CopilotReaction | null>(null);
+  const reactionTimer = useRef<number | undefined>(undefined);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastSeenMessageId = useRef<string | undefined>(messages[messages.length - 1]?.id);
   const navigate = useNavigate();
+
+  function showReaction(next: CopilotReaction) {
+    window.clearTimeout(reactionTimer.current);
+    reactionRef.current = next;
+    setReaction(next);
+    reactionTimer.current = window.setTimeout(() => {
+      reactionRef.current = null;
+      setReaction(null);
+    }, REACTION_MS);
+  }
+
+  useEffect(() => () => window.clearTimeout(reactionTimer.current), []);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -63,6 +86,13 @@ function CopilotPageContent() {
       return;
     }
 
+    // Estado de negocio que se nota en la respuesta (alerta, buena noticia, récord).
+    // Si el usuario acaba de provocar enojo o guiño, esa reacción no se pisa.
+    const replyReaction = detectReplyReaction(last.content);
+    if (replyReaction && reactionRef.current !== "angry" && reactionRef.current !== "wink") {
+      showReaction(replyReaction);
+    }
+
     setIsResponding(true);
     const duration = Math.min(5000, Math.max(1800, last.content.length * 18));
     const timer = window.setTimeout(() => setIsResponding(false), duration);
@@ -75,6 +105,9 @@ function CopilotPageContent() {
 
     setDraft("");
     copilotStore.addUserMessage(trimmed);
+
+    const userReaction = detectUserReaction(trimmed);
+    if (userReaction) showReaction(userReaction);
 
     const command = await container.commandEngine.get().parse(trimmed);
     if (command) {
@@ -146,9 +179,11 @@ function CopilotPageContent() {
     ? "listening"
     : isLoading
       ? "thinking"
-      : isResponding
-        ? "responding"
-        : "idle";
+      : reaction
+        ? reaction
+        : isResponding
+          ? "responding"
+          : "idle";
 
   // Pantalla inicial: solo existe el mensaje de bienvenida y no hay nada en curso.
   const showHero = messages.length <= 1 && !isLoading;
