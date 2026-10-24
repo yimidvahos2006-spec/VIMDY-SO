@@ -58,8 +58,8 @@ export function CategoriesVideo() {
             <video
               ref={videoRef}
               className="h-full w-full object-cover"
-              src="/videos/vimdy-ia.mp4"
-              poster="/videos/vimdy-ia-poster.jpg"
+              src="/videos/vimdy-ia.mp4?v=2"
+              poster="/videos/vimdy-ia-poster.jpg?v=2"
               autoPlay={!reduceMotion}
               controls={reduceMotion}
               muted
