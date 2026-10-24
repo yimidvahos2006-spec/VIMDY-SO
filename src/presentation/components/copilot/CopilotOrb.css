@@ -1,0 +1,268 @@
+/* ===========================================================
+   CopilotOrb — avatar animado de VIMDY IA
+   -----------------------------------------------------------
+   Todo en CSS/SVG. El estado se controla con data-state:
+     idle | listening | thinking | responding
+   y data-animated="false" apaga todas las animaciones
+   (avatares pequeños dentro de cada mensaje).
+   Colores: cian/azul de marca + un toque de violeta, los mismos
+   tonos que ya usa el Copiloto (cyan-400 / accent #2563EB).
+=========================================================== */
+
+.copilot-orb {
+  --orb-cyan: 34 211 238;
+  --orb-blue: 37 99 235;
+  --orb-violet: 139 92 246;
+
+  /* Valores por estado (se sobrescriben abajo) */
+  --orb-spin: 14s;
+  --orb-breath: 5s;
+  --orb-scale: 1.04;
+  --orb-halo-opacity: 0.55;
+  --orb-ripple: 1.8s;
+
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  isolation: isolate;
+}
+
+.copilot-orb > *,
+.copilot-orb__body > * {
+  position: absolute;
+}
+
+.copilot-orb[data-state="listening"] {
+  --orb-spin: 7s;
+  --orb-breath: 0.9s;
+  --orb-scale: 1.1;
+  --orb-halo-opacity: 1;
+  --orb-ripple: 1.8s;
+}
+
+.copilot-orb[data-state="thinking"] {
+  --orb-spin: 3s;
+  --orb-breath: 2.2s;
+  --orb-scale: 1.03;
+  --orb-halo-opacity: 0.8;
+}
+
+.copilot-orb[data-state="responding"] {
+  --orb-spin: 5s;
+  --orb-breath: 1.6s;
+  --orb-scale: 1.06;
+  --orb-halo-opacity: 0.9;
+  --orb-ripple: 2.6s;
+}
+
+/* ---------- Halo (resplandor exterior) ---------- */
+.copilot-orb__halo {
+  inset: -10%;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgb(var(--orb-cyan) / 0.38) 0%,
+    rgb(var(--orb-blue) / 0.2) 42%,
+    transparent 70%
+  );
+  filter: blur(calc(var(--orb-size) * 0.07));
+  opacity: var(--orb-halo-opacity);
+  transition: opacity 0.4s ease;
+  animation: copilot-orb-halo var(--orb-breath) ease-in-out infinite;
+}
+
+/* ---------- Cuerpo (la esfera) ---------- */
+.copilot-orb__body {
+  inset: 12%;
+  border-radius: 50%;
+  overflow: hidden;
+  background: radial-gradient(
+    circle at 30% 24%,
+    rgb(var(--orb-cyan) / 0.95),
+    rgb(var(--orb-blue)) 55%,
+    #0b1a4a 100%
+  );
+  box-shadow:
+    inset 0 0 calc(var(--orb-size) * 0.1) rgb(255 255 255 / 0.28),
+    0 0 calc(var(--orb-size) * 0.16) rgb(var(--orb-blue) / 0.5);
+  animation: copilot-orb-breathe var(--orb-breath) ease-in-out infinite;
+}
+
+/* Manchas de color que orbitan dentro de la esfera (efecto fluido) */
+.copilot-orb__blob {
+  top: 15%;
+  left: 15%;
+  width: 70%;
+  height: 70%;
+  border-radius: 50%;
+  filter: blur(calc(var(--orb-size) * 0.07));
+  mix-blend-mode: screen;
+  opacity: 0.7;
+  will-change: transform;
+}
+
+/* Posiciones base: también son el aspecto de la versión estática */
+.copilot-orb__blob--a {
+  --r: 24%;
+  background: rgb(var(--orb-cyan));
+  transform: translate(-22%, -20%);
+  animation: copilot-orb-orbit var(--orb-spin) linear infinite;
+}
+
+.copilot-orb__blob--b {
+  --r: 28%;
+  background: rgb(var(--orb-violet));
+  transform: translate(24%, 22%);
+  animation: copilot-orb-orbit calc(var(--orb-spin) * 1.35) linear infinite reverse;
+}
+
+.copilot-orb__blob--c {
+  --r: 14%;
+  width: 50%;
+  height: 50%;
+  top: 25%;
+  left: 25%;
+  background: rgb(var(--orb-blue) / 0.9);
+  animation: copilot-orb-orbit calc(var(--orb-spin) * 0.8) linear infinite;
+}
+
+/* Brillo superior izquierdo */
+.copilot-orb__gloss {
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 30% 18%, rgb(255 255 255 / 0.55), transparent 42%);
+  pointer-events: none;
+}
+
+/* ---------- Barras de audio (responding) ---------- */
+.copilot-orb__bars {
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--orb-size) * 0.035);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.copilot-orb__bar {
+  position: relative;
+  width: calc(var(--orb-size) * 0.045);
+  height: 34%;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.92);
+  transform: scaleY(0.25);
+  animation: copilot-orb-bar 0.9s ease-in-out infinite;
+  animation-play-state: paused;
+}
+
+.copilot-orb__bar:nth-child(1) { height: 30%; animation-delay: 0s; }
+.copilot-orb__bar:nth-child(2) { height: 46%; animation-delay: 0.12s; }
+.copilot-orb__bar:nth-child(3) { height: 58%; animation-delay: 0.24s; }
+.copilot-orb__bar:nth-child(4) { height: 46%; animation-delay: 0.36s; }
+.copilot-orb__bar:nth-child(5) { height: 30%; animation-delay: 0.48s; }
+
+.copilot-orb[data-state="responding"] .copilot-orb__bars {
+  opacity: 1;
+}
+
+.copilot-orb[data-state="responding"] .copilot-orb__bar {
+  animation-play-state: running;
+}
+
+/* ---------- Ondas (listening / responding) ---------- */
+.copilot-orb__ripple {
+  inset: 12%;
+  border-radius: 50%;
+  border: 1.5px solid rgb(var(--orb-cyan) / 0.6);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.copilot-orb[data-state="responding"] .copilot-orb__ripple {
+  border-color: rgb(var(--orb-blue) / 0.7);
+}
+
+.copilot-orb[data-state="listening"] .copilot-orb__ripple,
+.copilot-orb[data-state="responding"] .copilot-orb__ripple {
+  animation: copilot-orb-ripple var(--orb-ripple) ease-out infinite;
+}
+
+.copilot-orb__ripple--2 { animation-delay: calc(var(--orb-ripple) / 3) !important; }
+.copilot-orb__ripple--3 { animation-delay: calc(var(--orb-ripple) / 3 * 2) !important; }
+
+/* ---------- Anillo de partículas (thinking) ---------- */
+.copilot-orb__ring {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  color: rgb(var(--orb-cyan));
+  opacity: 0;
+  transform: scale(0.9);
+  transition: opacity 0.4s ease, transform 0.4s ease;
+  pointer-events: none;
+}
+
+.copilot-orb[data-state="thinking"] .copilot-orb__ring {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.copilot-orb__ring g {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation-play-state: paused;
+}
+
+.copilot-orb__ring-dots { animation: copilot-orb-rotate 7s linear infinite; }
+.copilot-orb__ring-dots-inner { animation: copilot-orb-rotate 11s linear infinite reverse; }
+.copilot-orb__ring-arc { animation: copilot-orb-rotate 1.6s linear infinite; }
+
+.copilot-orb[data-state="thinking"] .copilot-orb__ring g {
+  animation-play-state: running;
+}
+
+/* ---------- Keyframes ---------- */
+@keyframes copilot-orb-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(var(--orb-scale)); }
+}
+
+@keyframes copilot-orb-halo {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+
+@keyframes copilot-orb-orbit {
+  from { transform: rotate(0deg) translateX(var(--r)) rotate(0deg); }
+  to { transform: rotate(360deg) translateX(var(--r)) rotate(-360deg); }
+}
+
+@keyframes copilot-orb-ripple {
+  0% { transform: scale(1); opacity: 0.7; }
+  100% { transform: scale(1.3); opacity: 0; }
+}
+
+@keyframes copilot-orb-bar {
+  0%, 100% { transform: scaleY(0.3); }
+  50% { transform: scaleY(1); }
+}
+
+@keyframes copilot-orb-rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ---------- Versión estática (avatares pequeños) ---------- */
+.copilot-orb[data-animated="false"] *,
+.copilot-orb[data-animated="false"] {
+  animation: none !important;
+}
+
+/* ---------- Accesibilidad: sin movimiento ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .copilot-orb,
+  .copilot-orb * {
+    animation: none !important;
+  }
+}
