@@ -46,6 +46,20 @@ class CopilotStore extends ObservableStore<CopilotSnapshot> {
     this.publish({ ...this.snapshot, isOpen: !this.snapshot.isOpen });
   }
 
+  /**
+   * Nuevo chat: borra el historial y deja solo el mensaje de bienvenida.
+   * Conserva isOpen (el panel flotante no se cierra). Como el panel flotante
+   * y la página /ia comparten este store, se reinician los dos a la vez.
+   */
+  public reset(): void {
+    this.publish({
+      ...this.snapshot,
+      isLoading: false,
+      error: null,
+      messages: [{ ...WELCOME_MESSAGE, createdAt: new Date() }]
+    });
+  }
+
   public addUserMessage(content: string): void {
     const message: CopilotMessage = {
       id: `user-${Date.now()}`,

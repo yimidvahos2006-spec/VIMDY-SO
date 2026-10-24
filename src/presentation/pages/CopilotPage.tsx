@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Send, Mic, MicOff } from "lucide-react";
+import { Send, Mic, MicOff, MessageSquarePlus } from "lucide-react";
 
 import { useCopilot } from "../../core/store/useCopilot";
 import { copilotStore } from "../../core/store/copilotStore";
@@ -57,7 +57,11 @@ function CopilotPageContent() {
     if (!last || last.id === lastSeenMessageId.current) return;
     lastSeenMessageId.current = last.id;
 
-    if (last.role !== "assistant") return;
+    // El mensaje de bienvenida (inicio o "Nuevo chat") no cuenta como respuesta.
+    if (last.role !== "assistant" || last.id === "welcome") {
+      setIsResponding(false);
+      return;
+    }
 
     setIsResponding(true);
     const duration = Math.min(5000, Math.max(1800, last.content.length * 18));
@@ -128,6 +132,16 @@ function CopilotPageContent() {
     await handleAsk(speech.text);
   }
 
+  // Nuevo chat: no se puede reiniciar mientras se espera una respuesta o se
+  // escucha (la respuesta pendiente caería en la conversación nueva), ni
+  // cuando no hay nada que borrar.
+  function handleNewChat() {
+    if (isLoading || isListening) return;
+    setDraft("");
+    setIsResponding(false);
+    copilotStore.reset();
+  }
+
   const orbState: CopilotOrbState = isListening
     ? "listening"
     : isLoading
@@ -162,6 +176,20 @@ function CopilotPageContent() {
                 {STATUS_LABEL[orbState]}
               </p>
             </div>
+
+            {!showHero && (
+            <button
+              type="button"
+              onClick={handleNewChat}
+              disabled={isLoading || isListening}
+              title="Nuevo chat"
+              aria-label="Nuevo chat: limpiar la conversación"
+              className="ml-auto inline-flex shrink-0 items-center gap-2 rounded-xl border border-cyan-500/20 bg-[#0F1A2B] px-3 py-2 text-sm text-cyan-200 transition hover:border-cyan-400/40 hover:bg-cyan-500/15 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[#0F1A2B]"
+            >
+              <MessageSquarePlus size={16} aria-hidden="true" />
+              <span className="hidden sm:inline">Nuevo chat</span>
+            </button>
+            )}
           </div>
 
           {/* Conversación */}
@@ -259,6 +287,10 @@ function CopilotPageContent() {
                 <Send size={18} className="text-white" />
               </button>
             </div>
+
+            <p className="mx-auto w-full max-w-3xl text-center text-xs text-slate-500">
+              VIMDY IA puede cometer errores. Verifique la información importante del negocio.
+            </p>
           </div>
         </div>
       </div>
