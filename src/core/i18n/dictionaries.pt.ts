@@ -180,6 +180,10 @@ const pt: Record<TranslationKey, string> = {
   "pos.topbar.barcodeNotFound": "Nenhum produto tem o código {code}.",
   "pos.topbar.barcodeOutOfStock": "{name} está esgotado — não foi possível adicionar.",
   "pos.topbar.barcodeNegativeStock": "{name} sem estoque — adicionado mesmo assim; revise o inventário.",
+  "pos.negativeStock.titleOne": "Esta venda deixa 1 item com estoque negativo",
+  "pos.negativeStock.titleMany": "Esta venda deixa {count} itens com estoque negativo",
+  "pos.negativeStock.hint": "A venda segue normalmente. Avise quem administra o estoque para regularizar.",
+  "pos.negativeStock.more": "e mais {count}",
   "pos.topbar.chargeByTable": "Cobrar por mesa",
 
   "pos.tableCharge.title": "Cobrar por mesa",

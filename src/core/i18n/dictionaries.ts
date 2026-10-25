@@ -192,6 +192,10 @@ const es = {
   "pos.topbar.barcodeNotFound": "Ningún producto tiene el código {code}.",
   "pos.topbar.barcodeOutOfStock": "{name} está agotado — no se pudo agregar.",
   "pos.topbar.barcodeNegativeStock": "{name} sin stock — se agregó igual; revisa el inventario.",
+  "pos.negativeStock.titleOne": "Esta venta deja 1 artículo en negativo",
+  "pos.negativeStock.titleMany": "Esta venta deja {count} artículos en negativo",
+  "pos.negativeStock.hint": "Se vende igual. Avisa a quien administra el inventario para que lo regularice.",
+  "pos.negativeStock.more": "y {count} más",
   "pos.topbar.chargeByTable": "Cobrar por mesa",
 
   "pos.tableCharge.title": "Cobrar por mesa",

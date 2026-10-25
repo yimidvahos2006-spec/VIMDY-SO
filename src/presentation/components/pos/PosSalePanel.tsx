@@ -10,6 +10,7 @@ import { useAuth } from "../../context/AuthContext";
 import { toast } from "../../../core/store/toastStore";
 import { PosCart } from "./PosCart";
 import { PosCheckoutPanel } from "./PosCheckoutPanel";
+import { PosNegativeStockNotice } from "./PosNegativeStockNotice";
 import { useTranslation } from "../../../core/i18n/useTranslation";
 import { formatMoney } from "../../../core/utils/formatMoney";
 import { companyConfigStore } from "../../../core/store/companyConfigStore";
@@ -272,6 +273,8 @@ export function PosSalePanel() {
             {t("pos.sale.shiftClosedBanner")}
           </div>
         )}
+
+        <PosNegativeStockNotice />
 
         <div className="rounded-vimdy-md bg-vimdy-background border border-vimdy-border px-4 py-4 text-center [container-type:inline-size]">
           <span className="block text-vimdy-text-secondary text-vimdy-micro uppercase tracking-[0.25em] font-bold">

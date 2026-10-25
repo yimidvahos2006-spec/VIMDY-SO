@@ -180,6 +180,10 @@ const en: Record<TranslationKey, string> = {
   "pos.topbar.barcodeNotFound": "No product matches code {code}.",
   "pos.topbar.barcodeOutOfStock": "{name} is out of stock — couldn't add it.",
   "pos.topbar.barcodeNegativeStock": "{name} has no stock — added anyway; check your inventory.",
+  "pos.negativeStock.titleOne": "This sale leaves 1 item with negative stock",
+  "pos.negativeStock.titleMany": "This sale leaves {count} items with negative stock",
+  "pos.negativeStock.hint": "The sale goes through anyway. Let whoever manages inventory know so they can fix it.",
+  "pos.negativeStock.more": "and {count} more",
   "pos.topbar.chargeByTable": "Charge by table",
 
   "pos.tableCharge.title": "Charge by table",

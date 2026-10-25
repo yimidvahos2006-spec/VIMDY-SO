@@ -773,6 +773,20 @@ export class InventoryEngine {
   }
 
   /**
+   * Vista previa para Caja (solo lectura, no toca stock ni base de datos):
+   * cuánto descontaría esta venta de cada producto/ingrediente, con la MISMA
+   * expansión de recetas que usa consumeForSale. Recibe el catálogo ya cargado.
+   * Lanza PRODUCT_NOT_FOUND / RECIPE_CYCLE / INVALID_SALE_QUANTITY igual que la venta real.
+   */
+  public previewSaleConsumption(
+    items: SaleStockItem[],
+    products: readonly Product[]
+  ): Map<string, number> {
+    const productById = new Map(products.map((product) => [product.id, product]));
+    return this.expandSaleConsumption(items, productById);
+  }
+
+  /**
    * Devuelve los productos REALES cuyo Kardex debe tener movimientos
    * asociados a una venta: la misma expansión que consumeForSale usa
    * para descontar stock (ingredientes de recetas, no el producto
