@@ -101,6 +101,19 @@ class DashboardStore extends ObservableStore<DashboardSnapshot> {
     });
   }
 
+  /**
+   * Aislamiento entre negocios: vuelve TODO a cero (datos, ayer, historial y
+   * ajustes optimistas). Se llama al cerrar sesión o al cambiar de negocio,
+   * para que nunca se vean cifras del negocio anterior mientras carga el nuevo.
+   */
+  reset(): void {
+    this.data = { ...INITIAL_DATA };
+    this.yesterday = { ...INITIAL_YESTERDAY };
+    this.history = { sales: [], customers: [], orders: [], inventory: [] };
+    this.optimistic = {};
+    this.publishSnapshot();
+  }
+
   getData(): DashboardData {
     return this.snapshot.data;
   }

@@ -159,22 +159,21 @@ describe("Smoke: venta con receta y venta por peso", () => {
     expect(cheeseAfterSale?.stock).toBe(18);
   });
 
-  it("rechaza la venta de un producto con receta si falta stock de algún ingrediente", async () => {
+  it("la venta de un producto con receta pasa aunque falte stock de un ingrediente; el ingrediente queda en negativo (Opción B)", async () => {
     await ctx.products.save({ ...MEAT, stock: 1 });
     await ctx.products.save({ ...CHEESE, stock: 0 });
 
     ctx.cart.addItem(BURGER, 2);
 
-    await expect(ctx.salesEngine.quickSale({ cashierId: "cashier-1" })).rejects.toThrow(
-      /No puedes vender/);
+    await expect(ctx.salesEngine.quickSale({ cashierId: "cashier-1" })).resolves.toBeDefined();
 
-    const breadAfterFail = await ctx.products.findById(BREAD.id);
-    const meatAfterFail = await ctx.products.findById(MEAT.id);
-    const cheeseAfterFail = await ctx.products.findById(CHEESE.id);
+    const breadAfter = await ctx.products.findById(BREAD.id);
+    const meatAfter = await ctx.products.findById(MEAT.id);
+    const cheeseAfter = await ctx.products.findById(CHEESE.id);
 
-    expect(breadAfterFail?.stock).toBe(50);
-    expect(meatAfterFail?.stock).toBe(1);
-    expect(cheeseAfterFail?.stock).toBe(0);
+    expect(breadAfter!.stock).toBeLessThan(50);
+    expect(meatAfter!.stock).toBeLessThan(1);
+    expect(cheeseAfter!.stock).toBeLessThan(0); // quedó en negativo, a propósito
   });
 
   it("descuenta correctamente un producto vendido por peso y calcula el precio total", async () => {

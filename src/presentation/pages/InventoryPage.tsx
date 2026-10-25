@@ -1,9 +1,11 @@
-import React, { lazy, Suspense, useState } from "react";
-import { ChefHat, ClipboardCheck, Package, Trash2 } from "lucide-react";
+import React, { lazy, Suspense, useMemo, useState } from "react";
+import { AlertTriangle, ChefHat, ClipboardCheck, Package, Trash2 } from "lucide-react";
 import { InventoryCountModal } from "../components/inventory/InventoryCountModal";
 import { DeleteItemsModal } from "../components/inventory/DeleteItemsModal";
 import { InventoryDashboard } from "../components/inventory/InventoryDashboard";
 import { InventorySummaryBar } from "../components/inventory/InventorySummaryBar";
+import { NegativeStockReport } from "../components/inventory/NegativeStockReport";
+import { isNegativeStock } from "../../core/utils/negativeStockReport";
 import { RequirePermission } from "../navigation/RequirePermission";
 import { useInventory } from "../../core/store/useInventory";
 
@@ -12,7 +14,7 @@ const InsumosPanel = lazy(() =>
   import("../components/inventory/InsumosPanel").then((m) => ({ default: m.InsumosPanel }))
 );
 
-type Side = "insumos" | "productos";
+type Side = "insumos" | "productos" | "negativos";
 
 const Fallback = () => <div className="h-64 w-full animate-pulse rounded-vimdy-xl bg-vimdy-border/20" aria-hidden="true" />;
 
@@ -43,6 +45,7 @@ const InventoryContent: React.FC = () => {
 
   const productCount = inventory.sellableProducts.filter((p) => p.active !== false).length;
   const insumoCount = inventory.insumos.filter((p) => p.active !== false).length;
+  const negativeCount = useMemo(() => inventory.products.filter(isNegativeStock).length, [inventory.products]);
 
   return (
     <div className="min-h-screen p-4 sm:p-6 xl:p-8 space-y-5">
@@ -72,12 +75,18 @@ const InventoryContent: React.FC = () => {
 
       <InventorySummaryBar products={inventory.products} loading={inventory.loading} onGoTo={goTo} />
 
-      <div className="flex gap-1 p-1 rounded-vimdy-lg border border-vimdy-border bg-vimdy-surface max-w-md" role="tablist">
+      <div className="flex gap-1 p-1 rounded-vimdy-lg border border-vimdy-border bg-vimdy-surface max-w-xl" role="tablist">
         <button role="tab" aria-selected={side === "productos"} onClick={() => setSide("productos")} className={tabClass(side === "productos")}>
           <Package size={16} /> Productos{!inventory.loading && <span className="opacity-80">({productCount})</span>}
         </button>
         <button role="tab" aria-selected={side === "insumos"} onClick={() => setSide("insumos")} className={tabClass(side === "insumos")}>
           <ChefHat size={16} /> Insumos{!inventory.loading && <span className="opacity-80">({insumoCount})</span>}
+        </button>
+        <button role="tab" aria-selected={side === "negativos"} onClick={() => setSide("negativos")} className={tabClass(side === "negativos")}>
+          <AlertTriangle size={16} className={!inventory.loading && negativeCount > 0 && side !== "negativos" ? "text-vimdy-danger" : undefined} /> En negativo
+          {!inventory.loading && (
+            <span className={negativeCount > 0 && side !== "negativos" ? "font-bold text-vimdy-danger" : "opacity-80"}>({negativeCount})</span>
+          )}
         </button>
       </div>
 
@@ -90,9 +99,12 @@ const InventoryContent: React.FC = () => {
         <section aria-label="Productos" className={`${side === "productos" ? "block" : "hidden"} min-w-0`}>
           <InventoryDashboard inventory={inventory} statusRequest={statusRequest} />
         </section>
+        <section aria-label="En negativo" className={`${side === "negativos" ? "block" : "hidden"} min-w-0`}>
+          <NegativeStockReport inventory={inventory} onRegularize={() => setShowCount(true)} />
+        </section>
       </div>
       {showCount && <InventoryCountModal inventory={inventory} onClose={() => setShowCount(false)} />}
-      {showDelete && <DeleteItemsModal inventory={inventory} initialKind={side} onClose={() => setShowDelete(false)} />}
+      {showDelete && <DeleteItemsModal inventory={inventory} initialKind={side === "insumos" ? "insumos" : "productos"} onClose={() => setShowDelete(false)} />}
     </div>
   );
 };

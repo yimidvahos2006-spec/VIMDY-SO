@@ -134,24 +134,32 @@ interface CopilotMessageBubbleProps {
   message: CopilotMessage;
   /** Nombre de la persona que usa VIMDY (para la inicial del avatar). */
   userName?: string;
+  /** Versión reducida (avatares y márgenes más chicos) para el panel flotante. */
+  compact?: boolean;
 }
 
-export function CopilotMessageBubble({ message, userName }: CopilotMessageBubbleProps) {
+export function CopilotMessageBubble({ message, userName, compact = false }: CopilotMessageBubbleProps) {
   const time = formatTime(message.createdAt);
 
   if (message.role === "user") {
     const initial = userName?.trim().charAt(0).toUpperCase();
 
     return (
-      <div className="flex flex-row-reverse items-start gap-3 animate-vimdy-slide-up">
+      <div className={`flex flex-row-reverse items-start animate-vimdy-slide-up ${compact ? "gap-2" : "gap-3"}`}>
         <div
-          className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-600/60 bg-gradient-to-br from-slate-600 to-slate-800 text-sm font-semibold text-slate-100"
+          className={`mt-0.5 flex shrink-0 items-center justify-center rounded-full border border-slate-600/60 bg-gradient-to-br from-slate-600 to-slate-800 font-semibold text-slate-100 ${
+            compact ? "h-7 w-7 text-xs" : "h-9 w-9 text-sm"
+          }`}
           aria-hidden="true"
         >
-          {initial ? initial : <User size={16} />}
+          {initial ? initial : <User size={compact ? 13 : 16} />}
         </div>
 
-        <div className="flex min-w-0 max-w-[85%] flex-col items-end sm:max-w-[75%]">
+        <div
+          className={`flex min-w-0 flex-col items-end ${
+            compact ? "max-w-[85%]" : "max-w-[85%] sm:max-w-[75%]"
+          }`}
+        >
           <div className="mb-1 flex items-baseline gap-2">
             {time && <span className="text-xs text-slate-500">{time}</span>}
             <span className="text-xs font-semibold tracking-wide text-slate-300">Tú</span>
@@ -165,12 +173,12 @@ export function CopilotMessageBubble({ message, userName }: CopilotMessageBubble
   }
 
   return (
-    <div className="flex items-start gap-3 animate-vimdy-slide-up">
+    <div className={`flex items-start animate-vimdy-slide-up ${compact ? "gap-2" : "gap-3"}`}>
       <div className="mt-0.5 shrink-0">
-        <CopilotOrb size={40} animated={false} />
+        <CopilotOrb size={compact ? 28 : 40} animated={false} />
       </div>
 
-      <div className="min-w-0 max-w-[88%] sm:max-w-[80%]">
+      <div className={`min-w-0 ${compact ? "max-w-[88%]" : "max-w-[88%] sm:max-w-[80%]"}`}>
         <div className="mb-1 flex items-baseline gap-2">
           <span className="text-xs font-semibold tracking-wide text-cyan-300">VIMDY IA</span>
           {time && <span className="text-xs text-slate-500">{time}</span>}
@@ -184,11 +192,11 @@ export function CopilotMessageBubble({ message, userName }: CopilotMessageBubble
 }
 
 /** Burbuja "pensando": tres puntos animados junto al avatar de VIMDY IA. */
-export function CopilotThinkingBubble() {
+export function CopilotThinkingBubble({ compact = false }: { compact?: boolean }) {
   return (
-    <div className="flex items-start gap-3 animate-vimdy-fade-in">
+    <div className={`flex items-start animate-vimdy-fade-in ${compact ? "gap-2" : "gap-3"}`}>
       <div className="mt-0.5 shrink-0">
-        <CopilotOrb size={40} animated={false} />
+        <CopilotOrb size={compact ? 28 : 40} animated={false} />
       </div>
 
       <div className="min-w-0">

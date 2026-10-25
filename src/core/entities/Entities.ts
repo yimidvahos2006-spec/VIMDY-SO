@@ -654,8 +654,9 @@ export interface CashMovement {
   readonly date: Date;
 
   /**
-   * Medio de pago del movimiento (solo aplica a ingresos por venta).
-   * Los egresos (retiros, gastos) son siempre en efectivo físico.
+   * Medio de pago del movimiento. En ingresos por venta es el medio con el que
+   * se pagó. En egresos, retiros y gastos son en efectivo; un reembolso
+   * electrónico (ej. Wompi) lleva el medio original y cashAmount = 0.
    * Si no se especifica, se asume "CASH" (movimientos manuales de caja).
    */
   readonly paymentMethod?: "CASH" | "CARD" | "TRANSFER" | "QR" | "MIXED";
@@ -663,9 +664,12 @@ export interface CashMovement {
   /**
    * Parte de `amount` que es efectivo físico real (el que debe estar en
    * el cajón). Para CASH es igual a `amount`; para CARD/TRANSFER/QR es 0;
-   * para MIXED es la porción en efectivo del pago dividido; para egresos
-   * es siempre igual a `amount`. Esta es la cifra que usa el arqueo de
-   * turno para calcular lo "esperado en caja" — nunca `amount`.
+   * para MIXED es la porción en efectivo del pago dividido; para egresos en
+   * efectivo es igual a `amount`, y para un reembolso electrónico (ej. Wompi)
+   * es 0 porque el dinero vuelve al medio de pago, no sale del cajón. Esta es
+   * la cifra que usa el arqueo de turno para calcular lo "esperado en caja"
+   * — nunca `amount`. La regla completa vive en core/caja/cashExpectedRule.ts
+   * (espejo de la del servidor).
    */
   readonly cashAmount?: number;
   /** Caja física del movimiento. En producción debe coincidir con el turno. */
@@ -1002,6 +1006,14 @@ export interface Table {
   readonly mergedAt?: Date;
   readonly openedAt?: Date;
   readonly openOperationId?: string;
+  /**
+   * Marcador de idempotencia (offline, Paso 3): ids de las operaciones de la
+   * cola que YA se aplicaron a esta mesa. Vive dentro de `data` y se escribe
+   * en el MISMO update (con bloqueo optimista) que el cambio de líneas, así
+   * que "cambio aplicado" y "marcador guardado" son atómicos. Ver
+   * core/offline/tableOperationMarkers.ts.
+   */
+  readonly appliedOperationIds?: readonly string[];
   /** id del pedido (Order) asociado a esta mesa, si existe. */
   readonly orderId?: string;
   readonly updatedAt: Date;
@@ -1126,13 +1138,15 @@ export interface Shift {
 
   /** Suma de TODOS los ingresos del turno, sin importar el medio de pago (informativo). */
   readonly totalIncome?: number;
-  /** Suma de egresos registrados durante el turno (siempre efectivo). */
+  /** Suma de TODAS las salidas del turno (informativo; incluye reembolsos electrónicos que no sacan efectivo). */
   readonly totalExpense?: number;
   /** Parte de totalIncome que es efectivo físico real. Es la que se usa para expectedAmount. */
   readonly totalCashIncome?: number;
+  /** Parte de las salidas que sacó efectivo físico del cajón. Es la que se resta en expectedAmount. */
+  readonly totalCashExpense?: number;
   /** Ventas por medio de pago no físico durante el turno, ej. { CARD: 300000, TRANSFER: 50000 } (informativo). */
   readonly incomeByMethod?: Record<string, number>;
-  /** openingAmount + totalCashIncome - totalExpense (solo al cerrar). Lo que debe haber físicamente en el cajón. */
+  /** openingAmount + totalCashIncome - totalCashExpense (solo al cerrar). Lo que debe haber físicamente en el cajón. */
   readonly expectedAmount?: number;
   /** Monto contado físicamente por el cajero al cerrar. */
   readonly countedAmount?: number;

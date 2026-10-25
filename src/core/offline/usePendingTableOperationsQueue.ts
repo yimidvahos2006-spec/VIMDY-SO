@@ -1,13 +1,20 @@
-import { useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 
 import { pendingTableOperationsStore, PendingTableOperationsSnapshot } from "./pendingTableOperationsStore";
 import { PendingTableOperation } from "./PendingTableOperation";
+import { BlockedTable, blockedTablesFrom } from "./tableConflictRules";
 
 export interface UsePendingTableOperationsQueueResult extends PendingTableOperationsSnapshot {
   /** Cuántas operaciones hay en la cola en total (incluye SYNCING y FAILED). */
   count: number;
   /** Solo las que están esperando su turno. */
   pending: PendingTableOperation[];
+  /**
+   * Mesas con operaciones retenidas por conflicto (derivado de la cola, igual
+   * que pendingTableOperationsStore.blockedTables()). Alimenta el aviso
+   * TableConflictBanner de Meseros.
+   */
+  blocked: BlockedTable[];
 }
 
 /**
@@ -25,9 +32,12 @@ export function usePendingTableOperationsQueue(): UsePendingTableOperationsQueue
     pendingTableOperationsStore.getSnapshot
   );
 
+  const blocked = useMemo(() => blockedTablesFrom(snapshot.items), [snapshot.items]);
+
   return {
     ...snapshot,
     count: snapshot.items.length,
-    pending: snapshot.items.filter((op) => op.status === "PENDING_SYNC")
+    pending: snapshot.items.filter((op) => op.status === "PENDING_SYNC"),
+    blocked
   };
 }

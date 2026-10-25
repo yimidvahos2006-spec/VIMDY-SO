@@ -78,6 +78,13 @@ import { subscriptionStore } from "../../core/store/subscriptionStore";
 import { businessOperatingProfileStore } from "../../core/store/businessOperatingProfileStore";
 import { operationConfigStore } from "../../core/store/operationConfigStore";
 import { userSessionStore } from "../../core/store/userSessionStore";
+import { dashboardStore } from "../../core/store/dashboardStore";
+import { dashboardSyncStatusStore } from "../../core/store/dashboardSyncStatusStore";
+import { productCatalogStore } from "../../core/store/productCatalogStore";
+import { customerStore } from "../../core/store/customerStore";
+import { cartStore } from "../../core/store/cartStore";
+import { paymentStore } from "../../core/store/paymentStore";
+import { copilotStore } from "../../core/store/copilotStore";
 import { fetchBusinessSettings } from "../../infrastructure/supabase/businessSettings";
 import { hydrateBusinessOperatingProfile } from "../../core/bootstrap/businessOperatingProfileBootstrap";
 import {
@@ -254,6 +261,31 @@ function stopLocalBusinessSyncs(): void {
   operationConfigStore.clear();
 }
 
+/**
+ * AISLAMIENTO ENTRE NEGOCIOS (P1)
+ * Vacía los stores en memoria con datos del negocio/sucursal (cifras del
+ * Dashboard, catálogo, clientes, carrito, cobro, chat de la IA). Se llama al
+ * cerrar sesión y cuando el usuario entra a un negocio distinto al que estaba
+ * cargado, para que jamás se vean cifras del negocio anterior mientras carga
+ * el nuevo.
+ *
+ * NO toca nada que sea trabajo pendiente del negocio: ni las colas offline ni
+ * el turno/caja guardados en localStorage (están indexados por negocio y
+ * sucursal, y borrarlos perdería dinero real) ni las notificaciones (su
+ * clear() también borra en Supabase).
+ */
+function resetBusinessScopedState(): void {
+  dashboardStore.reset();
+  dashboardSyncStatusStore.reset();
+  productCatalogStore.reset();
+  customerStore.clear();
+  cartStore.clear();
+  paymentStore.reset();
+  businessStore.clear();
+  copilotStore.reset();
+  copilotStore.close();
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [role, setRole] = useState<AuthRole | null>(null);
@@ -285,6 +317,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     try {
       stopLocalBusinessSyncs();
+      resetBusinessScopedState();
       setUser(null);
       setRole(null);
       setSessionId(null);
@@ -305,7 +338,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         email
       );
 
+      // Si venía otro negocio cargado (cambio de cuenta o de negocio sin pasar
+      // por un cierre de sesión), se limpia antes de hidratar el nuevo.
+      const previousBusinessId = getCurrentBusinessId();
       stopLocalBusinessSyncs();
+      if (previousBusinessId && previousBusinessId !== businessSession.businessId) {
+        resetBusinessScopedState();
+      }
 
       const branchId = await resolveDefaultBranchId(businessSession.businessId);
       setCurrentBranchId(branchId);
@@ -397,6 +436,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (businesses.length === 0) {
         stopLocalBusinessSyncs();
+        resetBusinessScopedState();
         setUser(authUserFromSupabase(authUser));
         setSessionId(authUser.id);
         setRole(null);
@@ -441,6 +481,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       stopLocalBusinessSyncs();
+      resetBusinessScopedState();
       setUser(authUserFromSupabase(authUser));
       setRole(null);
       setSessionId(authUser.id);

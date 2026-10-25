@@ -81,8 +81,29 @@ export function requireCurrentBusinessId(): string {
   return id;
 }
 
+const branchListeners = new Set<(branchId: string | null) => void>();
+
 export function setCurrentBranchId(branchId: string | null | undefined): void {
-  currentBranchId = branchId ?? null;
+  const next = branchId ?? null;
+  if (next === currentBranchId) return;
+  currentBranchId = next;
+  // Avisa a quien dependa de la sucursal activa (Dashboard, etc.). Un fallo
+  // en un oyente no debe impedir el cambio ni romper a los demás.
+  branchListeners.forEach((listener) => {
+    try {
+      listener(next);
+    } catch (error) {
+      console.error("[supabaseClient] Falló un oyente de cambio de sucursal:", error);
+    }
+  });
+}
+
+/** Se ejecuta cada vez que cambia la sucursal activa. Devuelve la función para cancelar. */
+export function subscribeCurrentBranch(listener: (branchId: string | null) => void): () => void {
+  branchListeners.add(listener);
+  return () => {
+    branchListeners.delete(listener);
+  };
 }
 
 export function getCurrentBranchId(): string | undefined {

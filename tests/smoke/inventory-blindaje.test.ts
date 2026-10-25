@@ -276,17 +276,16 @@ describe("Smoke: blindaje del inventario", () => {
     expect((await ctx.products.findById(ON_DEMAND_BURGER.id))?.stock).toBe(0);
   });
 
-  it("rechaza la receta cuando falta stock de ingrediente y no modifica stock", async () => {
+  it("con falta de stock de ingrediente la venta pasa y los ingredientes quedan en negativo (Opción B)", async () => {
     await ctx.products.save({ ...INGREDIENT_A, stock: 1 });
     await ctx.products.save({ ...INGREDIENT_B, stock: 0 });
 
     ctx.cart.addItem(ON_DEMAND_BURGER, 2);
 
-    await expect(ctx.salesEngine.quickSale({ cashierId: "cashier-1" })).rejects.toThrow(
-      /No puedes vender/);
+    await expect(ctx.salesEngine.quickSale({ cashierId: "cashier-1" })).resolves.toBeDefined();
 
-    expect((await ctx.products.findById(INGREDIENT_A.id))?.stock).toBe(1);
-    expect((await ctx.products.findById(INGREDIENT_B.id))?.stock).toBe(0);
+    expect((await ctx.products.findById(INGREDIENT_A.id))!.stock).toBeLessThan(1);
+    expect((await ctx.products.findById(INGREDIENT_B.id))!.stock).toBeLessThan(0);
   });
 
   it("una receta BATCH descuenta el producto terminado al vender y no vuelve a descontar ingredientes", async () => {
@@ -394,7 +393,7 @@ describe("Smoke: blindaje del inventario", () => {
     expect((await ctx.products.findById(NORMAL_PRODUCT.id))?.stock).toBe(0);
   });
 
-  it("rechaza la venta cuando el stock es menor que la cantidad sin modificar inventario", async () => {
+  it("cuando el stock es menor que la cantidad la venta pasa y el stock queda en negativo (Opción B)", async () => {
     await ctx.products.save({ ...NORMAL_PRODUCT, stock: 2 });
 
     await expect(
@@ -404,9 +403,9 @@ describe("Smoke: blindaje del inventario", () => {
         items: [{ productId: NORMAL_PRODUCT.id, quantity: 3, price: NORMAL_PRODUCT.price }],
         cashierId: "cashier-1"
       })
-    ).rejects.toThrow(/Stock insuficiente/);
+    ).resolves.toBeDefined();
 
-    expect((await ctx.products.findById(NORMAL_PRODUCT.id))?.stock).toBe(2);
+    expect((await ctx.products.findById(NORMAL_PRODUCT.id))?.stock).toBe(-1); // 2 - 3
   });
 
   it("una receta con cantidades decimales consume exactamente la cantidad esperada", async () => {

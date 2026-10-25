@@ -179,6 +179,7 @@ const en: Record<TranslationKey, string> = {
   "pos.topbar.clearSearchAria": "Clear search",
   "pos.topbar.barcodeNotFound": "No product matches code {code}.",
   "pos.topbar.barcodeOutOfStock": "{name} is out of stock — couldn't add it.",
+  "pos.topbar.barcodeNegativeStock": "{name} has no stock — added anyway; check your inventory.",
   "pos.topbar.chargeByTable": "Charge by table",
 
   "pos.tableCharge.title": "Charge by table",
@@ -192,6 +193,7 @@ const en: Record<TranslationKey, string> = {
 
   "pos.sale.title": "Current sale",
   "pos.sale.itemCount": "{count} item(s)",
+  "pos.sale.cleared": "Sale cleared",
   "pos.sale.shiftClosedToast": "The register is closed. Open a shift in the \"Cash shift\" tab before charging.",
   "pos.sale.addProductsBeforeSendToast": "Add products before sending the order.",
   "pos.sale.addProductsBeforeChargeToast": "Add products before charging.",
@@ -370,6 +372,9 @@ const en: Record<TranslationKey, string> = {
   "waiter.page.loading": "Loading…",
   "waiter.offline.pendingSingular": "1 pending table operation",
   "waiter.offline.pendingPlural": "{count} pending table operations",
+  "waiter.conflict.titleSingular": "Table {tables}: changed at the register",
+  "waiter.conflict.titlePlural": "Tables {tables}: changed at the register",
+  "waiter.conflict.body": "While you were offline the account changed (paid, closed or reopened). Your changes are saved and on hold. Do nothing more on that account: the cashier will review them.",
 
   "waiter.select.errorCreate": "Could not add the waiter.",
   "waiter.select.emptyTitle": "You haven't added waiters yet.",

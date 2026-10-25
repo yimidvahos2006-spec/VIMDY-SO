@@ -31,6 +31,13 @@ class ProductCatalogStore extends ObservableStore<Product[]> {
    */
   private initPromise: Promise<void> | null = null;
 
+  /**
+   * Se incrementa en cada reset() (cierre de sesión / cambio de negocio).
+   * Una carga que empezó con el negocio anterior y termina después NO debe
+   * escribir su catálogo en el store del negocio nuevo.
+   */
+  private epoch = 0;
+
   constructor() {
     super([]);
   }
@@ -65,21 +72,33 @@ class ProductCatalogStore extends ObservableStore<Product[]> {
   }
 
   private async hydrate(): Promise<void> {
+    const epoch = this.epoch;
     try {
       await productsReady;
       const products = await container.inventoryEngine.get().listAll();
+      if (epoch !== this.epoch) return;
       this.publish(products);
       this.loaded = true;
     } catch (error) {
       logWarning("[productCatalogStore] No se pudo hidratar el catálogo al iniciar", { category: "offline", context: { error: String(error) } });
     } finally {
-      this.initPromise = null;
+      if (epoch === this.epoch) this.initPromise = null;
     }
+  }
+
+  /** Vacía el catálogo en memoria (cierre de sesión / cambio de negocio). */
+  reset(): void {
+    this.epoch += 1;
+    this.loaded = false;
+    this.initPromise = null;
+    this.publish([]);
   }
 
   /** Vuelve a leer del InventoryEngine (llamar después de vender, reabastecer, etc). */
   async refresh(): Promise<void> {
+    const epoch = this.epoch;
     const products = await container.inventoryEngine.get().listAll();
+    if (epoch !== this.epoch) return;
     this.publish(products);
   }
 

@@ -116,7 +116,7 @@ describe("Smoke: flujo real de POS", () => {
     expect((await cashMovements.findAll())).toHaveLength(1);
   });
 
-  it("rechaza ventas con producto inactivo o stock insuficiente sin modificar stock", async () => {
+  it("rechaza ventas con producto inactivo; con stock insuficiente la venta pasa y el stock queda en negativo (Opción B)", async () => {
     const { salesEngine, products } = buildContext();
 
     const inactiveProduct: Product = {
@@ -163,9 +163,9 @@ describe("Smoke: flujo real de POS", () => {
         cashierId: "cashier-1",
         taxRate: 0
       })
-    ).rejects.toThrow(/Stock insuficiente/);
+    ).resolves.toBeDefined();
 
     expect((await products.findById(inactiveProduct.id))?.stock).toBe(10);
-    expect((await products.findById(insufficientProduct.id))?.stock).toBe(2);
+    expect((await products.findById(insufficientProduct.id))?.stock).toBe(-1); // 2 - 3
   });
 });

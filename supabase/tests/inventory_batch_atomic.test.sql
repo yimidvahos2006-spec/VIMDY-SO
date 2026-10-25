@@ -61,7 +61,7 @@ BEGIN
   BEGIN
     PERFORM public.adjust_stock_batch_with_kardex(v_operation_id, jsonb_build_array(
       jsonb_build_object('productId', v_first_product_id, 'delta', -2, 'reason', 'TEST_ATOMIC_BATCH', 'type', 'DECREASE', 'branchId', v_branch_id),
-      jsonb_build_object('productId', v_second_product_id, 'delta', -2, 'reason', 'TEST_ATOMIC_BATCH', 'type', 'DECREASE', 'branchId', v_branch_id, 'allowNegative', true)
+      jsonb_build_object('productId', v_second_product_id, 'delta', -2, 'reason', 'TEST_ATOMIC_BATCH', 'type', 'DECREASE', 'branchId', v_branch_id)
     ));
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM = 'INSUFFICIENT_STOCK' THEN

@@ -1,5 +1,4 @@
 import type { LossCategory } from "../entities/Entities";
-import { companyConfigStore } from "../store/companyConfigStore";
 import type { ApplyFailure, IInventoryCountGateway } from "./IInventoryCountGateway";
 import type {
   CountKind,
@@ -86,7 +85,8 @@ export class InventoryCountEngine {
       sessionId,
       performedBy,
       reasons,
-      allowNegative: companyConfigStore.get().allowNegativeStock
+      // Opción B: el conteo físico es la cura del stock negativo, nunca lo crea.
+      allowNegative: false
     });
   }
 }

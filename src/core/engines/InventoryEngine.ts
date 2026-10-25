@@ -11,7 +11,6 @@ import type {
 import type { IRepository } from "../../infrastructure/di/repositories/IRepository";
 import type { IProductRepository } from "../../infrastructure/di/repositories/IProductRepository";
 import { KardexEngine } from "./KardexEngine";
-import { companyConfigStore } from "../store/companyConfigStore";
 import { getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
 import { INVENTORY_AUDIT_ACTIONS, INVENTORY_AUDIT_MODULE } from "../utils/inventoryFeed";
 
@@ -658,6 +657,11 @@ export class InventoryEngine {
     movementId?: string;
     branchId?: string | null;
     lossCategory?: LossCategory;
+    /**
+     * Opción B: SOLO el descuento por venta puede dejar el stock en negativo.
+     * Los ajustes manuales (increaseStock/decreaseStock) siguen estrictos.
+     */
+    allowNegative?: boolean;
   }): Promise<void> {
     const repository = this.getRepository();
     const product = await repository.findById(params.productId);
@@ -702,7 +706,7 @@ export class InventoryEngine {
       lossCategory: params.lossCategory,
       movementId,
       branchId,
-      allowNegative: companyConfigStore.get().allowNegativeStock,
+      allowNegative: params.allowNegative ?? false,
       extraFields
     };
 
@@ -719,7 +723,7 @@ export class InventoryEngine {
        params.productId,
        params.quantity,
        extraFields,
-       companyConfigStore.get().allowNegativeStock,
+       params.allowNegative ?? false,
        branchId
      );
      const stockAfter = updatedProduct.stock;
@@ -828,6 +832,9 @@ export class InventoryEngine {
       reason,
       type: direction,
       branchId,
+      // Opción B: una venta nunca se bloquea por falta de stock. Solo el
+      // descuento lo pide; la reposición (INCREASE) no lleva el flag.
+      ...(direction === "DECREASE" ? { allowNegative: true } : {}),
       extraFields: { lastUpdated: now }
     }));
 
@@ -849,7 +856,9 @@ export class InventoryEngine {
         reason: movement.reason,
         movementId: undefined,
         branchId: movement.branchId,
-        lossCategory: undefined
+        lossCategory: undefined,
+        // Opción B: una venta nunca se bloquea por falta de stock.
+        allowNegative: direction === "DECREASE"
       });
     }
   }
@@ -979,7 +988,8 @@ export class InventoryEngine {
     const ingredients = await repository.findMany(ingredientIds);
     const ingredientMap = new Map(ingredients.map((ingredient) => [ingredient.id, ingredient]));
 
-    const allowNegative = companyConfigStore.get().allowNegativeStock;
+    // Producción por tandas: validación estricta siempre (Opción B). Producir
+    // sin ingredientes suficientes es un error de digitación, no una venta.
     const consumed: Array<{ productId: string; name: string; quantity: number }> = [];
 
     for (const item of recipe) {
@@ -1005,7 +1015,7 @@ export class InventoryEngine {
         throw new Error("INVALID_RECIPE_QUANTITY");
       }
 
-      if (ingredient.stock < totalNeeded && !allowNegative) {
+      if (ingredient.stock < totalNeeded) {
         throw new Error("INSUFFICIENT_STOCK");
       }
 

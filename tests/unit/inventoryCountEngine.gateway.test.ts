@@ -3,15 +3,10 @@ import { InventoryCountEngine } from "../../src/core/inventoryCount/InventoryCou
 import type { IInventoryCountGateway } from "../../src/core/inventoryCount/IInventoryCountGateway";
 import type { CountLine, InventoryCountSession } from "../../src/core/inventoryCount/inventoryCountLogic";
 
-const config = vi.hoisted(() => ({ allowNegativeStock: false }));
-vi.mock("../../src/core/store/companyConfigStore", () => ({
-  companyConfigStore: { get: () => ({ allowNegativeStock: config.allowNegativeStock }) }
-}));
-
 /**
  * El conteo vive en el SERVIDOR: el motor solo reenvía. Estos tests fijan ese contrato:
  * nunca viajan cifras del sistema, los errores del servidor se propagan (sin improvisar
- * con datos locales) y cerrar respeta "permitir stock negativo".
+ * con datos locales) y cerrar nunca permite stock negativo (Opción B).
  */
 const session = (id: string, createdAt: string): InventoryCountSession => ({
   id,
@@ -38,7 +33,7 @@ function makeGateway() {
 
 describe("InventoryCountEngine (delegado al servidor)", () => {
   beforeEach(() => {
-    config.allowNegativeStock = false;
+    vi.clearAllMocks();
   });
 
   it("lista las sesiones de la más nueva a la más vieja", async () => {
@@ -93,13 +88,12 @@ describe("InventoryCountEngine (delegado al servidor)", () => {
     ).rejects.toThrow("COUNT_SERVER_ERROR");
   });
 
-  it("cerrar pasa los motivos y respeta 'permitir stock negativo'", async () => {
+  it("cerrar pasa los motivos y el conteo físico nunca crea stock negativo (Opción B)", async () => {
     const { gateway, engine } = makeGateway();
     await engine.closeSession("s1", "ana", { a: "DAÑO" });
     expect(gateway.close).toHaveBeenLastCalledWith({ sessionId: "s1", performedBy: "ana", reasons: { a: "DAÑO" }, allowNegative: false });
 
-    config.allowNegativeStock = true;
     await engine.closeSession("s1", "ana");
-    expect(gateway.close).toHaveBeenLastCalledWith({ sessionId: "s1", performedBy: "ana", reasons: {}, allowNegative: true });
+    expect(gateway.close).toHaveBeenLastCalledWith({ sessionId: "s1", performedBy: "ana", reasons: {}, allowNegative: false });
   });
 });

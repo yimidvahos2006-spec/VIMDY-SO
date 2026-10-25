@@ -22,8 +22,17 @@
 //     solo un ADMIN del negocio puede llamarla.
 //
 // CONTRATO:
-//   Body: { name, email, password, roleId }  (roleId: ADMIN|CAJERO|MESERO|COCINA)
-//   Respuesta: { ok: true, user: { id, name, email, roleId, status } }
+//   Body: { name, email, password, roleId, branchId? }
+//         (roleId: ADMIN|CAJERO|MESERO|COCINA)
+//   Respuesta: { ok: true, user: { id, name, email, roleId, status, branchId } }
+//
+// SUCURSAL (aislamiento fail-closed, migración 20261109000000):
+//   - ADMIN: alcance de negocio completo (branch_id NULL; el alcance lo da el rol).
+//   - Cualquier otro rol: SIEMPRE queda atado a UNA sucursal. Si el body trae
+//     branchId, debe ser una sucursal ACTIVA del negocio del que llama; si no
+//     lo trae, se usa la sucursal principal activa del negocio.
+//   - Un empleado operativo sin sucursal no tendría acceso a nada, por eso
+//     nunca se crea sin una.
 //
 // SEGURIDAD:
 //   - El negocio del que se crea el empleado se resuelve SIEMPRE del JWT del
@@ -59,6 +68,7 @@ interface RequestPayload {
   email?: string;
   password?: string;
   roleId?: string;
+  branchId?: string;
 }
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
@@ -142,6 +152,45 @@ Deno.serve(async (req: Request) => {
     return json({ error: `ROLE_INVALID: el rol "${roleId}" no es válido.` }, 400);
   }
 
+  // 4b) Resolver la sucursal del empleado ANTES de crear nada en Auth.
+  //     ADMIN queda con branch_id NULL (alcance de negocio por rol). El resto
+  //     de roles necesita una sucursal activa de ESTE negocio.
+  let staffBranchId: string | null = null;
+
+  if (roleId !== "ADMIN") {
+    const requestedBranchId = payload.branchId?.trim();
+
+    if (requestedBranchId) {
+      const { data: requestedBranch, error: requestedBranchError } = await admin
+        .from("branches")
+        .select("id")
+        .eq("id", requestedBranchId)
+        .eq("business_id", businessId)
+        .eq("active", true)
+        .maybeSingle();
+
+      if (requestedBranchError || !requestedBranch) {
+        return json({ error: "BRANCH_INVALID: la sucursal no existe, está inactiva o no pertenece a tu negocio." }, 400);
+      }
+      staffBranchId = requestedBranch.id as string;
+    } else {
+      const { data: mainBranch, error: mainBranchError } = await admin
+        .from("branches")
+        .select("id")
+        .eq("business_id", businessId)
+        .eq("active", true)
+        .order("is_main", { ascending: false })
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (mainBranchError || !mainBranch) {
+        return json({ error: "NO_BRANCH: el negocio no tiene ninguna sucursal activa para asignar al empleado." }, 409);
+      }
+      staffBranchId = mainBranch.id as string;
+    }
+  }
+
   try {
     // 4) Crear el usuario real en Supabase Auth. El password nunca vuelve
     //    a salir de aquí — Supabase lo guarda ya hasheado (bcrypt).
@@ -181,6 +230,7 @@ Deno.serve(async (req: Request) => {
     const { error: profileError } = await admin.from("app_users").insert({
       id: newUserId,
       business_id: businessId,
+      branch_id: staffBranchId,
       data: {
         id: newUserId,
         name,
@@ -200,7 +250,7 @@ Deno.serve(async (req: Request) => {
 
     return json({
       ok: true,
-      user: { id: newUserId, name, email, roleId, status: "ACTIVE" }
+      user: { id: newUserId, name, email, roleId, status: "ACTIVE", branchId: staffBranchId }
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Error inesperado.";

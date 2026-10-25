@@ -126,6 +126,7 @@ export function PosPayment() {
             <div className="relative mt-1">
               <input
                 id="pos-cash-received"
+                data-pos-enter-charge
                 type="number"
                 value={received || ""}
                 onChange={(e) => {
@@ -160,6 +161,7 @@ export function PosPayment() {
               {suggestedCashAmounts(total).map((amount) => (
                 <button
                   key={amount}
+                  data-pos-enter-charge
                   onClick={() => {
                     receive(amount);
                     calculateChange(total);
@@ -226,6 +228,7 @@ export function PosPayment() {
           {!useWompiCheckout && (
             <>
               <input
+                data-pos-enter-charge
                 value={reference}
                 onChange={(e) => setReference(e.target.value)}
                 placeholder={method === "card" ? t("pos.payment.cardRefPlaceholder") : t("pos.payment.transferRefPlaceholder")}

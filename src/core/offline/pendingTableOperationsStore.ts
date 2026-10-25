@@ -1,16 +1,22 @@
 import { ObservableStore } from "../store/ObservableStore";
 import {
+  PendingTableConflict,
   PendingTableOperation,
   PendingTableOperationType,
   PendingTableStateSnapshot
 } from "./PendingTableOperation";
+import { BlockedTable, blockedTableIds, blockedTablesFrom } from "./tableConflictRules";
+import {
+  applyLineOperation,
+  computeTableTotals,
+  lineOperationFromPending
+} from "./tableLineRules";
 import { PendingTableOperationRepository } from "../../infrastructure/di/repositories/PendingTableOperationRepository";
 import {
   OpenTableInput,
   CloseTableInput
 } from "../engines/TableEngine";
 import { Table } from "../entities/Entities";
-import { CartEngine } from "../engines/CartEngine";
 import { TableLocalRepository } from "../../infrastructure/di/repositories/TableLocalRepository";
 import { productCatalogStore } from "../store/productCatalogStore";
 import { companyConfigStore } from "../store/companyConfigStore";
@@ -48,44 +54,16 @@ function snapshotTable(table: Table): PendingTableStateSnapshot {
   };
 }
 
-function calculatedFinancials(
-  items: Table["items"],
-  table: Table
-): Pick<PendingTableStateSnapshot, "subtotal" | "tax" | "total"> {
-  const subtotal = Number(
-    items
-      .reduce((sum, item) => sum + item.price * item.quantity, 0)
-      .toFixed(2)
-  );
-  const tax = Number(
-    (subtotal * (companyConfigStore.get().tax / 100)).toFixed(2)
-  );
-  const total = Number(
-    Math.max(
-      subtotal + tax - Number(table.discount ?? 0),
-      0
-    ).toFixed(2)
-  );
-
-  return { subtotal, tax, total };
-}
-
 function buildExpectedAfter(
   table: Table,
   params: {
     type: PendingTableOperationType;
     openInput?: OpenTableInput;
     closeInput?: CloseTableInput;
-    addItemInput?: {
-      productId: string;
-      quantity: number;
-      note?: string;
-    };
-    removeItemInput?: { productId: string };
-    updateQuantityInput?: {
-      productId: string;
-      quantity: number;
-    };
+    addItemInput?: PendingTableOperation["addItemInput"];
+    removeItemInput?: PendingTableOperation["removeItemInput"];
+    updateQuantityInput?: PendingTableOperation["updateQuantityInput"];
+    updateNoteInput?: PendingTableOperation["updateNoteInput"];
     sendToKitchenInput?: { priority?: string };
   },
   normalizedOpenInput?: OpenTableInput,
@@ -122,57 +100,20 @@ function buildExpectedAfter(
     };
   }
 
-  if (params.type === "ADD_ITEM" && params.addItemInput) {
-    const product = productCatalogStore.getById(
-      params.addItemInput.productId
-    );
+  const lineOperation = lineOperationFromPending(params, (productId) =>
+    productCatalogStore.getById(productId)
+  );
 
-    if (!product) {
-      return undefined;
-    }
-
-    const cart = new CartEngine();
-    cart.loadItems(table.items);
-    cart.addItem(
-      product,
-      params.addItemInput.quantity,
-      params.addItemInput.note
-    );
-
-    const items = cart.getItems();
+  if (lineOperation) {
+    const items = applyLineOperation(table.items, lineOperation);
     return {
       ...current,
       items,
-      ...calculatedFinancials(items, table)
-    };
-  }
-
-  if (params.type === "REMOVE_ITEM" && params.removeItemInput) {
-    const cart = new CartEngine();
-    cart.loadItems(table.items);
-    cart.removeItem(params.removeItemInput.productId);
-
-    const items = cart.getItems();
-    return {
-      ...current,
-      items,
-      ...calculatedFinancials(items, table)
-    };
-  }
-
-  if (params.type === "UPDATE_QUANTITY" && params.updateQuantityInput) {
-    const cart = new CartEngine();
-    cart.loadItems(table.items);
-    cart.updateQuantity(
-      params.updateQuantityInput.productId,
-      params.updateQuantityInput.quantity
-    );
-
-    const items = cart.getItems();
-    return {
-      ...current,
-      items,
-      ...calculatedFinancials(items, table)
+      ...computeTableTotals(
+        items,
+        companyConfigStore.get().tax,
+        Number(table.discount ?? 0)
+      )
     };
   }
 
@@ -215,9 +156,10 @@ class PendingTableOperationsStore extends ObservableStore<PendingTableOperations
     type: PendingTableOperationType;
     openInput?: OpenTableInput;
     closeInput?: CloseTableInput;
-    addItemInput?: { productId: string; quantity: number; note?: string };
-    removeItemInput?: { productId: string };
-    updateQuantityInput?: { productId: string; quantity: number };
+    addItemInput?: PendingTableOperation["addItemInput"];
+    removeItemInput?: PendingTableOperation["removeItemInput"];
+    updateQuantityInput?: PendingTableOperation["updateQuantityInput"];
+    updateNoteInput?: PendingTableOperation["updateNoteInput"];
     sendToKitchenInput?: { priority?: string };
   }): Promise<PendingTableOperation> {
     if (!params.id) {
@@ -227,6 +169,15 @@ class PendingTableOperationsStore extends ObservableStore<PendingTableOperations
     }
 
     const existing = await repository.findById(params.id);
+
+    // Paso 4: una mesa con conflicto de significado no admite operaciones
+    // nuevas hasta que Caja/Admin la audite; si no, el mesero seguiría
+    // apilando cambios sobre una cuenta que el servidor ya no reconoce.
+    if (!existing && (await this.isTableBlocked(params.tableId))) {
+      throw new Error(
+        `TABLE_BLOCKED_BY_CONFLICT: la mesa "${params.tableName}" tiene cambios sin conexión en revisión por Caja. No se pueden encolar más cambios.`
+      );
+    }
 
     const normalizedOpenInput =
       params.type === "OPEN" && params.openInput
@@ -279,6 +230,7 @@ class PendingTableOperationsStore extends ObservableStore<PendingTableOperations
       addItemInput: params.addItemInput,
       removeItemInput: params.removeItemInput,
       updateQuantityInput: params.updateQuantityInput,
+      updateNoteInput: params.updateNoteInput,
       sendToKitchenInput: params.sendToKitchenInput,
       expectedBefore: existing?.expectedBefore ?? expectedBefore,
       expectedAfter: existing?.expectedAfter ?? expectedAfter,
@@ -340,6 +292,39 @@ class PendingTableOperationsStore extends ObservableStore<PendingTableOperations
     await this.refresh();
   }
 
+  /**
+   * Conflicto de significado (Paso 4). La operación queda guardada tal cual,
+   * sin reintentos (`findSyncable` solo devuelve PENDING_SYNC) y sin borrarse,
+   * para que Caja/Admin la audite. Bloquea las demás operaciones de la mesa.
+   */
+  async markConflict(id: string, conflict: PendingTableConflict): Promise<void> {
+    const current = await repository.findById(id);
+    if (!current) return;
+
+    await repository.update({
+      ...current,
+      status: "CONFLICT",
+      conflict,
+      lastError: conflict.detail,
+      lastAttemptAt: new Date()
+    });
+    await this.refresh();
+  }
+
+  /** Ids de las mesas bloqueadas, leídos de la cola persistida (no de la copia en memoria). */
+  async loadBlockedTableIds(): Promise<Set<string>> {
+    return blockedTableIds(await repository.findAll());
+  }
+
+  async isTableBlocked(tableId: string): Promise<boolean> {
+    return (await this.loadBlockedTableIds()).has(tableId);
+  }
+
+  /** Mesas bloqueadas según la copia en memoria (para la UI). */
+  blockedTables(): BlockedTable[] {
+    return blockedTablesFrom(this.snapshot.items);
+  }
+
   async markPermanentFailure(id: string, error: string): Promise<void> {
     const current = await repository.findById(id);
     if (!current) return;
@@ -384,9 +369,11 @@ class PendingTableOperationsStore extends ObservableStore<PendingTableOperations
     await this.refresh();
   }
 
+  /** Operaciones listas para sincronizar: pendientes y de mesas SIN conflicto. */
   syncable(): PendingTableOperation[] {
+    const blocked = blockedTableIds(this.snapshot.items);
     return this.snapshot.items.filter(
-      (op) => op.status === "PENDING_SYNC"
+      (op) => op.status === "PENDING_SYNC" && !blocked.has(op.tableId)
     );
   }
 

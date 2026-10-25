@@ -170,20 +170,17 @@ describe("Smoke: venta completa (mostrador)", () => {
     expect(persistedSales).toHaveLength(0);
   });
 
-  it("rechaza la venta si no hay stock suficiente (no deja el carrito a medias)", async () => {
+  it("NO bloquea la venta por falta de stock: la venta pasa y el stock queda en negativo (Opción B)", async () => {
     ctx.cart.addItem(BURGER, 999);
 
-    // validateSale() (llamado desde createSale ANTES de tocar inventario)
-    // rechaza con este mensaje en español — el código INSUFFICIENT_STOCK
-    // solo aparece si el descuento atómico falla DESPUÉS de pasar esta
-    // validación previa (condición de carrera), que no es este caso.
-    await expect(ctx.salesEngine.quickSale({ cashierId: "cashier-1" })).rejects.toThrow(
-      /VALIDATION_ERROR.*[Ss]tock insuficiente/
-    );
+    // Opción B: validateSale() ya no exige stock (solo producto existente y
+    // activo) y el descuento permite negativo. El Kardex lo deja marcado.
+    await expect(ctx.salesEngine.quickSale({ cashierId: "cashier-1" })).resolves.toBeDefined();
 
-    // El stock no debe haber cambiado: la venta se rechazó ANTES de tocar
-    // inventario (ver validateSale -> validateInventory en SalesEngine).
-    const productAfterFailedSale = await ctx.products.findById(BURGER.id);
-    expect(productAfterFailedSale?.stock).toBe(10);
+    const productAfterSale = await ctx.products.findById(BURGER.id);
+    expect(productAfterSale?.stock).toBe(10 - 999);
+
+    // Y el carrito se vació (la venta quedó completa, no a medias).
+    expect(ctx.cart.getItems()).toHaveLength(0);
   });
 });

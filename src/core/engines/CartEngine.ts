@@ -1,13 +1,22 @@
 import { Product, SaleItem } from '../entities/Entities';
+import {
+  applyLineOperation,
+  normalizeLineNote,
+  sameLine
+} from '../offline/tableLineRules';
 
-/** Nota normalizada: sin espacios sobrantes; "sin nota" es siempre "". */
-export function normalizeLineNote(note?: string | null): string {
-  return (note ?? '').trim();
-}
+// La identidad de línea vive en tableLineRules.ts (fuente única, también la
+// usan la cola offline y el estado optimista). Se re-exporta por compatibilidad.
+export { normalizeLineNote };
 
-/** Identifica una línea del carrito cuando un mismo producto puede tener varias notas. */
+/**
+ * Identifica una línea del carrito cuando un mismo producto puede tener varias
+ * variantes: nota, tamaño y extras. Lo que no se indica cuenta como "ninguno".
+ */
 export interface CartLineRef {
   note?: string | null;
+  selectedSizeId?: string | null;
+  selectedExtraIds?: readonly string[] | null;
 }
 
 export interface CartAddOptions {
@@ -17,6 +26,9 @@ export interface CartAddOptions {
    * false → comportamiento clásico (Caja/POS): una línea por producto.
    */
   splitByNote?: boolean;
+  /** Variante elegida (solo se usa con splitByNote): tamaño y extras forman parte de la identidad. */
+  selectedSizeId?: string | null;
+  selectedExtraIds?: readonly string[] | null;
 }
 
 export class CartEngine {
@@ -30,8 +42,14 @@ export class CartEngine {
   ): void {
     const wanted = normalizeLineNote(note);
     const index = this.items.findIndex(item =>
-      item.productId === product.id &&
-      (!options.splitByNote || normalizeLineNote(item.note) === wanted)
+      options.splitByNote
+        ? sameLine(item, {
+            productId: product.id,
+            note: wanted,
+            selectedSizeId: options.selectedSizeId,
+            selectedExtraIds: options.selectedExtraIds
+          })
+        : item.productId === product.id
     );
 
     if (index >= 0) {
@@ -57,6 +75,12 @@ export class CartEngine {
         quantity,
         price: product.price,
         ...(wanted ? { note: wanted } : {}),
+        ...(options.splitByNote && options.selectedSizeId
+          ? { selectedSizeId: options.selectedSizeId }
+          : {}),
+        ...(options.splitByNote && options.selectedExtraIds?.length
+          ? { selectedExtraIds: [...new Set(options.selectedExtraIds)].sort() }
+          : {}),
         requiresKitchen: product.requiresKitchen ?? false
       }
     ];
@@ -66,7 +90,7 @@ export class CartEngine {
   private matchesLine(item: SaleItem, productId: string, line?: CartLineRef): boolean {
     if (item.productId !== productId) return false;
     if (!line) return true;
-    return normalizeLineNote(item.note) === normalizeLineNote(line.note);
+    return sameLine(item, { productId, ...line });
   }
 
   public removeItem(productId: string, line?: CartLineRef): void {
@@ -105,46 +129,15 @@ export class CartEngine {
     productId: string,
     fromNote: string | null | undefined,
     toNote: string | null | undefined,
-    units?: number
+    units?: number,
+    variant?: Pick<CartLineRef, 'selectedSizeId' | 'selectedExtraIds'>
   ): void {
-    const from = normalizeLineNote(fromNote);
-    const to = normalizeLineNote(toNote);
-    if (from === to) return;
-
-    const index = this.items.findIndex(item => this.matchesLine(item, productId, { note: from }));
-    if (index < 0) return;
-
-    const line = this.items[index];
-    const isPartial =
-      units !== undefined &&
-      Number.isFinite(units) &&
-      units >= 1 &&
-      units < line.quantity &&
-      line.quantityRaw === undefined;
-    const moved = isPartial ? Math.trunc(units as number) : line.quantity;
-    const withNote = (item: SaleItem, quantity: number): SaleItem => {
-      const { note: _omit, ...rest } = item;
-      return { ...rest, quantity, ...(to ? { note: to } : {}) };
-    };
-
-    const targetIndex = this.items.findIndex(
-      (item, i) => i !== index && this.matchesLine(item, productId, { note: to })
-    );
-
-    const next = this.items.map(item => ({ ...item }));
-
-    if (targetIndex >= 0) {
-      next[targetIndex] = { ...next[targetIndex], quantity: next[targetIndex].quantity + moved };
-      if (isPartial) next[index] = { ...next[index], quantity: line.quantity - moved };
-      else next.splice(index, 1);
-    } else if (isPartial) {
-      next[index] = { ...next[index], quantity: line.quantity - moved };
-      next.splice(index + 1, 0, withNote(line, moved));
-    } else {
-      next[index] = withNote(line, line.quantity);
-    }
-
-    this.items = next;
+    this.items = applyLineOperation(this.items, {
+      type: 'UPDATE_NOTE',
+      line: { productId, note: fromNote, ...variant },
+      toNote,
+      units
+    });
   }
 
   public clear(): void {

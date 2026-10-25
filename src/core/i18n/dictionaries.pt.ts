@@ -179,6 +179,7 @@ const pt: Record<TranslationKey, string> = {
   "pos.topbar.clearSearchAria": "Limpar busca",
   "pos.topbar.barcodeNotFound": "Nenhum produto tem o código {code}.",
   "pos.topbar.barcodeOutOfStock": "{name} está esgotado — não foi possível adicionar.",
+  "pos.topbar.barcodeNegativeStock": "{name} sem estoque — adicionado mesmo assim; revise o inventário.",
   "pos.topbar.chargeByTable": "Cobrar por mesa",
 
   "pos.tableCharge.title": "Cobrar por mesa",
@@ -192,6 +193,7 @@ const pt: Record<TranslationKey, string> = {
 
   "pos.sale.title": "Venda atual",
   "pos.sale.itemCount": "{count} produto(s)",
+  "pos.sale.cleared": "Venda limpa",
   "pos.sale.shiftClosedToast": "O caixa está fechado. Abra um turno na aba \"Turno de caixa\" antes de cobrar.",
   "pos.sale.addProductsBeforeSendToast": "Adicione produtos antes de enviar o pedido.",
   "pos.sale.addProductsBeforeChargeToast": "Adicione produtos antes de cobrar.",
@@ -370,6 +372,9 @@ const pt: Record<TranslationKey, string> = {
   "waiter.page.loading": "Carregando…",
   "waiter.offline.pendingSingular": "1 operação de mesa pendente",
   "waiter.offline.pendingPlural": "{count} operações de mesa pendentes",
+  "waiter.conflict.titleSingular": "Mesa {tables}: mudou no caixa",
+  "waiter.conflict.titlePlural": "Mesas {tables}: mudaram no caixa",
+  "waiter.conflict.body": "Enquanto você estava sem conexão a conta mudou (paga, fechada ou reaberta). Suas alterações ficaram salvas e em espera. Não faça mais nada nessa conta: o caixa vai revisá-las.",
 
   "waiter.select.errorCreate": "Não foi possível adicionar o garçom.",
   "waiter.select.emptyTitle": "Você ainda não adicionou garçons.",

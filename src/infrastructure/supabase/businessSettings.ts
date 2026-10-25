@@ -14,7 +14,6 @@ export interface BusinessSettingsBlob {
   city?: string;
   whatsappOrders?: string;
   autoPrintReceipt?: boolean;
-  allowNegativeStock?: boolean;
   enableAI?: boolean;
   dailySalesGoal?: number;
   electronicInvoicing?: { enabled: boolean; provider: string };
@@ -67,7 +66,6 @@ export function buildBusinessSettingsUpdate(
       city: text(business.city, 80) ?? "",
       whatsappOrders: text(business.whatsappOrders, 40) ?? "",
       autoPrintReceipt: !!config.autoPrintReceipt,
-      allowNegativeStock: !!config.allowNegativeStock,
       enableAI: !!config.enableAI,
       dailySalesGoal: clampNumber(config.dailySalesGoal, 0, 100_000_000_000) ?? 0,
       electronicInvoicing: {
@@ -107,8 +105,6 @@ export function readBusinessSettings(blob: unknown): {
 
   const auto = bool(s.autoPrintReceipt);
   if (auto !== undefined) config.autoPrintReceipt = auto;
-  const neg = bool(s.allowNegativeStock);
-  if (neg !== undefined) config.allowNegativeStock = neg;
   const ai = bool(s.enableAI);
   if (ai !== undefined) config.enableAI = ai;
   const goal = clampNumber(s.dailySalesGoal, 0, 100_000_000_000);

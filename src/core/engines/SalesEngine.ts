@@ -37,7 +37,6 @@ import { isOptimisticLockError } from "../errors/OptimisticLockError";
 
 import { HealthResult } from "../types/HealthTypes";
 import { companyConfigStore } from "../store/companyConfigStore";
-import { isStockMasked, stockCoversQuantity } from "../utils/stockMask";
 import { InvoiceFactory } from "../invoicing/InvoiceFactory";
 import type { InvoiceRequest, InvoiceCustomer } from "../invoicing/models/InvoiceModels";
 import { roundMoney } from "../config/globalization";
@@ -669,7 +668,8 @@ export class SalesEngine {
   }
 
   /**
-   * Valida que exista stock suficiente y que los productos estén activos.
+   * Valida que los productos existan y estén activos. Opción B: NO valida stock
+   * (una venta nunca se bloquea por falta de inventario).
    */
   public async validateInventory(
     items: CreateSaleItemInput[]
@@ -731,15 +731,10 @@ export class SalesEngine {
         return;
       }
 
-      if (!stockCoversQuantity(product, item.quantity)) {
-        // Enmascarado (conteo a ciegas): `stock` es un valor de banda, jamás
-        // se muestra ni se usa como cantidad. Solo se avisa que está agotado.
-        errors.push(
-          isStockMasked(product)
-            ? `"${product.name}" está agotado.`
-            : `Stock insuficiente para "${product.name}". Disponible: ${product.stock}, solicitado: ${item.quantity}.`
-        );
-      }
+      // Opción B: una venta NUNCA se bloquea por falta de stock. El inventario
+      // puede quedar en negativo y el Kardex lo marca para auditarlo después
+      // (ver 20261106000000_sale_never_blocked_by_stock.sql). Aquí solo se
+      // valida que el producto exista y esté activo.
     });
 
     // Misma idea para los ingredientes de receta: se piden todos a la vez.
@@ -750,20 +745,11 @@ export class SalesEngine {
 
     ingredientIds.forEach((ingredientId, index) => {
       const ingredient = ingredients[index];
-      const need = ingredientNeeded.get(ingredientId)!;
 
+      // Opción B: solo se exige que el ingrediente exista; si falta stock la
+      // venta pasa y el ingrediente queda en negativo (visible en Inventario).
       if (!ingredient) {
         errors.push(`Un ingrediente de receta (id "${ingredientId}") ya no existe en el inventario.`);
-        return;
-      }
-
-      if (!stockCoversQuantity(ingredient, need.quantity)) {
-        errors.push(
-          isStockMasked(ingredient)
-            ? `No puedes vender "${[...need.requiredBy].join(", ")}": ${ingredient.name} está agotado.`
-            : `No puedes vender "${[...need.requiredBy].join(", ")}": falta ${ingredient.name}. ` +
-                `Disponible: ${ingredient.stock}, necesario: ${need.quantity}.`
-        );
       }
     });
 

@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from "react";
 import { Activity } from "lucide-react";
 
 import { VimdyCenter } from "../components/ui/VimdyCenter";
@@ -11,6 +12,10 @@ import { DashboardSalesTrend } from "../components/dashboard/DashboardSalesTrend
 import { DashboardCloseStatus } from "../components/dashboard/DashboardCloseStatus";
 import { DashboardAdaptiveQuickActions } from "../components/dashboard/DashboardAdaptiveQuickActions";
 import { useDashboardExecutive } from "../../hooks/useDashboardExecutive";
+import {
+  getCurrentBranchId,
+  subscribeCurrentBranch
+} from "../../infrastructure/supabase/supabaseClient";
 import { DailyReportDeliveryStatus } from "../components/dashboard/DailyReportDeliveryStatus";
 
 /**
@@ -22,6 +27,11 @@ import { DailyReportDeliveryStatus } from "../components/dashboard/DailyReportDe
  */
 export function Dashboard() {
   const model = useDashboardExecutive();
+  const branchId = useSyncExternalStore(
+    subscribeCurrentBranch,
+    () => getCurrentBranchId() ?? null,
+    () => null
+  );
 
   return (
     <div className="w-full min-h-screen flex flex-col">
@@ -30,7 +40,8 @@ export function Dashboard() {
       </div>
 
       <main className="flex-1 w-full px-4 sm:px-6 lg:px-8 pb-10">
-        <div className="max-w-[1800px] mx-auto space-y-8">
+        {/* key = sucursal: al cambiar de sucursal, los bloques que cargan sus propios datos (actividad, top ventas, etc.) se vuelven a montar y consultan de nuevo. */}
+        <div key={branchId ?? "sin-sucursal"} className="max-w-[1800px] mx-auto space-y-8">
           <DashboardCommandHeader model={model} />
 
           <DashboardExecutiveOverview model={model} />

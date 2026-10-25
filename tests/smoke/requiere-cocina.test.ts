@@ -207,4 +207,50 @@ describe("Smoke: requiresKitchen filtra qué llega a Cocina", () => {
     const kitchenOrders = await ctx.kitchenOrders.findAll();
     expect(kitchenOrders).toHaveLength(0);
   });
+  async function openFreshTable(id: string) {
+    await ctx.tables.save({
+      id,
+      name: id,
+      capacity: 2,
+      peopleCount: 0,
+      status: "FREE",
+      items: [],
+      subtotal: 0,
+      tax: 0,
+      discount: 0,
+      total: 0,
+      updatedAt: new Date()
+    } as Table);
+    await ctx.tableEngine.openTable({ tableId: id, peopleCount: 1, waiterId: "waiter-1" });
+  }
+
+  it("TableEngine: un producto SIN bandera requiresKitchen NO va a cocina (mismo estándar que OrderEngine)", async () => {
+    await openFreshTable("table-3");
+    const legacy = {
+      id: "prod-legacy",
+      name: "Producto sin bandera",
+      categoryId: "cat-x",
+      price: 5000,
+      stock: 10,
+      minStock: 1,
+      lastUpdated: new Date()
+    } as Product;
+
+    await ctx.tableEngine.addItem({ tableId: "table-3", product: legacy, quantity: 1 });
+
+    const table = await ctx.tables.findById("table-3");
+    expect(table?.items[0].requiresKitchen).toBe(false);
+    expect(await ctx.tableEngine.sendToKitchen("table-3")).toBeNull();
+    expect(await ctx.kitchenOrders.findAll()).toHaveLength(0);
+  });
+
+  it("TableEngine: un ingrediente NUNCA va a cocina aunque traiga requiresKitchen=true", async () => {
+    await openFreshTable("table-4");
+    const ingredient = { ...BURGER, id: "prod-ingredient", isIngredient: true, requiresKitchen: true } as Product;
+
+    await ctx.tableEngine.addItem({ tableId: "table-4", product: ingredient, quantity: 1 });
+
+    const table = await ctx.tables.findById("table-4");
+    expect(table?.items[0].requiresKitchen).toBe(false);
+  });
 });

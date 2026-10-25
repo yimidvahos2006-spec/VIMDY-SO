@@ -14,6 +14,9 @@ import type { PaymentMethod, PaymentResult } from "./PaymentEngine";
 import type { Receipt } from "./ReceiptEngine";
 import { getCurrentBusinessId, getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
 import { userSessionStore } from "../store/userSessionStore";
+import { appendAppliedOperation, hasAppliedOperation } from "../offline/tableOperationMarkers";
+import { assertSameTableSession } from "../offline/tableConflictRules";
+import { sameLine } from "../offline/tableLineRules";
 
 async function deterministicUuid(seed: string): Promise<string> {
   const digest = await crypto.subtle.digest(
@@ -94,12 +97,32 @@ export interface CloseTableInput {
   [key: string]: any;
 }
 
-export interface AddProductInput {
+/**
+ * Opciones de una operación que viene de la cola offline (ver
+ * syncPendingTableOperations.ts). Online no se pasan y todo funciona como antes.
+ */
+export interface TableMutationOptions {
+  /**
+   * Id de la operación de la cola. Si la mesa ya lo tiene en
+   * `appliedOperationIds`, la operación NO se vuelve a aplicar (idempotencia).
+   * Si no, se aplica y el id se guarda en el MISMO update (atómico).
+   */
+  operationId?: string;
+  /**
+   * `openOperationId` de la cuenta sobre la que se hizo la operación offline.
+   * Si la mesa ya tiene otra cuenta abierta, se lanza TABLE_SESSION_CHANGED.
+   */
+  expectedSessionId?: string;
+}
+
+export interface AddProductInput extends TableMutationOptions {
   tableId?: string;
   productId?: string;
   product?: any;
   quantity?: number;
   note?: string;
+  selectedSizeId?: string | null;
+  selectedExtraIds?: readonly string[] | null;
   [key: string]: any;
 }
 
@@ -138,11 +161,21 @@ export class TableEngine {
   private async mutateItems(
     tableId: string,
     mutate: (cart: CartEngine) => void,
-    precheck?: (table: Table) => void | Promise<void>
+    precheck?: (table: Table) => void | Promise<void>,
+    options: TableMutationOptions = {}
   ): Promise<Table> {
     for (let attempt = 1; attempt <= TableEngine.MAX_CONFLICT_RETRIES; attempt++) {
       const table = await this.getTable(tableId);
       if (!table) throw new Error("TABLE_NOT_FOUND");
+
+      // Idempotencia (Paso 3): la lectura es fresca en cada intento, así que
+      // si un intento anterior sí llegó a la base (respuesta perdida), el
+      // marcador ya está aquí y la operación no se repite. Va ANTES de las
+      // validaciones de estado: una operación ya aplicada es un éxito aunque
+      // la mesa se haya cobrado después.
+      if (hasAppliedOperation(table, options.operationId)) return table;
+
+      assertSameTableSession(table, options.expectedSessionId);
       await precheck?.(table);
 
       const cart = new CartEngine();
@@ -150,7 +183,7 @@ export class TableEngine {
       mutate(cart);
 
       try {
-        return await this.persist(table, cart.getItems());
+        return await this.persist(table, cart.getItems(), options.operationId);
       } catch (error) {
         if (isOptimisticLockError(error) && attempt < TableEngine.MAX_CONFLICT_RETRIES) {
           await new Promise((resolve) => setTimeout(resolve, 25 * attempt));
@@ -162,11 +195,23 @@ export class TableEngine {
     throw new Error("TABLE_UPDATE_CONFLICT");
   }
 
-  private async persist(table: Table, items: SaleItem[]): Promise<Table> {
+  private async persist(table: Table, items: SaleItem[], operationId?: string): Promise<Table> {
     const subtotal = Number(items.reduce((sum, item) => sum + item.price * item.quantity, 0).toFixed(2));
     const tax = Number((subtotal * (companyConfigStore.get().tax / 100)).toFixed(2));
     const total = Number(Math.max(subtotal + tax - (table.discount ?? 0), 0).toFixed(2));
-    const updated: Table = { ...table, items, subtotal, tax, total, updatedAt: new Date() };
+    const updated: Table = {
+      ...table,
+      items,
+      subtotal,
+      tax,
+      total,
+      // El marcador viaja en el mismo update que el cambio: lo protege el
+      // mismo bloqueo optimista (eq version), sin RPC aparte.
+      ...(operationId
+        ? { appliedOperationIds: appendAppliedOperation(table.appliedOperationIds, operationId) }
+        : {}),
+      updatedAt: new Date()
+    };
     await this.getRepository().update(updated);
     return updated;
   }
@@ -770,36 +815,70 @@ export class TableEngine {
   public async addItem(tableOrInput: string | AddProductInput, maybeInput?: AddProductInput): Promise<any> {
     const resolvedInput = typeof tableOrInput === 'string' ? (maybeInput ?? {}) : tableOrInput;
     const tableId = typeof tableOrInput === 'string' ? tableOrInput : (resolvedInput.tableId ?? (tableOrInput as any).tableId);
-    const table = tableId ? await this.getRepository().findById(tableId) : null;
-    if (!table) throw new Error('TABLE_NOT_FOUND');
-    this.assertTableAcceptsItems(table);
+    if (!tableId) throw new Error('TABLE_NOT_FOUND');
 
-    const product = resolvedInput.product ?? { id: resolvedInput.productId, price: 0, requiresKitchen: true };
+    const product = resolvedInput.product ?? { id: resolvedInput.productId, price: 0, requiresKitchen: false };
     const item = {
       productId: resolvedInput.productId ?? product.id,
       quantity: resolvedInput.quantity ?? 1,
       price: product.price ?? 0,
       note: resolvedInput.note,
-      requiresKitchen: product.requiresKitchen ?? true,
+      // Misma regla que OrderEngine: si no se sabe, NO es de cocina, y un
+      // ingrediente nunca entra a cocina sin importar su flag.
+      requiresKitchen: !product.isIngredient && (product.requiresKitchen ?? false),
     };
 
     // En mesas, el mismo producto con OTRA nota va en una línea aparte: así
     // "sin cebolla" llega solo a ese plato y cocina recibe cada variante.
-    return this.mutateItems(table.id, (cart) => cart.addItem({
-      id: item.productId,
-      name: product.name ?? "Producto",
-      price: item.price,
-      requiresKitchen: item.requiresKitchen
-    } as Product, item.quantity, item.note, { splitByNote: true }));
+    return this.mutateItems(
+      tableId,
+      (cart) => cart.addItem({
+        id: item.productId,
+        name: product.name ?? "Producto",
+        price: item.price,
+        requiresKitchen: item.requiresKitchen
+      } as Product, item.quantity, item.note, {
+        splitByNote: true,
+        selectedSizeId: resolvedInput.selectedSizeId,
+        selectedExtraIds: resolvedInput.selectedExtraIds
+      }),
+      // La validación de estado va como precheck para que, en un reintento
+      // offline, el marcador de idempotencia se evalúe primero.
+      (table) => this.assertTableAcceptsItems(table),
+      { operationId: resolvedInput.operationId, expectedSessionId: resolvedInput.expectedSessionId }
+    );
   }
 
   /** Sin `line` quita todas las líneas del producto; con `line` solo la de esa nota. */
-  public async removeItem(tableId: string, productId: string, line?: CartLineRef): Promise<any> {
-    return this.mutateItems(tableId, (cart) => cart.removeItem(productId, line));
+  public async removeItem(
+    tableId: string,
+    productId: string,
+    line?: CartLineRef,
+    options: TableMutationOptions = {}
+  ): Promise<any> {
+    return this.mutateItems(
+      tableId,
+      (cart) => cart.removeItem(productId, line),
+      // Online no cambia. Al reproducir una operación offline sí: quitar algo
+      // de una mesa ya cobrada es un conflicto, no un éxito silencioso.
+      options.operationId ? (table) => this.assertTableAcceptsItems(table) : undefined,
+      options
+    );
   }
 
-  public async updateItemQuantity(tableId: string, productId: string, quantity: number, line?: CartLineRef): Promise<any> {
-    return this.mutateItems(tableId, (cart) => cart.updateQuantity(productId, quantity, line), (table) => this.assertTableAcceptsItems(table));
+  public async updateItemQuantity(
+    tableId: string,
+    productId: string,
+    quantity: number,
+    line?: CartLineRef,
+    options: TableMutationOptions = {}
+  ): Promise<any> {
+    return this.mutateItems(
+      tableId,
+      (cart) => cart.updateQuantity(productId, quantity, line),
+      (table) => this.assertTableAcceptsItems(table),
+      options
+    );
   }
 
   /**
@@ -815,18 +894,18 @@ export class TableEngine {
     productId: string,
     fromNote: string | null | undefined,
     toNote: string | null | undefined,
-    units?: number
+    units?: number,
+    variant?: Pick<CartLineRef, "selectedSizeId" | "selectedExtraIds">,
+    options: TableMutationOptions = {}
   ): Promise<any> {
     return this.mutateItems(
       tableId,
-      (cart) => cart.setLineNote(productId, fromNote, toNote, units),
+      (cart) => cart.setLineNote(productId, fromNote, toNote, units, variant),
       async (table) => {
         this.assertTableAcceptsItems(table);
         if (normalizeLineNote(fromNote) === normalizeLineNote(toNote)) return;
-        const line = table.items.find(
-          (candidate) =>
-            candidate.productId === productId &&
-            normalizeLineNote(candidate.note) === normalizeLineNote(fromNote)
+        const line = table.items.find((candidate) =>
+          sameLine(candidate, { productId, note: fromNote, ...variant })
         );
         if (!line || line.requiresKitchen !== true) return;
 
@@ -841,7 +920,8 @@ export class TableEngine {
             "TABLE_NOTE_ALREADY_SENT: esas unidades ya salieron a cocina; agrega el producto de nuevo con la nota"
           );
         }
-      }
+      },
+      options
     );
   }
 
@@ -1426,7 +1506,8 @@ export class TableEngine {
 
   public async sendToKitchen(
     tableId: string,
-    priority: OrderPriority = "NORMAL"
+    priority: OrderPriority = "NORMAL",
+    options: Pick<TableMutationOptions, "expectedSessionId"> = {}
   ): Promise<KitchenOrder | null> {
     const table = await this.getRepository().findById(tableId);
 
@@ -1434,6 +1515,7 @@ export class TableEngine {
     if (table.status === "FREE" || table.status === "CLOSED") {
       throw new Error("TABLE_NOT_OPEN");
     }
+    assertSameTableSession(table, options.expectedSessionId);
     if (!this.kitchen) throw new Error("KITCHEN_ENGINE_REQUIRED");
 
     const activeOrderId = table.orderId;

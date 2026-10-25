@@ -2,7 +2,6 @@
 import { InventoryMovement, Product } from "../../src/core/entities/Entities";
 import { IProductRepository } from "../../src/infrastructure/di/repositories/IProductRepository";
 import { InMemoryRepository } from "./InMemoryRepository";
-import { companyConfigStore } from "../../src/core/store/companyConfigStore";
 
 /**
  * FakeProductRepository
@@ -168,7 +167,8 @@ export class FakeProductRepository
       throw new Error("NO_RECIPE");
     }
 
-    const allowNegative = companyConfigStore.get().allowNegativeStock;
+    // Opción B: producir una tanda es una operación manual -> siempre estricta.
+    const allowNegative = false;
 
     const ingredientIds = recipe.map((r) => r.productId);
     const ingredients = await this.findMany(ingredientIds);

@@ -1,4 +1,5 @@
 import { Shift } from "../../../core/entities/Entities";
+import type { ShiftCashTotals } from "../../../core/caja/cashExpectedRule";
 import { SupabaseRepository, reviveDates } from "./SupabaseRepository";
 import { supabase } from "../../supabase/supabaseClient";
 
@@ -17,6 +18,11 @@ export interface IShiftRepository {
     countedAmount: number,
     notes?: string
   ): Promise<Shift>;
+  /**
+   * Efectivo esperado del turno calculado por el SERVIDOR con la regla única
+   * (RPC get_shift_cash_summary): la misma consulta con la que se graba el cierre.
+   */
+  getCashSummary?(shiftId: string): Promise<ShiftCashTotals>;
 }
 
 /**
@@ -62,42 +68,60 @@ export class ShiftRepository
   }
 
   /**
-   * Cierra un turno de caja de forma atómica en servidor mediante la RPC
-   * `close_shift_atomic()`. Garantiza:
-   * 1. ATOMICITY: el arqueo (ingresos, egresos, efectivo esperado, diferencia)
-   *    se calcula y persiste en una única transacción de servidor, evitando
-   *    condiciones de carrera entre cajeros concurrentes.
-   * 2. DOUBLE-CLOSE PROTECTION: un turno ya cerrado no puede volver a cerrarse.
-   * 3. MULTI-TENANT: valida que el usuario pertenezca al negocio/branch del turno.
+   * Resumen de efectivo del turno desde el servidor (regla única de caja).
+   * Es exactamente la misma consulta que usa el cierre histórico, así que la
+   * cifra "esperado" de la pantalla coincide con la que se graba al cerrar.
    */
-  public async closeAtomic(
-    shiftId: string,
-    countedAmount: number,
-    notes?: string
-  ): Promise<Shift> {
-    const { data, error } = await supabase.rpc("close_shift_atomic", {
+  public async getCashSummary(shiftId: string): Promise<ShiftCashTotals> {
+    const { data, error } = await supabase.rpc("get_shift_cash_summary", {
       p_shift_id: shiftId,
-      p_counted_amount: countedAmount,
-      p_notes: notes ?? null,
     });
 
-    if (error) {
-      throw new Error(`SHIFT_CLOSE_RPC_FAILED: ${error.message}`);
-    }
-
-    const row = data?.[0];
-
+    if (error) throw new Error(`SHIFT_CASH_SUMMARY_RPC_FAILED: ${error.message}`);
+    const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined;
     if (!row) {
-      throw new Error(
-        "SHIFT_CLOSE_RPC_FAILED: la RPC no devolvió el turno cerrado."
-      );
+      throw new Error("SHIFT_CASH_SUMMARY_RPC_FAILED: la RPC no devolvió el resumen del turno.");
     }
 
-    const revived = reviveDates(row.data as unknown) as Shift;
+    const incomeByMethod: Record<string, number> = {};
+    const rawByMethod = (row.income_by_method ?? {}) as Record<string, unknown>;
+    for (const [method, total] of Object.entries(rawByMethod)) {
+      incomeByMethod[method] = Number(total);
+    }
 
     return {
-      ...revived,
-      version: row.version,
+      openingAmount: Number(row.opening_amount),
+      totalIncome: Number(row.total_income),
+      totalExpense: Number(row.total_expense),
+      totalCashIncome: Number(row.total_cash_income),
+      totalCashExpense: Number(row.total_cash_expense),
+      expectedAmount: Number(row.expected_amount),
+      incomeByMethod,
+      movementCount: Number(row.movement_count ?? 0),
     };
+  }
+
+  /**
+   * El cierre SIN arqueo está deshabilitado.
+   *
+   * La RPC `close_shift_atomic()` ya no es ejecutable por usuarios autenticados
+   * (migración 20261110000000_close_shift_requires_cash_count.sql). Todo cierre
+   * debe registrar el conteo físico de billetes y monedas mediante
+   * `enterpriseCashService.closeShiftWithCashCount()`, que invoca
+   * `close_shift_with_cash_count_atomic()`.
+   *
+   * Se conserva el método (y no se elimina) a propósito: ShiftEngine usa su
+   * existencia para distinguir el repositorio real de los de test/in-memory.
+   * Si desapareciera, el motor caería al fallback de cliente. Así, cualquier
+   * intento de cerrar sin arqueo falla de forma explícita en vez de silenciosa.
+   */
+  public async closeAtomic(
+    _shiftId: string,
+    _countedAmount: number,
+    _notes?: string
+  ): Promise<Shift> {
+    throw new Error(
+      "SHIFT_CLOSE_REQUIRES_CASH_COUNT: el cierre de turno exige el arqueo de billetes y monedas. Usa enterpriseCashService.closeShiftWithCashCount()."
+    );
   }
 }
