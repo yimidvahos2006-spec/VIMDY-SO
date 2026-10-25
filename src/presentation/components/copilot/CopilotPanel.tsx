@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Sparkles, Send, Loader2, Mic, MicOff } from "lucide-react";
+import { Send, Mic, MicOff, MessageSquarePlus, X } from "lucide-react";
 
 import { useCopilot } from "../../../core/store/useCopilot";
 import { copilotStore } from "../../../core/store/copilotStore";
@@ -9,16 +9,21 @@ import { container } from "../../../infrastructure/di/CompositionRoot";
 import { businessStore } from "../../../core/store/businessStore";
 import { companyConfigStore } from "../../../core/store/companyConfigStore";
 import { startSpeechRecognition } from "../../../core/voice/speechRecognition";
+import { useAuth } from "../../context/AuthContext";
+import { CopilotOrb, type CopilotOrbState } from "./CopilotOrb";
+import { CopilotMessageBubble, CopilotThinkingBubble } from "./CopilotMessageBubble";
+import { CopilotSuggestions } from "./CopilotSuggestions";
 
-const SUGGESTED_QUESTIONS = [
-  "¿Cómo voy?",
-  "¿Cuánto dinero hay en caja?",
-  "¿Qué pedidos están retrasados?",
-  "¿Qué producto me deja más ganancia?",
-  "¿Qué empleado vende más?",
-  "¿Qué debería comprar mañana?",
-  "¿Qué pasará esta semana?"
-];
+const STATUS_LABEL: Record<CopilotOrbState, string> = {
+  idle: "En línea",
+  listening: "Te escucho…",
+  thinking: "Analizando tu negocio…",
+  responding: "Respondiendo…",
+  angry: "En línea",
+  wink: "En línea",
+  success: "En línea",
+  warning: "En línea"
+};
 
 /**
  * CopilotPanel
@@ -32,7 +37,9 @@ export function CopilotPanel() {
   const [draft, setDraft] = useState("");
   const [isListening, setIsListening] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -96,6 +103,18 @@ export function CopilotPanel() {
   }
 
   /**
+   * Nuevo chat: limpia la conversación (misma acción que en /ia, porque
+   * comparten copilotStore). No se permite mientras hay una respuesta en
+   * camino o se está escuchando: caería dentro de la conversación nueva.
+   */
+  function handleNewChat() {
+    if (isLoading || isListening) return;
+    setDraft("");
+    copilotStore.reset();
+    inputRef.current?.focus();
+  }
+
+  /**
    * PASO 7 — IA por Voz. Reutiliza el mismo motor de reconocimiento de voz
    * que ya usa VIMDY Voice en el POS (startSpeechRecognition). El texto
    * transcrito entra por el MISMO handleAsk que el texto escrito, así que
@@ -119,114 +138,146 @@ export function CopilotPanel() {
 
   if (!isOpen) return null;
 
+  const orbState: CopilotOrbState = isListening ? "listening" : isLoading ? "thinking" : "idle";
+  const hasConversation = messages.length > 1 || Boolean(error);
+
   return (
-    <div
+    <section
+      role="dialog"
+      aria-label="VIMDY IA"
       className="
-        fixed bottom-28 right-6 z-[59]
-        w-[380px] max-w-[92vw] h-[560px] max-h-[75vh]
-        rounded-[28px] border border-cyan-500/20 bg-[#0B1522]
-        shadow-2xl flex flex-col overflow-hidden
+        fixed inset-x-3 bottom-24 z-[59]
+        sm:inset-x-auto sm:right-6 sm:bottom-28 sm:w-[400px]
+        h-[600px] max-h-[calc(100dvh-7.5rem)] sm:max-h-[calc(100dvh-8.5rem)]
+        flex flex-col overflow-hidden rounded-3xl
+        border border-cyan-400/20 bg-[#0B1522]/75
+        backdrop-blur-2xl backdrop-saturate-150
+        shadow-[0_24px_64px_-12px_rgba(0,0,0,0.65),0_0_48px_rgba(34,211,238,0.07)]
+        animate-vimdy-slide-up
       "
     >
-      {/* Header */}
-      <div className="flex items-center gap-3 p-5 border-b border-cyan-500/15 bg-[#08111F]">
-        <div className="w-10 h-10 rounded-xl bg-cyan-500/15 flex items-center justify-center">
-          <Sparkles size={20} className="text-cyan-400" />
-        </div>
-        <div>
-          <p className="text-white font-bold leading-tight">Copiloto VIMDY</p>
-          <p className="text-xs text-cyan-300">Tu gerente virtual</p>
-        </div>
-      </div>
+      {/* Brillo sutil superior (glass) */}
+      <div
+        className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-cyan-400/[0.07] to-transparent"
+        aria-hidden="true"
+      />
 
-      {/* Mensajes */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
+      {/* Cabecera */}
+      <header className="relative flex items-center gap-3 border-b border-cyan-400/10 bg-white/[0.03] px-4 py-3">
+        <div className="shrink-0">
+          <CopilotOrb state={orbState} size={44} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h2 className="truncate text-base font-bold leading-tight tracking-tight text-slate-100">VIMDY IA</h2>
+          <p className="flex items-center gap-1.5 text-xs text-slate-400" role="status" aria-live="polite">
+            <span
+              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                orbState === "idle" ? "bg-emerald-400" : "animate-pulse bg-cyan-400"
+              }`}
+              aria-hidden="true"
+            />
+            <span className="truncate">{STATUS_LABEL[orbState]}</span>
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleNewChat}
+          disabled={!hasConversation || isLoading || isListening}
+          title="Nuevo chat"
+          aria-label="Nuevo chat: limpiar la conversación"
+          className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-cyan-400/20 bg-white/[0.04] px-3 text-xs font-medium text-cyan-200 transition hover:border-cyan-400/40 hover:bg-cyan-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/50 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-cyan-400/20 disabled:hover:bg-white/[0.04]"
+        >
+          <MessageSquarePlus size={16} aria-hidden="true" />
+          <span className="hidden min-[400px]:inline">Nuevo chat</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => copilotStore.close()}
+          title="Cerrar"
+          aria-label="Cerrar panel"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-400 transition hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/50"
+        >
+          <X size={18} aria-hidden="true" />
+        </button>
+      </header>
+
+      {/* Conversación */}
+      <div
+        ref={scrollRef}
+        role="log"
+        aria-label="Conversación con VIMDY IA"
+        className="relative min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-3.5 py-4 sm:px-4"
+      >
         {messages.map((message) => (
-          <div
-            key={message.id}
-            className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
-          >
-            <div
-              className={`
-                max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap
-                ${message.role === "user"
-                  ? "bg-cyan-500 text-white rounded-br-sm"
-                  : "bg-[#131F30] text-slate-200 border border-cyan-500/10 rounded-bl-sm"}
-              `}
-            >
-              {message.content}
-            </div>
-          </div>
+          <CopilotMessageBubble key={message.id} message={message} userName={user?.name} compact />
         ))}
 
-        {isLoading && (
-          <div className="flex justify-start">
-            <div className="bg-[#131F30] border border-cyan-500/10 rounded-2xl rounded-bl-sm px-4 py-3 flex items-center gap-2">
-              <Loader2 size={16} className="text-cyan-400 animate-spin" />
-              <span className="text-slate-400 text-sm">Analizando tu negocio…</span>
-            </div>
-          </div>
-        )}
+        {isLoading && <CopilotThinkingBubble compact />}
 
         {error && (
-          <div className="text-red-400 text-xs bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2">
+          <div
+            role="alert"
+            className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400"
+          >
             {error}
           </div>
         )}
       </div>
 
-      {/* Preguntas sugeridas (solo si es la primera interacción) */}
-      {messages.length <= 1 && (
-        <div className="px-4 pb-2 flex flex-wrap gap-2">
-          {SUGGESTED_QUESTIONS.map((question) => (
-            <button
-              key={question}
-              onClick={() => handleAsk(question)}
-              className="text-xs bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/20 text-cyan-300 rounded-full px-3 py-1.5 transition"
-            >
-              {question}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* Entrada */}
+      <div className="relative space-y-2.5 border-t border-cyan-400/10 bg-[#08111F]/60 px-3.5 pb-3 pt-3 sm:px-4">
+        {/* Sugerencias: una sola fila compacta con scroll horizontal */}
+        <CopilotSuggestions variant="chips" onSelect={handleAsk} disabled={isLoading || isListening} />
 
-      {/* Input */}
-      <div className="p-4 border-t border-cyan-500/15 bg-[#08111F] flex items-center gap-2">
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") handleAsk(draft);
-          }}
-          placeholder={isListening ? "Escuchando…" : "Pregúntale algo a tu negocio…"}
-          disabled={isListening}
-          className="flex-1 bg-[#131F30] border border-cyan-500/15 rounded-2xl px-4 py-3 text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/40 disabled:opacity-60"
-        />
-        <button
-          onClick={handleVoice}
-          disabled={isLoading}
-          title="Hablarle al Copiloto"
-          className={`w-11 h-11 rounded-2xl flex items-center justify-center transition disabled:opacity-40 ${
-            isListening
-              ? "bg-red-500 hover:bg-red-400 animate-pulse"
-              : "bg-[#131F30] border border-cyan-500/20 hover:bg-cyan-500/15"
-          }`}
-        >
-          {isListening ? (
-            <MicOff size={18} className="text-white" />
-          ) : (
-            <Mic size={18} className="text-cyan-300" />
-          )}
-        </button>
-        <button
-          onClick={() => handleAsk(draft)}
-          disabled={isLoading || isListening || !draft.trim()}
-          className="w-11 h-11 rounded-2xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 disabled:hover:bg-cyan-500 flex items-center justify-center transition"
-        >
-          <Send size={18} className="text-white" />
-        </button>
+        <div className="flex items-center gap-2">
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) handleAsk(draft);
+            }}
+            placeholder={isListening ? "Escuchando…" : "Pregúntale algo a tu negocio…"}
+            aria-label="Escribe tu pregunta"
+            disabled={isListening}
+            className="min-w-0 flex-1 rounded-2xl border border-cyan-400/15 bg-white/[0.05] px-4 py-3 text-base text-white placeholder-slate-500 outline-none transition focus:border-cyan-400/50 focus:shadow-vimdy-accent disabled:opacity-60 sm:text-sm"
+          />
+          <button
+            type="button"
+            onClick={handleVoice}
+            disabled={isLoading}
+            title="Hablarle al Copiloto"
+            aria-label={isListening ? "Escuchando" : "Hablarle al Copiloto"}
+            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl transition disabled:opacity-40 ${
+              isListening
+                ? "animate-pulse bg-red-500 hover:bg-red-400"
+                : "border border-cyan-400/20 bg-white/[0.05] hover:bg-cyan-500/15"
+            }`}
+          >
+            {isListening ? (
+              <MicOff size={18} className="text-white" />
+            ) : (
+              <Mic size={18} className="text-cyan-300" />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => handleAsk(draft)}
+            disabled={isLoading || isListening || !draft.trim()}
+            aria-label="Enviar pregunta"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 transition hover:from-cyan-400 hover:to-blue-500 disabled:opacity-40 disabled:hover:from-cyan-500 disabled:hover:to-blue-600"
+          >
+            <Send size={18} className="text-white" />
+          </button>
+        </div>
+
+        <p className="text-center text-[11px] leading-snug text-slate-500">
+          VIMDY IA puede cometer errores. Verifique la información importante.
+        </p>
       </div>
-    </div>
+    </section>
   );
 }
 

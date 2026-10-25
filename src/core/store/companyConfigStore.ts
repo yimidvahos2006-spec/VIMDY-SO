@@ -15,8 +15,6 @@ export interface CompanyConfig {
 
   timezone: string;
 
-  allowNegativeStock: boolean;
-
   autoPrintReceipt: boolean;
 
   enableKitchen: boolean;
@@ -62,7 +60,6 @@ const DEFAULT_CONFIG: CompanyConfig = {
   serviceCharge: 0,
   language: "es",
   timezone: "America/Bogota",
-  allowNegativeStock: false,
   autoPrintReceipt: true,
   enableKitchen: true,
   enableTables: true,

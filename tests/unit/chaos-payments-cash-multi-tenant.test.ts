@@ -539,7 +539,7 @@ describe("P3 — Caos: pagos, caja, multi-tenant", () => {
       expect(movements[0].amount).toBe(sale.total);
     });
 
-    it("venta con stock insuficiente: no se crea la venta y no se modifica el inventario", async () => {
+    it("venta con stock insuficiente (Opción B): la venta SÍ se crea y el stock queda en negativo", async () => {
       setCurrentBusinessId("b-no-stock");
       setCurrentBranchId("br-no-stock");
 
@@ -583,13 +583,13 @@ describe("P3 — Caos: pagos, caja, multi-tenant", () => {
           items: [{ productId: "prod-no-stock", quantity: 5, price: 10000 }],
           cashierId: "cashier-1"
         })
-      ).rejects.toThrow("Stock insuficiente");
+      ).resolves.toBeDefined();
 
       const allSales = await sales.findAll();
-      expect(allSales).toHaveLength(0);
+      expect(allSales).toHaveLength(1);
 
       const product = await products.findById("prod-no-stock");
-      expect(product?.stock).toBe(1);
+      expect(product?.stock).toBe(-4); // 1 - 5
     });
   });
 });

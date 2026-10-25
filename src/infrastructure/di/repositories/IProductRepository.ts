@@ -62,10 +62,10 @@ export interface IProductRepository extends IRepository<Product> {
    * misma operación (ej. purchasePrice, lastPurchaseDate) — evita un
    * segundo UPDATE separado que podría pisar un cambio de stock concurrente
    * ocurrido entre medio.
-   * @param allowNegative BLOQUEANTE #4 (auditoría Fase 2): si es `true`
-   * (viene de `companyConfigStore.get().allowNegativeStock`), la operación
-   * NO rechaza el descuento aunque el stock resultante quede en negativo.
-   * Por defecto `false` — mismo comportamiento estricto de siempre.
+   * @param allowNegative Opción B: si es `true` (solo el descuento por venta
+   * lo envía así), la operación NO rechaza el descuento aunque el stock
+   * resultante quede en negativo. Por defecto `false`: los ajustes manuales,
+   * transferencias y producción por tandas siguen siendo estrictos.
    * @throws Error('PRODUCT_NOT_FOUND') si el producto no existe (o no
    * pertenece al negocio activo).
    * @throws Error('INSUFFICIENT_STOCK') si el stock actual no alcanza para
@@ -109,5 +109,13 @@ export interface StockMovementBatchItem {
   reason: string;
   type: InventoryMovement["type"];
   branchId?: string;
+  /**
+   * Opción B: solo el descuento por venta (type DECREASE) lo envía en `true`;
+   * el RPC `adjust_stock_batch_with_kardex` entonces NO rechaza el movimiento
+   * aunque el stock quede en negativo. Ausente o `false` = estricto
+   * (INSUFFICIENT_STOCK), que es lo que usan los ajustes manuales y las
+   * recepciones de compra.
+   */
+  allowNegative?: boolean;
   extraFields?: Record<string, unknown>;
 }

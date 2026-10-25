@@ -91,7 +91,7 @@ describe("Gate 1 — venta e idempotencia concurrentes en Supabase", () => {
     if (client) await client.auth.signOut();
   });
 
-  it("serializa dos ventas sobre stock 1 y dos intentos concurrentes de pago", async () => {
+  it("dos ventas concurrentes sobre stock 1 pasan ambas y dejan el stock en -1 (Opción B), más dos intentos concurrentes de pago", async () => {
     const settings = getRequiredConfig();
     const [{ data: business, error: businessError }, { data: branch, error: branchError }, { data: product, error: productError }] =
       await Promise.all([
@@ -136,9 +136,9 @@ describe("Gate 1 — venta e idempotencia concurrentes en Supabase", () => {
     expect(saleResults.every((result) => result !== null)).toBe(true);
     const successfulSales = saleResults.filter((result) => result?.success === true);
     const rejectedSales = saleResults.filter((result) => result?.success === false);
-    expect(successfulSales).toHaveLength(1);
-    expect(rejectedSales).toHaveLength(1);
-    expect(rejectedSales[0]?.error).toContain("INSUFFICIENT_STOCK");
+    // Opción B: una venta nunca se bloquea por falta de stock.
+    expect(successfulSales).toHaveLength(2);
+    expect(rejectedSales).toHaveLength(0);
 
     const paidSale = successfulSales[0]?.sale;
     const saleId = requiredValue(paidSale?.id, "successful sale id");
@@ -166,8 +166,8 @@ describe("Gate 1 — venta e idempotencia concurrentes en Supabase", () => {
       throw new Error(`Gate 1 post-sale read failed: ${updatedProductError?.message ?? salesError?.message ?? kitchenError?.message}`);
     }
 
-    expect(Number(updatedProduct.data.stock)).toBe(0);
-    expect(saleRows).toHaveLength(1);
+    expect(Number(updatedProduct.data.stock)).toBe(-1);
+    expect(saleRows).toHaveLength(2);
     const expectsKitchen =
       business.kitchen_enabled === true &&
       ["kds", "printer", "both"].includes(business.kitchen_output_mode) &&

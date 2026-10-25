@@ -42,7 +42,13 @@ export function CopilotSuggestions({ variant, onSelect, disabled = false }: Copi
   if (variant === "chips") {
     return (
       <div
-        className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="-mx-3 flex scroll-px-3 snap-x gap-2 overflow-x-auto overscroll-x-contain px-3 pb-0.5 [-webkit-overflow-scrolling:touch] [mask-image:linear-gradient(to_right,transparent,#000_12px,#000_calc(100%-24px),transparent)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        onWheel={(e) => {
+          // Rueda del mouse (vertical) → scroll horizontal, para escritorio.
+          if (e.deltaY !== 0 && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+            e.currentTarget.scrollLeft += e.deltaY;
+          }
+        }}
         role="group"
         aria-label="Preguntas rápidas"
       >
@@ -52,7 +58,7 @@ export function CopilotSuggestions({ variant, onSelect, disabled = false }: Copi
             type="button"
             onClick={() => onSelect(question)}
             disabled={disabled}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1.5 text-xs text-cyan-200 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex shrink-0 snap-start items-center gap-1.5 whitespace-nowrap rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3.5 py-2 text-xs text-cyan-200 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Icon size={13} className="text-cyan-400" aria-hidden="true" />
             {question}

@@ -248,7 +248,6 @@ const ProductCard = React.memo(function ProductCard({
     <button
       type="button"
       onClick={handleAdd}
-      disabled={!available}
       aria-label={t("pos.products.addAria", { name, price: formattedPrice })}
       className={`
         group relative flex flex-col items-center text-center
@@ -256,8 +255,7 @@ const ProductCard = React.memo(function ProductCard({
         transition-all duration-vimdy-fast
         active:scale-[0.96]
         focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-vimdy-accent/40
-        disabled:opacity-40 disabled:cursor-not-allowed
-        ${justAdded ? "border-vimdy-success shadow-vimdy-md" : "border-vimdy-border hover:border-vimdy-accent"}
+        ${justAdded ? "border-vimdy-success shadow-vimdy-md" : available ? "border-vimdy-border hover:border-vimdy-accent" : "border-vimdy-danger/50 opacity-70 hover:border-vimdy-danger"}
       `}
     >
       {justAdded && (

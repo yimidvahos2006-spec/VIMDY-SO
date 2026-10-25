@@ -2,12 +2,13 @@ import { useMemo } from "react";
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Product } from "../../../core/entities/Entities";
 import { getStockStatus } from "../../../core/store/useInventory";
+import { isNegativeStock } from "../../../core/utils/negativeStockReport";
 import { calculateInventoryCostValuation, type InventoryCostValuation } from "../../../core/utils/inventoryValuation";
 import { money } from "./inventoryShared";
 import { hasMaskedStock } from "../../../core/utils/stockMask";
 import { useAuth } from "../../context/AuthContext";
 
-type Side = "insumos" | "productos";
+type Side = "insumos" | "productos" | "negativos";
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -36,11 +37,13 @@ export function InventorySummaryBar({
     const count = (ingredient: boolean, status: "bajo" | "agotado") =>
       active.filter((p) => (p.isIngredient === true) === ingredient && getStockStatus(p) === status).length;
 
+    const negative = active.filter(isNegativeStock).length;
     const valuation = calculateInventoryCostValuation(products);
     const valuationIns = calculateInventoryCostValuation(products.filter((p) => p.isIngredient === true));
     const valuationProd = calculateInventoryCostValuation(products.filter((p) => p.isIngredient !== true));
     return {
       total: active.length,
+      negative,
       lowIns: count(true, "bajo"),
       outIns: count(true, "agotado"),
       lowProd: count(false, "bajo"),
@@ -53,7 +56,7 @@ export function InventorySummaryBar({
 
   if (!loading && products.length === 0) return null;
 
-  const { lowIns, outIns, lowProd, outProd, valuation, valuationIns, valuationProd } = summary;
+  const { lowIns, outIns, lowProd, outProd, valuation, valuationIns, valuationProd, negative } = summary;
   const low = lowIns + lowProd;
   const out = outIns + outProd;
   const insTotal = lowIns + outIns;
@@ -89,7 +92,7 @@ export function InventorySummaryBar({
 
   return (
     <div className="space-y-3" aria-label="Resumen del inventario">
-      <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 ${canViewCosts ? "lg:grid-cols-5" : ""}`}>
+      <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 ${canViewCosts ? "lg:grid-cols-6" : "lg:grid-cols-3"}`}>
         <div className={cardClass}>
           <p className={labelClass}>Por acabarse</p>
           <p className={`text-2xl font-bold ${!loading && low > 0 ? "text-vimdy-warning" : "text-vimdy-text"}`}>
@@ -102,6 +105,17 @@ export function InventorySummaryBar({
             {loading ? "—" : out}
           </p>
         </div>
+        <button
+          type="button"
+          onClick={() => onGoTo("negativos")}
+          className={`${cardClass} text-left transition hover:border-vimdy-accent`}
+          aria-label="Ver el reporte de stock en negativo"
+        >
+          <p className={labelClass}>En negativo</p>
+          <p className={`text-2xl font-bold ${!loading && negative > 0 ? "text-vimdy-danger" : "text-vimdy-text"}`}>
+            {loading ? "—" : negative}
+          </p>
+        </button>
         {canViewCosts && (<>
         <div className={cardClass}>
           <p className={labelClass}>Valor del inventario</p>

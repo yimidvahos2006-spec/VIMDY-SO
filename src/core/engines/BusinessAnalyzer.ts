@@ -8,6 +8,7 @@ import { PurchaseIntelligenceEngine } from "./PurchaseIntelligenceEngine";
 import { KardexEngine } from "./KardexEngine";
 import { LOSS_CATEGORY_LABEL } from "./lossCategoryLabels";
 import { CashEngine } from "./CashEngine";
+import { computeShiftCashTotals } from "../caja/cashExpectedRule";
 import { CustomerEngine } from "./CustomerEngine";
 import { AuditEngine } from "./AuditEngine";
 import { BusinessSnapshot, SmartAlert } from "../types/CopilotTypes";
@@ -1357,19 +1358,9 @@ export class BusinessAnalyzer {
     );
     let balance = 0;
     for (const shift of shifts) {
-      let cashIn = 0;
-      let out = 0;
-      for (const movement of movements) {
-        if (movement.shiftId !== shift.id) continue;
-        if (movement.type === "IN") {
-          cashIn +=
-            movement.cashAmount ??
-            (movement.paymentMethod === "CASH" || !movement.paymentMethod ? movement.amount : 0);
-        } else {
-          out += movement.amount;
-        }
-      }
-      balance += shift.openingAmount + cashIn - out;
+      // Misma regla única de efectivo que el servidor y la pantalla de Caja.
+      const shiftMovements = movements.filter((movement) => movement.shiftId === shift.id);
+      balance += computeShiftCashTotals(shift.openingAmount, shiftMovements).expectedAmount;
     }
     return { balance: fixed2(balance), openShifts: shifts.length };
   }
@@ -1396,22 +1387,16 @@ export class BusinessAnalyzer {
 
     for (const shift of closedShifts.filter((item) => item.status === "CLOSED")) {
       const shiftMovements = byShift.get(shift.id) ?? [];
-      const cashIncome = shiftMovements
-        .filter((movement) => movement.type === "IN")
-        .reduce(
-          (sum, movement) =>
-            sum +
-            (movement.cashAmount ??
-              (movement.paymentMethod === "CASH" || !movement.paymentMethod
-                ? movement.amount
-                : 0)),
-          0
-        );
-      const expenses = shiftMovements
-        .filter((movement) => movement.type === "OUT")
-        .reduce((sum, movement) => sum + movement.amount, 0);
+      // Un turno ya cerrado conserva EL esperado que se grabó al cerrar (la
+      // historia no se reescribe). Solo si no lo trae, se recalcula con la regla
+      // única de efectivo (la misma del servidor).
+      const storedExpected =
+        typeof shift.expectedAmount === "number" && Number.isFinite(shift.expectedAmount)
+          ? shift.expectedAmount
+          : null;
       const expectedAmount = fixed2(
-        shift.openingAmount + cashIncome - expenses
+        storedExpected ??
+          computeShiftCashTotals(shift.openingAmount, shiftMovements).expectedAmount
       );
       const countedAmount = fixed2(
         shift.countedAmount ?? expectedAmount

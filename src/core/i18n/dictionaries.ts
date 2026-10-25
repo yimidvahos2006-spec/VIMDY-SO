@@ -191,6 +191,7 @@ const es = {
   "pos.topbar.clearSearchAria": "Borrar búsqueda",
   "pos.topbar.barcodeNotFound": "Ningún producto tiene el código {code}.",
   "pos.topbar.barcodeOutOfStock": "{name} está agotado — no se pudo agregar.",
+  "pos.topbar.barcodeNegativeStock": "{name} sin stock — se agregó igual; revisa el inventario.",
   "pos.topbar.chargeByTable": "Cobrar por mesa",
 
   "pos.tableCharge.title": "Cobrar por mesa",
@@ -204,6 +205,7 @@ const es = {
 
   "pos.sale.title": "Venta actual",
   "pos.sale.itemCount": "{count} producto(s)",
+  "pos.sale.cleared": "Venta limpiada",
   "pos.sale.shiftClosedToast": "La caja está cerrada. Abre un turno en la pestaña \"Turno de caja\" antes de cobrar.",
   "pos.sale.addProductsBeforeSendToast": "Agrega productos antes de enviar la comanda.",
   "pos.sale.addProductsBeforeChargeToast": "Agrega productos antes de cobrar.",
@@ -382,6 +384,9 @@ const es = {
   "waiter.page.loading": "Cargando…",
   "waiter.offline.pendingSingular": "1 operación de mesa pendiente",
   "waiter.offline.pendingPlural": "{count} operaciones de mesa pendientes",
+  "waiter.conflict.titleSingular": "Mesa {tables}: cambió en caja",
+  "waiter.conflict.titlePlural": "Mesas {tables}: cambiaron en caja",
+  "waiter.conflict.body": "Mientras estabas sin conexión la cuenta cambió (se cobró, se cerró o se volvió a abrir). Tus cambios quedaron guardados y en espera. No hagas nada más en esa cuenta: Caja los revisará.",
 
   "waiter.select.errorCreate": "No se pudo agregar el mesero.",
   "waiter.select.emptyTitle": "Todavía no has agregado meseros.",

@@ -104,7 +104,7 @@ export function PosTableSearchModal({ onClose }: Props) {
    }
 
   return (
-    <div className="fixed inset-0 z-[999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
+    <div role="dialog" aria-modal="true" className="fixed inset-0 z-[999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
       <div className="w-full max-w-3xl max-h-[85vh] rounded-vimdy-xl bg-vimdy-surface border border-vimdy-border shadow-vimdy-lg flex flex-col overflow-hidden">
 
         <div className="flex items-center justify-between px-6 py-5 border-b border-vimdy-border flex-shrink-0">

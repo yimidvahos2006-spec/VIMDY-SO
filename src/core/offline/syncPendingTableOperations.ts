@@ -8,6 +8,7 @@ import type { PendingTableOperation } from "./PendingTableOperation";
 import { getCurrentBusinessId, getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
 import { MAX_OFFLINE_ATTEMPTS, isBusinessError } from "./offlineConstants";
 import { OrderPriority } from "../entities/Entities";
+import { classifyTableConflict } from "./tableConflictRules";
 
 /**
  * syncPendingTableOperations.ts
@@ -42,6 +43,14 @@ async function syncOne(pending: PendingTableOperation): Promise<void> {
     );
   }
 
+  // Idempotencia (Paso 3): el id de la operación viaja al engine, que lo
+  // guarda en la mesa dentro del mismo update. `expectedSessionId` es la
+  // cuenta sobre la que se hizo la operación offline (Paso 4).
+  const mutation = {
+    operationId: pending.id,
+    expectedSessionId: pending.expectedBefore?.openOperationId
+  };
+
   if (pending.type === "OPEN") {
     if (!pending.openInput) {
       throw new Error("PENDING_TABLE_OPERATION_MISSING_INPUT: falta openInput.");
@@ -64,13 +73,21 @@ async function syncOne(pending: PendingTableOperation): Promise<void> {
       tableId: pending.tableId,
       product,
       quantity: pending.addItemInput.quantity,
-      note: pending.addItemInput.note
+      note: pending.addItemInput.note,
+      selectedSizeId: pending.addItemInput.selectedSizeId,
+      selectedExtraIds: pending.addItemInput.selectedExtraIds,
+      ...mutation
     });
   } else if (pending.type === "REMOVE_ITEM") {
     if (!pending.removeItemInput) {
       throw new Error("PENDING_TABLE_OPERATION_MISSING_INPUT: falta removeItemInput.");
     }
-    await container.tableEngine.get().removeItem(pending.tableId, pending.removeItemInput.productId);
+    await container.tableEngine.get().removeItem(
+      pending.tableId,
+      pending.removeItemInput.productId,
+      pending.removeItemInput.line,
+      mutation
+    );
   } else if (pending.type === "UPDATE_QUANTITY") {
     if (!pending.updateQuantityInput) {
       throw new Error("PENDING_TABLE_OPERATION_MISSING_INPUT: falta updateQuantityInput.");
@@ -78,17 +95,37 @@ async function syncOne(pending: PendingTableOperation): Promise<void> {
     await container.tableEngine.get().updateItemQuantity(
       pending.tableId,
       pending.updateQuantityInput.productId,
-      pending.updateQuantityInput.quantity
+      pending.updateQuantityInput.quantity,
+      pending.updateQuantityInput.line,
+      mutation
+    );
+  } else if (pending.type === "UPDATE_NOTE") {
+    if (!pending.updateNoteInput) {
+      throw new Error("PENDING_TABLE_OPERATION_MISSING_INPUT: falta updateNoteInput.");
+    }
+    const input = pending.updateNoteInput;
+    await container.tableEngine.get().updateItemNote(
+      pending.tableId,
+      input.productId,
+      input.fromNote,
+      input.toNote,
+      input.units,
+      { selectedSizeId: input.selectedSizeId, selectedExtraIds: input.selectedExtraIds },
+      mutation
     );
   } else if (pending.type === "SEND_TO_KITCHEN") {
-    await container.tableEngine.get().sendToKitchen(pending.tableId, pending.sendToKitchenInput?.priority as OrderPriority | undefined);
+    await container.tableEngine.get().sendToKitchen(
+      pending.tableId,
+      pending.sendToKitchenInput?.priority as OrderPriority | undefined,
+      { expectedSessionId: mutation.expectedSessionId }
+    );
   }
 }
 
 export async function syncPendingTableOperations(): Promise<void> {
   if (syncPromise) return syncPromise;
 
-  syncPromise = (async () => {
+  const run = (async () => {
     if (!connectionStore.isOnline()) return;
 
     await pendingTableOperationsStore.recoverStuckSyncing();
@@ -97,10 +134,17 @@ export async function syncPendingTableOperations(): Promise<void> {
 
     let syncedCount = 0;
     let failedCount = 0;
+    const conflictTables = new Map<string, string>();
+
+    // Paso 4: mesas con un conflicto de significado ya registrado. Sus
+    // operaciones esperan (sin tocarse); las demás mesas siguen normal.
+    const blockedTableIds = await pendingTableOperationsStore.loadBlockedTableIds();
 
     try {
       for (const pending of queue) {
         if (!connectionStore.isOnline()) break;
+
+        if (blockedTableIds.has(pending.tableId)) continue;
 
         if ((pending.attempts ?? 0) >= MAX_OFFLINE_ATTEMPTS) {
           await pendingTableOperationsStore.markPermanentFailure(pending.id, "MAX_ATTEMPTS_REACHED");
@@ -119,6 +163,17 @@ export async function syncPendingTableOperations(): Promise<void> {
           if (isNetworkFailure(error)) {
             await pendingTableOperationsStore.requeue(pending.id);
             break;
+          }
+
+          // Antes que isBusinessError: TABLE_ALREADY_CLOSED / TABLE_SALE_STALE
+          // también están en esa lista, pero para mesas son conflictos de
+          // significado (se retienen para Caja), no fallos "permanentes".
+          const conflict = classifyTableConflict(error);
+          if (conflict) {
+            await pendingTableOperationsStore.markConflict(pending.id, conflict);
+            blockedTableIds.add(pending.tableId);
+            conflictTables.set(pending.tableId, pending.tableName);
+            continue;
           }
 
           if (isBusinessError(error)) {
@@ -144,6 +199,15 @@ export async function syncPendingTableOperations(): Promise<void> {
       );
     }
 
+    if (conflictTables.size > 0) {
+      const names = [...conflictTables.values()].join(", ");
+      toast.error(
+        conflictTables.size === 1
+          ? `Mesa ${names}: cambió en caja mientras estabas sin conexión. Tus cambios quedaron en espera y Caja los revisará.`
+          : `Mesas ${names}: cambiaron en caja mientras estabas sin conexión. Tus cambios quedaron en espera y Caja los revisará.`
+      );
+    }
+
     if (failedCount > 0) {
       toast.error(
         failedCount === 1
@@ -152,6 +216,13 @@ export async function syncPendingTableOperations(): Promise<void> {
       );
     }
   })();
+
+  // Libera el candado SIEMPRE al terminar, también cuando la pasada sale
+  // temprano (sin conexión o cola vacía). Antes esas salidas dejaban
+  // `syncPromise` ocupado para siempre y las siguientes pasadas no hacían nada.
+  syncPromise = run.finally(() => {
+    syncPromise = null;
+  });
 
   return syncPromise;
 }

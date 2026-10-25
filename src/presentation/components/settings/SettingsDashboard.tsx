@@ -601,12 +601,6 @@ export function SettingsDashboard() {
               onChange={(v) => setConfigDraft({ ...configDraft, autoPrintReceipt: v })}
             />
             <Toggle
-              label="Vender aunque no quede stock"
-              description="Permite vender un producto aunque el inventario llegue a negativo. Apágalo si quieres que Caja te lo impida."
-              checked={configDraft.allowNegativeStock}
-              onChange={(v) => setConfigDraft({ ...configDraft, allowNegativeStock: v })}
-            />
-            <Toggle
               label="Recomendaciones con IA"
               description="Muestra sugerencias en el Dashboard y en Inventario."
               checked={configDraft.enableAI}

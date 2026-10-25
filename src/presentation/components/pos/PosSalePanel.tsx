@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { ShoppingCart, CreditCard, Receipt, Lock, ChefHat, CheckCircle2 } from "lucide-react";
 
 import { useCart } from "../../../core/store/useCart";
@@ -14,6 +14,8 @@ import { useTranslation } from "../../../core/i18n/useTranslation";
 import { formatMoney } from "../../../core/utils/formatMoney";
 import { companyConfigStore } from "../../../core/store/companyConfigStore";
 import { VimdyButton } from "../ui/VimdyButton";
+import { useSearch } from "../../../core/store/useSearch";
+import { classifyShortcutTarget, isModalOpen, resolvePosShortcut } from "./posShortcuts";
 
 /**
  * Panel único de "Venta actual": Carrito y Pago (antes dos columnas, luego
@@ -44,7 +46,8 @@ export function PosSalePanel() {
 
   const { t, language } = useTranslation();
 
-  const { items } = useCart();
+  const { items, clear: clearCart } = useCart();
+  const { value: searchValue } = useSearch();
   const { total, method, received, mixedReceived, change, requiresInvoice, reference, mixedCard, mixedTransfer, customerName } = usePayment();
   const { user } = useAuth();
 
@@ -173,6 +176,55 @@ export function PosSalePanel() {
     }
 
   }
+
+  // ATAJOS DEL POS (modo rápido): Enter = cobrar, Esc = limpiar la venta.
+  // (F2 y el Esc que limpia la búsqueda viven en PosTopBar.) La decisión la
+  // toma resolvePosShortcut(): Enter nunca cobra con un modal abierto, con
+  // el foco en el buscador, repetido (tecla sostenida) ni si canCharge es
+  // false — así no hay doble cobro ni cobros con recibido insuficiente.
+  // Se guarda la última versión de handleCharge en un ref para no volver a
+  // registrar el listener en cada render.
+  const handleChargeRef = useRef(handleCharge);
+  handleChargeRef.current = handleCharge;
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (saleConfirmation && event.key === "Enter") {
+        // Cerrar el "Venta realizada" con Enter = lista para la siguiente venta.
+        event.preventDefault();
+        setSaleConfirmation(null);
+        return;
+      }
+
+      const action = resolvePosShortcut({
+        key: event.key,
+        repeat: event.repeat,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        altKey: event.altKey,
+        targetKind: classifyShortcutTarget(event.target),
+        modalOpen: isModalOpen(),
+        processing,
+        canCharge,
+        searchHasText: searchValue.trim().length > 0,
+        cartHasItems: items.length > 0
+      });
+
+      if (action === "charge") {
+        // preventDefault evita que Enter además "haga clic" en el botón enfocado.
+        event.preventDefault();
+        void handleChargeRef.current();
+      } else if (action === "clear-sale") {
+        event.preventDefault();
+        clearCart();
+        paymentStore.reset();
+        toast.info(t("pos.sale.cleared"));
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [saleConfirmation, processing, canCharge, searchValue, items.length, clearCart, t]);
 
   // Paso 2.6 (Cocina en el botón de Caja): el botón sigue cobrando SIEMPRE
   // en un solo clic (handleCharge no cambia), pero ahora avisa con su

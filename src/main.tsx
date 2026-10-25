@@ -7,6 +7,7 @@ import { AuthProvider } from './presentation/context/AuthContext';
 import { ToastContainer } from './presentation/components/ui/ToastContainer';
 import { ErrorBoundary } from './presentation/components/ui/ErrorBoundary';
 import { installGlobalErrorHandlers } from './infrastructure/logging/globalErrorHandlers';
+import { reloadOnceForNewDeploy } from './core/utils/lazyWithRetry';
 
 import './styles/index.css';
 
@@ -41,6 +42,13 @@ if (sentryDsn) {
 // errores sueltos (onClick, async sin catch, promesas rechazadas) para que
 // también lleguen a system_errors. Ver globalErrorHandlers.ts.
 installGlobalErrorHandlers();
+
+// Vite dispara este evento cuando falla la precarga de un chunk (típico tras un
+// deploy nuevo con la pestaña abierta). Recarga una sola vez para traer los
+// hashes vigentes; la guardia anti-bucle vive en reloadOnceForNewDeploy().
+window.addEventListener('vite:preloadError', (event) => {
+  if (reloadOnceForNewDeploy()) event.preventDefault();
+});
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>

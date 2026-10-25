@@ -11,6 +11,8 @@ import {
 } from "../../infrastructure/di/CompositionRoot";
 import { getCurrentBusinessId } from "../../infrastructure/supabase/supabaseClient";
 import { useVimdyEvent } from "../../hooks/useVimdyCore";
+import { startLiveCatalog } from "../../core/utils/liveCatalog";
+import { logWarning } from "../../infrastructure/logging/opsLogger";
 
 import { WaiterSelect } from "../components/waiter/WaiterSelect";
 import { TableGrid } from "../components/waiter/TableGrid";
@@ -24,6 +26,7 @@ import { translateBusinessError } from "../../core/errors/translateBusinessError
 import { toast } from "../../core/store/toastStore";
 import { OfflineStatusBadge } from "../components/ui/OfflineStatusBadge";
 import { usePendingTableOperationsQueue } from "../../core/offline/usePendingTableOperationsQueue";
+import { TableConflictBanner } from "../components/waiter/TableConflictBanner";
 import { RequirePermission } from "../navigation/RequirePermission";
 import { useCanUse } from "../../hooks/useCanUse";
 
@@ -81,7 +84,7 @@ function MeserosContent() {
   // PASO 1.10 (offline elegante en Mesas) — cuántas aperturas/cierres de
   // mesa hechos sin conexión siguen esperando sincronizarse, para el badge
   // del encabezado (ver OfflineStatusBadge más abajo).
-  const { count: pendingTableOperationsCount } = usePendingTableOperationsQueue();
+  const { count: pendingTableOperationsCount, blocked: blockedTables } = usePendingTableOperationsQueue();
 
   // null = todavía estamos en la pantalla de tarjetas de mesero.
   const [activeWaiter, setActiveWaiter] = useState<Waiter | null>(null);
@@ -181,6 +184,23 @@ function MeserosContent() {
   useVimdyEvent("waiter", () => {
     reloadWaiters();
   });
+
+  // Lo mismo con el catálogo: si cambia un precio, un producto se desactiva o
+  // cambia su flag de cocina, el mesero lo ve sin recargar la página. Antes
+  // los productos se leían una sola vez al abrir la pantalla.
+  useEffect(
+    () =>
+      startLiveCatalog({
+        load: () => container.inventoryEngine.get().listAll(),
+        apply: setProducts,
+        onError: (error) =>
+          logWarning("[Meseros] No se pudo refrescar el catálogo", {
+            category: "inventory",
+            context: { error: String(error) }
+          })
+      }),
+    []
+  );
 
   const selectedTable = selectedTableId
     ? tables.find(t => t.id === selectedTableId) ?? null
@@ -287,6 +307,7 @@ function MeserosContent() {
 
   return (
     <div className="p-4 sm:p-8">
+      <TableConflictBanner blocked={blockedTables} />
       <div className="flex flex-wrap items-start justify-between gap-4 mb-6 sm:mb-8">
         <div className="min-w-0">
           <div className="flex items-center gap-3 flex-wrap">

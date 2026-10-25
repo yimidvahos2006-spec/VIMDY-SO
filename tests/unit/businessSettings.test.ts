@@ -36,7 +36,7 @@ const business: any = {
 };
 const config: any = {
   country: "CO", currency: "COP", tax: 8, serviceCharge: 0, language: "es",
-  timezone: "America/Bogota", allowNegativeStock: true, autoPrintReceipt: false,
+  timezone: "America/Bogota", autoPrintReceipt: false,
   enableAI: false, dailySalesGoal: 500000,
   electronicInvoicing: { enabled: false, provider: "dian" }
 };
@@ -53,7 +53,8 @@ describe("ajustes del negocio en la base de datos", () => {
     expect(row.tax_rate).toBe(8);
     expect(row.timezone).toBe("America/Bogota");
     expect(row.settings.whatsappOrders).toBe("573001112233");
-    expect(row.settings.allowNegativeStock).toBe(true);
+    // Opción B: ya no existe el switch "Vender aunque no quede stock"; no se guarda.
+    expect(row.settings).not.toHaveProperty("allowNegativeStock");
     expect(row.settings.autoPrintReceipt).toBe(false);
     expect(row.settings.dailySalesGoal).toBe(500000);
     // si la facturación está apagada, el proveedor se guarda como "none"
@@ -76,7 +77,7 @@ describe("ajustes del negocio en la base de datos", () => {
     const back = readBusinessSettings(row.settings);
     expect(back.business.nit).toBe("900.123");
     expect(back.business.city).toBe("La Unión");
-    expect(back.config.allowNegativeStock).toBe(true);
+    expect(back.config).not.toHaveProperty("allowNegativeStock");
     expect(back.config.dailySalesGoal).toBe(500000);
   });
 

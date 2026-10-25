@@ -75,10 +75,20 @@ WITH checks AS (
   UNION ALL
   SELECT
     '05 índice composite de idempotencia existe',
-    EXISTS (
-      SELECT 1 FROM pg_indexes
-      WHERE schemaname = 'public'
-        AND indexname = 'cash_movements_business_branch_idempotency_key_idx'
+    -- El indice se convirtio en constraint UNIQUE (20261006000000), por lo que
+    -- puede aparecer como indice o como constraint con el mismo respaldo unico.
+    (
+      EXISTS (
+        SELECT 1 FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND indexname = 'cash_movements_business_branch_idempotency_key_idx'
+      )
+      OR EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'public.cash_movements'::regclass
+          AND contype = 'u'
+          AND conname = 'cash_movements_business_branch_idempotency_key_unique'
+      )
     )
 
   UNION ALL
@@ -178,18 +188,18 @@ WITH checks AS (
 
   UNION ALL
   SELECT
-    '16 register_movement_atomic fija search_path=public',
+    '16 register_movement_atomic fija search_path=pg_catalog',
     COALESCE((
-      SELECT p.proconfig @> ARRAY['search_path=public']
+      SELECT p.proconfig @> ARRAY['search_path=pg_catalog']
       FROM pg_proc p
       WHERE p.oid = to_regprocedure('public.register_movement_atomic(text,uuid,uuid,text,numeric,text,text,numeric,text,timestamptz,uuid,text)')
     ), false)
 
   UNION ALL
   SELECT
-    '17 close_shift_atomic fija search_path=public',
+    '17 close_shift_atomic fija search_path=pg_catalog',
     COALESCE((
-      SELECT p.proconfig @> ARRAY['search_path=public']
+      SELECT p.proconfig @> ARRAY['search_path=pg_catalog']
       FROM pg_proc p
       WHERE p.oid = to_regprocedure('public.close_shift_atomic(uuid,numeric,text)')
     ), false)
@@ -208,10 +218,10 @@ WITH checks AS (
 
   UNION ALL
   SELECT
-    '19 authenticated puede ejecutar close_shift_atomic',
+    '19 authenticated NO puede ejecutar close_shift_atomic (cierre exige arqueo)',
     CASE
       WHEN to_regprocedure('public.close_shift_atomic(uuid,numeric,text)') IS NULL THEN false
-      ELSE has_function_privilege(
+      ELSE NOT has_function_privilege(
         'authenticated',
         to_regprocedure('public.close_shift_atomic(uuid,numeric,text)'),
         'EXECUTE'

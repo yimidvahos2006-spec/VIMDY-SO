@@ -2,19 +2,18 @@
 /* ===========================================================================
    SMOKE TEST — FASE H: errores y seguridad
    ---------------------------------------------------------------------------
-   Dos reglas de negocio críticas que hasta ahora no tenían NINGÚN test
-   propio (se usan en 3 lugares distintos de InventoryEngine.ts pero nunca
-   se habían ejercitado en `tests/smoke/`):
+   Dos reglas de negocio críticas:
 
-   1. `companyConfigStore.allowNegativeStock` ("Permitir stock negativo" en
-      Ajustes): por defecto está en `false` -- un negocio NUEVO nunca debe
-      poder vender ni producir por encima de lo que realmente tiene, ni por
-      accidente. Se prueba en los 3 caminos que lo consultan:
+   1. OPCIÓN B (decisión del dueño, 25 oct 2026): una VENTA nunca se bloquea
+      por falta de stock. Si un producto o un ingrediente de receta no
+      alcanza, la venta pasa, el stock baja y puede quedar en NEGATIVO; el
+      Kardex guarda stockBefore/stockAfter para poder auditarlo, y el conteo
+      físico es la cura. Ya no existe el switch "Vender aunque no quede stock".
+
+      En cambio, lo MANUAL sigue estricto (un negativo ahí es un error de
+      digitación, no una venta en hora pico):
         - decreaseStock() manual (ajuste de Inventario, ej. una merma)
-        - consumeForSale() (una venta normal)
         - produceBatch() (producir una tanda, ej. Pastel)
-      y que, si el dueño decide activarlo a propósito, los 3 caminos lo
-      respetan igual.
 
    2. Trazabilidad de Kardex (regla de oro #8 de la instrucción: "¿Quién
       cambió este inventario, cuándo y por qué?"): cada movimiento generado
@@ -87,7 +86,7 @@ function buildEngines() {
   return { salesEngine, inventory, products, movements };
 }
 
-describe("Fase H — Stock negativo: bloqueado por defecto, respetado en los 3 caminos", () => {
+describe("Fase H — Stock negativo (Opción B): la venta nunca se bloquea, lo manual sí es estricto", () => {
   let ctx: ReturnType<typeof buildEngines>;
 
   beforeEach(() => {
@@ -95,15 +94,10 @@ describe("Fase H — Stock negativo: bloqueado por defecto, respetado en los 3 c
   });
 
   afterEach(() => {
-    // El switch vive en un store global (companyConfigStore) -- si un test
-    // lo activa y no se limpia, contamina los demás archivos de test que
-    // corren en el mismo proceso de Vitest.
     companyConfigStore.reset();
   });
 
-  it("Ajuste manual (Inventario): por defecto NO deja bajar el stock de un producto por debajo de cero", async () => {
-    expect(companyConfigStore.get().allowNegativeStock).toBe(false);
-
+  it("Ajuste manual (Inventario): NO deja bajar el stock de un producto por debajo de cero", async () => {
     const coca = await ctx.inventory.createProduct({
       name: "Coca-Cola", categoryId: "cat-bebidas", price: 4000, stock: 3, minStock: 6, trackStock: true
     });
@@ -116,33 +110,33 @@ describe("Fase H — Stock negativo: bloqueado por defecto, respetado en los 3 c
     expect(after!.stock).toBe(3); // nada se descontó
   });
 
-  it("Ajuste manual (Inventario): con el switch activado, SÍ permite quedar en negativo", async () => {
-    companyConfigStore.update({ allowNegativeStock: true });
-
-    const coca = await ctx.inventory.createProduct({
-      name: "Coca-Cola", categoryId: "cat-bebidas", price: 4000, stock: 3, minStock: 6, trackStock: true
-    });
-
-    await ctx.inventory.decreaseStock(coca.id, 5, "Merma: se rompieron 5 botellas", "yimid");
-
-    const after = await ctx.products.findById(coca.id);
-    expect(after!.stock).toBe(-2);
-  });
-
-  it("Venta: por defecto se rechaza si no hay suficiente stock del producto", async () => {
+  it("Venta: si no hay suficiente stock del producto, la venta pasa y el stock queda en negativo", async () => {
     const coca = await ctx.inventory.createProduct({
       name: "Coca-Cola", categoryId: "cat-bebidas", price: 4000, stock: 2, minStock: 6, trackStock: true
     });
 
     await expect(
       ctx.salesEngine.quickSale({ cashierId: "c1", source: [{ productId: coca.id, quantity: 5 }] })
-    ).rejects.toThrow();
+    ).resolves.toBeDefined();
 
     const after = await ctx.products.findById(coca.id);
-    expect(after!.stock).toBe(2); // la venta no debió tocar el stock
+    expect(after!.stock).toBe(-3); // 2 - 5, a propósito
   });
 
-  it("Venta: por defecto se rechaza si falta un ingrediente de la receta (Café sin suficiente café molido)", async () => {
+  it("Venta: el Kardex deja constancia del stock antes/después cuando queda en negativo", async () => {
+    const coca = await ctx.inventory.createProduct({
+      name: "Coca-Cola", categoryId: "cat-bebidas", price: 4000, stock: 2, minStock: 6, trackStock: true
+    });
+
+    await ctx.salesEngine.quickSale({ cashierId: "c1", source: [{ productId: coca.id, quantity: 5 }] });
+
+    const movements = await ctx.movements.findByProduct(coca.id);
+    const sale = movements.find((m) => m.stockAfter === -3);
+    expect(sale).toBeDefined();
+    expect(sale!.stockBefore).toBe(2);
+  });
+
+  it("Venta: si falta un ingrediente de la receta (Café sin suficiente café molido), la venta pasa y el ingrediente queda en negativo", async () => {
     await ctx.products.save({
       id: "ing-cafe-molido", name: "Café molido", categoryId: "cat-insumos",
       price: 0, stock: 10, minStock: 0, active: true, favorite: false, trackStock: true
@@ -154,16 +148,16 @@ describe("Fase H — Stock negativo: bloqueado por defecto, respetado en los 3 c
       productionMode: "ON_DEMAND", trackStock: false
     });
 
-    // 18g necesarios, solo hay 10g -- debe rechazarse ANTES de descontar nada.
+    // 18g necesarios, solo hay 10g -- la venta NO se detiene.
     await expect(
       ctx.salesEngine.quickSale({ cashierId: "c1", source: [{ productId: cafe.id, quantity: 1 }] })
-    ).rejects.toThrow();
+    ).resolves.toBeDefined();
 
     const molido = await ctx.products.findById("ing-cafe-molido");
-    expect(molido!.stock).toBe(10);
+    expect(molido!.stock).toBe(-8); // 10 - 18
   });
 
-  it("Producir tanda (Pastel): por defecto se rechaza si no alcanzan los ingredientes", async () => {
+  it("Producir tanda (Pastel): sigue estricto -- se rechaza si no alcanzan los ingredientes", async () => {
     await ctx.products.save({
       id: "ing-harina", name: "Harina", categoryId: "cat-insumos",
       price: 0, stock: 500, minStock: 0, active: true, favorite: false, trackStock: true
@@ -182,27 +176,6 @@ describe("Fase H — Stock negativo: bloqueado por defecto, respetado en los 3 c
     const pastelAfter = await ctx.products.findById(pastel.id);
     expect(harina!.stock).toBe(500); // nada se descontó
     expect(pastelAfter!.stock).toBe(0); // no se sumó ninguna unidad "fantasma"
-  });
-
-  it("Producir tanda (Pastel): con el switch activado, sí permite producir aunque falte harina", async () => {
-    companyConfigStore.update({ allowNegativeStock: true });
-
-    await ctx.products.save({
-      id: "ing-harina", name: "Harina", categoryId: "cat-insumos",
-      price: 0, stock: 500, minStock: 0, active: true, favorite: false, trackStock: true
-    } as Product);
-
-    const pastel = await ctx.inventory.createProduct({
-      name: "Pastel", categoryId: "cat-panaderia", price: 35000, stock: 0, minStock: 2,
-      recipe: [{ productId: "ing-harina", quantity: 300 }],
-      productionMode: "BATCH", trackStock: true
-    });
-
-    const result = await ctx.inventory.produceBatch(pastel.id, 2, "yimid");
-    expect(result.product.stock).toBe(2);
-
-    const harina = await ctx.products.findById("ing-harina");
-    expect(harina!.stock).toBe(500 - 600); // queda en negativo, a propósito
   });
 });
 

@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { Suspense } from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 
 import { MainLayout } from "../presentation/layout/MainLayout";
@@ -11,6 +11,7 @@ import { LoginPage } from "../presentation/pages/LoginPage";
 import { RequireCountry } from "../presentation/navigation/RequireCountry";
 
 import { APP_URL } from "../core/config/appUrl";
+import { lazyWithRetry } from "../core/utils/lazyWithRetry";
 
 function isAppSubdomain(): boolean {
   if (typeof window === "undefined") return false;
@@ -35,31 +36,31 @@ function RedirectToApp() {
 
 // Pantallas de acceso: se cargan solo cuando el usuario entra a ellas
 // (LoginPage queda en el paquete principal porque es la primera pantalla).
-const RegisterPage = lazy(() =>
+const RegisterPage = lazyWithRetry(() =>
   import("../presentation/pages/RegisterPage").then((m) => ({ default: m.RegisterPage }))
 );
-const OtpPage = lazy(() =>
+const OtpPage = lazyWithRetry(() =>
   import("../presentation/pages/OtpPage").then((m) => ({ default: m.OtpPage }))
 );
-const ForgotPasswordPage = lazy(() =>
+const ForgotPasswordPage = lazyWithRetry(() =>
   import("../presentation/pages/ForgotPasswordPage").then((m) => ({ default: m.ForgotPasswordPage }))
 );
-const UpdatePasswordPage = lazy(() =>
+const UpdatePasswordPage = lazyWithRetry(() =>
   import("../presentation/pages/UpdatePasswordPage").then((m) => ({ default: m.UpdatePasswordPage }))
 );
-const OnboardingPage = lazy(() =>
+const OnboardingPage = lazyWithRetry(() =>
   import("../presentation/pages/OnboardingPage").then((m) => ({ default: m.OnboardingPage }))
 );
-const CountrySelectionPage = lazy(() =>
+const CountrySelectionPage = lazyWithRetry(() =>
   import("../presentation/pages/CountrySelectionPage").then((m) => ({ default: m.CountrySelectionPage }))
 );
-const BusinessSelectorPage = lazy(() =>
+const BusinessSelectorPage = lazyWithRetry(() =>
   import("../presentation/pages/BusinessSelectorPage").then((m) => ({ default: m.BusinessSelectorPage }))
 );
-const CreateBusinessPage = lazy(() =>
+const CreateBusinessPage = lazyWithRetry(() =>
   import("../presentation/pages/CreateBusinessPage").then((m) => ({ default: m.CreateBusinessPage }))
 );
-const AuthCallbackPage = lazy(() =>
+const AuthCallbackPage = lazyWithRetry(() =>
   import("../presentation/pages/AuthCallbackPage").then((m) => ({ default: m.AuthCallbackPage }))
 );
 
@@ -67,76 +68,76 @@ const AuthCallbackPage = lazy(() =>
 // usuario realmente entra a esa ruta, en vez de cargar Dashboard + POS +
 // Cocina + Inventario + Reportes + Configuración todos de una vez al
 // abrir la app.
-const Dashboard = lazy(() =>
+const Dashboard = lazyWithRetry(() =>
   import("../presentation/pages/Dashboard").then((m) => ({ default: m.Dashboard }))
 );
-const CashOperationsPage = lazy(() =>
+const CashOperationsPage = lazyWithRetry(() =>
   import("../presentation/pages/CashOperationsPage").then((m) => ({ default: m.CashOperationsPage }))
 );
-const KitchenPage = lazy(() =>
+const KitchenPage = lazyWithRetry(() =>
   import("../presentation/pages/KitchenPage").then((m) => ({ default: m.KitchenPage }))
 );
-const InventoryPage = lazy(() =>
+const InventoryPage = lazyWithRetry(() =>
   import("../presentation/pages/InventoryPage").then((m) => ({ default: m.InventoryPage }))
 );
-const ReportsPage = lazy(() =>
+const ReportsPage = lazyWithRetry(() =>
   import("../presentation/pages/ReportsPage").then((m) => ({ default: m.ReportsPage }))
 );
-const ProfitCenterPage = lazy(() =>
+const ProfitCenterPage = lazyWithRetry(() =>
   import("../presentation/pages/ProfitCenterPage").then((m) => ({ default: m.ProfitCenterPage }))
 );
-const LossCenterPage = lazy(() =>
+const LossCenterPage = lazyWithRetry(() =>
   import("../presentation/pages/LossCenterPage").then((m) => ({ default: m.LossCenterPage }))
 );
-const SmartPurchasingPage = lazy(() =>
+const SmartPurchasingPage = lazyWithRetry(() =>
   import("../presentation/pages/SmartPurchasingPage").then((m) => ({ default: m.SmartPurchasingPage }))
 );
-const ForecastPage = lazy(() =>
+const ForecastPage = lazyWithRetry(() =>
   import("../presentation/pages/ForecastPage").then((m) => ({ default: m.ForecastPage }))
 );
-const SettingsPage = lazy(() =>
+const SettingsPage = lazyWithRetry(() =>
   import("../presentation/pages/SettingsPage").then((m) => ({ default: m.SettingsPage }))
 );
-const Meseros = lazy(() =>
+const Meseros = lazyWithRetry(() =>
   import("../presentation/pages/Meseros").then((m) => ({ default: m.Meseros }))
 );
-const CustomersPage = lazy(() =>
+const CustomersPage = lazyWithRetry(() =>
   import("../presentation/pages/CustomersPage").then((m) => ({ default: m.CustomersPage }))
 );
-const NotificationsPage = lazy(() =>
+const NotificationsPage = lazyWithRetry(() =>
   import("../presentation/pages/NotificationsPage").then((m) => ({ default: m.NotificationsPage }))
 );
-const CopilotPage = lazy(() =>
+const CopilotPage = lazyWithRetry(() =>
   import("../presentation/pages/CopilotPage").then((m) => ({ default: m.CopilotPage }))
 );
-const LandingPage = lazy(() =>
+const LandingPage = lazyWithRetry(() =>
   import("../marketing/pages/LandingPage").then((m) => ({ default: m.LandingPage }))
 );
-const PricingPage = lazy(() =>
+const PricingPage = lazyWithRetry(() =>
   import("../marketing/pages/PricingPage").then((m) => ({ default: m.PricingPage }))
 );
-const DemoFondoPage = lazy(() =>
+const DemoFondoPage = lazyWithRetry(() =>
   import("../marketing/pages/DemoFondoPage").then((m) => ({ default: m.DemoFondoPage }))
 );
-const PosCheckoutPage = lazy(() =>
+const PosCheckoutPage = lazyWithRetry(() =>
   import("../presentation/pages/PosCheckoutPage").then((m) => ({ default: m.PosCheckoutPage }))
 );
-const FeaturesPage = lazy(() =>
+const FeaturesPage = lazyWithRetry(() =>
   import("../marketing/pages/FeaturesPage").then((m) => ({ default: m.FeaturesPage }))
 );
-const ContactPage = lazy(() =>
+const ContactPage = lazyWithRetry(() =>
   import("../marketing/pages/ContactPage").then((m) => ({ default: m.ContactPage }))
 );
-const PrivacyPage = lazy(() =>
+const PrivacyPage = lazyWithRetry(() =>
   import("../marketing/pages/PrivacyPage").then((m) => ({ default: m.PrivacyPage }))
 );
-const TermsPage = lazy(() =>
+const TermsPage = lazyWithRetry(() =>
   import("../marketing/pages/TermsPage").then((m) => ({ default: m.TermsPage }))
 );
-const CookiesPage = lazy(() =>
+const CookiesPage = lazyWithRetry(() =>
   import("../marketing/pages/CookiesPage").then((m) => ({ default: m.CookiesPage }))
 );
-const MarketingLayout = lazy(() =>
+const MarketingLayout = lazyWithRetry(() =>
   import("../marketing/components/MarketingLayout").then((m) => ({ default: m.MarketingLayout }))
 );
 

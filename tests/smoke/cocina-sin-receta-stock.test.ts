@@ -126,7 +126,7 @@ describe("Smoke: trackStock=false no bloquea la venta de un plato sin receta", (
     expect(stillZero?.stock).toBe(0); // nunca se descuenta: no se maneja stock propio.
   });
 
-  it("un producto de Inventario normal sigue exigiendo y descontando stock igual que siempre", async () => {
+  it("un producto de Inventario normal descuenta stock y, si no alcanza, la venta pasa y queda en negativo (Opción B)", async () => {
     ctx.cart.addItem(GASEOSA, 2);
 
     await ctx.salesEngine.quickSale({ cashierId: "cashier-1" });
@@ -134,11 +134,11 @@ describe("Smoke: trackStock=false no bloquea la venta de un plato sin receta", (
     const updated = await ctx.products.findById(GASEOSA.id);
     expect(updated?.stock).toBe(3); // 5 - 2
 
-    // Y si no hay suficiente stock, se sigue rechazando la venta.
+    // Y si no hay suficiente stock, la venta NO se bloquea: el stock queda en negativo.
     ctx.cart.addItem(GASEOSA, 10);
-    await expect(ctx.salesEngine.quickSale({ cashierId: "cashier-1" })).rejects.toThrow(
-      /Stock insuficiente/
-    );
+    await expect(ctx.salesEngine.quickSale({ cashierId: "cashier-1" })).resolves.toBeDefined();
+    const negative = await ctx.products.findById(GASEOSA.id);
+    expect(negative?.stock).toBe(-7); // 3 - 10
   });
 
   it("restoreForSale no infla el stock de un producto trackStock=false", async () => {

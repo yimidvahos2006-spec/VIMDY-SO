@@ -25,6 +25,7 @@ import { isVariableQuantityUnit } from "../../../core/utils/weightUnits";
 import { useVoiceOrder } from "../../../core/voice/useVoiceOrder";
 import { useTranslation } from "../../../core/i18n/useTranslation";
 import { PosTableSearchModal } from "./PosTableSearchModal";
+import { isModalOpen } from "./posShortcuts";
 
 export function PosTopBar() {
 
@@ -67,7 +68,16 @@ export function PosTopBar() {
         inputRef.current?.focus();
       }
 
-      if (event.key === "Escape") {
+      // F2: saltar al buscador sin tocar el mouse (hora pico).
+      if (event.key === "F2" && !event.ctrlKey && !event.metaKey && !event.altKey && !isModalOpen()) {
+        event.preventDefault();
+        inputRef.current?.focus();
+        inputRef.current?.select();
+        return;
+      }
+
+      // Esc: limpia la búsqueda. Si ya está vacía, PosSalePanel limpia la venta.
+      if (event.key === "Escape" && !isModalOpen()) {
         clearSearch();
       }
 
@@ -93,9 +103,15 @@ export function PosTopBar() {
       return;
     }
 
-    if ((product.stock <= 0 && product.trackStock !== false) || product.active === false) {
+    if (product.active === false) {
       toastStore.warning(t("pos.topbar.barcodeOutOfStock", { name: product.name }));
       return;
+    }
+
+    // Opción B: sin stock NO bloquea la venta. Se avisa y se agrega igual; el
+    // inventario queda en negativo y el Kardex lo marca para auditarlo después.
+    if (product.stock <= 0 && product.trackStock !== false) {
+      toastStore.warning(t("pos.topbar.barcodeNegativeStock", { name: product.name }));
     }
 
     if (isVariableQuantityUnit(product.unit)) {

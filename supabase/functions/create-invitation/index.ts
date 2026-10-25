@@ -23,6 +23,7 @@ function json(body: unknown, status = 200) {
 interface RequestPayload {
   email?: string;
   roleId?: string;
+  branchId?: string;
 }
 
 const VALID_ROLES = new Set(["ADMIN", "CAJERO", "MESERO", "COCINA"]);
@@ -103,6 +104,31 @@ Deno.serve(async (req: Request) => {
     return json({ error: `ROLE_INVALID: el rol "${roleId}" no es válido.` }, 400);
   }
 
+  // Sucursal (aislamiento fail-closed, migración 20261109000001).
+  // ADMIN: sin sucursal (alcance de negocio por rol). Resto de roles: si viene
+  // branchId debe ser una sucursal ACTIVA de ESTE negocio; si no viene, al
+  // aceptar la invitación se usará la sucursal principal.
+  let invitationBranchId: string | null = null;
+
+  if (roleId !== "ADMIN") {
+    const requestedBranchId = payload.branchId?.trim();
+
+    if (requestedBranchId) {
+      const { data: requestedBranch, error: requestedBranchError } = await admin
+        .from("branches")
+        .select("id")
+        .eq("id", requestedBranchId)
+        .eq("business_id", businessId)
+        .eq("active", true)
+        .maybeSingle();
+
+      if (requestedBranchError || !requestedBranch) {
+        return json({ error: "BRANCH_INVALID: la sucursal no existe, está inactiva o no pertenece a tu negocio." }, 400);
+      }
+      invitationBranchId = requestedBranch.id as string;
+    }
+  }
+
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + 7);
 
@@ -115,6 +141,7 @@ Deno.serve(async (req: Request) => {
       user_id: callerData.user.id,
       email,
       role: roleId,
+      branch_id: invitationBranchId,
       token,
       invited_by: callerData.user.id,
       expires_at: expiresAt.toISOString()
@@ -130,6 +157,7 @@ Deno.serve(async (req: Request) => {
       businessId: callerMembership.business_id,
       email,
       role: roleId,
+      branchId: invitationBranchId,
       token,
       expiresAt: expiresAt.toISOString()
     }

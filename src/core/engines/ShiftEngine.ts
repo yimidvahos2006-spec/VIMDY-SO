@@ -9,6 +9,7 @@ import { cashRegisterStore } from "../store/cashRegisterStore";
 import { activeShiftStore } from "../store/activeShiftStore";
 import { companyConfigStore } from "../store/companyConfigStore";
 import { roundMoney } from "../config/globalization";
+import { computeShiftCashTotals, type ShiftCashTotals } from "../caja/cashExpectedRule";
 
 /* ===========================================================================
    ShiftEngine
@@ -44,9 +45,11 @@ export class ShiftEngine {
   ) {}
 
   /**
-   * Detecta si el repositorio de turnos expone el método `closeAtomic()`,
-   * que delega en la RPC `close_shift_atomic()` de servidor (producción).
-   * Los repositorios de test/in-memory no la implementan y usan el fallback.
+   * Detecta si el repositorio de turnos expone el método `closeAtomic()`
+   * (repositorio real de Supabase). En producción ese método NO cierra: lanza
+   * SHIFT_CLOSE_REQUIRES_CASH_COUNT porque el cierre exige arqueo y se hace con
+   * `enterpriseCashService.closeShiftWithCashCount()`.
+   * Los repositorios de test/in-memory no lo implementan y usan el fallback.
    */
   private isAtomicShiftRepository(
     repo: unknown
@@ -68,6 +71,12 @@ export class ShiftEngine {
     repo: unknown
   ): repo is IShiftRepository {
     return typeof (repo as Partial<IShiftRepository> | null)?.openAtomic === "function";
+  }
+
+  private hasServerCashSummary(
+    repo: unknown
+  ): repo is { getCashSummary(shiftId: string): Promise<ShiftCashTotals> } {
+    return typeof (repo as { getCashSummary?: unknown } | null)?.getCashSummary === "function";
   }
 
   private isAtomicShiftCloseRepository(
@@ -211,8 +220,11 @@ export class ShiftEngine {
     totalIncome: number;
     totalExpense: number;
     totalCashIncome: number;
+    totalCashExpense: number;
     incomeByMethod: Record<string, number>;
     expectedAmount: number;
+    /** "server": cifra calculada por el servidor (la misma del cierre). "local": espejo local de la misma regla. */
+    source: "server" | "local";
   }> {
     const shift = await this.repository.findById(shiftId);
 
@@ -236,45 +248,46 @@ export class ShiftEngine {
       throw new Error("SHIFT_REGISTER_CONTEXT_MISMATCH");
     }
 
-    const movements = await this.cash.getMovementsForShift(
-      shiftId,
-      shift.openedAt,
-      shift.closedAt ?? new Date()
-    );
-
-    const incomeMovements = movements.filter(movement => movement.type === "IN");
-
     const currency = companyConfigStore.get().currency;
+    const round = (value: number): number => roundMoney(value, currency);
 
-    const totalIncome = roundMoney(
-      incomeMovements.reduce((sum, movement) => sum + movement.amount, 0),
-      currency
-    );
+    // REGLA ÚNICA: la cifra la calcula el SERVIDOR, con la misma consulta con la
+    // que se graba el cierre histórico. Sin conexión (o con repositorios de
+    // prueba) se usa el espejo local de esa misma regla (cashExpectedRule.ts).
+    let totals: ShiftCashTotals | null = null;
+    let source: "server" | "local" = "local";
 
-    const totalCashIncome = roundMoney(
-      incomeMovements.reduce(
-        (sum, movement) => sum + (movement.cashAmount ?? (movement.paymentMethod === "CASH" || !movement.paymentMethod ? movement.amount : 0)),
-        0
-      ),
-      currency
-    );
-
-    const incomeByMethod: Record<string, number> = {};
-    for (const movement of incomeMovements) {
-      const method = movement.paymentMethod ?? "CASH";
-      incomeByMethod[method] = roundMoney((incomeByMethod[method] ?? 0) + movement.amount, currency);
+    if (this.hasServerCashSummary(this.repository)) {
+      try {
+        totals = await this.repository.getCashSummary(shiftId);
+        source = "server";
+      } catch (error) {
+        console.warn(
+          "[ShiftEngine] No se pudo leer el resumen del servidor; se usa el cálculo local de la misma regla.",
+          error
+        );
+      }
     }
 
-    const totalExpense = roundMoney(
-      movements
-        .filter(movement => movement.type === "OUT")
-        .reduce((sum, movement) => sum + movement.amount, 0),
-      currency
-    );
+    if (!totals) {
+      const movements = await this.cash.getMovementsForShift(
+        shiftId,
+        shift.openedAt,
+        shift.closedAt ?? new Date()
+      );
+      totals = computeShiftCashTotals(shift.openingAmount, movements, round);
+    }
 
-    const expectedAmount = roundMoney(shift.openingAmount + totalCashIncome - totalExpense, currency);
-
-    return { shift, totalIncome, totalExpense, totalCashIncome, incomeByMethod, expectedAmount };
+    return {
+      shift,
+      totalIncome: totals.totalIncome,
+      totalExpense: totals.totalExpense,
+      totalCashIncome: totals.totalCashIncome,
+      totalCashExpense: totals.totalCashExpense,
+      incomeByMethod: totals.incomeByMethod,
+      expectedAmount: totals.expectedAmount,
+      source,
+    };
   }
 
   /**
@@ -282,9 +295,11 @@ export class ShiftEngine {
     * contra lo contado físicamente por el cajero, y deja el turno en
     * estado CLOSED con el detalle del arqueo (faltante/sobrante incluido).
     *
-    * En producción, el cierre se delega a la RPC `close_shift_atomic()`
-    * (ShiftRepository.closeAtomic), que calcula el arqueo y aplica el cambio
-    * de estado en una sola transacción atómica del servidor.
+    * En producción NO se cierra por aquí: `close_shift_atomic()` fue revocada
+    * a los clientes y ShiftRepository.closeAtomic lanza
+    * SHIFT_CLOSE_REQUIRES_CASH_COUNT. El cierre real usa
+    * `enterpriseCashService.closeShiftWithCashCount()` (RPC
+    * `close_shift_with_cash_count_atomic`), con conteo por denominación.
     *
     * El fallback (cálculo + update en cliente) SOLO se usa con repositorios
     * de test/in-memory que no implementan `closeAtomic`. Nunca debe usarse
@@ -324,6 +339,7 @@ export class ShiftEngine {
       totalIncome,
       totalExpense,
       totalCashIncome,
+      totalCashExpense,
       incomeByMethod,
       expectedAmount,
     } = await this.getShiftSummary(shiftId);
@@ -342,6 +358,7 @@ export class ShiftEngine {
       totalIncome,
       totalExpense,
       totalCashIncome,
+      totalCashExpense,
       incomeByMethod,
       expectedAmount,
       countedAmount,
