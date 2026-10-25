@@ -297,7 +297,7 @@ describe("Auditoría funcional: Cocina / Barra / Sin preparación", () => {
       await ctx.tableEngine.openTable({ tableId: "table-cocina-sin-receta", peopleCount: 2, waiterId: "waiter-1" });
       await ctx.tableEngine.addItem({ tableId: "table-cocina-sin-receta", product: COCINA_SIN_RECETA, quantity: 1 });
 
-      const updatedTable = await ctx.tableEngine.getTable("table-cocina-sin-receta");
+      const updatedTable = (await ctx.tableEngine.getTable("table-cocina-sin-receta"))!;
       expect(updatedTable.items).toHaveLength(1);
       expect(updatedTable.items[0].productId).toBe(COCINA_SIN_RECETA.id);
     });
@@ -352,7 +352,7 @@ describe("Auditoría funcional: Cocina / Barra / Sin preparación", () => {
       await ctx.tableEngine.openTable({ tableId: "table-servicio", peopleCount: 2, waiterId: "waiter-1" });
       await ctx.tableEngine.addItem({ tableId: "table-servicio", product: SERVICIO_SIN_PREPARACION, quantity: 1 });
 
-      const updatedTable = await ctx.tableEngine.getTable("table-servicio");
+      const updatedTable = (await ctx.tableEngine.getTable("table-servicio"))!;
       expect(updatedTable.items).toHaveLength(1);
       expect(updatedTable.items[0].productId).toBe(SERVICIO_SIN_PREPARACION.id);
     });
@@ -609,16 +609,16 @@ describe("Auditoría funcional: Cocina / Barra / Sin preparación", () => {
       await expect(ctx.salesEngine.quickSale({ cashierId: "cashier-1" })).resolves.toBeDefined();
     });
 
-    it("producto trackStock=true SÍ exige y descuenta stock", async () => {
+    it("producto trackStock=true descuenta stock y la venta NO se bloquea aunque quede en negativo (Opción B)", async () => {
       // Primero, agotar el inventario
       ctx.cart.addItem(INVENTARIO_NORMAL, 20);
       await ctx.salesEngine.quickSale({ cashierId: "cashier-1" });
 
-      // Ahora intentar vender más de lo disponible
+      // Ahora vender más de lo disponible: la venta pasa y el stock queda en negativo
       ctx.cart.addItem(INVENTARIO_NORMAL, 1);
-      await expect(ctx.salesEngine.quickSale({ cashierId: "cashier-1" })).rejects.toThrow(
-        /Stock insuficiente/
-      );
+      await expect(ctx.salesEngine.quickSale({ cashierId: "cashier-1" })).resolves.toBeDefined();
+      const after = await ctx.products.findById(INVENTARIO_NORMAL.id);
+      expect(after?.stock).toBe(-1);
     });
 
     it("restoreForSale no infla stock de productos trackStock=false", async () => {
