@@ -89,7 +89,10 @@ import { productCatalogStore } from "../../core/store/productCatalogStore";
 import { cartStore } from "../../core/store/cartStore";
 import { paymentStore } from "../../core/store/paymentStore";
 import { copilotStore } from "../../core/store/copilotStore";
-import { fetchBusinessSettings } from "../../infrastructure/supabase/businessSettings";
+import {
+  fetchBusinessSettings,
+  readCachedBusinessSettings
+} from "../../infrastructure/supabase/businessSettings";
 import { hydrateBusinessOperatingProfile } from "../../core/bootstrap/businessOperatingProfileBootstrap";
 import {
   CountryCode,
@@ -213,6 +216,16 @@ function hydrateBusinessConfig(session: BusinessSession): void {
  * queda con los valores por defecto.
  */
 async function hydrateBusinessExtraSettings(businessId: string): Promise<void> {
+  // 1) Al instante: lo último que se guardó en este dispositivo (síncrono, antes
+  //    del primer render), para que NIT, WhatsApp, meta diaria, etc. no
+  //    aparezcan vacíos mientras la red responde.
+  const cached = readCachedBusinessSettings(businessId);
+  if (cached) {
+    businessStore.update(cached.business);
+    companyConfigStore.update(cached.config);
+  }
+
+  // 2) Por detrás: el dato real de Supabase reemplaza al caché.
   const saved = await fetchBusinessSettings(businessId);
   if (!saved) return;
   // Si mientras tanto se cerró sesión o se cambió de negocio, no pisar nada.

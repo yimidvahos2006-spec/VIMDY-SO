@@ -73,6 +73,22 @@ export class UserEngine {
     return users.filter(user => user.status !== "DELETED");
   }
 
+  /**
+   * Equipo guardado en este dispositivo (sin red), para pintar la pantalla al
+   * instante mientras `listUsers()` confirma por detrás. null si nunca se guardó.
+   */
+  public async listUsersCached(): Promise<User[] | null> {
+    const users = await this.repository.readCached();
+    if (!users) return null;
+    return users.filter(user => user.status !== "DELETED");
+  }
+
+  /** Igual que listUsers(), pero siempre consulta al servidor (no usa la memoria de 15 s). */
+  public async listUsersFresh(): Promise<User[]> {
+    const users = await this.repository.findAllFresh();
+    return users.filter(user => user.status !== "DELETED");
+  }
+
   public async updateUser(
     actorId: string,
     userId: string,

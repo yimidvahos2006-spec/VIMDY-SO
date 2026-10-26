@@ -70,6 +70,20 @@ export class RoleEngine {
     return this.repository.findAll();
   }
 
+  /** Roles guardados en este dispositivo (sin red). null si el repositorio no tiene caché o aún no se guardó. */
+  public async listRolesCached(): Promise<Role[] | null> {
+    const cached = (this.repository as Partial<{ readCached: () => Promise<Role[] | null> }>).readCached;
+    if (typeof cached !== "function") return null;
+    return cached.call(this.repository);
+  }
+
+  /** Igual que listRoles(), pero siempre consulta al servidor cuando el repositorio lo soporta. */
+  public async listRolesFresh(): Promise<Role[]> {
+    const fresh = (this.repository as Partial<{ findAllFresh: () => Promise<Role[]> }>).findAllFresh;
+    if (typeof fresh === "function") return fresh.call(this.repository);
+    return this.repository.findAll();
+  }
+
   /** Reemplaza por completo la lista de permisos de un rol. */
   public async setPermissions(roleId: string, permissionIds: string[]): Promise<Role> {
     const role = await this.getRole(roleId);

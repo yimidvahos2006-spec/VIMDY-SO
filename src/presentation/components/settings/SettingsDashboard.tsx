@@ -33,6 +33,7 @@ import { CompanyConfig } from "../../../core/store/companyConfigStore";
 import { UserStatus } from "../../../core/entities/Entities";
 import { downloadBackup } from "../../../infrastructure/supabase/backupService";
 import { useTranslation } from "../../../core/i18n/useTranslation";
+import { translateBusinessError } from "../../../core/errors/translateBusinessError";
 import {
   AVAILABLE_COUNTRIES,
   AVAILABLE_COUNTRY_CODES,
@@ -247,7 +248,7 @@ export function SettingsDashboard() {
         setConfigSaved(false);
       }, 2000);
     } catch (e: any) {
-      setSaveError(e?.message ?? "No se pudieron guardar los cambios.");
+      setSaveError(translateBusinessError(e, "No se pudieron guardar los cambios."));
     } finally {
       setSaving(false);
     }
@@ -299,7 +300,7 @@ export function SettingsDashboard() {
       setBackupDone(true);
       setTimeout(() => setBackupDone(false), 3000);
     } catch (err) {
-      setBackupError(err instanceof Error ? err.message : "No se pudo generar el backup.");
+      setBackupError(translateBusinessError(err, "No se pudo generar el backup."));
     } finally {
       setBackingUp(false);
     }

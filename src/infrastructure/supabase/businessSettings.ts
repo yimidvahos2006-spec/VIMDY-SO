@@ -152,6 +152,48 @@ export async function saveBusinessSettings(
   }
 }
 
+/* ---------------------------------------------------------------------------
+   Caché local de los ajustes (stale-while-revalidate)
+   ---------------------------------------------------------------------------
+   Los ajustes extra (NIT, WhatsApp de pedidos, meta diaria, impresión
+   automática...) se guardan en este dispositivo, por negocio, para pintarlos
+   en el mismo instante en que se abre la app, sin esperar a Supabase.
+   Se usa localStorage (síncrono, disponible antes del primer render) porque
+   es un blob pequeño; la lista de equipo y roles, que sí puede crecer, usa
+   IndexedDB. Es solo lectura rápida: la verdad sigue siendo la base de datos.
+--------------------------------------------------------------------------- */
+const SETTINGS_CACHE_PREFIX = "vimdy:cache:business-settings:v1:";
+
+function settingsCacheKey(businessId: string): string {
+  return `${SETTINGS_CACHE_PREFIX}${businessId}`;
+}
+
+/** Guarda el blob de ajustes de este negocio. Nunca lanza (el caché es opcional). */
+export function writeCachedBusinessSettings(businessId: string, blob: BusinessSettingsBlob): void {
+  try {
+    if (typeof window === "undefined" || !businessId) return;
+    window.localStorage.setItem(settingsCacheKey(businessId), JSON.stringify(blob));
+  } catch {
+    // Cupo lleno o modo privado estricto: no es crítico.
+  }
+}
+
+/** Ajustes guardados en este dispositivo, o null si no hay (o están dañados). */
+export function readCachedBusinessSettings(
+  businessId: string
+): ReturnType<typeof readBusinessSettings> | null {
+  try {
+    if (typeof window === "undefined" || !businessId) return null;
+    const raw = window.localStorage.getItem(settingsCacheKey(businessId));
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    return readBusinessSettings(parsed);
+  } catch {
+    return null;
+  }
+}
+
 /** Carga los ajustes extra. Devuelve null si no se pueden leer (no rompe el inicio de sesión). */
 export async function fetchBusinessSettings(
   businessId: string
@@ -163,7 +205,11 @@ export async function fetchBusinessSettings(
       .eq("id", businessId)
       .maybeSingle();
     if (error || !data) return null;
-    return readBusinessSettings((data as { settings?: unknown }).settings);
+    const settings = (data as { settings?: unknown }).settings;
+    if (settings && typeof settings === "object") {
+      writeCachedBusinessSettings(businessId, settings as BusinessSettingsBlob);
+    }
+    return readBusinessSettings(settings);
   } catch {
     return null;
   }

@@ -597,7 +597,33 @@ export async function completeRegistration(): Promise<BusinessSession> {
  * Inicia sesión y resuelve el negocio activo del usuario. Se llama al
  * cargar la app (si ya hay sesión guardada) y en la pantalla de Login.
  */
-export async function resolveDefaultBranchId(businessId: string): Promise<string | null> {
+// La sucursal principal de un negocio no cambia durante la sesión. Antes se
+// resolvía dos veces seguidas en cada inicio de sesión (una al abrir la
+// sesión y otra al aplicar el negocio), con dos viajes a la red y hasta dos
+// intentos de crearla. Ahora todas las llamadas del mismo negocio comparten
+// UN solo resultado; si falla (null o error) se olvida para poder reintentar.
+const branchIdByBusiness = new Map<string, Promise<string | null>>();
+
+export function resolveDefaultBranchId(businessId: string): Promise<string | null> {
+  const existing = branchIdByBusiness.get(businessId);
+  if (existing) return existing;
+
+  const pending = resolveDefaultBranchIdFromServer(businessId).then(
+    (branchId) => {
+      if (branchId === null) branchIdByBusiness.delete(businessId);
+      return branchId;
+    },
+    (error: unknown) => {
+      branchIdByBusiness.delete(businessId);
+      throw error;
+    }
+  );
+
+  branchIdByBusiness.set(businessId, pending);
+  return pending;
+}
+
+async function resolveDefaultBranchIdFromServer(businessId: string): Promise<string | null> {
   const { data, error } = await supabase
     .from("branches")
     .select("id")
