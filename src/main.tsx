@@ -5,6 +5,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { App } from './routes/App';
 import { AuthProvider } from './presentation/context/AuthContext';
 import { ToastContainer } from './presentation/components/ui/ToastContainer';
+import { ConfirmHost } from './presentation/components/ui/ConfirmHost';
 import { ErrorBoundary } from './presentation/components/ui/ErrorBoundary';
 import { installGlobalErrorHandlers } from './infrastructure/logging/globalErrorHandlers';
 import { reloadOnceForNewDeploy } from './core/utils/lazyWithRetry';
@@ -66,6 +67,7 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
         </ErrorBoundary>
       </AuthProvider>
       <ToastContainer />
+      <ConfirmHost />
     </BrowserRouter>
   </React.StrictMode>
 );

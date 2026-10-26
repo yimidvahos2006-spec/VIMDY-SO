@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Plus, Pencil, Ban, RotateCcw, Trash2, MapPin, Phone, Building2 } from "lucide-react";
+import { confirmDialog } from "../../../core/store/confirmStore";
 
 import { getCurrentBusinessId, getBranches, createBranch, updateBranch, deleteBranch } from "../../../infrastructure/supabase/supabaseClient";
 import { VimdyButton } from "../ui/VimdyButton";
@@ -97,7 +98,13 @@ export function BranchManager() {
       setError("No se puede eliminar la sucursal principal.");
       return;
     }
-    if (!window.confirm(`¿Eliminar la sucursal "${branch.name}"? Esta acción no se puede deshacer.`)) return;
+    const accepted = await confirmDialog({
+      title: "Eliminar sucursal",
+      message: `¿Eliminar la sucursal "${branch.name}"? Esta acción no se puede deshacer.`,
+      confirmLabel: "Eliminar",
+      danger: true
+    });
+    if (!accepted) return;
 
     setBusyId(branch.id);
     setError(null);

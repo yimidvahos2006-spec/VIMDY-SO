@@ -12,4 +12,7 @@ import { SupabaseRepository } from "./SupabaseRepository";
  */
 export class RoleRepository extends SupabaseRepository<Role> {
   protected tableName = "roles" as const;
+
+  /** Los roles pertenecen al negocio completo, no a una sucursal concreta. */
+  protected readonly scopeByBranch = false;
 }

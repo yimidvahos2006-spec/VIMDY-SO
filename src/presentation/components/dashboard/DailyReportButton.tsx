@@ -4,6 +4,7 @@ import { VimdyButton } from "../ui/VimdyButton";
 import { useTranslation } from "../../../core/i18n/useTranslation";
 import { useDailyBusinessReport } from "../../../hooks/useDailyBusinessReport";
 import { businessStore } from "../../../core/store/businessStore";
+import { toast } from "../../../core/store/toastStore";
 
 export function DailyReportButton() {
   const { language } = useTranslation();
@@ -14,12 +15,13 @@ export function DailyReportButton() {
     const rawNumber = businessStore.get().phone?.trim() || "";
     const digits = rawNumber.replace(/\D/g, "");
     if (!digits) {
-      alert(
+      toast.warning(
         language === "en"
           ? "Configure the business phone in Settings before sending the manual WhatsApp preview."
           : language === "pt"
             ? "Configure o telefone do negócio em Configurações antes de enviar a prévia manual pelo WhatsApp."
             : "Configura el teléfono del negocio en Ajustes antes de enviar la vista previa manual por WhatsApp.",
+        8000,
       );
       return;
     }
