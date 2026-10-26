@@ -7,6 +7,7 @@ import { VimdyBackground } from "../components/ui/VimdyBackground";
 import { VimdyLogo } from "../components/ui/VimdyLogo";
 import { VimdyCard } from "../components/ui/VimdyCard";
 import { VimdyButton } from "../components/ui/VimdyButton";
+import { homePathForRole } from "../../core/config/roleAccess";
 
 /**
  * Pantalla de inicio de sesión — sirve tanto al dueño como a cualquier
@@ -21,7 +22,7 @@ import { VimdyButton } from "../components/ui/VimdyButton";
  * siempre en el servidor de Supabase, nunca en este componente.
  */
 export function LoginPage() {
-  const { login, isAuthenticated, isReady, isLoading, error, businessCount, onboardingCompleted } = useAuth();
+  const { login, isAuthenticated, isReady, isLoading, error, businessCount, onboardingCompleted, role } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -38,7 +39,7 @@ export function LoginPage() {
         : businessCount === 0
           ? "/crear-negocio"
           : onboardingCompleted
-            ? "/dashboard"
+            ? homePathForRole(role?.name)
             : "/onboarding";
 
     return <Navigate to={destination} replace />;

@@ -26,6 +26,7 @@ import { useCashierShiftStatus } from "../../../hooks/useCashierShiftStatus";
 import { useCanUse } from "../../../hooks/useCanUse";
 import { useAuth } from "../../../presentation/context/AuthContext";
 import type { BusinessCapabilityId } from "../../../core/config/businessOperatingProfile";
+import { canAccessPath } from "../../../core/config/roleAccess";
 import { LogOut } from "lucide-react";
 
 const menu = [
@@ -68,7 +69,7 @@ export function VimdySidebar() {
   const { expanded, toggle } = useSidebar();
   const { open: mobileOpen, close: closeMobile } = useMobileSidebar();
   const shiftOpen = useCashierShiftStatus();
-  const { logout } = useAuth();
+  const { logout, can, role } = useAuth();
   const capabilities: Partial<Record<string, BusinessCapabilityId>> = {
     "/caja": "cash",
     "/cocina": "kitchen",
@@ -92,6 +93,10 @@ export function VimdySidebar() {
   // si solo tiene mesas, se llama "Mesas".
   const mesasLabel = availability.waiters ? "Meseros" : "Mesas";
   const visibleMenu = menu.filter((item) => {
+    // Primero el rol: los módulos a los que el rol no tiene acceso (ej. un
+    // MESERO en Inventario, Compras, Ganancias) ni se muestran, así no hay
+    // nada en lo que hacer clic. Usa los mismos permisos que las rutas.
+    if (!canAccessPath(item.path, can, role?.name)) return false;
     if (item.path === "/meseros") return availability.tables || availability.waiters;
     const capability = capabilities[item.path];
     return !capability || availability[capability];

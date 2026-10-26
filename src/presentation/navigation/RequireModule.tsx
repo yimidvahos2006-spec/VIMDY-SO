@@ -1,7 +1,10 @@
 import React from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 
 import { useBusinessOperatingProfile } from "../../core/store/useBusinessOperatingProfile";
+import { useAuth } from "../context/AuthContext";
+import { resolveDeniedRedirect } from "../../core/config/roleAccess";
+import { AccessDeniedScreen } from "./AccessDeniedScreen";
 import type { ModuleId } from "../../core/config/modules";
 import {
   hasBusinessCapability,
@@ -24,6 +27,8 @@ interface Props {
  */
 export function RequireModule({ children, module, alsoCapability }: Props) {
   const { status, profile } = useBusinessOperatingProfile();
+  const { role } = useAuth();
+  const location = useLocation();
 
   if (status === "idle" || status === "loading") {
     return <div role="status" aria-live="polite" className="p-6 text-sm text-slate-400">Cargando configuración operativa…</div>;
@@ -35,7 +40,19 @@ export function RequireModule({ children, module, alsoCapability }: Props) {
   );
 
   if (status !== "ready" || !profile || !enabled) {
-    return <Navigate to="/dashboard" replace />;
+    // Va a la pantalla de inicio del rol. Si la ruta bloqueada YA es esa
+    // pantalla (ej. un MESERO en un negocio sin mesas), redirigir sería un
+    // bucle infinito: se muestra un aviso.
+    const target = resolveDeniedRedirect(location.pathname, role?.name);
+    if (target === null) {
+      return (
+        <AccessDeniedScreen
+          title="Módulo no disponible"
+          message="Este módulo no está habilitado para tu negocio. Pídele a un administrador que lo active."
+        />
+      );
+    }
+    return <Navigate to={target} replace />;
   }
 
   return <>{children}</>;

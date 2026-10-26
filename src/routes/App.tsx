@@ -5,6 +5,8 @@ import { MainLayout } from "../presentation/layout/MainLayout";
 import { ProtectedRoute } from "../presentation/navigation/ProtectedRoute";
 import { OnboardingGate } from "../presentation/navigation/OnboardingGate";
 import { RequireModule } from "../presentation/navigation/RequireModule";
+import { DashboardGate, RoleHomeRedirect } from "../presentation/navigation/RoleHome";
+import { ROUTE_PERMISSIONS } from "../core/config/roleAccess";
 import { ErrorBoundary } from "../presentation/components/ui/ErrorBoundary";
 
 import { LoginPage } from "../presentation/pages/LoginPage";
@@ -176,18 +178,22 @@ function AuthenticatedApp() {
 
               <Route
                 path="/"
-                element={<Navigate to="/dashboard" replace />}
+                element={<RoleHomeRedirect />}
               />
 
               <Route
                 path="/dashboard"
-                element={<Dashboard />}
+                element={
+                  <DashboardGate>
+                    <Dashboard />
+                  </DashboardGate>
+                }
               />
 
               <Route
                 path="/caja"
                 element={
-                  <ProtectedRoute requires="cash.view">
+                  <ProtectedRoute requires={ROUTE_PERMISSIONS["/caja"]}>
                     <RequireModule module="caja">
                       <CashOperationsPage />
                     </RequireModule>
@@ -207,7 +213,7 @@ function AuthenticatedApp() {
               <Route
                 path="/meseros"
                 element={
-                  <ProtectedRoute requires="staff.view">
+                  <ProtectedRoute requires={ROUTE_PERMISSIONS["/meseros"]}>
                     <RequireModule module="mesas" alsoCapability="waiters">
                       <Meseros />
                     </RequireModule>
@@ -218,7 +224,7 @@ function AuthenticatedApp() {
               <Route
                 path="/inventario"
                 element={
-                  <ProtectedRoute requires="inventory.view">
+                  <ProtectedRoute requires={ROUTE_PERMISSIONS["/inventario"]}>
                     <RequireModule module="inventario">
                       <InventoryPage />
                     </RequireModule>
@@ -229,7 +235,7 @@ function AuthenticatedApp() {
               <Route
                 path="/clientes"
                 element={
-                  <ProtectedRoute requires="customers.view">
+                  <ProtectedRoute requires={ROUTE_PERMISSIONS["/clientes"]}>
                     <RequireModule module="clientes">
                       <CustomersPage />
                     </RequireModule>
@@ -245,7 +251,7 @@ function AuthenticatedApp() {
               <Route
                 path="/reportes"
                 element={
-                  <ProtectedRoute requires="reports.view">
+                  <ProtectedRoute requires={ROUTE_PERMISSIONS["/reportes"]}>
                     <ReportsPage />
                   </ProtectedRoute>
                 }
@@ -254,7 +260,7 @@ function AuthenticatedApp() {
               <Route
                 path="/ganancias"
                 element={
-                  <ProtectedRoute requires="reports.view">
+                  <ProtectedRoute requires={ROUTE_PERMISSIONS["/ganancias"]}>
                     <ProfitCenterPage />
                   </ProtectedRoute>
                 }
@@ -263,7 +269,7 @@ function AuthenticatedApp() {
               <Route
                 path="/perdidas"
                 element={
-                  <ProtectedRoute requires="reports.view">
+                  <ProtectedRoute requires={ROUTE_PERMISSIONS["/perdidas"]}>
                     <LossCenterPage />
                   </ProtectedRoute>
                 }
@@ -272,7 +278,7 @@ function AuthenticatedApp() {
               <Route
                 path="/compras-inteligentes"
                 element={
-                  <ProtectedRoute requires="reports.view">
+                  <ProtectedRoute requires={ROUTE_PERMISSIONS["/compras-inteligentes"]}>
                     <SmartPurchasingPage />
                   </ProtectedRoute>
                 }
@@ -281,7 +287,7 @@ function AuthenticatedApp() {
               <Route
                 path="/pronostico"
                 element={
-                  <ProtectedRoute requires="reports.view">
+                  <ProtectedRoute requires={ROUTE_PERMISSIONS["/pronostico"]}>
                     <ForecastPage />
                   </ProtectedRoute>
                 }
@@ -290,7 +296,7 @@ function AuthenticatedApp() {
               <Route
                 path="/configuracion"
                 element={
-                  <ProtectedRoute requires="company.settings">
+                  <ProtectedRoute requires={ROUTE_PERMISSIONS["/configuracion"]}>
                     <SettingsPage />
                   </ProtectedRoute>
                 }
@@ -299,7 +305,7 @@ function AuthenticatedApp() {
               <Route
                 path="/ia"
                 element={
-                  <ProtectedRoute requires="reports.view">
+                  <ProtectedRoute requires={ROUTE_PERMISSIONS["/ia"]}>
                     <RequireModule module="ia">
                       <CopilotPage />
                     </RequireModule>

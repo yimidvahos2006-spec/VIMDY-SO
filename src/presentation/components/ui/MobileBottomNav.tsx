@@ -21,6 +21,8 @@ import {
 
 import { useCanUse } from "../../../hooks/useCanUse";
 import type { BusinessCapabilityId } from "../../../core/config/businessOperatingProfile";
+import { useAuth } from "../../context/AuthContext";
+import { canAccessPath, homePathForRole } from "../../../core/config/roleAccess";
 
 const MAIN_ITEMS = [
   { icon: LayoutDashboard, label: "Inicio", path: "/dashboard" },
@@ -46,6 +48,8 @@ export function MobileBottomNav() {
   const navigate = useNavigate();
   const location = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
+  const { can, role } = useAuth();
+  const homePath = homePathForRole(role?.name);
   const availability: Record<BusinessCapabilityId, boolean> = {
     sales: useCanUse("sales"),
     orders: useCanUse("orders"),
@@ -62,8 +66,14 @@ export function MobileBottomNav() {
   };
   // "Meseros" solo si el negocio usa meseros; si solo tiene mesas se llama "Mesas".
   const mesasLabel = availability.waiters ? "Meseros" : "Mesas";
-  const visibleMainItems = MAIN_ITEMS.filter((item) => !item.capability || availability[item.capability]);
+  // "Inicio" apunta a la pantalla de inicio del rol (MESERO -> /meseros).
+  const visibleMainItems = MAIN_ITEMS
+    .map((item) => (item.path === "/dashboard" ? { ...item, path: homePath } : item))
+    .filter((item) => canAccessPath(item.path, can, role?.name) || item.path === homePath)
+    .filter((item) => !item.capability || availability[item.capability]);
   const visibleMoreItems = MORE_ITEMS.filter((item) => {
+    // Solo lo que el rol puede abrir, y sin repetir la pantalla de inicio.
+    if (!canAccessPath(item.path, can, role?.name) || item.path === homePath) return false;
     if (item.path === "/meseros") return availability.tables || availability.waiters;
     return !item.capability || availability[item.capability];
   });
@@ -148,7 +158,7 @@ export function MobileBottomNav() {
                 `}
               >
                 <Icon size={22} className={active ? "text-vimdy-accent" : ""} />
-                <span className="text-[10px] font-medium leading-none">{item.path === "/meseros" ? mesasLabel : item.label}</span>
+                <span className="text-[10px] font-medium leading-none">{item.path === "/meseros" && item.label !== "Inicio" ? mesasLabel : item.label}</span>
               </button>
             );
           })}
