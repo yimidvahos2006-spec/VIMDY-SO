@@ -12,6 +12,7 @@
 
   },
 
-  "deno.enable": true
+  "deno.enable": true,
+  "CodeGPT.apiKey": "Antigravity"
 
 }
