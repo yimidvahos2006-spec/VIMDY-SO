@@ -1,11 +1,12 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ShoppingCart, AlertTriangle, Package, Info, ShoppingBag, ClipboardList, History as HistoryIcon } from "lucide-react";
+import { ShoppingCart, AlertTriangle, Package, Info, ShoppingBag, ClipboardList, History as HistoryIcon, FilePlus2 } from "lucide-react";
 
 import { EmptyState } from "../ui/EmptyState";
 import { Skeleton, SkeletonCards, SkeletonPanel } from "../ui/Skeleton";
 import { VimdyButton } from "../ui/VimdyButton";
 import { CreatePurchaseOrderModal } from "./CreatePurchaseOrderModal";
+import { DirectPurchaseModal } from "./DirectPurchaseModal";
 import { PurchaseOrdersPanel } from "./PurchaseOrdersPanel";
 import { PurchaseHistoryTable } from "./PurchaseHistoryTable";
 
@@ -65,6 +66,7 @@ export function SmartPurchasingDashboard() {
 
   const [tab, setTab] = useState<Tab>("recomendaciones");
   const [orderTarget, setOrderTarget] = useState<PurchaseRecommendation | null>(null);
+  const [directPurchaseOpen, setDirectPurchaseOpen] = useState(false);
 
   const orderTargetProduct = orderTarget ? products.find((p) => p.id === orderTarget.productId) ?? null : null;
 
@@ -88,15 +90,26 @@ export function SmartPurchasingDashboard() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-vimdy-text flex items-center gap-2">
-          <ShoppingCart size={26} className="text-vimdy-accent" />
-          Compras Inteligentes
-        </h1>
-        <p className="text-vimdy-text-secondary text-sm mt-1">
-          Qué necesitas comprar y por qué, calculado con tus ventas e ingredientes reales. Crea la orden,
-          márcala como comprada y VIMDY actualiza el inventario solo.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-vimdy-text flex items-center gap-2">
+            <ShoppingCart size={26} className="text-vimdy-accent" />
+            Compras Inteligentes
+          </h1>
+          <p className="text-vimdy-text-secondary text-sm mt-1">
+            Qué necesitas comprar y por qué, calculado con tus ventas e ingredientes reales. Crea la orden,
+            márcala como comprada y VIMDY actualiza el inventario solo. Si la mercancía llegó con factura y sin
+            orden previa, regístrala como compra directa.
+          </p>
+        </div>
+        <VimdyButton
+          variant="secondary"
+          icon={<FilePlus2 size={16} />}
+          className="shrink-0 whitespace-nowrap"
+          onClick={() => setDirectPurchaseOpen(true)}
+        >
+          Compra directa
+        </VimdyButton>
       </div>
 
       <div className="flex items-center gap-2 border-b border-vimdy-border-subtle pb-1">
@@ -256,6 +269,17 @@ export function SmartPurchasingDashboard() {
           </div>
         </>
       )}
+
+      <DirectPurchaseModal
+        open={directPurchaseOpen}
+        onClose={() => setDirectPurchaseOpen(false)}
+        suppliers={suppliers}
+        products={products}
+        onConfirm={async (input) => {
+          const messages = await purchaseOrders.recordDirectPurchase(input);
+          return messages !== null;
+        }}
+      />
 
       {orderTarget && orderTargetProduct && (
         <CreatePurchaseOrderModal

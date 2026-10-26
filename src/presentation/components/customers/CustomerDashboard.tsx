@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Users, UserPlus } from "lucide-react";
+import { confirmDialog } from "../../../core/store/confirmStore";
 
 import { useCommandIntent } from "../../../hooks/useCommandIntent";
 import { EmptyState } from "../ui/EmptyState";
@@ -151,10 +152,16 @@ export function CustomerDashboard() {
             setSelected(null);
           }}
           onDelete={async () => {
-            if (confirm(`¿Eliminar a ${selected.name}? Esta acción no se puede deshacer.`)) {
-              const ok = await deleteCustomer(selected.id);
-              if (ok) setSelected(null);
-            }
+            const target = selected;
+            const accepted = await confirmDialog({
+              title: "Eliminar cliente",
+              message: `¿Eliminar a ${target.name}? Esta acción no se puede deshacer.`,
+              confirmLabel: "Eliminar",
+              danger: true
+            });
+            if (!accepted) return;
+            const ok = await deleteCustomer(target.id);
+            if (ok) setSelected(null);
           }}
         />
       )}

@@ -10,7 +10,7 @@
  */
 
 const DB_NAME = "vimdy_os_db";
-const DB_VERSION = 8;
+const DB_VERSION = 9;
 
 /**
  * Un object store por repositorio. Si agregas un repositorio nuevo,
@@ -52,6 +52,14 @@ const DB_VERSION = 8;
  * servidor (ver core/offline/customerIdAliases.ts). Vive solo en este
  * dispositivo y sirve para que un reintento de sincronización (o una venta
  * que todavía apunta al id local) nunca cree un cliente duplicado.
+ *
+ * v9 (Compras offline): se agrega "pendingPurchases" -> cola DEDICADA de
+ * compras (directas y recepciones de orden) que esperan confirmación del
+ * servidor (ver core/offline/PendingPurchase.ts). Cada registro guarda su
+ * clave de idempotencia (id = operation_id del servidor), así que un reinicio
+ * del navegador no puede duplicar la entrada de stock. Mismo patrón que las
+ * demás colas: nunca vive en Supabase, existe solo mientras la compra todavía
+ * no se confirmó de verdad.
  */
 export const STORE_NAMES = [
   "products",
@@ -75,6 +83,7 @@ export const STORE_NAMES = [
   "pendingInventoryAdjustments",
   "pendingTableOperations",
   "pendingCustomerOperations",
+  "pendingPurchases",
   "pendingKitchenOrders",
   "customerIdAliases"
 ] as const;

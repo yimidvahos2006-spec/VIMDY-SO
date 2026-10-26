@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Loader2, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { confirmDialog } from "../../../core/store/confirmStore";
 
 import type { CashRegister } from "../../../core/entities/Entities";
 import { container } from "../../../infrastructure/di/CompositionRoot";
@@ -46,9 +47,13 @@ export function CashRegisterManagementCard(props: {
   }
 
   async function handleDeactivate(register: CashRegister) {
-    if (!window.confirm(`¿Desactivar ${register.name} (${register.code})? La caja no se borrará y su historial permanecerá intacto.`)) {
-      return;
-    }
+    const accepted = await confirmDialog({
+      title: "Desactivar caja",
+      message: `¿Desactivar ${register.name} (${register.code})? La caja no se borrará y su historial permanecerá intacto.`,
+      confirmLabel: "Desactivar",
+      danger: true
+    });
+    if (!accepted) return;
 
     const businessId = getCurrentBusinessId();
     const branchId = getCurrentBranchId();

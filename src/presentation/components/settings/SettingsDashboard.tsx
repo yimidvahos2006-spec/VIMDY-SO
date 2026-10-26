@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { roleHelp, roleSummary, userStatusLabel } from "../../../core/services/roleLabels";
+import { ROLE_PERMISSIONS } from "../../../core/config/permissions";
 import {
   Building2,
   Percent,
@@ -147,6 +148,16 @@ function SavedToast({ show, label = "Guardado" }: { show: boolean; label?: strin
   );
 }
 
+// Roles que VIMDY acepta de verdad al crear una persona (el servidor y el motor de
+// usuarios solo aceptan estos 4). Se muestran siempre, aunque la tabla `roles`
+// de la base de datos esté vacía.
+const STAFF_ROLES: { id: string; name: string }[] = [
+  { id: "ADMIN", name: "Administrador" },
+  { id: "CAJERO", name: "Cajero" },
+  { id: "MESERO", name: "Mesero" },
+  { id: "COCINA", name: "Cocina" }
+];
+
 export function SettingsDashboard() {
   const { t, language } = useTranslation();
   const { user, can } = useAuth();
@@ -169,6 +180,15 @@ export function SettingsDashboard() {
     return {
       ...business,
       country: isValidCountry ? (legacyCountry as Business["country"]) : "CO"
+    };
+  });
+  const roleCards = STAFF_ROLES.map((base) => {
+    const saved = roles.find((r) => r.id === base.id);
+    return {
+      id: base.id,
+      name: saved?.name ?? base.name,
+      permissions: saved?.permissions ?? ROLE_PERMISSIONS[base.id] ?? [],
+      editable: Boolean(saved)
     };
   });
   const [businessSaved, setBusinessSaved] = useState(false);
@@ -821,7 +841,7 @@ export function SettingsDashboard() {
                 ¿Qué puede hacer cada rol?
               </h4>
               <div className="space-y-2">
-                {roles.map((r) => (
+                {roleCards.map((r) => (
                   <div
                     key={r.id}
                     className="flex items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-2.5"
@@ -831,7 +851,7 @@ export function SettingsDashboard() {
                       <p className="text-slate-400 text-xs">{roleHelp(r.id, r.permissions)}</p>
                       <p className="text-slate-500 text-xs">{roleSummary(r.permissions)}</p>
                     </div>
-                    {!r.permissions.includes("*") && (
+                    {!r.permissions.includes("*") && r.editable && (
                       <VimdyButton
                         onClick={() => setEditingRole({ id: r.id, name: r.name })}
                         variant="ghost"
@@ -883,7 +903,7 @@ export function SettingsDashboard() {
 
       {creatingUser && (
         <CreateUserModal
-          roles={roles}
+          roles={roleCards}
           onClose={() => setCreatingUser(false)}
           onSubmit={async (data) => {
             const ok = await createUser(user?.id ?? "SYSTEM", data);
@@ -918,7 +938,7 @@ function CreateUserModal({
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [roleId, setRoleId] = useState(roles[0]?.id ?? "");
+  const [roleId, setRoleId] = useState(roles.find((r) => r.id === "CAJERO")?.id ?? roles[0]?.id ?? "");
   const [saving, setSaving] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
@@ -998,7 +1018,7 @@ function CreateUserModal({
             </VimdyButton>
             <VimdyButton
               onClick={handleSubmit}
-              disabled={!name.trim() || !email.trim() || password.length < 6}
+              disabled={!name.trim() || !email.trim() || password.length < 6 || !roleId}
               loading={saving}
               variant="primary"
               fullWidth

@@ -1,6 +1,7 @@
 import { companyConfigStore } from "../../../core/store/companyConfigStore";
 import React, { useMemo, useState } from "react";
 import { toast } from "../../../core/store/toastStore";
+import { confirmDialog } from "../../../core/store/confirmStore";
 import { VimdyButton } from "../ui/VimdyButton";
 import { parseMoneyInput } from "../../../core/utils/parseMoneyInput";
 import { toMoneyInputValue } from "../../../core/utils/formatMoneyInput";
@@ -579,18 +580,24 @@ export function ProductFormModal({
     // Protección contra el error más común: escribir "4" queriendo decir 4.000.
     const isPesos = (companyConfigStore.get().currency || "COP").toUpperCase() === "COP";
     if (isPesos && priceValue > 0 && priceValue < 100) {
-      const ok = window.confirm(
-        `El precio de venta es solo $${priceValue.toLocaleString("es-CO")} pesos. ¿Seguro que es correcto?\n\nSi quisiste escribir ${(priceValue * 1000).toLocaleString("es-CO")}, toca Cancelar y corrígelo.`
-      );
+      const ok = await confirmDialog({
+        title: "Revisa el precio de venta",
+        message: `El precio de venta es solo $${priceValue.toLocaleString("es-CO")} pesos. ¿Seguro que es correcto?\n\nSi quisiste escribir ${(priceValue * 1000).toLocaleString("es-CO")}, toca "Corregir" y cámbialo.`,
+        confirmLabel: "Sí, es correcto",
+        cancelLabel: "Corregir"
+      });
       if (!ok) {
         setFormError("Revisa el precio de venta: se guarda solo si confirmas que es correcto.");
         return;
       }
     }
     if (!isServiceType && isPesos && purchasePriceValue !== undefined && !isNaN(purchasePriceValue) && purchasePriceValue > 0 && purchasePriceValue < 100) {
-      const okCost = window.confirm(
-        `El precio de compra es solo $${purchasePriceValue.toLocaleString("es-CO")} pesos. ¿Seguro que es correcto?`
-      );
+      const okCost = await confirmDialog({
+        title: "Revisa el precio de compra",
+        message: `El precio de compra es solo $${purchasePriceValue.toLocaleString("es-CO")} pesos. ¿Seguro que es correcto?`,
+        confirmLabel: "Sí, es correcto",
+        cancelLabel: "Corregir"
+      });
       if (!okCost) {
         setFormError("Revisa el costo: se guarda solo si confirmas que es correcto.");
         return;
@@ -609,11 +616,15 @@ export function ProductFormModal({
     // unidades queda "Agotado". Es el error más común cuando el dueño en
     // realidad prepara el plato (ej. un tamal) y eligió esta opción.
     if (!isEditing && productType === "inventario" && stockValue === 0) {
-      const okEmptyStock = window.confirm(
-        `"${name.trim()}" se guardará con 0 unidades y va a salir como "Agotado".\n\n` +
-          `Si lo preparas tú con ingredientes, toca Cancelar y elige "Con receta" o "Se prepara, sin receta".\n\n` +
-          `Si lo compras ya hecho, toca Aceptar y agrega el stock después con "Aumentar stock".`
-      );
+      const okEmptyStock = await confirmDialog({
+        title: "Producto con 0 unidades",
+        message:
+          `"${name.trim()}" se guardará con 0 unidades y va a salir como "Agotado".\n\n` +
+          `Si lo preparas tú con ingredientes, toca "Corregir" y elige "Con receta" o "Se prepara, sin receta".\n\n` +
+          `Si lo compras ya hecho, toca "Guardar así" y agrega el stock después con "Aumentar stock".`,
+        confirmLabel: "Guardar así",
+        cancelLabel: "Corregir"
+      });
       if (!okEmptyStock) {
         setFormError(
           'Este producto tiene 0 unidades. Escribe el "Stock inicial", o cambia el tipo a "Con receta" / "Se prepara, sin receta".'

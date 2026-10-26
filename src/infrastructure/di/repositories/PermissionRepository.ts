@@ -12,4 +12,7 @@ import { SupabaseRepository } from "./SupabaseRepository";
  */
 export class PermissionRepository extends SupabaseRepository<Permission> {
   protected tableName = "permissions" as const;
+
+  /** El catálogo de permisos es compartido por todas las sucursales del negocio. */
+  protected readonly scopeByBranch = false;
 }
