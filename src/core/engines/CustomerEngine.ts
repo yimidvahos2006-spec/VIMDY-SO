@@ -10,6 +10,24 @@ export interface CustomerProfile {
   readonly ltv: number;
 }
 
+/**
+ * Paso 5: repositorios que saben leer SOLO del caché local (IndexedDB) y
+ * refrescarlo aparte. CustomerRepository lo cumple; los repositorios en
+ * memoria de los tests no, y el motor cae a findAll() en ese caso.
+ */
+export interface LocalFirstCustomerSource {
+  findAllLocal(): Promise<Customer[]>;
+  refreshFromServer(): Promise<Customer[]>;
+}
+
+function isLocalFirstSource(repository: unknown): repository is LocalFirstCustomerSource {
+  const candidate = repository as Partial<LocalFirstCustomerSource> | null;
+  return (
+    typeof candidate?.findAllLocal === "function" &&
+    typeof candidate?.refreshFromServer === "function"
+  );
+}
+
 export class CustomerEngine {
   constructor(
     private readonly customerRepository: IRepository<Customer>,
@@ -55,6 +73,27 @@ export class CustomerEngine {
   }
 
   /**
+   * Paso 5: clientes leídos solo del caché local, sin esperar a la red.
+   * Es lo que usa la búsqueda de Caja para responder al instante.
+   */
+  public async getCustomersFromLocal(): Promise<Customer[]> {
+    if (isLocalFirstSource(this.customerRepository)) {
+      return this.customerRepository.findAllLocal();
+    }
+    return this.customerRepository.findAll();
+  }
+
+  /**
+   * Paso 5: actualiza el caché local desde Supabase. Devuelve false si este
+   * repositorio no tiene caché local; lanza si no hay red o tarda demasiado.
+   */
+  public async refreshCustomers(): Promise<boolean> {
+    if (!isLocalFirstSource(this.customerRepository)) return false;
+    await this.customerRepository.refreshFromServer();
+    return true;
+  }
+
+  /**
    * Paso 6: búsqueda de clientes por nombre, teléfono o correo.
    *
    * Usa SOLO campos que el modelo declara en `Customer` (name, phone, email,
@@ -80,6 +119,18 @@ export class CustomerEngine {
         return name.includes(needle) || phone.includes(needle) || email.includes(needle);
       })
       .slice(0, Math.max(limit, 0));
+  }
+
+  /**
+   * PASO 3: cliente que ya usa este teléfono según el servidor (o null).
+   * Delegado al repositorio concreto; si el repositorio inyectado no lo
+   * soporta (tests/DI antiguos) devuelve null.
+   */
+  public async findByPhone(phone: string, excludeId?: string): Promise<Customer | null> {
+    const repo = this.customerRepository as IRepository<Customer> & {
+      findByPhone?: (phone: string, excludeId?: string) => Promise<Customer | null>;
+    };
+    return typeof repo.findByPhone === 'function' ? repo.findByPhone(phone, excludeId) : null;
   }
 
   public async save(customer: Customer): Promise<void> {

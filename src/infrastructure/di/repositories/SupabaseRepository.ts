@@ -1,7 +1,18 @@
 import { IRepository } from "./IRepository";
 import { supabase, getCurrentBusinessId, getCurrentBranchId } from "../../supabase/supabaseClient";
 import { OptimisticLockError } from "../../../core/errors/OptimisticLockError";
-import { DuplicateNameError } from "../../../core/errors/DuplicateNameError";
+import { DuplicateNameError, type PostgresConflictInfo } from "../../../core/errors/DuplicateNameError";
+
+/** Extrae del error de PostgREST lo necesario para identificar la restricción que chocó. */
+function pgConflictInfo(error: { code?: string; message?: string; details?: string | null }): PostgresConflictInfo {
+  const constraint = /constraint "([^"]+)"/.exec(error.message ?? "")?.[1];
+  return {
+    code: error.code,
+    message: error.message,
+    details: error.details ?? undefined,
+    constraint
+  };
+}
 
 /**
  * Detecta strings con forma de fecha ISO (ej. "2026-07-17T22:49:42.499Z")
@@ -212,7 +223,7 @@ export abstract class SupabaseRepository<T extends { id: string; version?: numbe
     if (error) {
       if (error.code === "23505") {
         const name = (item as unknown as { name?: string }).name ?? item.id;
-        throw new DuplicateNameError(this.tableName, name);
+        throw new DuplicateNameError(this.tableName, name, pgConflictInfo(error));
       }
       throw new Error(`SUPABASE_SAVE_FAILED (${this.tableName}): ${error.message}`);
     }
@@ -289,7 +300,7 @@ export abstract class SupabaseRepository<T extends { id: string; version?: numbe
     if (error) {
       if (error.code === "23505") {
         const name = (item as unknown as { name?: string }).name ?? item.id;
-        throw new DuplicateNameError(this.tableName, name);
+        throw new DuplicateNameError(this.tableName, name, pgConflictInfo(error));
       }
       throw new Error(`SUPABASE_UPDATE_FAILED (${this.tableName}): ${error.message}`);
     }
