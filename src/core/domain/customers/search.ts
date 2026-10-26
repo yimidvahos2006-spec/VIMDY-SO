@@ -35,10 +35,18 @@ export interface QuickCreateDraft {
 /**
  * Separa lo que el cajero escribió en nombre y teléfono, para precargar el
  * formulario de creación rápida: "Ana 300 123 4567" -> { Ana, 300 123 4567 }.
- * Un teléfono es una racha de 7+ dígitos (con espacios, guiones, + o paréntesis).
+ * Un teléfono es una racha de 7+ dígitos (con espacios, guiones, + o paréntesis),
+ * o cualquier texto que tenga solo números.
  */
 export function splitNameAndPhone(query: string): QuickCreateDraft {
   const text = query.trim();
+
+  // Solo números y separadores (sin ninguna letra): es un teléfono, aunque
+  // todavía esté incompleto ("313"). Un nombre nunca es solo dígitos, así que
+  // no se debe copiar al campo Nombre del formulario.
+  if (text && !/\p{L}/u.test(text) && phoneDigits(text).length > 0) {
+    return { name: "", phone: text };
+  }
   const pattern = /\+?\(?\d[\d\s().-]{5,}\d/g;
 
   let match: RegExpExecArray | null;
