@@ -7,10 +7,7 @@ import React, {
 import {
   Search,
   X,
-  Mic,
-  Loader2,
-  Users,
-  CheckCircle2
+  Users
 } from "lucide-react";
 
 import { VimdyButton } from "../ui/VimdyButton";
@@ -22,7 +19,10 @@ import { toastStore } from "../../../core/store/toastStore";
 import { weightEntryStore } from "../../../core/store/weightEntryStore";
 import { variantSelectorStore } from "../../../core/store/variantSelectorStore";
 import { isVariableQuantityUnit } from "../../../core/utils/weightUnits";
-import { useVoiceOrder } from "../../../core/voice/useVoiceOrder";
+import { useVoiceOrderSession, type VoiceAddLine } from "../../../core/voice/useVoiceOrderSession";
+import type { Product } from "../../../core/entities/Entities";
+import { VoiceOrderButton } from "../voice/VoiceOrderButton";
+import { VoiceOrderPanel } from "../voice/VoiceOrderPanel";
 import { useTranslation } from "../../../core/i18n/useTranslation";
 import { PosTableSearchModal } from "./PosTableSearchModal";
 import { isModalOpen } from "./posShortcuts";
@@ -40,23 +40,74 @@ export function PosTopBar() {
   } = useSearch();
 
   const { add } = useCart();
-  const { getByBarcode } = useProductCatalog();
+  const { getByBarcode, products } = useProductCatalog();
   const hasTablesModule = useCanUse("tables");
 
-  const [processing, setProcessing] = useState(false);
-  const [voiceSuccess, setVoiceSuccess] = useState<string | null>(null);
   const [showTableCharge, setShowTableCharge] = useState(false);
 
-  const { listening, listen } = useVoiceOrder({
-    onSuccess: (voiceResult) => {
-      if (voiceResult.added.length > 0) {
-        setVoiceSuccess(voiceResult.added.join(", "));
-        setTimeout(() => setVoiceSuccess(null), 3000);
+  /**
+   * VIMDY Voice en Caja: mismas reglas que el escáner de código de barras
+   * (peso, tamaños y aviso de stock) para que dictar y escanear se comporten igual.
+   */
+  function addVoiceLines(lines: VoiceAddLine<Product>[]) {
+    const needsInput: Product[] = [];
+
+    for (const { product, quantity, note } of lines) {
+      if (isVariableQuantityUnit(product.unit) || variantSelectorStore.needsSelector(product)) {
+        needsInput.push(product);
+        continue;
       }
-    },
-    onError: (error) => {
-      toastStore.warning(error);
+
+      if (product.stock <= 0 && product.trackStock !== false) {
+        toastStore.warning(t("pos.topbar.barcodeNegativeStock", { name: product.name }));
+      }
+
+      add({
+        id: product.id,
+        name: product.name,
+        price: product.price,
+        requiresKitchen: product.requiresKitchen ?? false,
+        quantity,
+        note
+      });
     }
+
+    // Los selectores son de uno en uno: se abre el primero y se avisa de los demás.
+    const [first, ...rest] = needsInput;
+    if (!first) return;
+
+    if (isVariableQuantityUnit(first.unit)) {
+      weightEntryStore.open({
+        id: first.id,
+        name: first.name,
+        price: first.price,
+        unit: first.unit as string,
+        requiresKitchen: first.requiresKitchen ?? false
+      });
+    } else {
+      variantSelectorStore.open({
+        id: first.id,
+        name: first.name,
+        price: first.price,
+        requiresKitchen: first.requiresKitchen ?? false,
+        sizes: first.sizes,
+        extras: first.extras
+      });
+    }
+
+    toastStore.info(
+      rest.length > 0
+        ? `Elige el peso o tamaño de ${first.name}. Después dicta de nuevo: ${rest.map(p => p.name).join(", ")}.`
+        : `Elige el peso o tamaño de ${first.name}.`
+    );
+  }
+
+  const voice = useVoiceOrderSession<Product>({
+    products,
+    onAddLines: addVoiceLines,
+    // Las mesas se atienden desde Meseros: no se mezcla un pedido de mesa con la venta de Caja.
+    checkTable: (tableNumber) =>
+      `Dijiste “mesa ${tableNumber}”. Los pedidos de mesa se toman en Meseros; en Caja di solo los productos.`
   });
 
   useEffect(() => {
@@ -143,16 +194,6 @@ export function PosTopBar() {
     clearSearch();
   }
 
-  async function handleVoice() {
-
-    setProcessing(true);
-
-    await listen();
-
-    setProcessing(false);
-
-  }
-
   return (
 
     <div className="flex items-center gap-4 bg-vimdy-surface border border-vimdy-border rounded-vimdy-lg pl-5 pr-[230px] py-3 flex-shrink-0 relative">
@@ -215,49 +256,13 @@ export function PosTopBar() {
         </div>
       )}
 
-      <button
-        onClick={handleVoice}
-        disabled={listening || processing}
-        className={`
-          flex items-center gap-2 h-11 px-4 rounded-vimdy-md border transition-all duration-vimdy-normal flex-shrink-0
+      <VoiceOrderButton session={voice} />
 
-          ${
-            listening || processing
-              ? "bg-vimdy-accent/10 border-vimdy-accent"
-              : "bg-vimdy-surface-active border-vimdy-border hover:border-vimdy-accent animate-voice-idle-glow"
-          }
-        `}
-      >
-
-        {
-          processing
-            ? <Loader2 size={18} className="text-vimdy-accent flex-shrink-0 animate-vimdy-spin" />
-            : <Mic size={18} className="text-vimdy-accent flex-shrink-0" />
-        }
-
-        <span className="text-vimdy-text text-vimdy-small font-semibold whitespace-nowrap">
-          VIMDY Voice
-        </span>
-
-        {
-          listening && (
-            <span className="flex items-end gap-[3px] h-3 ml-1">
-              <span className="w-[2.5px] h-full bg-vimdy-accent/80 rounded-full animate-voice-bar-1" />
-              <span className="w-[2.5px] h-full bg-vimdy-accent/80 rounded-full animate-voice-bar-2" />
-              <span className="w-[2.5px] h-full bg-vimdy-accent/80 rounded-full animate-voice-bar-3" />
-              <span className="w-[2.5px] h-full bg-vimdy-accent/80 rounded-full animate-voice-bar-4" />
-            </span>
-          )
-        }
-
-      </button>
-
-      {voiceSuccess && (
-        <div className="absolute -bottom-10 left-5 flex items-center gap-2 text-emerald-400 text-xs font-semibold bg-emerald-500/10 border border-emerald-500/40 px-3 py-1.5 rounded-lg">
-          <CheckCircle2 size={14} />
-          {voiceSuccess}
-        </div>
-      )}
+      <VoiceOrderPanel
+        session={voice}
+        hint="Di: “dos cervezas águila light y una bandeja paisa sin arroz”"
+        className="absolute right-5 top-full mt-2 z-[900] w-[min(92vw,380px)]"
+      />
 
       {showTableCharge && (
         <PosTableSearchModal onClose={() => setShowTableCharge(false)} />

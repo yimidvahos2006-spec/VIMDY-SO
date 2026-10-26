@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { Table } from "../entities/Entities";
+import type { Product, Table } from "../entities/Entities";
 import { toast } from "../store/toastStore";
+import { describeVoiceLine, parseVoiceOrder, pickBestParse, type ParsedVoiceOrder } from "./orderParser";
 import {
   isMicSecureContext,
   isSpeechRecognitionSupported,
@@ -24,6 +25,8 @@ export interface TableVoiceTarget {
   table: Table;
   /** null = no se dijo; el diálogo usa su valor por defecto. */
   peopleCount: number | null;
+  /** Pedido dictado junto a la mesa ("Mesa 3, dos cervezas…"): se agrega al abrirla. */
+  order?: ParsedVoiceOrder<Product> | null;
 }
 
 /** Orden de unir dos mesas: la cuenta de `secondary` pasa a `primary`. */
@@ -42,6 +45,8 @@ export interface VoiceFallback {
   /** Mesas entre las que elegir con un toque (zonas repetidas). */
   choices?: Table[];
   peopleCount?: number | null;
+  /** Pedido que acompaña a la mesa, para no perderlo al elegir entre mesas repetidas. */
+  order?: ParsedVoiceOrder<Product> | null;
   /** Interpretación dudosa que se puede confirmar con un toque. */
   suggestion?: TableVoiceTarget;
   /** Unir mesas siempre se confirma con un toque: mueve cuentas. */
@@ -76,9 +81,20 @@ interface Options {
   onTarget: (target: TableVoiceTarget) => void;
   /** Se llama cuando el mesero CONFIRMÓ unir dos mesas. */
   onMerge?: (merge: TableVoiceMerge) => void;
+  /**
+   * Catálogo: si se pasa, una frase como "Mesa 3, dos cervezas águila light y
+   * una bandeja paisa sin arroz" abre la mesa 3 y entrega el pedido ya
+   * interpretado en `target.order`.
+   */
+  products?: readonly Product[];
 }
 
-export function useTableVoiceCommand({ tables, onTarget, onMerge }: Options) {
+/** "Mesa N" + al menos un producto entendido (o dudoso) = es un pedido, no solo abrir mesa. */
+function isOrderCommand(parsed: ParsedVoiceOrder<Product>): boolean {
+  return parsed.tableNumber !== null && parsed.lines.length > 0;
+}
+
+export function useTableVoiceCommand({ tables, onTarget, onMerge, products }: Options) {
   const [phase, setPhase] = useState<VoicePhase>("idle");
   const [fallback, setFallback] = useState<VoiceFallback | null>(null);
   /** Texto que se va escuchando en tiempo real (parcial o final). */
@@ -88,6 +104,8 @@ export function useTableVoiceCommand({ tables, onTarget, onMerge }: Options) {
   const tablesRef = useRef(tables);
   const onTargetRef = useRef(onTarget);
   const onMergeRef = useRef(onMerge);
+  const productsRef = useRef(products);
+  productsRef.current = products;
   tablesRef.current = tables;
   onTargetRef.current = onTarget;
   onMergeRef.current = onMerge;
@@ -107,6 +125,48 @@ export function useTableVoiceCommand({ tables, onTarget, onMerge }: Options) {
    * así los dos caminos se comportan exactamente igual.
    */
   const resolveText = useCallback((text: string, lowConfidence = false, strict = false) => {
+    /* ------------------------ Mesa + pedido en una frase ------------------------ */
+    const catalog = productsRef.current;
+    if (catalog) {
+      const order = parseVoiceOrder(text, catalog);
+      if (isOrderCommand(order)) {
+        const orderTableNumber = order.tableNumber as number;
+        const tableMatches = findTablesByNumber(tablesRef.current, orderTableNumber);
+
+        if (tableMatches.length === 0) {
+          fail({ message: `No encuentro la mesa ${orderTableNumber}. Corrígela o repite.`, heard: text });
+          return;
+        }
+
+        if (tableMatches.length > 1) {
+          setFallback({
+            message: `Hay ${tableMatches.length} mesas con el número ${orderTableNumber}. Toca la correcta:`,
+            heard: text,
+            choices: tableMatches,
+            peopleCount: null,
+            order
+          });
+          return;
+        }
+
+        const orderTarget: TableVoiceTarget = { table: tableMatches[0], peopleCount: null, order };
+
+        if (lowConfidence) {
+          setFallback({
+            message: `¿Entendí bien? ${tableMatches[0].name}: ${order.lines.map(describeVoiceLine).join(", ")}`,
+            heard: text,
+            suggestion: orderTarget
+          });
+          return;
+        }
+
+        setFallback(null);
+        playVoiceSuccess();
+        onTargetRef.current(orderTarget);
+        return;
+      }
+    }
+
     const command = parseVoiceCommand(text, { strict });
 
     if (command.kind === "none") {
@@ -243,10 +303,15 @@ export function useTableVoiceCommand({ tables, onTarget, onMerge }: Options) {
     // Con ruido, la mejor alternativa no siempre es la primera: tomamos la
     // primera que cumple el filtro estricto (orden de mesa, frase corta).
     // Si ninguna lo cumple, se trata como ruido y no se abre nada.
+    const orderBest = productsRef.current
+      ? pickBestParse(result.alternatives, productsRef.current)
+      : null;
     const best =
-      result.alternatives.find(
-        alt => parseVoiceCommand(alt.transcript, { strict: true }).kind !== "none"
-      ) ?? result.alternatives[0];
+      orderBest && isOrderCommand(orderBest.parsed)
+        ? { transcript: orderBest.transcript, confidence: orderBest.confidence }
+        : result.alternatives.find(
+            alt => parseVoiceCommand(alt.transcript, { strict: true }).kind !== "none"
+          ) ?? result.alternatives[0];
 
     setTranscript(best.transcript);
     const lowConfidence = best.confidence > 0 && best.confidence < LOW_CONFIDENCE;

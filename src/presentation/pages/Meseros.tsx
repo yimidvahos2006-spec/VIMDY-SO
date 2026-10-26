@@ -20,6 +20,7 @@ import { OpenTableDialog } from "../components/waiter/OpenTableDialog";
 import { TableDetailPanel } from "../components/waiter/TableDetailPanel";
 import { VoiceCommandButton } from "../components/waiter/VoiceCommandButton";
 import type { TableVoiceMerge, TableVoiceTarget } from "../../core/voice/useTableVoiceCommand";
+import type { ParsedVoiceOrder } from "../../core/voice/orderParser";
 import { playVoiceError, playVoiceSuccess } from "../../core/voice/voiceFeedback";
 import { healOrphanLinkedTables, isMergeableTableStatus } from "../../core/utils/tableMerge";
 import { translateBusinessError } from "../../core/errors/translateBusinessError";
@@ -96,6 +97,8 @@ function MeserosContent() {
   const [dialog, setDialog] = useState<"open" | "detail" | null>(null);
   // Comensales dictados por voz para precargar el diálogo de apertura.
   const [voicePeopleCount, setVoicePeopleCount] = useState<number | null>(null);
+  // Pedido dictado junto a la mesa ("Mesa 3, dos cervezas…"): se agrega al abrirla.
+  const [voiceOrder, setVoiceOrder] = useState<ParsedVoiceOrder<Product> | null>(null);
   // El menú ⋮ de la mesa abre el diálogo directamente en "Reservar".
   const [openInReserveMode, setOpenInReserveMode] = useState(false);
 
@@ -217,8 +220,9 @@ function MeserosContent() {
   }
 
   /** Control por voz: abre la mesa dicha con los comensales ya cargados. */
-  function handleVoiceTarget({ table, peopleCount }: TableVoiceTarget) {
+  function handleVoiceTarget({ table, peopleCount, order }: TableVoiceTarget) {
     setVoicePeopleCount(peopleCount);
+    setVoiceOrder(order ?? null);
     handleSelectTable(table);
   }
 
@@ -283,6 +287,7 @@ function MeserosContent() {
     setDialog(null);
     setSelectedTableId(null);
     setVoicePeopleCount(null);
+    setVoiceOrder(null);
   }
 
   /** Cierra todo y regresa a la pantalla de tarjetas para el siguiente mesero. */
@@ -328,7 +333,7 @@ function MeserosContent() {
         {/* Barra superior derecha: micrófono + mesero activo + cambio de mesero. */}
         <div className="flex flex-wrap items-center justify-end gap-3">
           {showTableTools && dialog === null && (
-            <VoiceCommandButton tables={tables} onTarget={handleVoiceTarget} onMerge={handleVoiceMerge} />
+            <VoiceCommandButton tables={tables} products={products} onTarget={handleVoiceTarget} onMerge={handleVoiceMerge} />
           )}
 
           {activeWaiter && (
@@ -440,6 +445,8 @@ function MeserosContent() {
           table={selectedTable}
           tables={tables}
           products={products}
+          initialVoiceOrder={voiceOrder}
+          onVoiceOrderConsumed={() => setVoiceOrder(null)}
           onClose={closeDialogs}
           onChanged={reloadTables}
           onClosedTable={() => {

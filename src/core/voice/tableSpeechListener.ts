@@ -40,7 +40,8 @@ interface RecognitionLike {
   interimResults: boolean;
   maxAlternatives: number;
   continuous: boolean;
-  start: () => void;
+  /** `track` (Chrome reciente): reconoce sobre ESA pista en vez de abrir su propio micrófono. */
+  start: (track?: MediaStreamTrack) => void;
   stop: () => void;
   abort: () => void;
   onstart: (() => void) | null;
@@ -65,6 +66,18 @@ export function isSpeechRecognitionSupported(): boolean {
 }
 
 const LISTEN_TIMEOUT_MS = 7000;
+
+/** Opciones de la escucha (todas opcionales; sin ellas se comporta como siempre). */
+export interface ListenOptions {
+  /**
+   * Pista de audio ya capturada y procesada (cancelación de eco, ruido y
+   * ganancia dinámica; ver voiceAudio.ts). Los navegadores que no soportan
+   * `start(track)` la ignoran y usan su micrófono normal.
+   */
+  audioTrack?: MediaStreamTrack | null;
+  /** Tope de escucha en ms. Un pedido largo necesita más que "Mesa 3, 4 personas". */
+  timeoutMs?: number;
+}
 
 /** Callbacks opcionales del ciclo de vida (onstart / onresult parcial / onend). */
 export interface ListenCallbacks {
@@ -105,7 +118,11 @@ export async function queryMicPermission(): Promise<"granted" | "denied" | "prom
   }
 }
 
-export function listenOnce(lang = "es-CO", callbacks: ListenCallbacks = {}): SpeechListenHandle {
+export function listenOnce(
+  lang = "es-CO",
+  callbacks: ListenCallbacks = {},
+  options: ListenOptions = {}
+): SpeechListenHandle {
   const Ctor = getRecognitionCtor();
 
   if (!isMicSecureContext()) {
@@ -198,10 +215,19 @@ export function listenOnce(lang = "es-CO", callbacks: ListenCallbacks = {}): Spe
     finish(lastPartial
       ? { ok: true, alternatives: [{ transcript: lastPartial, confidence: 0 }] }
       : { ok: false, reason: "no-speech" });
-  }, LISTEN_TIMEOUT_MS);
+  }, options.timeoutMs ?? LISTEN_TIMEOUT_MS);
 
   try {
-    recognition.start();
+    if (options.audioTrack) {
+      try {
+        recognition.start(options.audioTrack);
+      } catch {
+        // El navegador no aceptó la pista: se reconoce con su micrófono normal.
+        recognition.start();
+      }
+    } else {
+      recognition.start();
+    }
   } catch {
     finish({ ok: false, reason: "unknown" });
   }

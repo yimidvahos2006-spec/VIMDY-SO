@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Mic } from "lucide-react";
 
-import type { Table } from "../../../core/entities/Entities";
+import type { Product, Table } from "../../../core/entities/Entities";
 import {
   useTableVoiceCommand,
   TableVoiceMerge,
@@ -14,6 +14,8 @@ interface Props {
   onTarget: (target: TableVoiceTarget) => void;
   /** El mesero confirmó unir dos mesas por voz. */
   onMerge?: (merge: TableVoiceMerge) => void;
+  /** Catálogo: permite dictar "Mesa 3, dos cervezas…" y que el pedido llegue con la mesa. */
+  products?: readonly Product[];
 }
 
 /**
@@ -25,8 +27,8 @@ interface Props {
  * confirmar la unión. Si no se entiende, o el micrófono está bloqueado,
  * aparece el panel de comando rápido para escribirlo sin perder tiempo.
  */
-export function VoiceCommandButton({ tables, onTarget, onMerge }: Props) {
-  const voice = useTableVoiceCommand({ tables, onTarget, onMerge });
+export function VoiceCommandButton({ tables, onTarget, onMerge, products }: Props) {
+  const voice = useTableVoiceCommand({ tables, onTarget, onMerge, products });
   const { fallback, phase, transcript } = voice;
   const listening = phase === "listening";
 
@@ -96,7 +98,7 @@ export function VoiceCommandButton({ tables, onTarget, onMerge }: Props) {
             Escuchando
           </div>
           <p className={`mt-1 text-base leading-snug ${transcript ? "text-white" : "text-slate-400"}`}>
-            {transcript || "Di “Mesa 3, 4 personas” o “Unir mesa 5 y 4”"}
+            {transcript || "Di “Mesa 3, 4 personas”, “Unir mesa 5 y 4” o “Mesa 3, dos cervezas y una bandeja paisa”"}
           </p>
         </div>
       )}
@@ -144,7 +146,7 @@ export function VoiceCommandButton({ tables, onTarget, onMerge }: Props) {
                 <button
                   key={table.id}
                   type="button"
-                  onClick={() => voice.pick({ table, peopleCount: fallback.peopleCount ?? null })}
+                  onClick={() => voice.pick({ table, peopleCount: fallback.peopleCount ?? null, order: fallback.order })}
                   className="h-12 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-white font-semibold"
                 >
                   {table.name}

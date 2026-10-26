@@ -1,12 +1,15 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Minus, Plus, Trash2, X, ChefHat, Wallet, Search, Mic, MicOff, CheckCircle2, MessageSquarePlus, ClipboardList, UtensilsCrossed, Users, GitMerge, ArrowRightLeft, Receipt, MoreVertical, XCircle, Clock, AlertTriangle, ArrowRight, Armchair, DoorOpen, ShoppingBasket, MapPin } from "lucide-react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Minus, Plus, Trash2, X, ChefHat, Wallet, Search, MessageSquarePlus, ClipboardList, UtensilsCrossed, Users, GitMerge, ArrowRightLeft, Receipt, MoreVertical, XCircle, Clock, AlertTriangle, ArrowRight, Armchair, DoorOpen, ShoppingBasket, MapPin } from "lucide-react";
 
 import { Table, Product, OrderPriority } from "../../../core/entities/Entities";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { isOptimisticLockError } from "../../../core/errors/OptimisticLockError";
 import { translateBusinessError } from "../../../core/errors/translateBusinessError";
-import { useVoiceOrder } from "../../../core/voice/useVoiceOrder";
-import { VoiceOrder } from "../../../core/voice/voiceParser";
+import { useVoiceOrderSession, type VoiceAddLine } from "../../../core/voice/useVoiceOrderSession";
+import type { ParsedVoiceOrder } from "../../../core/voice/orderParser";
+import { findTablesByNumber } from "../../../core/voice/tableVoiceResolver";
+import { VoiceOrderButton } from "../voice/VoiceOrderButton";
+import { VoiceOrderPanel } from "../voice/VoiceOrderPanel";
 import { CloseTableDialog } from "./CloseTableDialog";
 import { STATUS_STYLES } from "./TableGrid";
 import { useAuth } from "../../context/AuthContext";
@@ -26,6 +29,12 @@ interface Props {
   onChanged: () => void;
   onClosedTable: () => void;
   onOrderSent?: () => void;
+  /**
+   * Pedido dictado desde la pantalla de mesas ("Mesa 3, dos cervezas…"): se
+   * agrega a esta mesa apenas se abre el panel.
+   */
+  initialVoiceOrder?: ParsedVoiceOrder<Product> | null;
+  onVoiceOrderConsumed?: () => void;
 }
 
 export function TableDetailPanel({
@@ -35,7 +44,9 @@ export function TableDetailPanel({
   onClose,
   onChanged,
   onClosedTable,
-  onOrderSent
+  onOrderSent,
+  initialVoiceOrder,
+  onVoiceOrderConsumed
 }: Props) {
   const { role } = useAuth();
   // Solo ADMIN, GERENTE y CAJERO cobran (misma lista que exige la base de datos).
@@ -46,7 +57,6 @@ export function TableDetailPanel({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showCloseDialog, setShowCloseDialog] = useState(false);
   const [priority, setPriority] = useState<OrderPriority>("NORMAL");
-  const [voiceSuccess, setVoiceSuccess] = useState<string | null>(null);
   const [editingLineKey, setEditingLineKey] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [mobileTab, setMobileTab] = useState<"order" | "products">("products");
@@ -60,29 +70,45 @@ export function TableDetailPanel({
   const [showReleaseConfirm, setShowReleaseConfirm] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
-  const { listening, listen } = useVoiceOrder({
-    onSuccess: (voiceResult) => {
-      if (voiceResult.added.length > 0) {
-        setVoiceSuccess(voiceResult.added.join(", "));
-        setTimeout(() => setVoiceSuccess(null), 3000);
-        onChanged();
+  /**
+   * VIMDY Voice: agrega al pedido de ESTA mesa. Una por una y esperando cada
+   * respuesta: así el bloqueo optimista de la mesa no choca con sus propias
+   * escrituras y cocina recibe cada nota en su línea.
+   */
+  async function addVoiceLines(lines: VoiceAddLine<Product>[]) {
+    setBusy(true);
+    setErrorMsg(null);
+    try {
+      for (const { product, quantity, note } of lines) {
+        await container.tableEngine.get().addItem({ tableId: table.id, product, quantity, note });
       }
-    },
-    onError: (error) => {
-      setErrorMsg(error);
-    },
-    onAddItem: (order: VoiceOrder, match) => {
-      const note = order.modifiers.length > 0 ? order.modifiers.join(", ") : undefined;
-      run(() =>
-        container.tableEngine.get().addItem({
-          tableId: table.id,
-          product: match.product,
-          quantity: order.quantity,
-          note
-        })
-      );
+    } catch (err) {
+      if (isOptimisticLockError(err)) onChanged();
+      throw err;
+    } finally {
+      setBusy(false);
+      onChanged();
     }
+  }
+
+  const voice = useVoiceOrderSession<Product>({
+    products,
+    onAddLines: addVoiceLines,
+    // Si dice otra mesa, no se agrega nada: mejor avisar que cargarle a la mesa equivocada.
+    checkTable: (tableNumber) =>
+      findTablesByNumber([table], tableNumber).length > 0
+        ? null
+        : `Dijiste “mesa ${tableNumber}” pero estás en ${table.name}. Vuelve a las mesas para abrir la otra, o di solo los productos.`
   });
+
+  // Pedido dictado en la pantalla de mesas: se aplica una sola vez al abrir.
+  const voiceOrderAppliedRef = useRef(false);
+  useEffect(() => {
+    if (!initialVoiceOrder || voiceOrderAppliedRef.current) return;
+    voiceOrderAppliedRef.current = true;
+    void voice.applyParsed(initialVoiceOrder, "").finally(() => onVoiceOrderConsumed?.());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const productMap = useMemo(() => {
     const map = new Map<string, Product>();
@@ -546,13 +572,6 @@ export function TableDetailPanel({
           </div>
         )}
 
-        {voiceSuccess && (
-          <div className="mx-4 sm:mx-6 mt-4 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-emerald-300 px-4 py-3 text-sm flex items-center gap-2">
-            <CheckCircle2 size={16} />
-            {voiceSuccess}
-          </div>
-        )}
-
         <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
           {/* Móvil: pestañas Productos / Pedido */}
           <div className="flex md:hidden border-b border-slate-700 bg-vimdy-background flex-shrink-0">
@@ -602,19 +621,14 @@ export function TableDetailPanel({
                     className="w-full h-12 pl-10 pr-4 rounded-xl bg-vimdy-background border border-slate-700 text-white text-sm outline-none focus:border-cyan-500 transition"
                   />
                 </div>
-                <button
-                  onClick={listen}
-                  disabled={listening}
-                  className={`h-12 px-4 sm:px-5 rounded-xl flex items-center gap-2 text-sm font-bold transition ${
-                    listening
-                      ? "bg-red-500 text-white animate-pulse"
-                      : "bg-cyan-500 hover:bg-cyan-400 text-slate-950"
-                  }`}
-                >
-                  {listening ? <MicOff size={18} /> : <Mic size={18} />}
-                  {listening ? "Escuchando..." : "Voz"}
-                </button>
+                <VoiceOrderButton session={voice} size="lg" hideLabelOnMobile />
               </div>
+
+              <VoiceOrderPanel
+                session={voice}
+                hint="Di: “dos cervezas águila light y una bandeja paisa sin arroz”"
+                className="mb-3 flex-shrink-0 max-h-[55vh] overflow-y-auto"
+              />
 
               <div className="flex gap-2 mb-3 overflow-x-auto pb-1 flex-shrink-0">
                 {categories.map(cat => (
