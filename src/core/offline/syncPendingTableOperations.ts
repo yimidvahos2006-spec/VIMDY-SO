@@ -1,4 +1,5 @@
 import { container } from "../../infrastructure/di/CompositionRoot";
+import { loadCustomerIdAliases, peekCanonicalCustomerId } from "./customerIdAliases";
 import { connectionStore } from "../store/connectionStore";
 import { productCatalogStore } from "../store/productCatalogStore";
 import { toast } from "../store/toastStore";
@@ -55,7 +56,16 @@ async function syncOne(pending: PendingTableOperation): Promise<void> {
     if (!pending.openInput) {
       throw new Error("PENDING_TABLE_OPERATION_MISSING_INPUT: falta openInput.");
     }
-    await container.tableEngine.get().openTable(pending.openInput);
+    // PASO 2: si el cliente se creó offline y el servidor lo resolvió a otro
+    // id, la mesa se abre con el id canónico.
+    await loadCustomerIdAliases();
+    const openInput = pending.openInput.customerId
+      ? {
+          ...pending.openInput,
+          customerId: peekCanonicalCustomerId(pending.openInput.customerId)
+        }
+      : pending.openInput;
+    await container.tableEngine.get().openTable(openInput);
   } else if (pending.type === "CLOSE") {
     if (!pending.closeInput) {
       throw new Error("PENDING_TABLE_OPERATION_MISSING_INPUT: falta closeInput.");

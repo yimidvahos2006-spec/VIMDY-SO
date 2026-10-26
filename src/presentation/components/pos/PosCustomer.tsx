@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { User, Plus, X, Search, Crown, Award, Medal, Star, UserPlus, Loader2 } from "lucide-react";
+import { User, Plus, X, Crown, Award, Medal, Star } from "lucide-react";
 
 import { VimdyButton } from "../ui/VimdyButton";
+import { CustomerCheckoutModal } from "./CustomerCheckoutModal";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { Customer } from "../../../core/entities/Entities";
 import { usePayment } from "../../../core/store/usePayment";
@@ -42,38 +43,9 @@ export function PosCustomer({ compact = false }: PosCustomerProps = {}) {
   const { t, language } = useTranslation();
   const { customerId, customerName, setCustomer, clearCustomer } = usePayment();
 
+  // El buscador/creador de clientes vive en CustomerCheckoutModal (Paso 4).
   const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newPhone, setNewPhone] = useState("");
-  const [newDocumentType, setNewDocumentType] = useState<Customer["documentType"]>("CC");
-  const [newDocumentNumber, setNewDocumentNumber] = useState("");
   const [selectedProfile, setSelectedProfile] = useState<Customer | null>(null);
-
-  // Carga real desde CustomerEngine (no un store local desconectado).
-  useEffect(() => {
-    if (!open) return;
-
-    let cancelled = false;
-    setLoading(true);
-
-    container.customerEngine.get()
-      .getAllCustomers()
-      .then((list) => {
-        if (!cancelled) setCustomers(list);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [open]);
 
   // Cuando hay un cliente seleccionado, trae su perfil real (puntos) para
   // mostrar el nivel de fidelidad correcto.
@@ -99,53 +71,9 @@ export function PosCustomer({ compact = false }: PosCustomerProps = {}) {
     };
   }, [customerId]);
 
-  const filtered = customers.filter(
-    (customer) =>
-      customer.name.toLowerCase().includes(search.toLowerCase()) ||
-      (customer.phone ?? "").includes(search)
-  );
-
   function handleSelect(customer: Customer) {
     setCustomer(customer.id, customer.name);
     setOpen(false);
-    setSearch("");
-  }
-
-  async function handleCreate() {
-    if (!newName.trim() || saving) return;
-
-    const customer: Customer = {
-      id: crypto.randomUUID(),
-      name: newName.trim(),
-      email: "",
-      phone: newPhone.trim() || undefined,
-      documentType: newDocumentType,
-      documentNumber: newDocumentNumber.trim() || undefined,
-      points: 0,
-      createdAt: new Date()
-    };
-
-    // BLOQUEANTE (Fase 3 — Caja): antes no había ningún estado "saving" acá.
-    // El botón quedaba clickeable y sin ningún indicador mientras
-    // container.customerEngine.get().save() esperaba respuesta de red — un
-    // cajero con conexión lenta podía tocarlo dos veces y no tenía forma
-    // de saber si estaba "pensando" o si el toque no había registrado.
-    // Mismo patrón que el botón de Cobrar en PosSalePanel: disabled +
-    // Loader2 + texto que cambia mientras dura la operación.
-    setSaving(true);
-
-    try {
-      await container.customerEngine.get().save(customer);
-      setCustomers((prev) => [...prev, customer]);
-      handleSelect(customer);
-      setCreating(false);
-      setNewName("");
-      setNewPhone("");
-      setNewDocumentNumber("");
-      setNewDocumentType("CC");
-    } finally {
-      setSaving(false);
-    }
   }
 
   const level = selectedProfile ? getLevel(selectedProfile.points ?? 0) : null;
@@ -247,165 +175,11 @@ export function PosCustomer({ compact = false }: PosCustomerProps = {}) {
     <>
       {trigger}
 
-      {open && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-          onClick={() => {
-            setOpen(false);
-            setCreating(false);
-          }}
-        >
-          <div
-            className="w-full max-w-sm rounded-vimdy-lg bg-vimdy-surface border border-vimdy-border p-4"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-vimdy-text font-bold">
-                {creating ? t("pos.customer.newCustomer") : t("pos.customer.selectCustomer")}
-              </h3>
-              <button
-                onClick={() => {
-                  setOpen(false);
-                  setCreating(false);
-                }}
-                aria-label={t("pos.customer.closeAria")}
-                className="w-8 h-8 flex items-center justify-center text-vimdy-text-secondary hover:text-vimdy-text transition-colors"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {creating ? (
-              <div className="space-y-3">
-                <div>
-                  <label className="text-vimdy-micro text-vimdy-text-secondary">{t("pos.customer.name")}</label>
-                  <input
-                    autoFocus
-                    value={newName}
-                    onChange={(event) => setNewName(event.target.value)}
-                    placeholder={t("pos.customer.namePlaceholder")}
-                    className="mt-1 w-full h-11 rounded-vimdy-md bg-vimdy-surface-active border border-vimdy-border px-3 text-vimdy-text text-vimdy-small outline-none focus:border-vimdy-accent transition-colors"
-                  />
-                </div>
-                <div>
-                  <label className="text-vimdy-micro text-vimdy-text-secondary">{t("pos.customer.phoneOptional")}</label>
-                  <input
-                    value={newPhone}
-                    onChange={(event) => setNewPhone(event.target.value)}
-                    placeholder="300 000 0000"
-                    className="mt-1 w-full h-11 rounded-vimdy-md bg-vimdy-surface-active border border-vimdy-border px-3 text-vimdy-text text-vimdy-small outline-none focus:border-vimdy-accent transition-colors"
-                  />
-                </div>
-                <div className="grid grid-cols-[96px_1fr] gap-2">
-                  <div>
-                    <label className="text-vimdy-micro text-vimdy-text-secondary">Documento</label>
-                    <select
-                      value={newDocumentType ?? "CC"}
-                      onChange={(event) => setNewDocumentType(event.target.value as Customer["documentType"])}
-                      className="mt-1 w-full h-11 rounded-vimdy-md bg-vimdy-surface-active border border-vimdy-border px-2 text-vimdy-text text-vimdy-small outline-none focus:border-vimdy-accent transition-colors"
-                    >
-                      <option value="CC">CC</option>
-                      <option value="CE">CE</option>
-                      <option value="NIT">NIT</option>
-                      <option value="PASSPORT">Pasaporte</option>
-                      <option value="OTHER">Otro</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-vimdy-micro text-vimdy-text-secondary">Número fiscal (opcional)</label>
-                    <input
-                      value={newDocumentNumber}
-                      onChange={(event) => setNewDocumentNumber(event.target.value)}
-                      placeholder="123456789"
-                      inputMode="numeric"
-                      className="mt-1 w-full h-11 rounded-vimdy-md bg-vimdy-surface-active border border-vimdy-border px-3 text-vimdy-text text-vimdy-small outline-none focus:border-vimdy-accent transition-colors"
-                    />
-                  </div>
-                </div>
-                <div className="flex gap-2 pt-1">
-                  <div className="flex-1">
-                    <VimdyButton onClick={() => setCreating(false)} disabled={saving} variant="secondary" fullWidth>
-                      {t("common.cancel")}
-                    </VimdyButton>
-                  </div>
-                  <div className="flex-1">
-                    <VimdyButton
-                      onClick={handleCreate}
-                      disabled={!newName.trim()}
-                      loading={saving}
-                      variant="primary"
-                      fullWidth
-                    >
-                      {t("pos.customer.saveAndUse")}
-                    </VimdyButton>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <>
-                <div className="flex items-center h-11 rounded-vimdy-md border border-vimdy-border bg-vimdy-surface-active px-3 mb-3 focus-within:border-vimdy-accent transition-colors">
-                  <Search size={16} className="text-vimdy-text-secondary flex-shrink-0" />
-                  <input
-                    autoFocus
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    placeholder={t("pos.customer.searchPlaceholder")}
-                    className="flex-1 ml-2 bg-transparent outline-none text-vimdy-text text-vimdy-small placeholder:text-vimdy-text-tertiary"
-                  />
-                </div>
-
-                <div className="mb-2">
-                  <VimdyButton
-                    onClick={() => {
-                      setNewName(search);
-                      setCreating(true);
-                    }}
-                    variant="secondary"
-                    icon={<UserPlus size={16} />}
-                    fullWidth
-                  >
-                    {t("pos.customer.registerNew")}
-                  </VimdyButton>
-                </div>
-
-                <div className="max-h-56 overflow-y-auto space-y-2">
-                  {loading ? (
-                    <div className="flex items-center justify-center gap-2 py-6 text-vimdy-text-secondary text-vimdy-small">
-                      <Loader2 size={16} className="animate-vimdy-spin" />
-                      {t("pos.customer.loadingCustomers")}
-                    </div>
-                  ) : filtered.length === 0 ? (
-                    <p className="text-vimdy-text-secondary text-vimdy-small text-center py-6">{t("pos.customer.noCustomers")}</p>
-                  ) : (
-                    filtered.map((customer) => {
-                      const customerLevel = getLevel(customer.points ?? 0);
-                      const Icon = customerLevel.icon;
-                      return (
-                        <button
-                          key={customer.id}
-                          onClick={() => handleSelect(customer)}
-                          className="w-full flex items-center justify-between gap-3 rounded-vimdy-md border border-vimdy-border bg-vimdy-surface-active hover:border-vimdy-accent px-3 py-2.5 text-left transition-colors"
-                        >
-                          <div className="min-w-0">
-                            <p className="text-vimdy-text font-semibold text-vimdy-small truncate">{customer.name}</p>
-                            <p className="text-vimdy-text-secondary text-vimdy-micro">{customer.phone || t("pos.customer.noPhone")}</p>
-                          </div>
-                          <span
-                            className={`flex items-center gap-1 text-vimdy-micro font-semibold px-2 py-0.5 rounded-vimdy-xs border flex-shrink-0 ${customerLevel.className}`}
-                          >
-                            <Icon size={11} />
-                            {t(customerLevel.nameKey)}
-                          </span>
-                        </button>
-                      );
-                    })
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
+      <CustomerCheckoutModal
+        open={open}
+        onClose={() => setOpen(false)}
+        onSelect={handleSelect}
+      />
     </>
   );
 }

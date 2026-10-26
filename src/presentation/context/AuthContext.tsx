@@ -81,7 +81,6 @@ import { userSessionStore } from "../../core/store/userSessionStore";
 import { dashboardStore } from "../../core/store/dashboardStore";
 import { dashboardSyncStatusStore } from "../../core/store/dashboardSyncStatusStore";
 import { productCatalogStore } from "../../core/store/productCatalogStore";
-import { customerStore } from "../../core/store/customerStore";
 import { cartStore } from "../../core/store/cartStore";
 import { paymentStore } from "../../core/store/paymentStore";
 import { copilotStore } from "../../core/store/copilotStore";
@@ -278,7 +277,6 @@ function resetBusinessScopedState(): void {
   dashboardStore.reset();
   dashboardSyncStatusStore.reset();
   productCatalogStore.reset();
-  customerStore.clear();
   cartStore.clear();
   paymentStore.reset();
   businessStore.clear();
@@ -360,10 +358,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         );
 
         startRealtimeSync(businessSession.businessId);
+        // Clientes primero: las ventas offline pueden referenciarlos.
+        startOfflineCustomerSync();
         startOfflineSalesSync();
         startOfflineInventorySync();
         startOfflineTableSync();
-        startOfflineCustomerSync();
         startOfflineKitchenSync();
       } catch (syncError) {
         setCurrentBusinessId(null);

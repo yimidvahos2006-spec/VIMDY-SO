@@ -4,6 +4,12 @@ import { productCatalogStore } from "../store/productCatalogStore";
 import { toast } from "../store/toastStore";
 import { isNetworkFailure } from "../services/offlineSale";
 import { pendingSalesStore } from "./pendingSalesStore";
+import { pendingCustomerOperationsStore } from "./pendingCustomerOperationsStore";
+import { syncPendingCustomerOperations } from "./syncPendingCustomerOperations";
+import {
+  loadCustomerIdAliases,
+  peekCanonicalCustomerId
+} from "./customerIdAliases";
 import type { PendingSale } from "./PendingSale";
 import type { Sale } from "../entities/Entities";
 import { logError } from "../../infrastructure/logging/opsLogger";
@@ -170,11 +176,36 @@ export async function syncOne(
    * la implementación idempotente del SalesEngine debe devolver la venta
    * existente en vez de volver a descontar inventario.
    */
+  /*
+   * PASO 2: si el cliente de la venta se creó offline y el servidor lo
+   * resolvió a otro id, la venta se envía con el id CANÓNICO. Así no se
+   * rechaza por cliente inexistente ni se crea un cliente duplicado.
+   * El id de la venta (idempotencia) no cambia.
+   */
+  await loadCustomerIdAliases();
+
+  const canonicalCustomerId =
+    peekCanonicalCustomerId(
+      pending.createSaleInput
+        .customerId
+    );
+
+  const createSaleInput =
+    canonicalCustomerId !==
+    pending.createSaleInput
+      .customerId
+      ? {
+          ...pending.createSaleInput,
+          customerId:
+            canonicalCustomerId
+        }
+      : pending.createSaleInput;
+
   const sale =
     await container.salesEngine
       .get()
       .createSale(
-        pending.createSaleInput
+        createSaleInput
       );
 
   /*
@@ -253,7 +284,47 @@ let unsubscribeConnection:
 let unsubscribePendingSales:
   (() => void) | null = null;
 
+let unsubscribePendingCustomers:
+  (() => void) | null = null;
+
 let syncBackoffUntil = 0;
+
+/**
+ * true si la venta usa un cliente creado offline que aún no se sincronizó.
+ * Los clientes en FAILED/PERMANENT_FAILURE no bloquean: el servidor decidirá
+ * y la venta quedará con el error real en vez de esperar para siempre.
+ */
+function isWaitingForCustomer(
+  pending: PendingSale
+): boolean {
+  const customerId =
+    pending.createSaleInput
+      .customerId;
+
+  if (!customerId) {
+    return false;
+  }
+
+  // Ya resuelto a un id canónico: el cliente existe en el servidor.
+  if (
+    peekCanonicalCustomerId(
+      customerId
+    ) !== customerId
+  ) {
+    return false;
+  }
+
+  return pendingCustomerOperationsStore
+    .list()
+    .some(
+      (op) =>
+        op.id === customerId &&
+        (op.status ===
+          "PENDING_SYNC" ||
+          op.status ===
+            "SYNCING")
+    );
+}
 
 /**
  * Procesa la cola secuencialmente.
@@ -279,6 +350,33 @@ export async function syncPendingSales(): Promise<void> {
       if (
         Date.now() <
         syncBackoffUntil
+      ) {
+        return;
+      }
+
+      /*
+       * ORDEN DE SINCRONIZACIÓN: los clientes creados offline deben existir
+       * en el servidor ANTES de reproducir ventas que los referencian
+       * (customerId). Si hay una sincronización de clientes en curso se
+       * reutiliza su misma Promise; si no, se dispara una ahora.
+       * syncPendingCustomerOperations() nunca lanza: maneja sus errores.
+       */
+      try {
+        await syncPendingCustomerOperations();
+      } catch (error) {
+        logError(
+          "Fallo inesperado sincronizando clientes antes de las ventas",
+          {
+            category: "offline",
+            context: { error: String(error) }
+          }
+        );
+      }
+
+      await loadCustomerIdAliases();
+
+      if (
+        !connectionStore.isOnline()
       ) {
         return;
       }
@@ -322,6 +420,20 @@ export async function syncPendingSales(): Promise<void> {
             !connectionStore.isOnline()
           ) {
             break;
+          }
+
+          /*
+           * Si la venta referencia un cliente que todavía no llegó al
+           * servidor (sigue PENDING_SYNC/SYNCING), se deja intacta en la
+           * cola: no cuenta como intento ni como fallo. Se reintenta
+           * cuando la cola de clientes cambie (ver startOfflineSalesSync).
+           */
+          if (
+            isWaitingForCustomer(
+              pending
+            )
+          ) {
+            continue;
           }
 
           if (
@@ -599,7 +711,13 @@ export async function syncPendingSales(): Promise<void> {
           );
         }
       }
-    })();
+    })().finally(() => {
+      /*
+       * Libera el lock también en los retornos tempranos (sin conexión,
+       * backoff, cola vacía), que antes dejaban syncPromise colgada.
+       */
+      syncPromise = null;
+    });
 
   return syncPromise;
 }
@@ -631,7 +749,8 @@ function triggerIfNeeded(): void {
 export function startOfflineSalesSync(): void {
   if (
     unsubscribeConnection ||
-    unsubscribePendingSales
+    unsubscribePendingSales ||
+    unsubscribePendingCustomers
   ) {
     return;
   }
@@ -643,6 +762,15 @@ export function startOfflineSalesSync(): void {
 
   unsubscribePendingSales =
     pendingSalesStore.subscribe(
+      triggerIfNeeded
+    );
+
+  /*
+   * Cuando la cola de clientes cambia (p. ej. un cliente ya se sincronizó)
+   * se reevalúan las ventas que estaban esperándolo.
+   */
+  unsubscribePendingCustomers =
+    pendingCustomerOperationsStore.subscribe(
       triggerIfNeeded
     );
 
@@ -661,11 +789,15 @@ export function startOfflineSalesSync(): void {
 export function stopOfflineSalesSync(): void {
   unsubscribeConnection?.();
   unsubscribePendingSales?.();
+  unsubscribePendingCustomers?.();
 
   unsubscribeConnection =
     null;
 
   unsubscribePendingSales =
+    null;
+
+  unsubscribePendingCustomers =
     null;
 
   syncPromise =

@@ -3,6 +3,10 @@ import { pendingCustomerOperationsStore } from "../offline/pendingCustomerOperat
 import { CustomerLocalRepository } from "../../infrastructure/di/repositories/CustomerLocalRepository";
 import { toast } from "../store/toastStore";
 import { vimdyCore } from "../VimdyCore";
+import { container } from "../../infrastructure/di/CompositionRoot";
+import { connectionStore } from "../store/connectionStore";
+import { isNetworkFailure } from "./offlineSale";
+import { isCustomerPhoneConflict } from "../offline/customerPhoneConflict";
 
 /**
  * offlineCustomer.ts
@@ -41,4 +45,59 @@ export async function queueCreateCustomerOffline(customer: Customer): Promise<Cu
   toast.warning(OFFLINE_CREATE_MESSAGE);
 
   return customer;
+}
+
+export interface CheckoutCustomerResult {
+  /** Cliente que debe quedar seleccionado en la venta. */
+  readonly customer: Customer;
+  /** true = quedó en la cola offline (se sincroniza al volver internet). */
+  readonly queued: boolean;
+  /** true = el teléfono ya existía en el servidor y se usó ese cliente. */
+  readonly linkedToExisting: boolean;
+}
+
+/**
+ * Creación rápida de un cliente desde Caja (CustomerCheckoutModal).
+ *
+ * Mismo criterio que useCustomers.createCustomer(), pero sin recargar la
+ * lista completa ni las estadísticas de compras (en Caja cada segundo
+ * cuenta):
+ * - sin conexión, o red caída a mitad del guardado -> cola offline;
+ * - teléfono ya registrado (23505) -> se reconecta con el cliente existente
+ *   (Paso 3) en vez de fallar.
+ * Cualquier otro error se propaga para que el modal lo muestre.
+ */
+export async function createCustomerFromCheckout(
+  customer: Customer
+): Promise<CheckoutCustomerResult> {
+  if (!connectionStore.isOnline()) {
+    await queueCreateCustomerOffline(customer);
+    return { customer, queued: true, linkedToExisting: false };
+  }
+
+  try {
+    await container.customerEngine.get().save(customer);
+    // Paso 5: el cliente recién creado queda también en el caché local, para
+    // poder buscarlo sin internet aunque aún no haya habido un refresco.
+    await local.save(customer).catch(() => undefined);
+    vimdyCore.emit("customer", { action: "customer.created", customer });
+    return { customer, queued: false, linkedToExisting: false };
+  } catch (error) {
+    if (isNetworkFailure(error)) {
+      await queueCreateCustomerOffline(customer);
+      return { customer, queued: true, linkedToExisting: false };
+    }
+
+    if (isCustomerPhoneConflict(error) && customer.phone) {
+      const existing = await container.customerEngine
+        .get()
+        .findByPhone(customer.phone, customer.id);
+
+      if (existing) {
+        return { customer: existing, queued: false, linkedToExisting: true };
+      }
+    }
+
+    throw error;
+  }
 }

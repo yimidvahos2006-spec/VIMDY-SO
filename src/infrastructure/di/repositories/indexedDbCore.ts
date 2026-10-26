@@ -10,7 +10,7 @@
  */
 
 const DB_NAME = "vimdy_os_db";
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 
 /**
  * Un object store por repositorio. Si agregas un repositorio nuevo,
@@ -46,6 +46,12 @@ const DB_VERSION = 7;
  * internet (ver core/offline/PendingCustomerOperation.ts). Mismo patrón
  * exacto que las anteriores: nunca vive en Supabase, existe solo mientras
  * el cliente todavía no se sincronizó de verdad.
+ *
+ * v8 (PASO 2 — Cola offline para escrituras): se agrega
+ * "customerIdAliases" -> mapa id local de cliente -> id canónico del
+ * servidor (ver core/offline/customerIdAliases.ts). Vive solo en este
+ * dispositivo y sirve para que un reintento de sincronización (o una venta
+ * que todavía apunta al id local) nunca cree un cliente duplicado.
  */
 export const STORE_NAMES = [
   "products",
@@ -69,7 +75,8 @@ export const STORE_NAMES = [
   "pendingInventoryAdjustments",
   "pendingTableOperations",
   "pendingCustomerOperations",
-  "pendingKitchenOrders"
+  "pendingKitchenOrders",
+  "customerIdAliases"
 ] as const;
 
 let dbPromise: Promise<IDBDatabase> | null = null;

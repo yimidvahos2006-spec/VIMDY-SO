@@ -22,17 +22,33 @@
    revisión de siempre.
 =========================================================================== */
 
+/**
+ * Detalle crudo del error 23505 de Postgres (opcional). Permite a quien
+ * atrapa el error saber QUÉ restricción única chocó (ej. teléfono vs nombre)
+ * en vez de tratar todo como "nombre duplicado".
+ */
+export interface PostgresConflictInfo {
+  readonly code?: string;
+  readonly message?: string;
+  readonly details?: string;
+  /** Nombre del índice/restricción, extraído del mensaje de Postgres. */
+  readonly constraint?: string;
+}
+
 export class DuplicateNameError extends Error {
   /** Nombre de la tabla/entidad en conflicto (ej. "categories"). */
   public readonly entity: string;
   /** El nombre que ya estaba en uso. */
   public readonly name_: string;
+  /** Detalle de Postgres si el repositorio lo tenía disponible. */
+  public readonly pg?: PostgresConflictInfo;
 
-  constructor(entity: string, name: string) {
+  constructor(entity: string, name: string, pg?: PostgresConflictInfo) {
     super(`Ya existe un registro de "${entity}" con el nombre "${name}".`);
     this.name = "DuplicateNameError";
     this.entity = entity;
     this.name_ = name;
+    this.pg = pg;
   }
 }
 
