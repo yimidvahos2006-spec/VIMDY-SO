@@ -7,6 +7,8 @@ import { vimdyCore } from "../core/VimdyCore";
 import { useVimdyEvent } from "./useVimdyCore";
 import { userSessionStore } from "../core/store/userSessionStore";
 import { toast } from "../core/store/toastStore";
+import { remainingQuantity } from "../core/engines/PurchaseOrderEngine";
+import { submitPurchase, SubmitPurchaseOutcome } from "../core/services/offlinePurchase";
 
 /**
  * usePurchaseOrders — VIMDY FASE 5, PASO 2.7 (Compras Inteligentes — ejecución)
@@ -22,6 +24,12 @@ import { toast } from "../core/store/toastStore";
  * InventoryEngine.increaseStock() por cada item — aquí solo emitimos el
  * evento "inventory" para que el resto de la app (Inventario, Compras
  * Inteligentes PASO 2.6, Dashboard) se refresque sola, sin recargar nada.
+ *
+ * COLA OFFLINE DEDICADA: registrar una compra (directa o recepción) pasa por
+ * offlinePurchase.submitPurchase(). La compra se guarda primero en IndexedDB
+ * con su clave de idempotencia; si no hay internet, o la respuesta se pierde,
+ * queda en cola y se sincroniza sola con el MISMO id (no duplica stock aunque
+ * se reinicie el navegador). Ver core/offline/PendingPurchase.ts.
  */
 
 export interface UsePurchaseOrdersResult {
@@ -45,6 +53,17 @@ export interface UsePurchaseOrdersResult {
     orderId: string,
     receivedNow?: PurchaseOrderItem[]
   ) => Promise<string[] | null>;
+
+  /**
+   * Flujo B: registra una compra directa (factura / nota de entrega sin orden
+   * previa). Usa el mismo motor del servidor que markAsPurchased.
+   */
+  recordDirectPurchase: (input: {
+    supplierId: string;
+    items: PurchaseOrderItem[];
+    invoiceNumber?: string;
+    note?: string;
+  }) => Promise<string[] | null>;
 
   postponeOrder: (orderId: string, newExpectedDate: Date, note?: string) => Promise<boolean>;
   cancelOrder: (orderId: string, note?: string) => Promise<boolean>;
@@ -78,8 +97,29 @@ function friendlyError(message: string): string {
   if (message.includes("PURCHASE_RECEIVE_UNAVAILABLE")) {
     return "Esta versión no puede recibir compras. Recarga la página.";
   }
+  if (message.includes("PURCHASE_INVOICE_DUPLICATED")) {
+    return "Esa factura de este proveedor ya fue registrada. Revisa el historial para no duplicar el inventario.";
+  }
+  if (message.includes("PURCHASE_UNIT_PRICE_REQUIRED")) {
+    return "Escribe el precio unitario de cada producto (mayor a 0), tal como aparece en la factura.";
+  }
+  if (message.includes("PURCHASE_ITEM_DUPLICATED")) {
+    return "Un producto está repetido en la lista. Déjalo en una sola línea con la cantidad total.";
+  }
+  if (message.includes("PURCHASE_SUPPLIER_NOT_FOUND") || message.includes("PURCHASE_SUPPLIER_REQUIRED")) {
+    return "Elige un proveedor válido de tu lista.";
+  }
+  if (message.includes("PURCHASE_PRODUCT_NOT_IN_BUSINESS") || message.includes("PURCHASE_BRANCH_MISMATCH")) {
+    return "Uno de los productos no pertenece a esta sucursal. Actualiza la lista e intenta de nuevo.";
+  }
+  if (message.includes("NO_BUSINESS_CONTEXT") || message.includes("PURCHASE_SCOPE_REQUIRED")) {
+    return "No hay una empresa o sucursal activa. Recarga la página.";
+  }
+  if (message.includes("PURCHASE_RECORD_UNAVAILABLE")) {
+    return "Esta versión no puede registrar compras directas. Recarga la página.";
+  }
   if (/failed to fetch|network|load failed/i.test(message)) {
-    return "Necesitas internet para recibir una compra. El inventario no se modificó.";
+    return "Necesitas internet para registrar una compra. El inventario no se modificó.";
   }
   switch (message) {
     case "SUPPLIER_REQUIRED":
@@ -117,6 +157,21 @@ function buildManagerMessages(
   }
 
   return messages;
+}
+
+const OFFLINE_PURCHASE_MESSAGE =
+  "Sin conexión: la compra quedó guardada en este dispositivo y se sincronizará sola cuando vuelva internet. El inventario se actualizará entonces.";
+
+const NETWORK_PURCHASE_MESSAGE =
+  "No pudimos confirmar la compra con el servidor. Quedó guardada en este dispositivo y se reintentará sola, sin duplicar el inventario.";
+
+const ALREADY_QUEUED_PURCHASE_MESSAGE =
+  "Esta compra ya estaba guardada en este dispositivo y se sincronizará sola. No se registró dos veces.";
+
+/** Mensaje para la persona cuando la compra NO se confirmó ahora mismo pero tampoco se perdió. */
+function queuedPurchaseMessage(outcome: Exclude<SubmitPurchaseOutcome, { status: "COMPLETED" }>): string {
+  if (outcome.status === "ALREADY_QUEUED") return ALREADY_QUEUED_PURCHASE_MESSAGE;
+  return outcome.reason === "OFFLINE" ? OFFLINE_PURCHASE_MESSAGE : NETWORK_PURCHASE_MESSAGE;
 }
 
 export function usePurchaseOrders(): UsePurchaseOrdersResult {
@@ -174,16 +229,91 @@ export function usePurchaseOrders(): UsePurchaseOrdersResult {
       setError(null);
       try {
         const session = userSessionStore.get();
-        const result = await container.purchaseOrderEngine.get().markAsPurchased(
-          orderId,
-          session.logged ? session.name : undefined,
-          receivedNow
-        );
+
+        // Las líneas se resuelven AQUÍ, antes de guardar en la cola: si se
+        // guardara "recibir lo que falte" y el primer intento sí llegó al
+        // servidor, el reintento calcularía 0 pendiente y no podría confirmarse.
+        let items: PurchaseOrderItem[];
+        if (receivedNow && receivedNow.length > 0) {
+          items = receivedNow.filter((item) => item.quantity > 0);
+        } else {
+          const fresh = await container.purchaseOrderEngine
+            .get()
+            .getById(orderId)
+            .catch(() => null);
+          const order = fresh ?? orders.find((o) => o.id === orderId) ?? null;
+          if (!order) {
+            throw new Error("PURCHASE_ORDER_NOT_FOUND");
+          }
+          items = order.items
+            .map((item) => ({ ...item, quantity: remainingQuantity(order, item) }))
+            .filter((item) => item.quantity > 0);
+        }
+        if (items.length === 0) {
+          throw new Error("PURCHASE_ITEMS_INVALID");
+        }
+
+        const outcome = await submitPurchase({
+          kind: "RECEIPT",
+          purchaseOrderId: orderId,
+          items,
+          performedBy: session.logged ? session.name : undefined
+        });
+
+        if (outcome.status !== "COMPLETED") {
+          const message = queuedPurchaseMessage(outcome);
+          toast.warning(message);
+          return [message];
+        }
+
         await reload();
         // Toda compra debe actualizar automáticamente el inventario: avisa
         // al resto de VIMDY (Inventario, Compras Inteligentes, Dashboard).
         vimdyCore.emit("inventory");
 
+        const result = outcome.result;
+        const messages = buildManagerMessages(result.order, result.capacityImproved, result.stockoutResolved);
+        messages.forEach((message) => toast.success(message));
+        return messages;
+      } catch (e: any) {
+        const message = friendlyError(e?.message ?? "");
+        setError(message);
+        toast.error(message);
+        return null;
+      }
+    },
+    [reload, orders]
+  );
+
+  const recordDirectPurchase = useCallback(
+    async (input: {
+      supplierId: string;
+      items: PurchaseOrderItem[];
+      invoiceNumber?: string;
+      note?: string;
+    }): Promise<string[] | null> => {
+      setError(null);
+      try {
+        const session = userSessionStore.get();
+        const outcome = await submitPurchase({
+          kind: "DIRECT",
+          supplierId: input.supplierId,
+          items: input.items,
+          invoiceNumber: input.invoiceNumber?.trim() || undefined,
+          note: input.note,
+          performedBy: session.logged ? session.name : undefined
+        });
+
+        if (outcome.status !== "COMPLETED") {
+          const message = queuedPurchaseMessage(outcome);
+          toast.warning(message);
+          return [message];
+        }
+
+        await reload();
+        vimdyCore.emit("inventory");
+
+        const result = outcome.result;
         const messages = buildManagerMessages(result.order, result.capacityImproved, result.stockoutResolved);
         messages.forEach((message) => toast.success(message));
         return messages;
@@ -244,6 +374,7 @@ export function usePurchaseOrders(): UsePurchaseOrdersResult {
     reload,
     createOrder,
     markAsPurchased,
+    recordDirectPurchase,
     postponeOrder,
     cancelOrder
   };

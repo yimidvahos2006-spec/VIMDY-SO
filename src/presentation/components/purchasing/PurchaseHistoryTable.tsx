@@ -59,6 +59,8 @@ export function PurchaseHistoryTable({ history, suppliers, products }: PurchaseH
       unit: productById.get(item.productId)?.unit ?? "",
       cost: item.quantity * item.unitPrice,
       supplierName: supplierById.get(order.supplierId)?.name ?? "—",
+      isDirect: order.source === "DIRECTA",
+      invoiceNumber: order.invoiceNumber,
       user: order.createdBy ?? "—",
       status: order.status
     }))
@@ -83,7 +85,14 @@ export function PurchaseHistoryTable({ history, suppliers, products }: PurchaseH
             {rows.map((row) => (
               <tr key={row.key} className="border-t border-vimdy-border">
                 <td className="py-3 pr-4 text-vimdy-text-secondary">{formatDate(row.date)}</td>
-                <td className="py-3 pr-4 text-vimdy-text font-medium">{row.productName}</td>
+                <td className="py-3 pr-4 text-vimdy-text font-medium">
+                  {row.productName}
+                  {row.isDirect && (
+                    <span className="block text-[11px] text-vimdy-text-tertiary font-normal">
+                      Compra directa{row.invoiceNumber ? ` · ${row.invoiceNumber}` : ""}
+                    </span>
+                  )}
+                </td>
                 <td className="py-3 pr-4 text-vimdy-text">
                   {row.quantity} {row.unit}
                 </td>

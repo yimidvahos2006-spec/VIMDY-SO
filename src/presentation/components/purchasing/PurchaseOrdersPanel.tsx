@@ -9,6 +9,7 @@ import { SupplierDetailsModal } from "./SupplierDetailsModal";
 import { PurchaseOrder, PurchaseOrderItem, Supplier, Product } from "../../../core/entities/Entities";
 import { remainingQuantity } from "../../../core/engines/PurchaseOrderEngine";
 import { UsePurchaseOrdersResult } from "../../../hooks/usePurchaseOrders";
+import { confirmDialog } from "../../../core/store/confirmStore";
 
 interface PurchaseOrdersPanelProps {
   orders: PurchaseOrder[];
@@ -107,7 +108,14 @@ export function PurchaseOrdersPanel({ orders, suppliers, products, actions }: Pu
   }
 
   async function handleCancel(order: PurchaseOrder) {
-    if (!window.confirm("¿Cancelar esta orden? Queda guardada en el historial como CANCELADO.")) return;
+    const accepted = await confirmDialog({
+      title: "Cancelar orden",
+      message: "¿Cancelar esta orden? Queda guardada en el historial como CANCELADO.",
+      confirmLabel: "Cancelar orden",
+      cancelLabel: "Volver",
+      danger: true
+    });
+    if (!accepted) return;
     setBusyOrderId(order.id);
     await actions.cancelOrder(order.id);
     setBusyOrderId(null);

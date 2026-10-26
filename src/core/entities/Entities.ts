@@ -71,6 +71,8 @@ export interface Product {
   readonly sku?: string;
   /** Precio al que el negocio compra el producto al proveedor. */
   readonly purchasePrice?: number;
+  /** Costo promedio ponderado de compra (lo calcula el servidor en cada compra). */
+  readonly averageCost?: number;
   /** Fecha de la última compra registrada a un proveedor (Aumentar stock con proveedor). */
   readonly lastPurchaseDate?: Date;
   /** Tasa de IVA aplicable en porcentaje (ej. 19 = 19%). */
@@ -959,6 +961,16 @@ export interface PurchaseOrder {
   readonly lastReceivedAt?: Date;
   /** Motivo al posponer o cancelar (auditoría, igual que reason en InventoryMovement). */
   readonly statusNote?: string;
+  /**
+   * Cómo nació la compra: "ORDEN" (flujo A: se creó una orden y luego se recibió)
+   * o "DIRECTA" (flujo B: factura / nota de entrega registrada sin orden previa).
+   * Las órdenes antiguas no lo traen: se tratan como "ORDEN".
+   */
+  readonly source?: "ORDEN" | "DIRECTA";
+  /** Número de factura o nota de entrega del proveedor (compras directas). */
+  readonly invoiceNumber?: string;
+  /** Código corto legible de la compra (ej. "CD-1A2B3C4D" en una compra directa). */
+  readonly code?: string;
 }
 
 /** Estado del ciclo de vida de una mesa. */

@@ -26,6 +26,10 @@ import {
   stopOfflineInventorySync
 } from "../../core/offline/syncPendingInventoryAdjustments";
 import {
+  startOfflinePurchaseSync,
+  stopOfflinePurchaseSync
+} from "../../core/offline/syncPendingPurchases";
+import {
   startOfflineTableSync,
   stopOfflineTableSync
 } from "../../core/offline/syncPendingTableOperations";
@@ -41,6 +45,7 @@ import { pendingSalesStore } from "../../core/offline/pendingSalesStore";
 import { pendingCustomerOperationsStore } from "../../core/offline/pendingCustomerOperationsStore";
 import { pendingTableOperationsStore } from "../../core/offline/pendingTableOperationsStore";
 import { pendingInventoryAdjustmentsStore } from "../../core/offline/pendingInventoryAdjustmentsStore";
+import { pendingPurchasesStore } from "../../core/offline/pendingPurchasesStore";
 import { pendingKitchenOrdersStore } from "../../core/offline/pendingKitchenOrdersStore";
 import {
   signIn,
@@ -235,6 +240,7 @@ function stopLocalBusinessSyncs(): void {
   stopRealtimeSync();
   stopOfflineSalesSync();
   stopOfflineInventorySync();
+  stopOfflinePurchaseSync();
   stopOfflineTableSync();
   stopOfflineCustomerSync();
   stopOfflineKitchenSync();
@@ -252,6 +258,7 @@ function stopLocalBusinessSyncs(): void {
   void pendingCustomerOperationsStore.refresh();
   void pendingTableOperationsStore.refresh();
   void pendingInventoryAdjustmentsStore.refresh();
+  void pendingPurchasesStore.refresh();
   void pendingKitchenOrdersStore.refresh();
   enabledModulesStore.clear();
   subscriptionStore.clear();
@@ -362,6 +369,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         startOfflineCustomerSync();
         startOfflineSalesSync();
         startOfflineInventorySync();
+        startOfflinePurchaseSync();
         startOfflineTableSync();
         startOfflineKitchenSync();
       } catch (syncError) {

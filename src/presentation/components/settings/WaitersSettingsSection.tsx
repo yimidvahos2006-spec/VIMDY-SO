@@ -6,6 +6,7 @@ import { Waiter } from "../../../core/entities/Entities";
 import { useVimdyEvent } from "../../../hooks/useVimdyCore";
 import { VimdyButton } from "../ui/VimdyButton";
 import { useWaiterPhotoVisibility } from "../../../core/store/waiterSettingsStore";
+import { confirmDialog } from "../../../core/store/confirmStore";
 
 const inputClass =
   "w-full h-10 rounded-xl bg-vimdy-surface border border-slate-700 px-3 text-white text-sm outline-none focus:border-cyan-500";
@@ -120,7 +121,13 @@ export function WaitersSettingsSection() {
   }
 
   async function handleDelete(waiter: Waiter) {
-    if (!window.confirm(`¿Quitar a "${waiter.name}" de la lista de meseros?`)) return;
+    const accepted = await confirmDialog({
+      title: "Quitar mesero",
+      message: `¿Quitar a "${waiter.name}" de la lista de meseros?`,
+      confirmLabel: "Quitar",
+      danger: true
+    });
+    if (!accepted) return;
 
     setBusyId(waiter.id);
     setError(null);
