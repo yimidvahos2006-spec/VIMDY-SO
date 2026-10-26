@@ -4,6 +4,7 @@ import { normalizeSearchText, productMatchesSearch } from "../utils/searchText";
 import { isStockMasked } from "../utils/stockMask";
 import { container, productsReady } from "../../infrastructure/di/CompositionRoot";
 import { logWarning } from "../../infrastructure/logging/opsLogger";
+import { vimdyCore } from "../VimdyCore";
 
 /* ===========================================================================
    ProductCatalogStore
@@ -37,6 +38,13 @@ class ProductCatalogStore extends ObservableStore<Product[]> {
    * escribir su catálogo en el store del negocio nuevo.
    */
   private epoch = 0;
+
+  /** Escucha del evento "inventory" (ver listenForCatalogChanges). Una sola vez. */
+  private stopListening: (() => void) | null = null;
+
+  /** Refrescos por evento: nunca dos a la vez; una ráfaga se resuelve con UNA lectura más. */
+  private eventRefreshRunning = false;
+  private eventRefreshQueued = false;
 
   constructor() {
     super([]);
@@ -79,10 +87,47 @@ class ProductCatalogStore extends ObservableStore<Product[]> {
       if (epoch !== this.epoch) return;
       this.publish(products);
       this.loaded = true;
+      this.listenForCatalogChanges();
     } catch (error) {
       logWarning("[productCatalogStore] No se pudo hidratar el catálogo al iniciar", { category: "offline", context: { error: String(error) } });
     } finally {
       if (epoch === this.epoch) this.initPromise = null;
+    }
+  }
+
+  /**
+   * ProductRepository.findAll() responde con la caché local al instante y
+   * revalida por detrás; si el servidor trae algo distinto (stock, precio,
+   * productos nuevos o borrados en otro dispositivo) emite "inventory". Sin
+   * esta escucha la Caja se quedaba con la foto vieja hasta la siguiente
+   * venta o recarga. La lectura que dispara el evento ya sale de la caché
+   * actualizada, así que no hay bucle: la segunda revalidación no encuentra
+   * diferencias y no vuelve a emitir.
+   */
+  private listenForCatalogChanges(): void {
+    if (this.stopListening) return;
+    this.stopListening = vimdyCore.on("inventory", () => {
+      if (this.loaded) void this.refreshFromEvent();
+    });
+  }
+
+  private async refreshFromEvent(): Promise<void> {
+    if (this.eventRefreshRunning) {
+      this.eventRefreshQueued = true;
+      return;
+    }
+    this.eventRefreshRunning = true;
+    try {
+      do {
+        this.eventRefreshQueued = false;
+        try {
+          await this.refresh();
+        } catch (error) {
+          logWarning("[productCatalogStore] No se pudo refrescar el catálogo tras un cambio", { category: "offline", context: { error: String(error) } });
+        }
+      } while (this.eventRefreshQueued);
+    } finally {
+      this.eventRefreshRunning = false;
     }
   }
 

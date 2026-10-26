@@ -214,22 +214,70 @@ export class ProductRepository extends SupabaseRepository<Product> implements IP
   }
 
   /**
-   * Con internet: espera el dato fresco del servidor hasta FRESH_WAIT_MS
-   * (lo normal: <1s), así lo que ves es lo que hay en la base de datos —
-   * un producto creado o borrado desde otro dispositivo aparece/desaparece
-   * en el acto. Si el servidor tarda más, se pinta con el caché local y,
-   * cuando llegue la respuesta, si algo cambió se avisa con el evento
-   * "inventory" para que las pantallas se recarguen solas (antes se
-   * actualizaba el caché en silencio y la pantalla quedaba un paso atrás
-   * hasta recargar la página).
-   * Sin internet (o si el servidor falla): caché local, sin esperar nada.
+   * LECTURA RÁPIDA (stale-while-revalidate) — para pintar pantallas (Caja,
+   * Meseros, Inventario).
+   *
+   * Devuelve de INMEDIATO lo último guardado en IndexedDB (0 s de espera de
+   * red) y, si hay señal, revalida contra el servidor por detrás. Cuando la
+   * respuesta llega y algo cambió (stock, precio, productos nuevos o
+   * borrados en otro dispositivo) se emite el evento "inventory" con
+   * `source: "cache-refresh"` para que las pantallas se vuelvan a leer —
+   * esa segunda lectura ya sale de la caché actualizada y no emite de nuevo.
+   *
+   * Excepción: si en este dispositivo todavía no hay NADA guardado (primer
+   * uso) no hay qué pintar, así que se espera al servidor (tope FRESH_WAIT_MS).
+   *
+   * Qué NO hace esta lectura: validar. Todo cálculo que dependa de cifras
+   * exactas (descuento de stock al vender, fotos para conteo) va al servidor:
+   * adjustStock* es atómico en la base y findAllAuthoritative() nunca usa la
+   * caché. Las operaciones de administración del catálogo (nombre duplicado,
+   * receta en uso, eliminar todos) usan findAllPreferFresh().
    */
   public async findAll(): Promise<Product[]> {
-    if (!connectionStore.isOnline()) {
-      return this.scopeToCurrent(await this.local.findAll());
-    }
-
     const cached = this.scopeToCurrent(await this.local.findAll());
+    if (!connectionStore.isOnline()) return cached;
+
+    if (cached.length === 0) return this.waitForFresh(cached);
+
+    this.revalidateInBackground(cached);
+    return cached;
+  }
+
+  /**
+   * Comportamiento anterior de findAll(): con internet espera el dato fresco
+   * hasta FRESH_WAIT_MS (lo normal: <1 s). Es para operaciones de
+   * administración que deciden con la lista completa (validar nombre
+   * duplicado, saber si un producto es ingrediente de una receta, eliminar
+   * todos): ahí una lista con unos segundos de atraso daría un veredicto
+   * equivocado. Sin internet o si el servidor falla, cae a la caché.
+   */
+  public async findAllPreferFresh(): Promise<Product[]> {
+    const cached = this.scopeToCurrent(await this.local.findAll());
+    if (!connectionStore.isOnline()) return cached;
+    return this.waitForFresh(cached);
+  }
+
+  /** Refresca la caché por detrás y avisa a las pantallas solo si algo cambió. */
+  private revalidateInBackground(cached: Product[]): void {
+    const cachedSignature = catalogSignature(cached);
+    void this.fetchFresh()
+      .then((fresh) => {
+        // null = una escritura propia dejó este resultado viejo: no se avisa.
+        if (fresh && catalogSignature(this.scopeToCurrent(fresh)) !== cachedSignature) {
+          vimdyCore.emit("inventory", { source: "cache-refresh" });
+        }
+      })
+      .catch((error) => {
+        logWarning("[ProductRepository] No se pudo refrescar el catálogo desde Supabase", { category: "offline", context: { error: String(error) } });
+      });
+  }
+
+  /**
+   * Espera el dato fresco del servidor hasta FRESH_WAIT_MS. Si tarda más,
+   * devuelve `cached` y, cuando llegue la respuesta, avisa con el evento
+   * "inventory" si algo cambió.
+   */
+  private async waitForFresh(cached: Product[]): Promise<Product[]> {
     const pending = this.fetchFresh().catch((error) => {
       logWarning("[ProductRepository] No se pudo refrescar el catálogo desde Supabase", { category: "offline", context: { error: String(error) } });
       return null;

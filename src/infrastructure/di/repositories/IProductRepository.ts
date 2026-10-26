@@ -23,6 +23,15 @@ export interface IProductRepository extends IRepository<Product> {
   findAllAuthoritative(): Promise<Product[]>;
 
   /**
+   * `findAll()` es la lectura RÁPIDA: devuelve la caché local al instante y
+   * revalida por detrás (puede traer unos segundos de atraso). Esta variante
+   * espera al servidor (con tope) y es para operaciones de administración que
+   * deciden con la lista completa: nombre duplicado, receta en uso, eliminar
+   * todos. Opcional: un repositorio sin caché puede omitirla (findAll ya es fresco).
+   */
+  findAllPreferFresh?(): Promise<Product[]>;
+
+  /**
    * Recarga el catálogo desde el servidor y REEMPLAZA el caché local con lo que
    * este usuario recibe ahora. Se usa cuando cambia lo que el servidor le
    * entrega (ej. se abre un conteo a ciegas y su stock pasa a llegar enmascarado):

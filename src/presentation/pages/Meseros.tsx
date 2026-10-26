@@ -12,6 +12,8 @@ import {
 import { getCurrentBusinessId } from "../../infrastructure/supabase/supabaseClient";
 import { useVimdyEvent } from "../../hooks/useVimdyCore";
 import { startLiveCatalog } from "../../core/utils/liveCatalog";
+import { readCachedWaiters, writeCachedWaiters } from "../../core/utils/waiterCache";
+import { loadMeserosScreen } from "../../core/utils/meserosLoad";
 import { logWarning } from "../../infrastructure/logging/opsLogger";
 
 import { WaiterSelect } from "../components/waiter/WaiterSelect";
@@ -126,6 +128,7 @@ function MeserosContent() {
 
   const reloadWaiters = useCallback(async () => {
     const all = await container.waiterEngine.get().listActive();
+    writeCachedWaiters(getCurrentBusinessId(), all);
     setWaiters(all);
   }, []);
 
@@ -135,31 +138,49 @@ function MeserosContent() {
     setReady(false);
 
     Promise.all([tablesReady, productsReady])
-      .then(async () => {
+      .then(() => {
         const businessId = getCurrentBusinessId();
-        const [allTables, allProducts, allWaiters, avgDuration] = await Promise.all([
-          container.tableEngine.get().getAllTables(),
-          container.inventoryEngine.get().listAll(),
-          container.waiterEngine.get().listActive(),
-          businessId ? container.tableEngine.get().getAverageDuration(businessId) : Promise.resolve(45 * 60 * 1000)
-        ]);
 
-        if (cancelled) return;
+        // Aplica la lista de meseros y recupera al que estaba atendiendo antes
+        // de recargar (una sola vez).
+        const applyWaiters = (list: Waiter[]) => {
+          setWaiters(list);
+          if (!restoredWaiterRef.current) {
+            restoredWaiterRef.current = true;
+            const storedId = readStoredWaiterId(businessId);
+            const stored = storedId ? list.find(w => w.id === storedId) : undefined;
+            if (stored) setActiveWaiter(stored);
+          }
+        };
 
-        setTables(allTables);
-        setProducts(allProducts);
-        setWaiters(allWaiters);
-        setAvgDurationMs(avgDuration);
-
-        // Recupera al mesero que estaba atendiendo antes de recargar (una sola vez).
-        if (!restoredWaiterRef.current) {
-          restoredWaiterRef.current = true;
-          const storedId = readStoredWaiterId(businessId);
-          const stored = storedId ? allWaiters.find(w => w.id === storedId) : undefined;
-          if (stored) setActiveWaiter(stored);
-        }
-
-        setReady(true);
+        // Stale-while-revalidate (ver core/utils/meserosLoad): la pantalla abre
+        // con lo que ya hay en caché local y la red confirma por detrás.
+        return loadMeserosScreen<Table, Product, Waiter>({
+          loadTables: () => container.tableEngine.get().getAllTables(),
+          loadProducts: () => container.inventoryEngine.get().listAll(),
+          fetchWaiters: async () => {
+            const list = await container.waiterEngine.get().listActive();
+            writeCachedWaiters(businessId, list);
+            return list;
+          },
+          readCachedWaiters: () => readCachedWaiters(businessId),
+          fetchAverage: businessId
+            ? () => container.tableEngine.get().getAverageDuration(businessId)
+            : undefined,
+          onTables: setTables,
+          onProducts: setProducts,
+          onWaiters: applyWaiters,
+          onAverage: setAvgDurationMs,
+          onBackgroundError: error =>
+            logWarning("[Meseros] No se pudo refrescar la lista de meseros", {
+              category: "offline",
+              context: { error: String(error) }
+            }),
+          isCancelled: () => cancelled
+        });
+      })
+      .then(() => {
+        if (!cancelled) setReady(true);
       })
       .catch(() => {
         // Antes se mostraba "no tienes mesas configuradas", que engañaba:

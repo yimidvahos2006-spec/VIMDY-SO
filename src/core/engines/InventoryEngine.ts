@@ -89,6 +89,17 @@ export class InventoryEngine {
   }
 
   /**
+   * Lista completa para DECIDIR (no para pintar): validar nombre duplicado,
+   * saber si un producto es ingrediente de una receta, eliminar todos.
+   * `listAll()` responde con la caché al instante y puede traer unos segundos
+   * de atraso; aquí se espera al servidor (con tope) cuando el repositorio lo ofrece.
+   */
+  private async listForCatalogDecision(): Promise<Product[]> {
+    const repository = this.getRepository();
+    return repository.findAllPreferFresh ? repository.findAllPreferFresh() : repository.findAll();
+  }
+
+  /**
    * Catálogo leído DIRECTO de la base de datos en este instante (nunca del caché
    * local). Lanza error si el servidor no responde. Úsalo siempre que el stock
    * leído se convierta en una "foto" para calcular diferencias (ej. conteo de
@@ -167,7 +178,7 @@ export class InventoryEngine {
       throw new Error("El stock inicial no puede ser negativo ni inválido.");
     }
 
-    const all = preloaded ?? (await this.getRepository().findAll());
+    const all = preloaded ?? (await this.listForCatalogDecision());
     const wantedName = InventoryEngine.normalizeName(input.name);
     const wantsIngredient = input.isIngredient === true;
     const nameTaken = all.some(
@@ -322,7 +333,7 @@ export class InventoryEngine {
   ): Promise<BatchCreateResult> {
     const repository = this.getRepository();
     const failed: BatchFailure[] = [];
-    const working: Product[] = [...(await repository.findAll())];
+    const working: Product[] = [...(await this.listForCatalogDecision())];
     const accepted: Array<{ index: number; product: Product }> = [];
     const now = new Date();
 
@@ -453,7 +464,7 @@ export class InventoryEngine {
     updates: Array<{ id: string; input: ProductInput }>,
     onProgress?: (done: number, total: number) => void
   ): Promise<{ updated: number; failed: BatchFailure[] }> {
-    const catalog = await this.getRepository().findAll();
+    const catalog = await this.listForCatalogDecision();
     const failed: BatchFailure[] = [];
     let updated = 0;
     for (let index = 0; index < updates.length; index += 1) {
@@ -545,7 +556,7 @@ export class InventoryEngine {
     }
 
     // Check if product is referenced as an ingredient in any recipe
-    const allProducts = await this.getRepository().findAll();
+    const allProducts = await this.listForCatalogDecision();
     for (const product of allProducts) {
       if (product.recipe && product.recipe.some((item) => item.productId === id)) {
         throw new Error('PRODUCT_IN_USE');
@@ -581,7 +592,7 @@ export class InventoryEngine {
    * de eliminación y no se puede deshacer. Devuelve cuántos borró.
    */
   public async deleteAllByKind(kind: "products" | "insumos"): Promise<number> {
-    const all = await this.getRepository().findAll();
+    const all = await this.listForCatalogDecision();
     const ids = all
       .filter((p) => (kind === "insumos" ? p.isIngredient === true : p.isIngredient !== true))
       .map((p) => p.id);
