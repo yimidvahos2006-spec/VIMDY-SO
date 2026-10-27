@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useId, useState, type FormEvent } from "react";
 import { Loader2, Package } from "lucide-react";
 
 import { VimdyCard } from "../ui/VimdyCard";
@@ -9,6 +9,8 @@ import { container } from "../../../infrastructure/di/CompositionRoot";
 import { useAuth } from "../../context/AuthContext";
 import { translateBusinessError } from "../../../core/errors/translateBusinessError";
 import { parseMoneyInput } from "../../../core/utils/parseMoneyInput";
+import { formatMoneyInput } from "../../../core/utils/formatMoneyInput";
+import { MoneyInput } from "../ui/MoneyInput";
 import type { Category } from "../../../core/entities/Entities";
 import { useStepDraft } from "./useStepDraft";
 import { useCanUse } from "../../../hooks/useCanUse";
@@ -41,6 +43,39 @@ interface FirstProductDraft {
   categoryId: string;
 }
 
+/** Campo de dinero con el mismo aspecto que VimdyInput: muestra 5000 como 5.000 mientras se escribe. */
+function MoneyField({
+  label,
+  value,
+  onValueChange,
+  disabled,
+}: {
+  label: string;
+  value: string;
+  onValueChange: (formatted: string) => void;
+  disabled?: boolean;
+}) {
+  const id = useId();
+  return (
+    <div className="flex w-full flex-col gap-1.5">
+      <label htmlFor={id} className="vimdy-small text-vimdy-text-secondary">
+        {label}
+      </label>
+      <div className="relative flex items-center">
+        <span className="pointer-events-none absolute left-vimdy-md text-vimdy-text-tertiary">$</span>
+        <MoneyInput
+          id={id}
+          value={value}
+          onValueChange={onValueChange}
+          placeholder="0"
+          disabled={disabled}
+          className="w-full rounded-vimdy-sm border border-vimdy-border bg-vimdy-surface pl-8 pr-vimdy-md py-vimdy-sm text-vimdy-body text-vimdy-text placeholder:text-vimdy-text-tertiary outline-none transition-colors duration-vimdy-fast focus:border-vimdy-accent focus:ring-2 focus:ring-vimdy-accent/20 disabled:opacity-50 disabled:cursor-not-allowed"
+        />
+      </div>
+    </div>
+  );
+}
+
 function sanitizeFirstProductDraft(raw: unknown): FirstProductDraft | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
@@ -48,8 +83,8 @@ function sanitizeFirstProductDraft(raw: unknown): FirstProductDraft | null {
   return {
     saleMode: isSaleMode(r.saleMode) ? r.saleMode : "",
     name: text(r.name, 120),
-    price: text(r.price, 20),
-    cost: text(r.cost, 20),
+    price: formatMoneyInput(text(r.price, 20)),
+    cost: formatMoneyInput(text(r.cost, 20)),
     stock: text(r.stock, 20),
     categoryId: text(r.categoryId, 80),
   };
@@ -262,24 +297,8 @@ export function FirstProductStep({ categories, onSaved }: FirstProductStepProps)
           </VimdySelect>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <VimdyInput
-              type="text"
-              inputMode="decimal"
-              label="Precio de venta *"
-              placeholder="0"
-              value={price}
-              onChange={(e) => setPrice(e.target.value)}
-              disabled={saving}
-            />
-            <VimdyInput
-              type="text"
-              inputMode="decimal"
-              label="Costo (opcional)"
-              placeholder="0"
-              value={cost}
-              onChange={(e) => setCost(e.target.value)}
-              disabled={saving}
-            />
+            <MoneyField label="Precio de venta *" value={price} onValueChange={setPrice} disabled={saving} />
+            <MoneyField label="Costo (opcional)" value={cost} onValueChange={setCost} disabled={saving} />
           </div>
 
           {saleMode === "stock" && (
