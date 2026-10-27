@@ -30,6 +30,7 @@ import {
 } from "../../../core/config/operation";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { useStepDraft } from "./useStepDraft";
+import { onboardingStepLabel } from "./onboardingSteps";
 
 interface ModulesStepProps {
   businessId: string;
@@ -226,7 +227,7 @@ export function ModulesStep({ businessId, onSaved }: ModulesStepProps) {
   return (
     <div className="w-full max-w-3xl mx-auto">
       <div className="text-center mb-10">
-        <p className="text-vimdy-micro uppercase tracking-widest text-vimdy-accent font-semibold mb-3">Paso 3 de 7</p>
+        <p className="text-vimdy-micro uppercase tracking-widest text-vimdy-accent font-semibold mb-3">{onboardingStepLabel("modules")}</p>
         <h2 className="text-vimdy-h2 text-vimdy-text mb-2">¿Qué módulos necesitas?</h2>
         <p className="text-vimdy-small text-vimdy-text-secondary max-w-md mx-auto">
           Marca solo lo que vas a usar. Puedes cambiarlo después en Configuración.

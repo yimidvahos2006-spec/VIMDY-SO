@@ -8,6 +8,7 @@ import { container } from "../../../infrastructure/di/CompositionRoot";
 import { useAuth } from "../../context/AuthContext";
 import { translateBusinessError } from "../../../core/errors/translateBusinessError";
 import { useStepDraft } from "./useStepDraft";
+import { onboardingStepLabel } from "./onboardingSteps";
 
 // Pesos colombianos sin decimales: 50000 -> "$ 50.000".
 const copFormatter = new Intl.NumberFormat("es-CO", {
@@ -75,7 +76,7 @@ export function CashOpeningStep({ onSaved }: CashOpeningStepProps) {
   return (
     <div className="w-full max-w-3xl mx-auto">
       <div className="text-center mb-10">
-        <p className="text-vimdy-micro uppercase tracking-widest text-vimdy-accent font-semibold mb-3">Paso 7 de 7</p>
+        <p className="text-vimdy-micro uppercase tracking-widest text-vimdy-accent font-semibold mb-3">{onboardingStepLabel("cash_opening")}</p>
         <h2 className="text-vimdy-h2 text-vimdy-text mb-2">Abramos tu caja</h2>
         <p className="text-vimdy-small text-vimdy-text-secondary max-w-md mx-auto">
           ¿Cuánto dinero hay en caja?

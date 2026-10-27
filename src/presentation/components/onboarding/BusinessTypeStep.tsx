@@ -18,6 +18,7 @@ import { VimdyButton } from "../ui/VimdyButton";
 import { setBusinessType } from "../../../infrastructure/supabase/authBusinessContext";
 import { BUSINESS_TYPES, isBusinessTypeId, type BusinessTypeId } from "../../../core/config/businessTypes";
 import { useStepDraft } from "./useStepDraft";
+import { onboardingStepLabel } from "./onboardingSteps";
 
 interface BusinessTypeStepProps {
   businessId: string;
@@ -90,7 +91,7 @@ export function BusinessTypeStep({ businessId, onSaved }: BusinessTypeStepProps)
   return (
     <div className="w-full max-w-3xl mx-auto">
       <div className="text-center mb-10">
-        <p className="text-vimdy-micro uppercase tracking-widest text-vimdy-accent font-semibold mb-3">Paso 2 de 7</p>
+        <p className="text-vimdy-micro uppercase tracking-widest text-vimdy-accent font-semibold mb-3">{onboardingStepLabel("business_type")}</p>
         <h2 className="text-vimdy-h2 text-vimdy-text mb-2">¿Qué tipo de negocio tienes?</h2>
         <p className="text-vimdy-small text-vimdy-text-secondary max-w-md mx-auto">
           Personalizaremos VIMDY según tu operación. Puedes cambiar esto después en Configuración.

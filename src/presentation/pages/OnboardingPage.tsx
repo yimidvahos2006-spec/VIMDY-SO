@@ -7,6 +7,7 @@ import { VimdyBackground } from "../components/ui/VimdyBackground";
 import { GlassCard } from "../components/ui/GlassCard";
 import { VimdyButton } from "../components/ui/VimdyButton";
 import { WelcomeStep } from "../components/onboarding/WelcomeStep";
+import { BusinessIdentityStep } from "../components/onboarding/BusinessIdentityStep";
 import { BusinessTypeStep } from "../components/onboarding/BusinessTypeStep";
 import { ModulesStep } from "../components/onboarding/ModulesStep";
 import { EmployeesStep } from "../components/onboarding/EmployeesStep";
@@ -27,6 +28,7 @@ import {
   onboardingDraftStore,
   type OnboardingDraft
 } from "../components/onboarding/onboardingDraftStore";
+import { syncPendingBusinessIdentity } from "../../infrastructure/supabase/businessIdentity";
 import type { BusinessTypeId } from "../../core/config/businessTypes";
 import type { ModuleId } from "../../core/config/modules";
 import type { Category } from "../../core/entities/Entities";
@@ -95,6 +97,15 @@ export function OnboardingPage() {
     });
   }, [businessId, draftLoaded, draftScope, step, businessType, enabledModules, categories, user?.id]);
 
+  // Local-first: nombre, NIT, moneda y ciudad se guardan primero en el dispositivo
+  // y se suben a Supabase en segundo plano. Si algo quedó pendiente (sin internet,
+  // recarga a mitad de camino), se reintenta al entrar y en cada cambio de paso.
+  // Si no hay nada pendiente, no hace nada.
+  useEffect(() => {
+    if (!draftLoaded || !businessId) return;
+    void syncPendingBusinessIdentity(businessId);
+  }, [businessId, draftLoaded, step]);
+
   useEffect(() => {
     if (onboardingCompleted && user?.id) {
       onboardingDraftStore.clear(user.id, businessId);
@@ -151,6 +162,13 @@ export function OnboardingPage() {
           <WelcomeStep
             ownerName={user?.name}
             onStart={() => setStep(nextOnboardingStep("welcome"))}
+          />
+        )}
+
+        {stepIsBuilt && step === "business_identity" && (
+          <BusinessIdentityStep
+            businessId={businessId}
+            onSaved={() => setStep(nextOnboardingStep("business_identity"))}
           />
         )}
 

@@ -9,6 +9,7 @@ import { getDefaultCategoriesForBusinessType } from "../../../core/config/onboar
 import type { BusinessTypeId } from "../../../core/config/businessTypes";
 import type { Category } from "../../../core/entities/Entities";
 import { useStepDraft } from "./useStepDraft";
+import { onboardingStepLabel } from "./onboardingSteps";
 
 /**
  * Compara nombres sin importar mayúsculas, tildes ni espacios de más
@@ -188,7 +189,7 @@ export function CategoriesStep({ businessType, onSaved }: CategoriesStepProps) {
   return (
     <div className="w-full max-w-3xl mx-auto">
       <div className="text-center mb-10">
-        <p className="text-vimdy-micro uppercase tracking-widest text-vimdy-accent font-semibold mb-3">Paso 5 de 7</p>
+        <p className="text-vimdy-micro uppercase tracking-widest text-vimdy-accent font-semibold mb-3">{onboardingStepLabel("categories")}</p>
         <h2 className="text-vimdy-h2 text-vimdy-text mb-2">Organiza tus categorías</h2>
         <p className="text-vimdy-small text-vimdy-text-secondary max-w-md mx-auto">
           Selecciona las categorías sugeridas para tu negocio o escribe las tuyas propias.

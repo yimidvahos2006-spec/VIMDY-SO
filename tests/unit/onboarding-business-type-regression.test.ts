@@ -4,6 +4,12 @@ import { join } from "node:path";
 import { onboardingDraftStore } from "../../src/presentation/components/onboarding/onboardingDraftStore";
 import { assertBusinessTypeId, type BusinessTypeId } from "../../src/core/config/businessTypes";
 import { translateBusinessError } from "../../src/core/errors/translateBusinessError";
+import {
+  ONBOARDING_PROGRESS_STEPS,
+  nextOnboardingStep,
+  onboardingStepLabel,
+  prevOnboardingStep
+} from "../../src/presentation/components/onboarding/onboardingSteps";
 
 const ONBOARDING_COMPONENTS = join(process.cwd(), "src", "presentation", "components", "onboarding");
 
@@ -73,12 +79,39 @@ describe("onboarding business type persistence", () => {
     );
   });
 
-  it("keeps visible onboarding counters aligned with the seven-step progress", () => {
-    const firstProduct = readFileSync(join(ONBOARDING_COMPONENTS, "FirstProductStep.tsx"), "utf-8");
-    const cashOpening = readFileSync(join(ONBOARDING_COMPONENTS, "CashOpeningStep.tsx"), "utf-8");
+  it("keeps visible onboarding counters aligned with the eight-step progress", () => {
+    // Cada pantalla pide su contador al helper (misma lista que la barra de progreso):
+    // nunca vuelve a escribirse "Paso N de M" a mano.
+    const stepFiles: Array<[string, string]> = [
+      ["BusinessIdentityStep.tsx", "business_identity"],
+      ["BusinessTypeStep.tsx", "business_type"],
+      ["ModulesStep.tsx", "modules"],
+      ["EmployeesStep.tsx", "employees"],
+      ["CategoriesStep.tsx", "categories"],
+      ["FirstProductStep.tsx", "first_product"],
+      ["CashOpeningStep.tsx", "cash_opening"]
+    ];
 
-    expect(firstProduct).toContain("Paso 6 de 7");
-    expect(cashOpening).toContain("Paso 7 de 7");
+    for (const [file, step] of stepFiles) {
+      const source = readFileSync(join(ONBOARDING_COMPONENTS, file), "utf-8");
+      expect(source, file).toContain(`onboardingStepLabel("${step}")`);
+      expect(source, file).not.toMatch(/Paso \d+ de \d+/);
+    }
+
+    expect(ONBOARDING_PROGRESS_STEPS).toHaveLength(8);
+    expect(onboardingStepLabel("welcome")).toBe("Paso 1 de 8");
+    expect(onboardingStepLabel("business_identity")).toBe("Paso 2 de 8");
+    expect(onboardingStepLabel("first_product")).toBe("Paso 7 de 8");
+    expect(onboardingStepLabel("cash_opening")).toBe("Paso 8 de 8");
+    expect(onboardingStepLabel("final")).toBe("");
+  });
+
+  it("goes from welcome to business identity to business type, and back", () => {
+    expect(nextOnboardingStep("welcome")).toBe("business_identity");
+    expect(nextOnboardingStep("business_identity")).toBe("business_type");
+    expect(prevOnboardingStep("business_type")).toBe("business_identity");
+    expect(prevOnboardingStep("business_identity")).toBe("welcome");
+    expect(prevOnboardingStep("welcome")).toBe("welcome");
   });
 
   it("blocks completion without an active product and translates the server rejection", () => {

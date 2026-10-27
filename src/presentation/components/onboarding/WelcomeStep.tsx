@@ -7,9 +7,9 @@ interface WelcomeStepProps {
   onStart: () => void;
 }
 
-/** Lo que el usuario va a dejar listo en el asistente (pasos 2 a 7). */
+/** Lo que el usuario va a dejar listo en el asistente (pasos 2 a 8). */
 const WELCOME_CHECKLIST: ReadonlyArray<{ title: string; detail: string }> = [
-  { title: "Tu negocio", detail: "Tipo de negocio y módulos que vas a usar" },
+  { title: "Tu negocio", detail: "Nombre, NIT, tipo de negocio y módulos que vas a usar" },
   { title: "Tu equipo", detail: "Las personas que te ayudan a operar" },
   { title: "Tu carta o catálogo", detail: "Categorías y tu primer producto" },
   { title: "Tu caja", detail: "El dinero con el que abres hoy" },
@@ -26,7 +26,7 @@ function firstNameOf(fullName?: string): string {
  * PASO 1 del asistente de onboarding.
  *
  * Pantalla de bienvenida pura: no lee ni escribe nada en Supabase — solo
- * saluda y dispara onStart() para avanzar al PASO 2 (tipo de negocio).
+ * saluda y dispara onStart() para avanzar al PASO 2 (identidad del negocio).
  * El nombre que muestra es el real de la sesión (useAuth().user.name, el
  * mismo que se escribió en el registro), nunca un placeholder inventado.
  *
