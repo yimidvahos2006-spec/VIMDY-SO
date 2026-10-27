@@ -6,6 +6,7 @@ import { VimdyButton } from "../ui/VimdyButton";
 import { useAuth } from "../../context/AuthContext";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { translateBusinessError } from "../../../core/errors/translateBusinessError";
+import { appIntroStore } from "../../../core/store/appIntroStore";
 
 interface Particle {
   id: number;
@@ -34,7 +35,7 @@ interface FinalStepProps {
 }
 
 export function FinalStep({ onAddProduct }: FinalStepProps) {
-  const { completeOnboarding } = useAuth();
+  const { completeOnboarding, businessId, role } = useAuth();
   const [finishing, setFinishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checkingProducts, setCheckingProducts] = useState(true);
@@ -85,6 +86,10 @@ export function FinalStep({ onAddProduct }: FinalStepProps) {
     setError(null);
 
     try {
+      // La intro premium es solo para el ADMIN que crea el negocio: se marca
+      // aquí (único lugar donde alguien termina el onboarding) y OnboardingGate
+      // la muestra una vez.
+      if (businessId && role?.id === "ADMIN") appIntroStore.markPending(businessId);
       await completeOnboarding();
     } catch (err) {
       const message = translateBusinessError(err, "No se pudo terminar la configuración.");

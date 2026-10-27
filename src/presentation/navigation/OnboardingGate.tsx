@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Navigate } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext";
-import { WelcomeIntro } from "../components/intro/WelcomeIntro";
+import { CinematicIntro } from "../components/intro/CinematicIntro";
 import { appIntroStore } from "../../core/store/appIntroStore";
 
 interface Props {
@@ -13,13 +13,20 @@ export function OnboardingGate({ children }: Props) {
   const {
     onboardingCompleted,
     businessId,
+    role,
     businessCount,
     businessBootstrapError,
     retryBusinessBootstrap
   } = useAuth();
-  // La intro se muestra una vez por negocio (ver appIntroStore).
+  // La intro es solo para el ADMIN que acaba de crear el negocio y se muestra
+  // una única vez (ver appIntroStore). Ningún otro rol la ve nunca.
   const [introDone, setIntroDone] = useState(false);
-  const showIntro = !!businessId && !introDone && !appIntroStore.hasBeenShown(businessId);
+  const showIntro =
+    !!businessId &&
+    !introDone &&
+    role?.id === "ADMIN" &&
+    appIntroStore.isPending(businessId) &&
+    !appIntroStore.hasBeenShown(businessId);
 
   if (businessBootstrapError) {
     return (
@@ -53,7 +60,7 @@ export function OnboardingGate({ children }: Props) {
 
   if (showIntro) {
     return (
-      <WelcomeIntro
+      <CinematicIntro
         onComplete={() => {
           appIntroStore.markShown(businessId);
           setIntroDone(true);

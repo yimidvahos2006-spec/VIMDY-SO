@@ -45,6 +45,8 @@ export interface IntroSound {
   sweep(): void;
   /** Campanita cuando aparece el logo. */
   chime(): void;
+  /** Golpe grave de cine (caída de sub-bajo) en el instante del destello. */
+  hit(): void;
   /** Baja el volumen a cero suavemente. */
   fadeOut(): void;
   setMuted(muted: boolean): void;
@@ -140,6 +142,23 @@ export function createIntroSound(): IntroSound {
       gain.connect(master);
       osc.start(now);
       osc.stop(now + 0.9);
+    },
+
+    hit() {
+      if (!isAudible() || !ctx || !master) return;
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(140, now);
+      osc.frequency.exponentialRampToValueAtTime(34, now + 1.1);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.linearRampToValueAtTime(0.9, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.3);
+      osc.connect(gain);
+      gain.connect(master);
+      osc.start(now);
+      osc.stop(now + 1.4);
     },
 
     chime() {

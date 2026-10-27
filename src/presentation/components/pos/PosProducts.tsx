@@ -124,7 +124,7 @@ export function PosProducts() {
         )}
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-[repeat(auto-fill,minmax(128px,1fr))] gap-3 auto-rows-fr">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-[repeat(auto-fill,minmax(164px,1fr))] gap-4 auto-rows-fr">
 
       {
         products.length === 0 ? (
@@ -250,60 +250,73 @@ const ProductCard = React.memo(function ProductCard({
       onClick={handleAdd}
       aria-label={t("pos.products.addAria", { name, price: formattedPrice })}
       className={`
-        group relative flex flex-col items-center text-center
-        rounded-vimdy-md border bg-vimdy-surface p-3 sm:p-2.5
-        transition-all duration-vimdy-fast
-        active:scale-[0.96]
+        group relative flex flex-col overflow-hidden text-left
+        rounded-vimdy-lg border bg-vimdy-surface
+        shadow-vimdy-xs transition-all duration-vimdy-normal
+        hover:-translate-y-0.5 hover:shadow-vimdy-md
+        active:scale-[0.97] active:translate-y-0
         focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-vimdy-accent/40
-        ${justAdded ? "border-vimdy-success shadow-vimdy-md" : available ? "border-vimdy-border hover:border-vimdy-accent" : "border-vimdy-danger/50 opacity-70 hover:border-vimdy-danger"}
+        ${justAdded ? "border-vimdy-success shadow-vimdy-md" : available ? "border-vimdy-border hover:border-vimdy-accent" : "border-vimdy-danger/40 hover:border-vimdy-danger"}
       `}
     >
       {justAdded && (
-        <div className="absolute inset-0 flex items-center justify-center rounded-vimdy-md bg-vimdy-success-bg/90">
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-vimdy-success-bg/90">
           <div className="flex items-center gap-1.5 text-vimdy-success font-semibold text-vimdy-small">
-            <Check size={18} />
+            <Check size={20} />
             {t("pos.products.added")}
           </div>
         </div>
       )}
 
-      <div className="w-14 h-14 sm:w-12 sm:h-12 rounded-vimdy-sm bg-vimdy-background flex items-center justify-center text-xl mb-2 overflow-hidden group-hover:scale-105 transition-transform duration-vimdy-fast">
+      {/* Imagen: ocupa todo el ancho de la tarjeta (producto protagonista). */}
+      <div className="relative aspect-[4/3] w-full overflow-hidden bg-vimdy-background">
         {image ? (
           <img
             src={image}
             alt={name}
-            className="w-full h-full object-cover"
             loading="lazy"
+            className={`h-full w-full object-cover transition-transform duration-vimdy-slow group-hover:scale-105 ${available ? "" : "grayscale opacity-60"}`}
           />
         ) : (
-          "🍽️"
+          <div
+            aria-hidden="true"
+            className="flex h-full w-full items-center justify-center bg-gradient-to-br from-vimdy-accent/25 to-vimdy-surface"
+          >
+            <span className="text-4xl font-bold text-vimdy-accent/80 select-none">
+              {name.trim().charAt(0).toUpperCase() || "?"}
+            </span>
+          </div>
         )}
+
+        {/* Estado de stock como chip sobre la imagen. */}
+        <span
+          className={`absolute left-2 top-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-vimdy-micro font-semibold backdrop-blur-sm ${
+            available
+              ? "bg-black/55 text-white"
+              : "bg-vimdy-danger/90 text-white"
+          }`}
+        >
+          <span className={`h-1.5 w-1.5 rounded-full ${available ? "bg-vimdy-success" : "bg-white"}`} />
+          {maskedBadge
+            ? available
+              ? maskedBadge.label
+              : t("pos.products.outOfStock")
+            : available
+              ? t("pos.products.available")
+              : t("pos.products.outOfStock")}
+        </span>
       </div>
 
-      <h3 className="w-full text-vimdy-text font-semibold text-vimdy-small sm:text-vimdy-micro leading-tight">
-        {name}
-      </h3>
+      {/* Nombre y precio, alineados y con altura constante. */}
+      <div className="flex flex-1 flex-col justify-between gap-1.5 p-3">
+        <h3 className="line-clamp-2 min-h-[2.5rem] text-vimdy-text font-semibold text-vimdy-small leading-tight">
+          {name}
+        </h3>
 
-      <span className="mt-1 text-vimdy-accent-hover font-bold text-vimdy-body tabular-nums">
-        {formattedPrice}
-        {unit && <span className="text-vimdy-text-tertiary font-semibold">/{unit}</span>}
-      </span>
-
-      <div className="mt-1 flex items-center justify-center gap-1.5">
-        {maskedBadge ? (
-          <span className={`text-vimdy-micro ${available ? "text-vimdy-text-tertiary" : "text-vimdy-danger"}`}>
-            {available ? maskedBadge.text : `🔴 ${t("pos.products.outOfStock")}`}
-          </span>
-        ) : (
-          <>
-            <span
-              className={`w-1.5 h-1.5 rounded-full ${available ? "bg-vimdy-success" : "bg-vimdy-danger"}`}
-            />
-            <span className={`text-vimdy-micro ${available ? "text-vimdy-text-tertiary" : "text-vimdy-danger"}`}>
-              {available ? t("pos.products.available") : t("pos.products.outOfStock")}
-            </span>
-          </>
-        )}
+        <span className="text-vimdy-accent-hover font-bold text-vimdy-h3 tabular-nums leading-none">
+          {formattedPrice}
+          {unit && <span className="ml-0.5 text-vimdy-small text-vimdy-text-tertiary font-semibold">/{unit}</span>}
+        </span>
       </div>
     </button>
   );
