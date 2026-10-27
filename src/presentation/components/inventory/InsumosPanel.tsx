@@ -14,6 +14,8 @@ import { ProductType, resolveProductFlags } from "../../../core/types/productTyp
 import { formatMoney } from "../../../core/utils/formatMoney";
 import { parseMoneyInput } from "../../../core/utils/parseMoneyInput";
 import { toMoneyInputValue } from "../../../core/utils/formatMoneyInput";
+import { computePackUnitCost, isPackUnit } from "../../../core/utils/packageCost";
+import { normalizeUnit } from "../../../core/utils/unitConversion";
 import { MoneyInput } from "../ui/MoneyInput";
 import { companyConfigStore } from "../../../core/store/companyConfigStore";
 import { getBranches, getCurrentBranchId, getCurrentBusinessId } from "../../../infrastructure/supabase/supabaseClient";
@@ -537,6 +539,8 @@ function InsumoFormModal({
   const [stock, setStock] = useState(insumo?.stock ? String(insumo.stock) : "");
   const [minStock, setMinStock] = useState(insumo?.minStock ? String(insumo.minStock) : "");
   const [unit, setUnit] = useState(insumo?.unit ?? "");
+  // Solo cuando compra por Paquete / Caja: cuántas unidades trae (el precio total va en `purchasePrice`).
+  const [packUnits, setPackUnits] = useState("");
   const [sku, setSku] = useState(insumo?.sku ?? "");
   const [barcode, setBarcode] = useState(insumo?.barcode ?? "");
   const [supplierId, setSupplierId] = useState(insumo?.supplierId ?? "");
@@ -549,6 +553,17 @@ function InsumoFormModal({
   const [creatingSupplier, setCreatingSupplier] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [creatingCategory, setCreatingCategory] = useState(false);
+
+  // Modo paquete/caja: dos datos obligatorios y VIMDY calcula el costo por unidad.
+  // Un insumo viejo que ya está guardado como "paquete"/"caja" (con stock contado en paquetes)
+  // conserva su comportamiento anterior para no descuadrar su inventario.
+  const keepsLegacyPack =
+    !!insumo && isPackUnit(insumo.unit) && normalizeUnit(unit) === normalizeUnit(insumo.unit);
+  const packMode = canViewCosts && isPackUnit(unit) && !keepsLegacyPack;
+  const packCost = useMemo(
+    () => (packMode ? computePackUnitCost(packUnits, purchasePrice) : null),
+    [packMode, packUnits, purchasePrice]
+  );
 
   async function handleCreateCategory(rawName?: string) {
     const name = (rawName ?? newCategoryName).trim();
@@ -589,7 +604,26 @@ function InsumoFormModal({
       setError("Selecciona o crea una categoría.");
       return;
     }
-    const purchasePriceValue = purchasePrice.trim() === "" ? 0 : parseMoneyInput(purchasePrice);
+    let purchasePriceValue = purchasePrice.trim() === "" ? 0 : parseMoneyInput(purchasePrice);
+    let unitToSave: string | undefined = unit.trim() || undefined;
+    if (packMode) {
+      const noun = normalizeUnit(unit) === "caja" ? "caja" : "paquete";
+      if (!packUnits.trim()) {
+        setError(`Escribe cuántas unidades trae ${noun === "caja" ? "la" : "el"} ${noun}.`);
+        return;
+      }
+      if (!purchasePrice.trim()) {
+        setError(`Escribe el precio total ${noun === "caja" ? "de la" : "del"} ${noun}.`);
+        return;
+      }
+      if (!packCost) {
+        setError("Revisa los datos: las unidades y el precio deben ser números mayores que cero.");
+        return;
+      }
+      // Se guarda por unidad suelta: así la receta y el inventario descuentan exacto.
+      purchasePriceValue = packCost.unitCost;
+      unitToSave = "unidad";
+    }
     if (!Number.isFinite(purchasePriceValue) || purchasePriceValue < 0) {
       setError("El precio de compra no es válido.");
       return;
@@ -616,7 +650,7 @@ function InsumoFormModal({
         purchasePrice: purchasePriceValue,
         stock: stockValue,
         minStock: minStockValue,
-        unit: unit.trim() || undefined,
+        unit: unitToSave,
         sku: sku.trim() || undefined,
         barcode: barcode.trim() || undefined,
         supplierId: supplierId || undefined,
@@ -755,7 +789,53 @@ function InsumoFormModal({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {canViewCosts && (
+            {canViewCosts && packMode && (
+            <div className="sm:col-span-2 rounded-vimdy-md border border-vimdy-border bg-vimdy-background p-3 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">
+                    Unidades que trae {normalizeUnit(unit) === "caja" ? "la caja" : "el paquete"} <span className="text-vimdy-danger">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={packUnits}
+                    onChange={(e) => setPackUnits(e.target.value.replace(/[^\d.,]/g, ""))}
+                    placeholder="Ej: 40"
+                    aria-required="true"
+                    className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
+                  />
+                  <p className="text-vimdy-text-tertiary text-xs mt-1">Cuántas piezas sueltas vienen adentro (tajadas, huevos...).</p>
+                </div>
+                <div>
+                  <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">
+                    Precio total {normalizeUnit(unit) === "caja" ? "de la caja" : "del paquete"} <span className="text-vimdy-danger">*</span>
+                  </label>
+                  <MoneyInput
+                    value={purchasePrice}
+                    onValueChange={setPurchasePrice}
+                    placeholder="Ej: 16.000"
+                    aria-required="true"
+                    className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
+                  />
+                  <p className="text-vimdy-text-tertiary text-xs mt-1">Lo que pagaste por {normalizeUnit(unit) === "caja" ? "la caja" : "el paquete"} completo.</p>
+                </div>
+              </div>
+              {packCost ? (
+                <p className="text-vimdy-accent text-sm" aria-live="polite">
+                  Cada unidad te cuesta <strong>≈ {money(packCost.unitCost)}</strong>{" "}
+                  <span className="text-vimdy-text-tertiary text-xs">
+                    ({money(packCost.packPrice)} ÷ {packCost.units.toLocaleString("es-CO")}). Se guarda por unidad.
+                  </span>
+                </p>
+              ) : (
+                <p className="text-vimdy-text-tertiary text-xs" aria-live="polite">
+                  Escribe las dos cosas y VIMDY calcula el costo de cada unidad por ti.
+                </p>
+              )}
+            </div>
+            )}
+            {canViewCosts && !packMode && (
             <div>
               <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Precio de compra *</label>
               <MoneyInput
@@ -777,7 +857,9 @@ function InsumoFormModal({
               </div>
             ) : (
               <div>
-                <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Stock inicial</label>
+                <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">
+                  Stock inicial{packMode ? " (en unidades sueltas)" : ""}
+                </label>
                 <input
                   type="number"
                   inputMode="decimal"

@@ -22,10 +22,15 @@ import { parseMoneyInput } from "../../../core/utils/parseMoneyInput";
 import { compatibleUnits, convertQuantity, normalizeUnit } from "../../../core/utils/unitConversion";
 import { parseDecimalInput } from "./importHelpers";
 import { sanitizeQuantityInput } from "./recipeFormHelpers";
+import { computePackUnitCost, isPackUnit } from "../../../core/utils/packageCost";
 
 export interface QuickIngredientPayload {
   name: string;
-  /** Unidad en la que se compra/guarda el insumo (kg, lt, lb, unidad...). El precio es POR esta unidad. */
+  /**
+   * Unidad en la que se guarda el insumo (kg, lt, lb, unidad...). El precio es POR esta unidad.
+   * Si compró por Paquete o Caja, aquí llega "unidad" y el precio ya viene dividido por
+   * las unidades que trae el paquete.
+   */
   storedUnit: string;
   /** Precio de compra de UNA `storedUnit` completa. undefined si no lo escribió. */
   purchasePrice?: number;
@@ -78,41 +83,61 @@ export function QuickIngredientCard({ initialName, creating, onSubmit, onCancel 
   const [quantity, setQuantity] = useState("");
   const [recipeUnit, setRecipeUnit] = useState("g");
   const [price, setPrice] = useState("");
+  // Solo para Paquete / Caja: cuántas unidades trae y cuánto cuesta el paquete completo.
+  const [packUnits, setPackUnits] = useState("");
 
   const qtyRef = useRef<HTMLInputElement>(null);
   const priceWrapRef = useRef<HTMLDivElement>(null);
 
-  const unitChoices = useMemo(() => compatibleUnits(storedUnit), [storedUnit]);
+  const isPack = isPackUnit(storedUnit);
+  // Si compra por paquete/caja, el insumo se guarda y se gasta en UNIDADES sueltas (tajadas, huevos...).
+  const effectiveUnit = isPack ? "unidad" : storedUnit;
+  const unitChoices = useMemo(() => compatibleUnits(effectiveUnit), [effectiveUnit]);
   const { noun, article, label } = formatNoun(storedUnit);
-  const isCountable = !["kg", "litro", "libra"].includes(normalizeUnit(storedUnit));
+  const isCountable = !["kg", "litro", "libra"].includes(normalizeUnit(effectiveUnit));
+  const packCost = useMemo(() => (isPack ? computePackUnitCost(packUnits, price) : null), [isPack, packUnits, price]);
+  const packReady = !isPack || packCost !== null;
 
   // Al cambiar el formato de compra, la unidad de la receta pasa a la más natural:
   // kilo/libra -> gramos, litro -> mililitros, el resto -> la misma unidad.
   function pickFormat(value: string) {
     setStoredUnit(value);
-    const norm = normalizeUnit(value);
+    const norm = isPackUnit(value) ? "unidad" : normalizeUnit(value);
     setRecipeUnit(norm === "kg" || norm === "libra" ? "g" : norm === "litro" ? "ml" : norm);
   }
 
   // Preview en vivo: demuestra que VIMDY hace la conversión, no el usuario.
   const preview = useMemo(() => {
     const qty = parseDecimalInput(quantity);
-    const p = parseMoneyInput(price);
+    // Paquete/caja: el precio por unidad sale de dividir; si no, es el precio escrito.
+    const p = isPack ? (packCost?.unitCost ?? Number.NaN) : parseMoneyInput(price);
     if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(p) || p <= 0) return null;
-    const converted = convertQuantity(qty, recipeUnit, storedUnit);
+    const converted = convertQuantity(qty, recipeUnit, effectiveUnit);
     if (converted === null) return null;
     return { cost: converted * p, qty, unitWord: UNIT_WORD[normalizeUnit(recipeUnit)] ?? recipeUnit };
-  }, [quantity, price, recipeUnit, storedUnit]);
+  }, [quantity, price, recipeUnit, effectiveUnit, isPack, packCost]);
 
   // Sanity check amistoso (no bloquea): precio por kilo de un solo dígito suele ser el precio de los gramos.
   const priceLooksTooLow = (() => {
     const p = parseMoneyInput(price);
-    return Number.isFinite(p) && p > 0 && p < 100 && !isCountable;
+    return !isPack && Number.isFinite(p) && p > 0 && p < 100 && !isCountable;
   })();
 
   function submit() {
     const trimmed = name.trim();
     if (!trimmed || creating) return;
+    // Paquete/caja: sin los dos datos no se puede calcular el costo, así que no se crea.
+    if (isPack) {
+      if (!packCost) return;
+      void onSubmit({
+        name: trimmed,
+        storedUnit: "unidad",
+        purchasePrice: packCost.unitCost,
+        quantity: quantity.trim(),
+        recipeUnit: ""
+      });
+      return;
+    }
     const parsedPrice = price.trim() ? parseMoneyInput(price) : undefined;
     void onSubmit({
       name: trimmed,
@@ -188,7 +213,7 @@ export function QuickIngredientCard({ initialName, creating, onSubmit, onCancel 
               ))}
             </div>
           ) : (
-            <span className="text-vimdy-text-secondary text-sm">{normalizeUnit(storedUnit)}</span>
+            <span className="text-vimdy-text-secondary text-sm">{normalizeUnit(effectiveUnit)}</span>
           )}
         </div>
       </div>
@@ -232,7 +257,66 @@ export function QuickIngredientCard({ initialName, creating, onSubmit, onCancel 
         </div>
       </div>
 
+      {/* 4 · Paquete / Caja: dos datos obligatorios, VIMDY divide */}
+      {isPack && (
+        <div className="rounded-vimdy-sm bg-vimdy-surface/70 border border-vimdy-border-subtle p-3 space-y-3">
+          <div>
+            <label className="block text-vimdy-text text-xs font-semibold mb-1.5">
+              Unidades que trae {article} {noun} <span className="text-vimdy-danger">*</span>
+            </label>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={packUnits}
+              onChange={(e) => setPackUnits(sanitizeQuantityInput(e.target.value))}
+              placeholder="Ej: 40"
+              aria-label={`Unidades que trae ${article} ${noun}`}
+              aria-required="true"
+              className={`w-full ${fieldBase}`}
+            />
+            <p className="text-vimdy-text-tertiary text-xs mt-1">Cuenta cuántas piezas sueltas vienen adentro (tajadas, huevos, bolsitas...).</p>
+          </div>
+          <div ref={priceWrapRef}>
+            <label className="block text-vimdy-text text-xs font-semibold mb-1.5">
+              Precio total {label.replace(" completo", "").replace(" completa", "")} <span className="text-vimdy-danger">*</span>
+            </label>
+            <MoneyInput
+              value={price}
+              onValueChange={setPrice}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+              placeholder="Ej: 16.000"
+              aria-label={`Precio total ${label}`}
+              aria-required="true"
+              className={`w-full ${fieldBase}`}
+            />
+          </div>
+          {packCost ? (
+            <p className="text-vimdy-accent text-xs flex items-center gap-1.5" aria-live="polite">
+              <Sparkles size={12} className="shrink-0" />
+              Cada unidad te cuesta <strong>≈ {money(packCost.unitCost)}</strong> ({money(packCost.packPrice)} ÷ {packCost.units.toLocaleString("es-CO")})
+            </p>
+          ) : (
+            <p className="text-vimdy-text-tertiary text-xs" aria-live="polite">
+              Escribe las dos cosas y VIMDY calcula el costo de cada unidad por ti.
+            </p>
+          )}
+          {preview && (
+            <p className="text-vimdy-accent text-xs flex items-center gap-1.5" aria-live="polite">
+              <Sparkles size={12} className="shrink-0" />
+              {preview.qty.toLocaleString("es-CO")} {preview.unitWord} de {name.trim() || "este ingrediente"} te cuestan{" "}
+              <strong>≈ {money(preview.cost)}</strong> por plato
+            </p>
+          )}
+        </div>
+      )}
+
       {/* 4 · Precio del formato COMPLETO (secundario, con ayuda) */}
+      {!isPack && (
       <div className="rounded-vimdy-sm bg-vimdy-surface/70 border border-vimdy-border-subtle p-3 space-y-2">
         <div className="flex items-center justify-between gap-2">
           <label className="text-vimdy-text-secondary text-xs font-medium">
@@ -276,12 +360,13 @@ export function QuickIngredientCard({ initialName, creating, onSubmit, onCancel 
           </p>
         )}
       </div>
+      )}
 
       <div className="flex items-center gap-2">
         <button
           type="button"
           onClick={submit}
-          disabled={creating || !name.trim()}
+          disabled={creating || !name.trim() || !packReady}
           className="flex-1 h-11 px-4 rounded-vimdy-sm bg-vimdy-recipe text-white hover:bg-vimdy-recipe/90 disabled:opacity-40 transition text-sm font-medium whitespace-nowrap"
         >
           {creating ? "Creando..." : "Crear y agregar a la receta"}
