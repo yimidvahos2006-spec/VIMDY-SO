@@ -7,7 +7,7 @@ import { parseMoneyInput } from "../../../core/utils/parseMoneyInput";
 import { toMoneyInputValue } from "../../../core/utils/formatMoneyInput";
 import { MoneyInput } from "../ui/MoneyInput";
 import { compatibleUnits, convertQuantity, normalizeUnit } from "../../../core/utils/unitConversion";
-import { X, Plus, ImagePlus, Trash2, ChefHat, Flame, Clock3, UserPlus } from "lucide-react";
+import { X, Plus, ImagePlus, Trash2, ChefHat, Flame, Clock3, UserPlus, Sparkles } from "lucide-react";
 import { Product, Category, Supplier, RecipeItem, ProductSizeOption, ProductExtraOption } from "../../../core/entities/Entities";
 import { ProductInput } from "../../../core/engines/InventoryEngine";
 import { ProductType, inferProductType, resolveProductFlags } from "../../../core/types/productType";
@@ -24,6 +24,7 @@ import { discardQuickIngredients } from "./quickIngredientCleanup";
 import { QuickIngredientCard, QuickIngredientPayload } from "./QuickIngredientCard";
 import { vimdyCore } from "../../../core/VimdyCore";
 import { filterIngredientOptions, findRecipeRowProblem, normalizeSearch, sanitizeQuantityInput } from "./recipeFormHelpers";
+import { DishDraft, formatDishQuantity, planRecipeRow, storedUnitFor } from "./dishDraft";
 
 /**
  * Formulario completo de "Nuevo producto" (Parte 1).
@@ -52,9 +53,18 @@ export function ProductFormModal({
   onSave,
   onBuyIngredient,
   onViewKardex,
-  saveError
+  saveError,
+  aiDraft
 }: {
   product?: Product;
+  /**
+   * VIMDY IA: borrador interpretado desde texto/voz ("Una hamburguesa a
+   * $22.000 con 150g de carne..."). Solo se usa al CREAR: precarga nombre,
+   * categoría, estación, precio y receta. Nada se guarda hasta que la persona
+   * pulse Guardar; los insumos nuevos que la IA haga falta crear se borran
+   * solos si cierra sin guardar (mismo mecanismo del "ingrediente rápido").
+   */
+  aiDraft?: DishDraft;
   onClose: () => void;
   onSave: (input: ProductInput) => Promise<boolean>;
   /** Último error del inventario (ej. nombre duplicado): se muestra dentro del formulario, que tapa el banner de la página. */
@@ -456,18 +466,194 @@ export function ProductFormModal({
   const [saveFailed, setSaveFailed] = useState(false);
   const errorBannerRef = React.useRef<HTMLDivElement>(null);
 
+  // VIMDY IA: avisos para revisar después de rellenar el formulario desde texto/voz.
+  const [aiNotice, setAiNotice] = useState<string[]>([]);
+  const aiAppliedRef = React.useRef(false);
+
+  /**
+   * VIMDY IA: vuelca el borrador en el formulario. No guarda nada: solo
+   * precarga campos y receta. Los insumos que no existen en el inventario se
+   * crean como "insumos rápidos" (sin precio de compra) y quedan registrados en
+   * quickIngredientIdsRef, así que si la persona cierra sin guardar se borran.
+   */
+  async function applyAiDraft(
+    draft: DishDraft,
+    sellCats: Category[],
+    insumoCats: Category[],
+    prods: Product[]
+  ) {
+    const notices: string[] = [];
+
+    setName(draft.name);
+
+    if (draft.price) {
+      setPrice(toMoneyInputValue(draft.price));
+    } else {
+      notices.push("No dijiste el precio de venta: escríbelo antes de guardar.");
+    }
+
+    // Categoría: solo se elige si es una que ya existe; si no, se deja la
+    // opción "+ Nueva categoría" con el nombre sugerido para que la persona decida.
+    const chosenCategory = draft.categoryId ? sellCats.find((c) => c.id === draft.categoryId) : undefined;
+    if (chosenCategory) {
+      setCategoryId(chosenCategory.id);
+    } else {
+      setCategoryId("__nueva__");
+      if (draft.suggestedCategory) setNewCategoryName(draft.suggestedCategory);
+      if (draft.station) setNewCategoryPrintStation(draft.station);
+      notices.push(
+        draft.suggestedCategory
+          ? `Ninguna categoría tuya encajó. Sugerencia: "${draft.suggestedCategory}". Créala con el botón "Crear" o elige otra.`
+          : "Ninguna categoría tuya encajó: elige una o crea una nueva."
+      );
+    }
+
+    // Estación: solo se fija en el producto si es distinta a la de su categoría.
+    if (draft.station) {
+      const categoryStation = chosenCategory?.printStation ?? "";
+      if (normalizeSearch(draft.station) !== normalizeSearch(categoryStation)) {
+        setPrintStationOverride(draft.station);
+      }
+    }
+
+    if (draft.ingredients.length === 0) {
+      notices.push("No mencionaste ingredientes: el producto quedó sin receta. Puedes agregarla abajo.");
+      setAiNotice(notices);
+      return;
+    }
+
+    // Con ingredientes, el plato es "Con receta" (se prepara y descuenta insumos).
+    setProductType("cocina_receta");
+    setRequiresKitchen(true);
+    setHasRecipe(true);
+    setProductionMode("ON_DEMAND");
+
+    const rows: { rowId: string; productId: string; quantity: string; optional: boolean; unit: string }[] = [];
+    const usedIds = new Set<string>();
+    const estimated: string[] = [];
+    const created: string[] = [];
+    const needsQuantity: string[] = [];
+    const failed: string[] = [];
+    let knownProducts = prods;
+    let insumoCategoryId: string | undefined = insumoCats[0]?.id;
+
+    for (const ingredient of draft.ingredients) {
+      let productId = ingredient.match?.productId;
+      let productName = ingredient.match?.name ?? ingredient.name;
+      let storedUnit = ingredient.match?.unit;
+
+      if (!productId) {
+        // El insumo no existe todavía: se crea (sin precio de compra) para que la receta quede completa.
+        try {
+          if (!insumoCategoryId) {
+            try {
+              const cat = await container.categoryEngine.get().create({
+                name: "Insumos",
+                kind: "INSUMO",
+                requiresKitchenByDefault: false
+              });
+              setInsumoCategories((prev) => [...prev, cat]);
+              insumoCategoryId = cat.id;
+            } catch {
+              const all = await container.categoryEngine.get().listAll();
+              insumoCategoryId =
+                all.find((c) => c.kind === "INSUMO")?.id ??
+                all.find((c) => c.name.trim().toLowerCase() === "insumos")?.id;
+            }
+          }
+          if (!insumoCategoryId) throw new Error("INSUMO_CATEGORY_UNAVAILABLE");
+
+          storedUnit = storedUnitFor(ingredient.unit);
+          const insumo = await container.inventoryEngine.get().createProduct(
+            {
+              name: ingredient.name,
+              categoryId: insumoCategoryId,
+              price: 0,
+              stock: 0,
+              minStock: 0,
+              unit: storedUnit,
+              isIngredient: true,
+              active: true
+            },
+            undefined,
+            { knownProducts, deferAudit: true }
+          );
+          quickIngredientIdsRef.current = [...quickIngredientIdsRef.current, insumo.id];
+          knownProducts = [...knownProducts, insumo];
+          setAllProducts(knownProducts);
+          productId = insumo.id;
+          productName = insumo.name;
+          created.push(insumo.name);
+        } catch {
+          failed.push(ingredient.name);
+          continue;
+        }
+      }
+
+      if (usedIds.has(productId)) {
+        notices.push(`"${ingredient.name}" ya estaba en la receta como "${productName}", no se repitió.`);
+        continue;
+      }
+      usedIds.add(productId);
+
+      const plan = planRecipeRow(ingredient, storedUnit);
+      if (plan.needsManualQuantity) {
+        needsQuantity.push(`${productName} (la IA dijo ${formatDishQuantity(ingredient.quantity, ingredient.unit)})`);
+      } else if (ingredient.estimated) {
+        estimated.push(`${productName} ${formatDishQuantity(ingredient.quantity, ingredient.unit)}`);
+      }
+      rows.push({ rowId: crypto.randomUUID(), productId, quantity: plan.quantity, optional: false, unit: plan.unit });
+    }
+
+    setRecipeRows(rows);
+
+    if (estimated.length > 0) {
+      notices.push(
+        `No dijiste estas cantidades y VIMDY IA propuso valores típicos. Revísalas porque descuentan inventario: ${estimated.join(", ")}.`
+      );
+    }
+    if (needsQuantity.length > 0) {
+      notices.push(`Escribe la cantidad de: ${needsQuantity.join(", ")}.`);
+    }
+    if (created.length > 0) {
+      notices.push(
+        `Insumos nuevos creados sin precio de compra: ${created.join(", ")}. Ponles su costo en Insumos para que el margen sea real.`
+      );
+    }
+    if (failed.length > 0) {
+      notices.push(`No se pudieron crear estos insumos, agrégalos a mano en la receta: ${failed.join(", ")}.`);
+    }
+    setAiNotice(notices);
+  }
+
   React.useEffect(() => {
     Promise.all([
       container.categoryEngine.get().listAll(),
       container.supplierEngine.get().listAll(),
       container.inventoryEngine.get().listAll()
     ])
-      .then(([cats, provs, prods]) => {
+      .then(async ([cats, provs, prods]) => {
         const sellCats = cats.filter((c) => c.kind !== "INSUMO");
+        const insumoCats = cats.filter((c) => c.kind === "INSUMO");
         setCategories(sellCats);
-        setInsumoCategories(cats.filter((c) => c.kind === "INSUMO"));
+        setInsumoCategories(insumoCats);
         setSuppliers(provs);
         setAllProducts(prods);
+
+        if (aiDraft && !product) {
+          // En desarrollo (StrictMode) este efecto corre dos veces: el borrador se aplica una sola.
+          if (aiAppliedRef.current) return;
+          aiAppliedRef.current = true;
+          try {
+            await applyAiDraft(aiDraft, sellCats, insumoCats, prods);
+          } catch (err) {
+            console.error("[ProductFormModal] No se pudo aplicar el borrador de VIMDY IA", err);
+            setCategoryId((current) => current || (sellCats.length > 0 ? sellCats[0].id : "__nueva__"));
+            setAiNotice(["VIMDY IA no pudo rellenar todo el formulario. Revisa los campos y complétalos a mano."]);
+          }
+          return;
+        }
+
         if (!categoryId) {
           setCategoryId(sellCats.length > 0 ? sellCats[0].id : "__nueva__");
         }
@@ -923,6 +1109,36 @@ export function ProductFormModal({
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 pb-4">
+        {aiDraft && !isEditing && (
+          <div
+            role="status"
+            className="mb-4 rounded-vimdy-md border border-vimdy-ai/30 bg-vimdy-ai/10 px-3 py-3 text-sm text-vimdy-text"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <p className="flex items-center gap-2 font-semibold text-vimdy-ai">
+                <Sparkles size={16} />
+                {loadingOptions ? "VIMDY IA está llenando el formulario…" : "VIMDY IA llenó el formulario. Revísalo y guarda."}
+              </p>
+              {aiNotice.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setAiNotice([])}
+                  aria-label="Ocultar avisos"
+                  className="text-vimdy-text-tertiary hover:text-vimdy-text shrink-0"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+            {aiNotice.length > 0 && (
+              <ul className="mt-2 space-y-1 text-xs text-vimdy-text-secondary list-disc pl-5">
+                {aiNotice.map((notice, i) => (
+                  <li key={i}>{notice}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
         {(formError ?? failureMessage) && (
           <div
             ref={errorBannerRef}

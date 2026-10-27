@@ -23,6 +23,7 @@ import { AlertsPanel, CategoryChip, RecentMovementsPanel, SortableHeader } from 
 import { useAuth } from "../../context/AuthContext";
 import { QuickWasteModal } from "./QuickWasteModal";
 import { describeStock, hasMaskedStock, isStockMasked, maskedStockStatus, stockMaskBadge } from "../../../core/utils/stockMask";
+import type { DishDraft } from "./dishDraft";
 
 // Las ventanas (modales) pesan mucho y solo se abren al hacer clic: se descargan
 // aparte. Después del primer pintado se precargan en segundo plano para que al
@@ -30,11 +31,13 @@ import { describeStock, hasMaskedStock, isStockMasked, maskedStockStatus, stockM
 const loadProductFormModal = () => import("./ProductFormModal").then((m) => ({ default: m.ProductFormModal }));
 const loadProductDetailModal = () => import("./ProductDetailModal").then((m) => ({ default: m.ProductDetailModal }));
 const loadAiImportModal = () => import("./AiImportModal").then((m) => ({ default: m.AiImportModal }));
+const loadVimdyAiDishModal = () => import("./VimdyAiDishModal").then((m) => ({ default: m.VimdyAiDishModal }));
 const loadProduceBatchModal = () => import("./ProduceBatchModal").then((m) => ({ default: m.ProduceBatchModal }));
 const loadCategoriesManagerModal = () => import("./CategoriesManagerModal").then((m) => ({ default: m.CategoriesManagerModal }));
 const ProductFormModal = lazy(loadProductFormModal);
 const ProductDetailModal = lazy(loadProductDetailModal);
 const AiImportModal = lazy(loadAiImportModal);
+const VimdyAiDishModal = lazy(loadVimdyAiDishModal);
 const CsvImportModal = lazy(() => import("./CsvImportModal").then((m) => ({ default: m.CsvImportModal })));
 const ProduceBatchModal = lazy(loadProduceBatchModal);
 const CategoriesManagerModal = lazy(loadCategoriesManagerModal);
@@ -55,6 +58,7 @@ export function InventoryDashboard({
       void loadProduceBatchModal();
       void loadCategoriesManagerModal();
       void loadAiImportModal();
+      void loadVimdyAiDishModal();
     };
     if (typeof window.requestIdleCallback === "function") {
       const id = window.requestIdleCallback(preload);
@@ -130,6 +134,9 @@ export function InventoryDashboard({
   const [showCategories, setShowCategories] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [showAiImport, setShowAiImport] = useState(false);
+  // VIMDY IA: modal "Describe tu plato" y el borrador que precarga "Nuevo producto".
+  const [showVimdyAi, setShowVimdyAi] = useState(false);
+  const [aiDraft, setAiDraft] = useState<DishDraft | null>(null);
   const [showCsvImport, setShowCsvImport] = useState(false);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const [wasteProduct, setWasteProduct] = useState<Product | null>(null);
@@ -460,6 +467,14 @@ export function InventoryDashboard({
               pendingLabelSingular="1 ajuste de stock pendiente"
               pendingLabelPlural="{count} ajustes de stock pendientes"
             />
+            <button
+              type="button"
+              onClick={() => setShowVimdyAi(true)}
+              className="h-9 px-3 rounded-vimdy-md border border-vimdy-ai/40 bg-vimdy-ai/10 text-vimdy-ai font-bold hover:bg-vimdy-ai/20 flex items-center gap-2 text-sm"
+            >
+              <Sparkles size={16} />
+              VIMDY IA
+            </button>
             <VimdyButton
               onClick={() => setShowNewProduct(true)}
               size="sm"
@@ -996,13 +1011,18 @@ export function InventoryDashboard({
       {showNewProduct && (
         <Suspense fallback={null}>
           <ProductFormModal
-            onClose={() => setShowNewProduct(false)}
+            aiDraft={aiDraft ?? undefined}
+            onClose={() => {
+              setShowNewProduct(false);
+              setAiDraft(null);
+            }}
             onSave={createProduct}
             saveError={error}
             onBuyIngredient={(ingredientId) => {
               const ingredient = productMap.get(ingredientId);
               if (ingredient) {
                 setShowNewProduct(false);
+                setAiDraft(null);
                 setSelected(ingredient);
               }
             }}
@@ -1027,6 +1047,19 @@ export function InventoryDashboard({
             onViewKardex={(p) => {
               setEditingProduct(null);
               setSelected(p);
+            }}
+          />
+        </Suspense>
+      )}
+
+      {showVimdyAi && (
+        <Suspense fallback={null}>
+          <VimdyAiDishModal
+            onClose={() => setShowVimdyAi(false)}
+            onResult={(draft) => {
+              setShowVimdyAi(false);
+              setAiDraft(draft);
+              setShowNewProduct(true);
             }}
           />
         </Suspense>
