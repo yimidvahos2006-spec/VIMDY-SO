@@ -12,6 +12,12 @@ import { isNetworkFailure } from "../services/offlineSale";
 import { queueIncreaseStockOffline, queueDecreaseStockOffline } from "../services/offlineInventory";
 import { getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
 import { calculateInventoryCostValuation, type InventoryValuationStatus } from "../utils/inventoryValuation";
+import { isDuplicateNameError } from "../errors/DuplicateNameError";
+
+/** Si la base rechazó el guardado por el índice único del código de barras, devuelve el código de error claro. */
+function barcodeConflictCode(error: unknown): "BARCODE_DUPLICADO" | undefined {
+  return isDuplicateNameError(error) && /barcode/i.test(error.pg?.constraint ?? "") ? "BARCODE_DUPLICADO" : undefined;
+}
 
 export type StockStatus = "normal" | "bajo" | "agotado";
 
@@ -292,8 +298,9 @@ export function useInventory() {
         INGREDIENTE_DUPLICADO: "No puedes repetir el mismo ingrediente dentro de una receta.",
         INGREDIENTE_CANTIDAD_INVALIDA: "La cantidad de los ingredientes debe ser mayor a cero.",
       };
+      const code = barcodeConflictCode(e) ?? e?.message;
       setError(
-        messages[e?.message]
+        messages[code]
           ?? (typeof e?.message === "string" && e.message.includes(" ")
             ? e.message
             : "No se pudo crear el producto. Intenta de nuevo.")
@@ -323,8 +330,9 @@ export function useInventory() {
         INGREDIENTE_DUPLICADO: "No puedes repetir el mismo ingrediente dentro de una receta.",
         INGREDIENTE_CANTIDAD_INVALIDA: "La cantidad de los ingredientes debe ser mayor a cero.",
       };
+      const code = barcodeConflictCode(e) ?? e?.message;
       setError(
-        messages[e?.message]
+        messages[code]
           ?? (typeof e?.message === "string" && e.message.includes(" ")
             ? e.message
             : "No se pudo actualizar el producto. Intenta de nuevo.")

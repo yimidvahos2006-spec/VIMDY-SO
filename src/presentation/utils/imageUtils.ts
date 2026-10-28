@@ -35,12 +35,24 @@ export function validateImageFile(file: File): void {
   }
 }
 
+export interface ProductImageOptions {
+  /** Lado máximo en px (por defecto 800). */
+  maxDimension?: number;
+  /** Calidad JPEG 0-1 (por defecto 0.82). */
+  quality?: number;
+}
+
+/** Foto de la tarjeta de producto: se ve a ~170px, así que 400px sobra y pesa unos 20 KB (no ~100 KB). */
+export const PRODUCT_CARD_IMAGE: ProductImageOptions = { maxDimension: 400, quality: 0.78 };
+
 /**
  * Convierte un File de imagen en un dataURL JPEG comprimido y redimensionado
- * (máximo 800px de lado), listo para guardarse en Product.image.
+ * (por defecto máximo 800px de lado), listo para guardarse en Product.image.
  */
-export async function fileToProductImage(file: File): Promise<string> {
+export async function fileToProductImage(file: File, options: ProductImageOptions = {}): Promise<string> {
   validateImageFile(file);
+  const maxDimension = options.maxDimension ?? MAX_DIMENSION_PX;
+  const quality = options.quality ?? JPEG_QUALITY;
 
   const original = await readFileAsDataUrl(file);
   const bitmap = await loadImage(original);
@@ -48,7 +60,7 @@ export async function fileToProductImage(file: File): Promise<string> {
   const { width, height } = fitDimensions(
     bitmap.width,
     bitmap.height,
-    MAX_DIMENSION_PX
+    maxDimension
   );
 
   const canvas = document.createElement("canvas");
@@ -68,7 +80,7 @@ export async function fileToProductImage(file: File): Promise<string> {
   ctx.fillRect(0, 0, width, height);
   ctx.drawImage(bitmap, 0, 0, width, height);
 
-  return canvas.toDataURL("image/jpeg", JPEG_QUALITY);
+  return canvas.toDataURL("image/jpeg", quality);
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {

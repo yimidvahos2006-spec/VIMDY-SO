@@ -5,7 +5,7 @@
 
 import React, { useRef, useState } from "react";
 import { Camera, X } from "lucide-react";
-import { fileToProductImage } from "../../../utils/imageUtils";
+import { fileToProductImage, PRODUCT_CARD_IMAGE } from "../../../utils/imageUtils";
 
 interface Props {
   /** dataURL de la foto actual. "" = sin foto. */
@@ -27,7 +27,7 @@ export function ProductPhotoPicker({ value, onChange, onError, disabled }: Props
     onError(null);
     setProcessing(true);
     try {
-      onChange(await fileToProductImage(file));
+      onChange(await fileToProductImage(file, PRODUCT_CARD_IMAGE));
     } catch (err: any) {
       onError(err?.message ?? "No se pudo procesar la imagen.");
     } finally {

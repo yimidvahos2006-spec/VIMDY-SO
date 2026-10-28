@@ -192,6 +192,13 @@ export class InventoryEngine {
       throw new Error("NOMBRE_DUPLICADO");
     }
 
+    // El código de barras es único por negocio/sucursal (índice en la base de datos, incluye productos
+    // inactivos e insumos). Se avisa aquí con un mensaje claro en vez de esperar el rechazo de la base.
+    const wantedBarcode = typeof input.barcode === "string" ? input.barcode.trim() : "";
+    if (wantedBarcode && all.some((p) => p.id !== selfId && (p.barcode ?? "").trim() === wantedBarcode)) {
+      throw new Error("BARCODE_DUPLICADO");
+    }
+
     if (input.recipe && input.recipe.length > 0) {
       const byId = new Map(all.map((p) => [p.id, p]));
       const seen = new Set<string>();
