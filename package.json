@@ -13,6 +13,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:vimdy": "vitest run tests/unit/inventario-insumos.test.ts tests/unit/producto-con-receta.test.ts tests/unit/vimdy-ia-flujo.test.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:e2e": "playwright test",
     "release:guards": "node scripts/release-guards.mjs",

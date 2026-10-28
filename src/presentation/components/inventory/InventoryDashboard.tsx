@@ -18,10 +18,13 @@ import { getBranches, getCurrentBranchId, getCurrentBusinessId } from "../../../
 import { STATUS_CLASS, STATUS_LABEL, SortKey, money } from "./inventoryShared";
 import type { InventoryState } from "./inventoryShared";
 import { EmptyProductsState } from "./EmptyProductsState";
+import { InventoryMainTable } from "./InventoryMainTable";
+import { toInventoryTableRow } from "./inventoryTableRows";
 import { getProductProfitView } from "./productProfit";
 import { AlertsPanel, CategoryChip, RecentMovementsPanel, SortableHeader } from "./InventoryWidgets";
 import { useAuth } from "../../context/AuthContext";
 import { QuickWasteModal } from "./QuickWasteModal";
+import { RestockModal } from "./RestockModal";
 import { describeStock, hasMaskedStock, isStockMasked, maskedStockStatus, stockMaskBadge } from "../../../core/utils/stockMask";
 import type { DishDraft } from "./dishDraft";
 
@@ -140,6 +143,7 @@ export function InventoryDashboard({
   const [showCsvImport, setShowCsvImport] = useState(false);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const [wasteProduct, setWasteProduct] = useState<Product | null>(null);
+  const [restockProduct, setRestockProduct] = useState<Product | null>(null);
   // BLOQUEANTE (auditoría Fase 2 — Panadería): productos elaborados que se
   // producen por tanda (ver Product.productionMode) — son los únicos que
   // puede recibir InventoryEngine.produceBatch(). Si no hay ninguno, el
@@ -338,6 +342,17 @@ export function InventoryDashboard({
     () => filtered.slice(pageStart, pageStart + pageSize),
     [filtered, pageStart, pageSize]
   );
+
+  const tableRows = useMemo(() => {
+    const engine = container.recipeEngine.get();
+    return pageItems.map((p) =>
+      toInventoryTableRow(p, {
+        categoryNameById,
+        canViewCosts,
+        getProfitability: (prod) => engine.getProfitability(prod, productMap)
+      })
+    );
+  }, [pageItems, categoryNameById, canViewCosts, productMap]);
 
   // "Te cuesta / Ganas" de cada fila VISIBLE, calculado una sola vez por cambio
   // de página/lista (no en cada tecla que se escribe en el buscador).
@@ -703,217 +718,22 @@ export function InventoryDashboard({
           )}
 
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-vimdy-text-secondary border-b border-vimdy-border">
-                  <SortableHeader label="Producto" active={sortKey === "name"} dir={sortDir} onClick={() => toggleSort("name")} />
-                  <th className="px-4 py-3 font-medium">Categoría</th>
-                  <th className="px-4 py-3 font-medium">Receta</th>
-                  <SortableHeader label="Stock" active={sortKey === "stock"} dir={sortDir} onClick={() => toggleSort("stock")} />
-                  <th className="px-4 py-3 font-medium">Mínimo</th>
-                  <SortableHeader label="Precio" active={sortKey === "price"} dir={sortDir} onClick={() => toggleSort("price")} />
-                  <th className="px-4 py-3 font-medium">Estado</th>
-                  <th className="px-4 py-3 font-medium">Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.length === 0 && (
-                  <tr>
-                    <td colSpan={8} className="px-4 py-10 text-center text-vimdy-text-tertiary">
-                      {hasActiveFilters ? (
-                        <div className="flex flex-col items-center gap-3">
-                          <span>Ningún producto coincide con los filtros activos.</span>
-                          <button
-                            type="button"
-                            onClick={clearFilters}
-                            className="h-9 px-4 rounded-vimdy-md border border-vimdy-accent/40 text-vimdy-accent text-sm font-semibold hover:bg-vimdy-accent/10"
-                          >
-                            Limpiar filtros
-                          </button>
-                        </div>
-                      ) : (
-                        "No se encontraron productos."
-                      )}
-                    </td>
-                  </tr>
-                )}
-                {pageItems.map((product) => {
-                  const status = getStockStatus(product);
-                  const rowMasked = isStockMasked(product);
-                  const capacity =
-                    !rowMasked && product.recipe && product.recipe.length > 0
-                      ? container.recipeEngine.get().getProductionCapacity(product, productMap)
-                      : null;
-                  return (
-                    <tr
-                      key={product.id}
-                      onClick={() => {
-                        if (!rowMasked) setSelected(product);
-                      }}
-                      className={`border-b border-vimdy-border-subtle transition-colors ${rowMasked ? "" : "hover:bg-vimdy-surface-hover/50 cursor-pointer"}`}
-                    >
-                      <td className="px-4 py-3 text-vimdy-text font-medium">
-                        <div className="flex flex-col gap-1">
-                          <div className="flex items-center gap-2">
-                            {product.name}
-                            {product.recipe && product.recipe.length > 0 && (
-                              <span
-                                title={`Receta con ${product.recipe.length} ingrediente(s)`}
-                                className="text-xs px-1.5 py-0.5 rounded-vimdy-xs bg-vimdy-recipe/20 text-vimdy-recipe border border-vimdy-recipe/30"
-                              >
-                                Receta
-                              </span>
-                            )}
-                            {product.recipe && product.recipe.length > 0 && product.productionMode === "BATCH" && (
-                              <span
-                                title="Se produce por tandas con anticipación (ej. panadería) — no a la orden."
-                                className="text-xs px-1.5 py-0.5 rounded-vimdy-xs bg-vimdy-warning/20 text-vimdy-warning border border-vimdy-warning/30"
-                              >
-                                Por tanda
-                              </span>
-                            )}
-                            {product.requiresKitchen === false && (
-                              <span
-                                title="No pasa por Cocina: se cobra y se entrega directo"
-                                className="text-xs px-1.5 py-0.5 rounded-vimdy-xs bg-vimdy-text-tertiary/20 text-vimdy-text-secondary border border-vimdy-text-tertiary/30"
-                              >
-                                Sin cocina
-                              </span>
-                            )}
-                          </div>
-                          {capacity && (
-                            <span
-                              title={
-                                capacity.limitingIngredient
-                                  ? `Ingrediente limitante: ${capacity.limitingIngredient.name} (${capacity.limitingIngredient.stockAvailable} disponible)`
-                                  : undefined
-                              }
-                              className={`text-xs ${capacity.maxUnits > 0 ? "text-vimdy-text-secondary" : "text-vimdy-danger font-semibold"}`}
-                            >
-                              {capacity.maxUnits > 0
-                                ? `Alcanza para ${capacity.maxUnits} und.`
-                                : `Sin stock: falta ${capacity.limitingIngredient?.name ?? "un ingrediente"}`}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-vimdy-text-secondary">
-                        {categoryNameById[product.categoryId] ?? product.categoryId}
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        {product.recipe && product.recipe.length > 0 ? (
-                          <span className="text-xs px-2 py-0.5 rounded-vimdy-sm bg-vimdy-recipe/20 text-vimdy-recipe border border-vimdy-recipe/30">
-                            Receta · {product.recipe.length} {product.recipe.length === 1 ? "insumo" : "insumos"}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-vimdy-text-tertiary">{product.trackStock === false && !product.requiresKitchen ? "No aplica" : "Sin receta"}</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-vimdy-text whitespace-nowrap">{rowMasked ? stockMaskBadge(product).text : product.stock}</td>
-                      <td className="px-4 py-3 text-vimdy-text-secondary">{product.minStock}</td>
-                      <td className="px-4 py-3">
-                        <p className="text-vimdy-accent font-semibold">{money(product.price)}</p>
-                        {(() => {
-                          if (rowMasked || !canViewCosts) return null;
-                          const profit = profitById.get(product.id);
-                          if (!profit || profit.kind === "none") return null;
-                          if (profit.kind === "missing-cost") {
-                            return (
-                              <p className="text-xs text-vimdy-warning" title="Agrega el costo (del producto o de sus insumos) para saber cuánto ganas.">
-                                Falta el costo
-                              </p>
-                            );
-                          }
-                          return (
-                            <p className="text-xs text-vimdy-text-secondary whitespace-nowrap">
-                              Te cuesta {money(profit.cost)} ·{" "}
-                              {profit.profit < 0 ? (
-                                <span className="text-vimdy-danger font-semibold">Pierdes {money(Math.abs(profit.profit))}</span>
-                              ) : (
-                                <span className="text-vimdy-success font-semibold">Ganas {money(profit.profit)}</span>
-                              )}
-                            </p>
-                          );
-                        })()}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`text-xs px-2 py-1 rounded-vimdy-sm ${STATUS_CLASS[status]}`}>
-                          {STATUS_LABEL[status]}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        {rowMasked ? (
-                          <span className="text-xs text-vimdy-text-tertiary">Solo lectura</span>
-                        ) : (
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditingProduct(product);
-                            }}
-                            aria-label="Editar"
-                            title="Editar"
-                            className="w-8 h-8 rounded-vimdy-sm border border-vimdy-border text-vimdy-text-secondary hover:bg-vimdy-surface-hover flex items-center justify-center"
-                          >
-                            <Pencil size={14} />
-                          </button>
-                          {product.trackStock !== false && product.active !== false && product.stock > 0 && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setWasteProduct(product);
-                              }}
-                              aria-label="Registrar merma"
-                              title="Registrar merma"
-                              className="w-8 h-8 rounded-vimdy-sm border border-vimdy-warning/30 text-vimdy-warning hover:bg-vimdy-warning/10 flex items-center justify-center"
-                            >
-                              <MinusCircle size={14} />
-                            </button>
-                          )}
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDuplicateProduct(product);
-                            }}
-                            disabled={duplicating === product.id}
-                            aria-label="Duplicar"
-                            title="Duplicar"
-                            className="w-8 h-8 rounded-vimdy-sm border border-vimdy-border text-vimdy-text-secondary hover:bg-vimdy-surface-hover flex items-center justify-center disabled:opacity-50"
-                          >
-                            <Copy size={14} />
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteProduct(product);
-                            }}
-                            aria-label="Eliminar"
-                            title="Eliminar"
-                            className="w-8 h-8 rounded-vimdy-sm border border-vimdy-danger/30 text-vimdy-danger hover:bg-vimdy-danger/10 flex items-center justify-center"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                          {product.active === false && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                reactivateProduct(product.id);
-                              }}
-                              aria-label="Reactivar"
-                              title="Reactivar producto"
-                              className="w-8 h-8 rounded-vimdy-sm border border-vimdy-success/30 text-vimdy-success hover:bg-vimdy-success/10 flex items-center justify-center"
-                            >
-                              <RefreshCw size={14} />
-                            </button>
-                          )}
-                        </div>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <InventoryMainTable
+              rows={tableRows}
+              onAddStock={(id) => {
+                const p = productMap.get(id);
+                if (p) setRestockProduct(p);
+              }}
+              onEdit={(id) => {
+                const p = productMap.get(id);
+                if (p) setEditingProduct(p);
+              }}
+              emptyMessage={
+                hasActiveFilters
+                  ? "Ningún producto coincide con los filtros."
+                  : "No se encontraron productos."
+              }
+            />
           </div>
 
           {filtered.length > 0 && (
@@ -992,6 +812,14 @@ export function InventoryDashboard({
             onDelete={() => handleDeleteProduct(selected)}
           />
         </Suspense>
+      )}
+
+      {restockProduct && (
+        <RestockModal
+          product={allProducts.find((p) => p.id === restockProduct.id) ?? restockProduct}
+          onConfirm={increaseStock}
+          onClose={() => setRestockProduct(null)}
+        />
       )}
 
       {wasteProduct && (
