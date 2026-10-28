@@ -13,7 +13,8 @@ import { container } from "../../../../infrastructure/di/CompositionRoot";
 import type { DishDraft } from "../dishDraft";
 import { collectKnownStations } from "../InventoryWidgets";
 import { applyAiDraft, sameStation } from "./applyAiDraft";
-import { buildProductInput, isKitchenFormType, resolveFormType } from "./buildProductInput";
+import { buildProductInput, isKitchenFormType, kindOfProduct, resolveFormType } from "./buildProductInput";
+import type { FormKind } from "./buildProductInput";
 import { DEFAULT_STATION, NEW_CATEGORY_VALUE, RecipeRowDraft, SUGGESTED_STATIONS } from "./productFormTypes";
 import { computeRecipeSummary } from "./recipeSummary";
 import { useRecipeBuilder } from "./useRecipeBuilder";
@@ -37,7 +38,9 @@ export function useProductForm({ product, aiDraft, saveError, onSave, onClose, c
   const isEditing = !!product;
 
   // ── Campos principales ──────────────────────────────────────────────────
+  const [kind, setKind] = useState<FormKind>(() => kindOfProduct(product));
   const [name, setName] = useState(product?.name ?? "");
+  const [barcode, setBarcode] = useState(product?.barcode ?? "");
   const [price, setPrice] = useState(product ? toMoneyInputValue(product.price) : "");
   const [categoryId, setCategoryId] = useState(product?.categoryId ?? "");
   const [station, setStation] = useState(product?.printStationOverride ?? "");
@@ -145,11 +148,15 @@ export function useProductForm({ product, aiDraft, saveError, onSave, onClose, c
   }, []);
 
   // ── Derivados ───────────────────────────────────────────────────────────
-  const type = resolveFormType(product, builder.rows.length > 0);
-  /** Receta y estación solo aplican a platos de cocina; un insumo o servicio editado no las muestra. */
+  /** Con ingredientes solo si es "Preparado": en reventa o servicio las filas escritas se ignoran. */
+  const recipeActive = kind === "preparado" && builder.rows.length > 0;
+  const type = resolveFormType(product, recipeActive, kind);
+  /** Receta y estación solo aplican a "Preparado"; reventa, servicio e insumos no las muestran. */
   const isKitchenProduct = isKitchenFormType(type);
-  /** Costo directo: no aplica a insumos (su costo va por compras) ni a servicios. */
-  const showCostField = canViewCosts && type !== "ingrediente" && type !== "servicio";
+  /** Costo directo: preparado sin receta y reventa. Insumos (costo por compras) y servicios no lo piden. */
+  const showCostField = canViewCosts && (kind === "preparado" || kind === "reventa");
+  /** Código de barras: solo reventa (para escanear en caja). */
+  const showBarcodeField = kind === "reventa";
   const selectedCategory = categories.find((c) => c.id === categoryId);
   const knownStations = useMemo(() => {
     const found = collectKnownStations(categories, allProducts);
@@ -221,6 +228,8 @@ export function useProductForm({ product, aiDraft, saveError, onSave, onClose, c
       price,
       cost: showCostField ? cost : undefined,
       image,
+      kind,
+      barcode: showBarcodeField ? barcode : undefined,
       station,
       rows: builder.rows,
       allProducts,
@@ -232,6 +241,18 @@ export function useProductForm({ product, aiDraft, saveError, onSave, onClose, c
       return;
     }
     builder.flagRow(null);
+
+    // Pasar un plato con receta a Reventa o Servicio borra su receta: se pide confirmación.
+    const savedIngredients = product?.recipe?.length ?? 0;
+    if (kind !== "preparado" && savedIngredients > 0) {
+      const ok = await confirmDialog({
+        title: "Se borrará la receta",
+        message: `Este producto tiene una receta con ${savedIngredients} ${savedIngredients === 1 ? "ingrediente" : "ingredientes"}. Si lo guardas como ${kind === "reventa" ? "Reventa" : "Servicio"}, la receta se borra y ya no descontará esos ingredientes.\n\nSi no quieres perderla, toca "Volver" y elige Preparado.`,
+        confirmLabel: "Sí, borrar la receta",
+        cancelLabel: "Volver"
+      });
+      if (!ok) return;
+    }
 
     // Error más común: escribir "4" queriendo decir 4.000.
     const isPesos = (companyConfigStore.get().currency || "COP").toUpperCase() === "COP";
@@ -285,6 +306,12 @@ export function useProductForm({ product, aiDraft, saveError, onSave, onClose, c
     setName,
     price,
     setPrice,
+    kind,
+    setKind,
+    barcode,
+    setBarcode,
+    showBarcodeField,
+    recipeActive,
     image,
     setImage,
     cost,

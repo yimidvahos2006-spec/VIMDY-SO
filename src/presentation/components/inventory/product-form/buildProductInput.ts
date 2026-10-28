@@ -13,13 +13,50 @@ import { findRecipeRowProblem } from "../recipeFormHelpers";
 import { DEFAULT_STATION, RecipeRowDraft } from "./productFormTypes";
 
 /**
- * Tipo con el que se guarda el producto. El formulario no pregunta "qué tipo es":
- *  - con ingredientes   -> cocina_receta (descuenta insumos al vender)
- *  - sin ingredientes   -> cocina (se prepara, sin descontar nada)
- * Al EDITAR un producto que no es de cocina (gaseosa, servicio, insumo) se respeta
- * su tipo original para no cambiarle el comportamiento sin querer.
+ * Lo que la persona elige arriba del formulario ("¿Qué vas a vender?"):
+ *  - preparado: plato o bebida de cocina (con o sin receta)
+ *  - reventa:   producto que se compra y se vende tal cual (gaseosa, snack), con stock
+ *  - servicio:  se vende directo, sin descontar inventario (domicilio, propina)
+ *  - ingrediente: solo al EDITAR un insumo; no se ofrece como opción.
  */
-export function resolveFormType(product: Product | undefined, hasRecipe: boolean): ProductType {
+export type FormKind = "preparado" | "reventa" | "servicio" | "ingrediente";
+
+/** Opción que se muestra al abrir el formulario: nuevo = preparado; editar = según lo ya guardado. */
+export function kindOfProduct(product?: Product): FormKind {
+  switch (inferProductType(product)) {
+    case "inventario":
+      return "reventa";
+    case "servicio":
+      return "servicio";
+    case "ingrediente":
+      return "ingrediente";
+    default:
+      return "preparado";
+  }
+}
+
+/** Tipo canónico con el que se guarda cada opción (con ingredientes un preparado es cocina_receta). */
+export function formTypeForKind(kind: FormKind, hasRecipe: boolean): ProductType {
+  switch (kind) {
+    case "reventa":
+      return "inventario";
+    case "servicio":
+      return "servicio";
+    case "ingrediente":
+      return "ingrediente";
+    default:
+      return hasRecipe ? "cocina_receta" : "cocina";
+  }
+}
+
+/**
+ * Tipo con el que se guarda el producto.
+ *  - Con `kind` (lo que eligió la persona): ver formTypeForKind.
+ *  - Sin `kind` (compatibilidad): con ingredientes -> cocina_receta; sin ingredientes -> cocina,
+ *    y al EDITAR un producto que no es de cocina se respeta su tipo original.
+ */
+export function resolveFormType(product: Product | undefined, hasRecipe: boolean, kind?: FormKind): ProductType {
+  if (kind) return formTypeForKind(kind, hasRecipe);
   if (hasRecipe) return "cocina_receta";
   if (!product) return "cocina";
   const original: ProductType = product.isIngredient ? "ingrediente" : inferProductType(product);
@@ -56,6 +93,10 @@ export interface BuildProductInputArgs {
   cost?: string;
   /** Foto (dataURL). undefined = se conserva la actual; "" = se quita. */
   image?: string;
+  /** Opción elegida arriba. undefined = comportamiento anterior (se deduce de la receta y del producto). */
+  kind?: FormKind;
+  /** Código de barras (solo reventa). undefined = se conserva el actual; "" = sin código. */
+  barcode?: string;
   /** "" = automática (la de la categoría). */
   station: string;
   rows: readonly RecipeRowDraft[];
@@ -68,9 +109,11 @@ export type BuildProductInputResult =
   | { ok: false; error: string; rowId?: string };
 
 export function buildProductInput(args: BuildProductInputArgs): BuildProductInputResult {
-  const { product, rows, allProducts, categories } = args;
+  const { product, allProducts, categories } = args;
+  // Solo un "Preparado" lleva ingredientes: al elegir otra opción la receta se ignora (y se borra si ya tenía).
+  const rows = args.kind && args.kind !== "preparado" ? [] : args.rows;
   const isEditing = !!product;
-  const type = resolveFormType(product, rows.length > 0);
+  const type = resolveFormType(product, rows.length > 0, args.kind);
   const productionMode = product?.productionMode ?? "ON_DEMAND";
   const flags = resolveProductFlags(type, productionMode);
   const isIngredientType = type === "ingrediente";
@@ -145,7 +188,7 @@ export function buildProductInput(args: BuildProductInputArgs): BuildProductInpu
     stock: isEditing ? product!.stock : 0,
     minStock: product?.minStock ?? 0,
     unit: product?.unit ?? "unidad",
-    barcode: product?.barcode,
+    barcode: args.barcode === undefined ? product?.barcode : args.barcode.trim() || undefined,
     sku: product?.sku,
     supplierId: product?.supplierId,
     alternateSupplierId: product?.alternateSupplierId,
@@ -153,7 +196,8 @@ export function buildProductInput(args: BuildProductInputArgs): BuildProductInpu
     recipe,
     productionMode: rows.length > 0 ? productionMode : undefined,
     requiresKitchen: flags.requiresKitchen,
-    estimatedPrepMinutes: keepsKitchen ? product?.estimatedPrepMinutes : undefined,
+    // Se conserva aunque el producto pase a otro modo: así volver a "Preparado" no pierde el dato.
+    estimatedPrepMinutes: product?.estimatedPrepMinutes,
     printStationOverride: keepsKitchen ? resolveStationOverride(args.station, category) : product?.printStationOverride,
     // Tamaños y extras ya configurados se conservan tal cual al editar.
     sizes: product?.sizes ? [...product.sizes] : [],

@@ -1,17 +1,18 @@
 // src/presentation/components/inventory/ProductFormModal.tsx
 //
-// Formulario "Plato / Receta" (filosofía cero-complejidad): UNA sola vista vertical.
-//   1. Lo básico        -> foto (opcional), nombre, categoría, precio de venta y costo (opcional)
-//   2. ¿Qué lleva?      -> constructor de receta (crea ingredientes al vuelo)
-//   3. ¿A dónde va?     -> estación del ticket (opcional)
-//   4. Guardar Plato / Receta
+// Formulario de producto (filosofía cero-complejidad): UNA sola vista vertical.
+//   0. ¿Qué vas a vender? -> Preparado (receta) · Reventa (costo y código de barras) · Servicio (sin stock)
+//   1. Lo básico          -> foto (opcional), nombre, categoría, precio de venta y costo (opcional)
+//   2. ¿Qué lleva?        -> constructor de receta (solo Preparado; crea ingredientes al vuelo)
+//   3. ¿A qué área va?    -> área de la comanda (solo Preparado)
+//   4. Guardar
 //
 // Mantiene la misma API pública que el modal anterior (product, aiDraft,
 // onSave, saveError...) para que InventoryDashboard no cambie. La lógica vive
 // en ./product-form/*; este archivo solo arma la pantalla.
 
 import React, { useEffect, useRef, useState } from "react";
-import { Sparkles, X } from "lucide-react";
+import { ScanBarcode, Sparkles, X } from "lucide-react";
 import type { Product } from "../../../core/entities/Entities";
 import type { ProductInput } from "../../../core/engines/InventoryEngine";
 import { VimdyButton } from "../ui/VimdyButton";
@@ -22,6 +23,7 @@ import { toMoneyInputValue } from "../../../core/utils/formatMoneyInput";
 import type { DishDraft } from "./dishDraft";
 import { CategoryField } from "./product-form/CategoryField";
 import { KitchenStationPicker } from "./product-form/KitchenStationPicker";
+import { ProductKindPicker } from "./product-form/ProductKindPicker";
 import { ProductPhotoPicker } from "./product-form/ProductPhotoPicker";
 import { RecipeBuilder } from "./product-form/RecipeBuilder";
 import { useProductForm } from "./product-form/useProductForm";
@@ -48,9 +50,12 @@ export function ProductFormModal({ product, aiDraft, onClose, onSave, saveError 
   const { can } = useAuth();
   const form = useProductForm({ product, aiDraft, saveError, onSave, onClose, canViewCosts: can("inventory.viewCosts") });
   const [photoError, setPhotoError] = useState<string | null>(null);
-  // Con ingredientes, el costo lo calcula la receta: el campo se muestra bloqueado con ese valor.
-  const costFromRecipe = form.builder.rows.length > 0;
-  const title = form.isEditing ? "Editar plato" : "Nuevo plato o receta";
+  // Con ingredientes (solo Preparado), el costo lo calcula la receta: el campo se muestra bloqueado con ese valor.
+  const costFromRecipe = form.recipeActive;
+  const title = form.isEditing ? "Editar producto" : "Nuevo producto";
+  const isPrepared = form.kind === "preparado";
+  const nameLabel = isPrepared ? "Nombre del plato" : "Nombre del producto";
+  const namePlaceholder = form.kind === "reventa" ? "Ej. Gaseosa 400 ml" : form.kind === "servicio" ? "Ej. Domicilio" : "Ej. Hamburguesa clásica";
   const dialogRef = useRef<HTMLDivElement>(null);
 
   // Garantiza que Escape funcione desde el primer momento (aunque el foco no esté en un campo).
@@ -79,7 +84,7 @@ export function ProductFormModal({ product, aiDraft, onClose, onSave, saveError 
         <header className="flex items-start justify-between gap-vimdy-md px-vimdy-lg pb-vimdy-sm pt-vimdy-lg">
           <div>
             <h2 className="text-vimdy-h3 text-vimdy-text">{title}</h2>
-            <p className="text-vimdy-small text-vimdy-text-secondary">Nombre, precio y qué lleva. Nada más.</p>
+            <p className="text-vimdy-small text-vimdy-text-secondary">Elige qué vendes, ponle nombre y precio. Nada más.</p>
           </div>
           <button
             type="button"
@@ -121,16 +126,19 @@ export function ProductFormModal({ product, aiDraft, onClose, onSave, saveError 
             </div>
           )}
 
+          {/* 0 · ¿Qué vas a vender? (un insumo que se edita aquí conserva su tipo y no lo muestra) */}
+          {form.kind !== "ingrediente" && <ProductKindPicker value={form.kind} onChange={form.setKind} disabled={form.saving} />}
+
           {/* 1 · Lo básico */}
           <section className="space-y-vimdy-md">
             <div>
               <div className="flex items-end gap-vimdy-md">
                 <div className="min-w-0 flex-1">
                   <VimdyInput
-                    label="Nombre del plato"
+                    label={nameLabel}
                     value={form.name}
                     onChange={(e) => form.setName(e.target.value)}
-                    placeholder="Ej. Hamburguesa clásica"
+                    placeholder={namePlaceholder}
                     autoFocus={!aiDraft}
                     maxLength={80}
                   />
@@ -201,9 +209,23 @@ export function ProductFormModal({ product, aiDraft, onClose, onSave, saveError 
                 )}
               </div>
             </div>
+            {form.showBarcodeField && (
+              <VimdyInput
+                label="Código de barras (opcional)"
+                hint="Escanéalo con el lector o escríbelo; así lo encuentras rápido en caja."
+                icon={<ScanBarcode size={16} aria-hidden="true" />}
+                value={form.barcode}
+                onChange={(e) => form.setBarcode(e.target.value)}
+                // Los lectores terminan con Enter: no debe cerrar ni enviar nada.
+                onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
+                autoComplete="off"
+                maxLength={40}
+                placeholder="Ej. 7702004003509"
+              />
+            )}
           </section>
 
-          {/* 2 · ¿Qué lleva? y 3 · ¿A dónde va? (solo platos de cocina) */}
+          {/* 2 · ¿Qué lleva? y 3 · ¿A qué área va? (solo Preparado) */}
           {form.isKitchenProduct && (
             <>
               <div className="border-t border-vimdy-border-subtle pt-vimdy-lg">
@@ -238,7 +260,7 @@ export function ProductFormModal({ product, aiDraft, onClose, onSave, saveError 
               Cancelar
             </VimdyButton>
             <VimdyButton variant="primary" size="lg" fullWidth onClick={() => void form.save()} loading={form.saving} disabled={form.loading}>
-              Guardar Plato / Receta
+              {isPrepared ? "Guardar Plato / Receta" : "Guardar producto"}
             </VimdyButton>
           </div>
         </footer>
