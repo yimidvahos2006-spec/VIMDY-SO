@@ -4,7 +4,7 @@ import { toast } from "../../../core/store/toastStore";
 import { ConfirmModal } from "../ui/ConfirmModal";
 import { VimdyButton } from "../ui/VimdyButton";
 import { SkeletonCards, SkeletonRows, Skeleton } from "../ui/Skeleton";
-import { MinusCircle, Search, X, Plus, Trash2, Pencil, Sparkles, Copy, Flame, RefreshCw, Tag, FileSpreadsheet, ChevronLeft, ChevronRight } from "lucide-react";
+import { MinusCircle, Search, X, Plus, Zap, Trash2, Pencil, Sparkles, Copy, Flame, RefreshCw, Tag, FileSpreadsheet, ChevronLeft, ChevronRight } from "lucide-react";
 import { getStockStatus, StockStatus } from "../../../core/store/useInventory";
 import { useCategories } from "../../../hooks/useCategories";
 import { OfflineStatusBadge } from "../ui/OfflineStatusBadge";
@@ -25,6 +25,7 @@ import { AlertsPanel, CategoryChip, RecentMovementsPanel, SortableHeader } from 
 import { useAuth } from "../../context/AuthContext";
 import { QuickWasteModal } from "./QuickWasteModal";
 import { RestockModal } from "./RestockModal";
+import { NewProductModal } from "./NewProductModal";
 import { describeStock, hasMaskedStock, isStockMasked, maskedStockStatus, stockMaskBadge } from "../../../core/utils/stockMask";
 import type { DishDraft } from "./dishDraft";
 
@@ -134,6 +135,7 @@ export function InventoryDashboard({
   const [pageSize, setPageSize] = useState<number>(50);
   const [selected, setSelected] = useState<Product | null>(null);
   const [showNewProduct, setShowNewProduct] = useState(false);
+  const [showQuickProduct, setShowQuickProduct] = useState(false);
   const [showCategories, setShowCategories] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [showAiImport, setShowAiImport] = useState(false);
@@ -491,6 +493,14 @@ export function InventoryDashboard({
               VIMDY IA
             </button>
             <VimdyButton
+              variant="secondary"
+              onClick={() => setShowQuickProduct(true)}
+              size="sm"
+              icon={<Zap size={16} />}
+            >
+              Producto rápido
+            </VimdyButton>
+            <VimdyButton
               onClick={() => setShowNewProduct(true)}
               size="sm"
               icon={<Plus size={16} />}
@@ -834,6 +844,31 @@ export function InventoryDashboard({
         <Suspense fallback={null}>
           <CategoriesManagerModal onClose={() => setShowCategories(false)} />
         </Suspense>
+      )}
+
+      {showQuickProduct && (
+        <NewProductModal
+          open
+          onClose={() => setShowQuickProduct(false)}
+          categories={categories.filter((c) => c.active !== false)}
+          error={error}
+          onSave={async (d) => {
+            const ok = await createProduct({
+              name: d.name,
+              categoryId: d.categoryId,
+              price: d.price,
+              purchasePrice: d.cost > 0 ? d.cost : undefined,
+              stock: d.stock,
+              requiresKitchen: false,
+              trackStock: true
+            });
+            if (ok) {
+              setShowQuickProduct(false);
+              toast.success("Producto creado.");
+            }
+            return ok;
+          }}
+        />
       )}
 
       {showNewProduct && (
