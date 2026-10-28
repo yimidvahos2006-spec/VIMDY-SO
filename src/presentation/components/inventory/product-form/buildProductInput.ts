@@ -48,6 +48,14 @@ export interface BuildProductInputArgs {
   categoryId: string;
   /** Precio de venta tal como se escribió ("22.000"). */
   price: string;
+  /**
+   * Costo de compra escrito a mano ("8.500"), solo para platos SIN receta.
+   * undefined = no se toca el costo guardado (sin permiso de ver costos, o producto sin ese campo).
+   * "" = sin costo. Con receta se ignora: el costo lo calcula la receta.
+   */
+  cost?: string;
+  /** Foto (dataURL). undefined = se conserva la actual; "" = se quita. */
+  image?: string;
   /** "" = automática (la de la categoría). */
   station: string;
   rows: readonly RecipeRowDraft[];
@@ -75,6 +83,18 @@ export function buildProductInput(args: BuildProductInputArgs): BuildProductInpu
   const price = isIngredientType && !args.price.trim() ? 0 : parseMoneyInput(args.price);
   if (!isIngredientType && (!args.price.trim() || Number.isNaN(price) || price < 0)) {
     return { ok: false, error: "Escribe un precio de venta válido." };
+  }
+
+  // Costo directo: solo cuenta sin ingredientes (con receta, RecipeEngine calcula el costo de los insumos).
+  let purchasePrice = product?.purchasePrice;
+  if (rows.length === 0 && args.cost !== undefined) {
+    if (args.cost.trim() === "") {
+      purchasePrice = undefined;
+    } else {
+      const typedCost = parseMoneyInput(args.cost);
+      if (Number.isNaN(typedCost) || typedCost < 0) return { ok: false, error: "Escribe un costo de compra válido." };
+      purchasePrice = typedCost;
+    }
   }
 
   // Receta: se revisa ANTES de guardar y se dice exactamente qué falta.
@@ -119,7 +139,7 @@ export function buildProductInput(args: BuildProductInputArgs): BuildProductInpu
     active: product?.active ?? true,
     categoryId: args.categoryId,
     price,
-    purchasePrice: product?.purchasePrice,
+    purchasePrice,
     taxRate: product?.taxRate,
     // updateProduct no toca el stock a propósito; al crear, un plato nace en 0.
     stock: isEditing ? product!.stock : 0,
@@ -129,7 +149,7 @@ export function buildProductInput(args: BuildProductInputArgs): BuildProductInpu
     sku: product?.sku,
     supplierId: product?.supplierId,
     alternateSupplierId: product?.alternateSupplierId,
-    image: product?.image,
+    image: args.image === undefined ? product?.image : args.image || undefined,
     recipe,
     productionMode: rows.length > 0 ? productionMode : undefined,
     requiresKitchen: flags.requiresKitchen,

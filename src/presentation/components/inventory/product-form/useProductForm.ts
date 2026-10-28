@@ -24,6 +24,8 @@ interface Args {
   saveError?: string | null;
   onSave: (input: ProductInput) => Promise<boolean>;
   onClose: () => void;
+  /** Permiso inventory.viewCosts: sin él no se muestra ni se toca el costo. */
+  canViewCosts: boolean;
 }
 
 const CATEGORY_ERRORS: Record<string, string> = {
@@ -31,7 +33,7 @@ const CATEGORY_ERRORS: Record<string, string> = {
   CATEGORY_NAME_DUPLICATE: "Ya existe una categoría con ese nombre."
 };
 
-export function useProductForm({ product, aiDraft, saveError, onSave, onClose }: Args) {
+export function useProductForm({ product, aiDraft, saveError, onSave, onClose, canViewCosts }: Args) {
   const isEditing = !!product;
 
   // ── Campos principales ──────────────────────────────────────────────────
@@ -39,6 +41,8 @@ export function useProductForm({ product, aiDraft, saveError, onSave, onClose }:
   const [price, setPrice] = useState(product ? toMoneyInputValue(product.price) : "");
   const [categoryId, setCategoryId] = useState(product?.categoryId ?? "");
   const [station, setStation] = useState(product?.printStationOverride ?? "");
+  const [image, setImage] = useState(product?.image ?? "");
+  const [cost, setCost] = useState(product?.purchasePrice !== undefined ? toMoneyInputValue(product.purchasePrice) : "");
 
   // ── Datos de apoyo ──────────────────────────────────────────────────────
   const [categories, setCategories] = useState<Category[]>([]);
@@ -144,6 +148,8 @@ export function useProductForm({ product, aiDraft, saveError, onSave, onClose }:
   const type = resolveFormType(product, builder.rows.length > 0);
   /** Receta y estación solo aplican a platos de cocina; un insumo o servicio editado no las muestra. */
   const isKitchenProduct = isKitchenFormType(type);
+  /** Costo directo: no aplica a insumos (su costo va por compras) ni a servicios. */
+  const showCostField = canViewCosts && type !== "ingrediente" && type !== "servicio";
   const selectedCategory = categories.find((c) => c.id === categoryId);
   const knownStations = useMemo(() => {
     const found = collectKnownStations(categories, allProducts);
@@ -213,6 +219,8 @@ export function useProductForm({ product, aiDraft, saveError, onSave, onClose }:
       name,
       categoryId: finalCategoryId,
       price,
+      cost: showCostField ? cost : undefined,
+      image,
       station,
       rows: builder.rows,
       allProducts,
@@ -277,6 +285,11 @@ export function useProductForm({ product, aiDraft, saveError, onSave, onClose }:
     setName,
     price,
     setPrice,
+    image,
+    setImage,
+    cost,
+    setCost,
+    showCostField,
     categoryId,
     setCategoryId,
     categories,

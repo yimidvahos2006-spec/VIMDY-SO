@@ -1,7 +1,7 @@
 // src/presentation/components/inventory/ProductFormModal.tsx
 //
 // Formulario "Plato / Receta" (filosofía cero-complejidad): UNA sola vista vertical.
-//   1. Lo básico        -> nombre, categoría, precio de venta
+//   1. Lo básico        -> foto (opcional), nombre, categoría, precio de venta y costo (opcional)
 //   2. ¿Qué lleva?      -> constructor de receta (crea ingredientes al vuelo)
 //   3. ¿A dónde va?     -> estación del ticket (opcional)
 //   4. Guardar Plato / Receta
@@ -10,16 +10,19 @@
 // onSave, saveError...) para que InventoryDashboard no cambie. La lógica vive
 // en ./product-form/*; este archivo solo arma la pantalla.
 
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Sparkles, X } from "lucide-react";
 import type { Product } from "../../../core/entities/Entities";
 import type { ProductInput } from "../../../core/engines/InventoryEngine";
 import { VimdyButton } from "../ui/VimdyButton";
 import { VimdyInput } from "../ui/VimdyInput";
 import { MoneyInput } from "../ui/MoneyInput";
+import { useAuth } from "../../context/AuthContext";
+import { toMoneyInputValue } from "../../../core/utils/formatMoneyInput";
 import type { DishDraft } from "./dishDraft";
 import { CategoryField } from "./product-form/CategoryField";
 import { KitchenStationPicker } from "./product-form/KitchenStationPicker";
+import { ProductPhotoPicker } from "./product-form/ProductPhotoPicker";
 import { RecipeBuilder } from "./product-form/RecipeBuilder";
 import { useProductForm } from "./product-form/useProductForm";
 
@@ -42,7 +45,11 @@ export interface ProductFormModalProps {
 }
 
 export function ProductFormModal({ product, aiDraft, onClose, onSave, saveError }: ProductFormModalProps) {
-  const form = useProductForm({ product, aiDraft, saveError, onSave, onClose });
+  const { can } = useAuth();
+  const form = useProductForm({ product, aiDraft, saveError, onSave, onClose, canViewCosts: can("inventory.viewCosts") });
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  // Con ingredientes, el costo lo calcula la receta: el campo se muestra bloqueado con ese valor.
+  const costFromRecipe = form.builder.rows.length > 0;
   const title = form.isEditing ? "Editar plato" : "Nuevo plato o receta";
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -116,15 +123,27 @@ export function ProductFormModal({ product, aiDraft, onClose, onSave, saveError 
 
           {/* 1 · Lo básico */}
           <section className="space-y-vimdy-md">
-            <VimdyInput
-              label="Nombre del plato"
-              value={form.name}
-              onChange={(e) => form.setName(e.target.value)}
-              placeholder="Ej. Hamburguesa clásica"
-              autoFocus={!aiDraft}
-              maxLength={80}
-            />
-            <div className="grid grid-cols-1 gap-vimdy-md sm:grid-cols-[1fr_11rem]">
+            <div>
+              <div className="flex items-end gap-vimdy-md">
+                <div className="min-w-0 flex-1">
+                  <VimdyInput
+                    label="Nombre del plato"
+                    value={form.name}
+                    onChange={(e) => form.setName(e.target.value)}
+                    placeholder="Ej. Hamburguesa clásica"
+                    autoFocus={!aiDraft}
+                    maxLength={80}
+                  />
+                </div>
+                <ProductPhotoPicker value={form.image} onChange={form.setImage} onError={setPhotoError} disabled={form.saving} />
+              </div>
+              {photoError && (
+                <p role="alert" className="mt-vimdy-xs text-vimdy-micro text-vimdy-danger">
+                  {photoError}
+                </p>
+              )}
+            </div>
+            <div className="grid grid-cols-1 gap-vimdy-md sm:grid-cols-[1fr_auto]">
               <CategoryField
                 categories={form.categories}
                 value={form.categoryId}
@@ -136,22 +155,50 @@ export function ProductFormModal({ product, aiDraft, onClose, onSave, saveError 
                 creating={form.creatingCategory}
                 error={form.categoryError}
               />
-              <div className="flex flex-col gap-1.5">
-                <label htmlFor="product-form-price" className="text-vimdy-small text-vimdy-text-secondary">
-                  Precio de venta
-                </label>
-                <div className="relative">
-                  <span aria-hidden="true" className="pointer-events-none absolute left-vimdy-md top-1/2 -translate-y-1/2 text-vimdy-text-tertiary">
-                    $
-                  </span>
-                  <MoneyInput
-                    id="product-form-price"
-                    value={form.price}
-                    onValueChange={form.setPrice}
-                    placeholder="0"
-                    className="w-full rounded-vimdy-sm border border-vimdy-border bg-vimdy-surface py-vimdy-sm pl-8 pr-vimdy-md text-vimdy-body tabular-nums text-vimdy-text outline-none transition-colors duration-vimdy-fast placeholder:text-vimdy-text-tertiary focus:border-vimdy-accent focus:ring-2 focus:ring-vimdy-accent/20"
-                  />
+              <div className={`grid gap-vimdy-md ${form.showCostField ? "grid-cols-2 sm:w-[23rem]" : "grid-cols-1 sm:w-[11rem]"}`}>
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="product-form-price" className="text-vimdy-small text-vimdy-text-secondary">
+                    Precio de venta
+                  </label>
+                  <div className="relative">
+                    <span aria-hidden="true" className="pointer-events-none absolute left-vimdy-md top-1/2 -translate-y-1/2 text-vimdy-text-tertiary">
+                      $
+                    </span>
+                    <MoneyInput
+                      id="product-form-price"
+                      value={form.price}
+                      onValueChange={form.setPrice}
+                      placeholder="0"
+                      className="w-full rounded-vimdy-sm border border-vimdy-border bg-vimdy-surface py-vimdy-sm pl-8 pr-vimdy-md text-vimdy-body tabular-nums text-vimdy-text outline-none transition-colors duration-vimdy-fast placeholder:text-vimdy-text-tertiary focus:border-vimdy-accent focus:ring-2 focus:ring-vimdy-accent/20"
+                    />
+                  </div>
                 </div>
+                {form.showCostField && (
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="product-form-cost" className="text-vimdy-small text-vimdy-text-secondary">
+                      Costo de compra
+                    </label>
+                    <div className="relative">
+                      <span aria-hidden="true" className="pointer-events-none absolute left-vimdy-md top-1/2 -translate-y-1/2 text-vimdy-text-tertiary">
+                        $
+                      </span>
+                      <MoneyInput
+                        id="product-form-cost"
+                        value={costFromRecipe ? (form.summary ? toMoneyInputValue(Math.round(form.summary.cost)) : "") : form.cost}
+                        onValueChange={form.setCost}
+                        disabled={costFromRecipe}
+                        aria-describedby={costFromRecipe ? "product-form-cost-hint" : undefined}
+                        placeholder="Opcional"
+                        className="w-full rounded-vimdy-sm border border-vimdy-border bg-vimdy-surface py-vimdy-sm pl-8 pr-vimdy-md text-vimdy-body tabular-nums text-vimdy-text outline-none transition-colors duration-vimdy-fast placeholder:text-vimdy-text-tertiary focus:border-vimdy-accent focus:ring-2 focus:ring-vimdy-accent/20 disabled:cursor-not-allowed disabled:opacity-60"
+                      />
+                    </div>
+                    {costFromRecipe && (
+                      <p id="product-form-cost-hint" className="text-vimdy-micro text-vimdy-text-tertiary">
+                        Lo calcula la receta.
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </section>

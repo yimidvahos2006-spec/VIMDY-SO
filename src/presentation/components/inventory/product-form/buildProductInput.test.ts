@@ -75,6 +75,45 @@ describe("buildProductInput", () => {
   });
 });
 
+describe("buildProductInput: costo directo y foto", () => {
+  it("sin ingredientes: guarda el costo de compra escrito", () => {
+    const r = buildProductInput({ ...base, cost: "8.500", rows: [] });
+    expect(r.ok && r.input.purchasePrice).toBe(8500);
+  });
+
+  it("sin ingredientes y costo vacío: queda sin costo", () => {
+    const r = buildProductInput({ ...base, cost: "", rows: [] });
+    expect(r.ok && r.input.purchasePrice).toBeUndefined();
+  });
+
+  it("costo inválido se rechaza", () => {
+    expect(buildProductInput({ ...base, cost: "abc", rows: [] })).toMatchObject({ ok: false });
+    expect(buildProductInput({ ...base, cost: "-5", rows: [] })).toMatchObject({ ok: false });
+  });
+
+  it("con ingredientes: el costo escrito se ignora (manda la receta)", () => {
+    const r = buildProductInput({ ...base, cost: "8.500", rows: [row("huevo", "2")] });
+    expect(r.ok && r.input.purchasePrice).toBeUndefined();
+    const editing = product({ id: "p", name: "Pan", categoryId: "c1", price: 4500, purchasePrice: 1200 });
+    const e = buildProductInput({ ...base, product: editing, cost: "8.500", rows: [row("huevo", "2")] });
+    expect(e.ok && e.input.purchasePrice).toBe(1200);
+  });
+
+  it("cost undefined (sin permiso de costos) conserva el costo guardado", () => {
+    const editing = product({ id: "p", name: "Pan", categoryId: "c1", price: 4500, purchasePrice: 1200 });
+    const r = buildProductInput({ ...base, product: editing, rows: [] });
+    expect(r.ok && r.input.purchasePrice).toBe(1200);
+  });
+
+  it("foto: se conserva, se cambia o se quita", () => {
+    const editing = product({ id: "p", name: "Pan", categoryId: "c1", price: 4500, image: "data:old" });
+    expect(buildProductInput({ ...base, product: editing, rows: [] })).toMatchObject({ ok: true, input: { image: "data:old" } });
+    expect(buildProductInput({ ...base, product: editing, image: "data:new", rows: [] })).toMatchObject({ ok: true, input: { image: "data:new" } });
+    const removed = buildProductInput({ ...base, product: editing, image: "", rows: [] });
+    expect(removed.ok && removed.input.image).toBeUndefined();
+  });
+});
+
 describe("resolveStationOverride", () => {
   it("vacío o igual a la de la categoría -> sin override", () => {
     expect(resolveStationOverride("", cats[0])).toBeUndefined();

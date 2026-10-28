@@ -1,10 +1,10 @@
 // src/presentation/components/inventory/product-form/KitchenStationPicker.tsx
 //
-// "¿Dónde se prepara?": selector opcional de estación (Cocina, Barra...).
-// Sin elegir nada, el ticket va a la estación de la categoría.
+// "¿A qué área va la comanda?": selector opcional de estación (Cocina, Barra...).
+// Sin elegir nada, la comanda va a la estación de la categoría.
 
-import React, { useId, useState } from "react";
-import { Plus } from "lucide-react";
+import React, { useEffect, useId, useRef, useState } from "react";
+import { HelpCircle, Plus } from "lucide-react";
 
 interface Props {
   /** "" = automática. */
@@ -24,8 +24,23 @@ const chip = (selected: boolean) =>
 
 export function KitchenStationPicker({ value, onChange, stations, autoLabel }: Props) {
   const titleId = useId();
+  const helpId = useId();
+  const sectionRef = useRef<HTMLElement>(null);
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState("");
+  // Ayuda: se abre al pasar el cursor/enfocar, o fija con clic (para táctil).
+  const [helpPinned, setHelpPinned] = useState(false);
+  const [helpHover, setHelpHover] = useState(false);
+  const helpOpen = helpPinned || helpHover;
+
+  useEffect(() => {
+    if (!helpPinned) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (!sectionRef.current?.contains(e.target as Node)) setHelpPinned(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [helpPinned]);
 
   function commitDraft() {
     const typed = draft.trim();
@@ -40,15 +55,57 @@ export function KitchenStationPicker({ value, onChange, stations, autoLabel }: P
   const options = isCustom ? [...stations, value] : stations;
 
   return (
-    <section aria-labelledby={titleId} className="space-y-vimdy-sm">
+    <section ref={sectionRef} aria-labelledby={titleId} className="relative space-y-vimdy-sm">
       <div>
-        <h3 id={titleId} className="text-vimdy-small font-semibold text-vimdy-text">
-          ¿A dónde va el ticket?
-        </h3>
+        <div className="flex items-center gap-vimdy-xs">
+          <h3 id={titleId} className="text-vimdy-small font-semibold text-vimdy-text">
+            ¿A qué área va la comanda?
+          </h3>
+          <button
+            type="button"
+            aria-label="Más información sobre las áreas de envío"
+            aria-expanded={helpOpen}
+            aria-controls={helpId}
+            onClick={() => setHelpPinned((v) => !v)}
+            onMouseEnter={() => setHelpHover(true)}
+            onMouseLeave={() => setHelpHover(false)}
+            onFocus={() => setHelpHover(true)}
+            onBlur={() => setHelpHover(false)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && helpOpen) {
+                e.stopPropagation();
+                setHelpPinned(false);
+                setHelpHover(false);
+              }
+            }}
+            className="inline-flex h-5 w-5 items-center justify-center rounded-full text-vimdy-text-tertiary transition-colors duration-vimdy-fast hover:text-vimdy-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vimdy-accent/40"
+          >
+            <HelpCircle size={15} aria-hidden="true" />
+          </button>
+        </div>
         <p className="text-vimdy-micro font-normal text-vimdy-text-tertiary">
-          Opcional. Si no eliges, va a: {autoLabel}.
+          Opcional. Elige la pantalla de cocina (KDS) o estación que prepara este plato. Si no eliges, se envía a: {autoLabel}.
         </p>
       </div>
+
+      {helpOpen && (
+        <div
+          id={helpId}
+          role="tooltip"
+          onMouseEnter={() => setHelpHover(true)}
+          onMouseLeave={() => setHelpHover(false)}
+          className="absolute bottom-full left-0 z-20 mb-vimdy-xs w-full max-w-sm rounded-vimdy-md border border-vimdy-border bg-vimdy-background-secondary p-vimdy-md text-vimdy-small text-vimdy-text-secondary shadow-lg"
+        >
+          <p>
+            Si tu negocio es pequeño y la barra está en la misma caja, déjalo en <strong className="font-semibold text-vimdy-text">Cocina</strong> o{" "}
+            <strong className="font-semibold text-vimdy-text">Automático</strong>: no necesitas más.
+          </p>
+          <p className="mt-vimdy-xs">
+            Si tienes pantallas TV o impresoras separadas, elige <strong className="font-semibold text-vimdy-text">Barra</strong> o crea una
+            nueva área con <strong className="font-semibold text-vimdy-text">+ Otra</strong>.
+          </p>
+        </div>
+      )}
 
       <div role="radiogroup" aria-labelledby={titleId} className="flex flex-wrap gap-vimdy-sm">
         <button type="button" role="radio" aria-checked={value === ""} onClick={() => onChange("")} className={chip(value === "")}>
