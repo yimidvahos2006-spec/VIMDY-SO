@@ -17,6 +17,8 @@
 
 import React, { useMemo, useRef, useState } from "react";
 import { Sparkles, X } from "lucide-react";
+import type { Category } from "../../../core/entities/Entities";
+import { autoCategoryValue, buildCategoryPickerOptions } from "../../../core/utils/insumoCategoryChoice";
 import { MoneyInput } from "../ui/MoneyInput";
 import { parseMoneyInput } from "../../../core/utils/parseMoneyInput";
 import { compatibleUnits, convertQuantity, normalizeUnit } from "../../../core/utils/unitConversion";
@@ -34,6 +36,11 @@ export interface QuickIngredientPayload {
   storedUnit: string;
   /** Precio de compra de UNA `storedUnit` completa. undefined si no lo escribió. */
   purchasePrice?: number;
+  /**
+   * Categoría que el dueño eligió a mano en el selector ("id" o "new:Nombre").
+   * null = no tocó el selector: se usa la sugerida según el nombre.
+   */
+  categoryChoice: string | null;
   /** Cantidad que lleva el plato, tal cual la escribió ("200"). Puede venir vacía. */
   quantity: string;
   /** Unidad en la que escribió la cantidad ("g"). "" = misma que storedUnit. */
@@ -42,6 +49,8 @@ export interface QuickIngredientPayload {
 
 interface Props {
   initialName: string;
+  /** Categorías de insumos que el negocio ya tiene (para el selector del insumo nuevo). */
+  categories: readonly Category[];
   creating: boolean;
   onSubmit: (payload: QuickIngredientPayload) => void | Promise<void>;
   onCancel: () => void;
@@ -77,8 +86,10 @@ const money = (v: number) => `$${Math.round(v).toLocaleString("es-CO")}`;
 const fieldBase =
   "h-11 px-3 rounded-vimdy-sm bg-vimdy-surface border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-recipe";
 
-export function QuickIngredientCard({ initialName, creating, onSubmit, onCancel }: Props) {
+export function QuickIngredientCard({ initialName, categories, creating, onSubmit, onCancel }: Props) {
   const [name, setName] = useState(initialName);
+  // null = automática (sigue al nombre); si la cambia a mano, se respeta.
+  const [manualCategory, setManualCategory] = useState<string | null>(null);
   const [storedUnit, setStoredUnit] = useState("kg");
   const [quantity, setQuantity] = useState("");
   const [recipeUnit, setRecipeUnit] = useState("g");
@@ -97,6 +108,11 @@ export function QuickIngredientCard({ initialName, creating, onSubmit, onCancel 
   const isCountable = !["kg", "litro", "libra"].includes(normalizeUnit(effectiveUnit));
   const packCost = useMemo(() => (isPack ? computePackUnitCost(packUnits, price) : null), [isPack, packUnits, price]);
   const packReady = !isPack || packCost !== null;
+
+  // Este selector solo existe porque el insumo es NUEVO; uno que ya existe nunca llega aquí.
+  const categoryOptions = useMemo(() => buildCategoryPickerOptions(categories), [categories]);
+  const nameReady = name.trim().length >= 2;
+  const categoryValue = manualCategory ?? (nameReady ? autoCategoryValue(name, categories) : "");
 
   // Al cambiar el formato de compra, la unidad de la receta pasa a la más natural:
   // kilo/libra -> gramos, litro -> mililitros, el resto -> la misma unidad.
@@ -131,6 +147,7 @@ export function QuickIngredientCard({ initialName, creating, onSubmit, onCancel 
       if (!packCost) return;
       void onSubmit({
         name: trimmed,
+        categoryChoice: manualCategory,
         storedUnit: "unidad",
         purchasePrice: packCost.unitCost,
         quantity: quantity.trim(),
@@ -141,6 +158,7 @@ export function QuickIngredientCard({ initialName, creating, onSubmit, onCancel 
     const parsedPrice = price.trim() ? parseMoneyInput(price) : undefined;
     void onSubmit({
       name: trimmed,
+      categoryChoice: manualCategory,
       storedUnit,
       purchasePrice: parsedPrice !== undefined && Number.isFinite(parsedPrice) && parsedPrice > 0 ? parsedPrice : undefined,
       quantity: quantity.trim(),
@@ -155,21 +173,39 @@ export function QuickIngredientCard({ initialName, creating, onSubmit, onCancel 
         if (e.key === "Escape") onCancel();
       }}
     >
-      {/* 1 · Nombre */}
-      <input
-        autoFocus
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            qtyRef.current?.focus();
-          }
-        }}
-        placeholder="¿Qué ingrediente es? (ej: Arroz, Leche...)"
-        aria-label="Nombre del ingrediente"
-        className={`w-full ${fieldBase}`}
-      />
+      {/* 1 · Nombre + categoría del insumo nuevo (se sugiere sola según el nombre) */}
+      <div className="flex flex-col sm:flex-row gap-2">
+        <input
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              qtyRef.current?.focus();
+            }
+          }}
+          placeholder="¿Qué ingrediente es? (ej: Arroz, Leche...)"
+          aria-label="Nombre del ingrediente"
+          className={`w-full sm:flex-1 ${fieldBase}`}
+        />
+        <select
+          value={categoryValue}
+          onChange={(e) => setManualCategory(e.target.value || null)}
+          aria-label="Categoría del insumo"
+          title="Categoría del insumo"
+          className={`w-full sm:w-44 shrink-0 text-vimdy-text-secondary ${fieldBase}`}
+        >
+          <option value="" disabled hidden>
+            Categoría
+          </option>
+          {categoryOptions.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </div>
 
       {/* 2 · Cantidad que lleva el plato (PRINCIPAL) */}
       <div>

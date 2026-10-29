@@ -12,7 +12,8 @@ import { compatibleUnits } from "../../../../core/utils/unitConversion";
 import { discardQuickIngredients } from "../quickIngredientCleanup";
 import type { QuickIngredientPayload } from "../QuickIngredientCard";
 import { filterIngredientOptions, normalizeSearch } from "../recipeFormHelpers";
-import { createInsumo, ensureInsumoCategory } from "./insumoFactory";
+import { resolveInsumoCategory } from "../../../../core/utils/insumoCategoryChoice";
+import { createInsumo, createInsumoCategory } from "./insumoFactory";
 import type { RecipeRowDraft } from "./productFormTypes";
 
 interface Args {
@@ -121,19 +122,25 @@ export function useRecipeBuilder({
 
   const submitQuickCreate = useCallback(
     async (payload: QuickIngredientPayload) => {
-      const { name, purchasePrice, storedUnit, quantity, recipeUnit } = payload;
+      const { name, purchasePrice, storedUnit, quantity, recipeUnit, categoryChoice } = payload;
       setCreating(true);
       try {
-        const insumoCategory = await ensureInsumoCategory(insumoCategories);
-        if (!insumoCategory) {
-          toast.error("No se pudo preparar la categoría de insumos. Intenta de nuevo.");
+        // Insumo nuevo: va a la categoría elegida o a la sugerida según su nombre (no a "la primera").
+        const resolved = await resolveInsumoCategory({
+          name,
+          manualChoice: categoryChoice,
+          categories: insumoCategories,
+          createCategory: createInsumoCategory
+        });
+        if (!resolved.ok) {
+          toast.error(resolved.reason);
           return;
         }
-        const { created: newCategory } = insumoCategory;
+        const { created: newCategory } = resolved;
         if (newCategory) setInsumoCategories((prev) => (prev.some((c) => c.id === newCategory.id) ? prev : [...prev, newCategory]));
 
         const insumo = await createInsumo(
-          { name, categoryId: insumoCategory.categoryId, unit: storedUnit, purchasePrice },
+          { name, categoryId: resolved.categoryId, unit: storedUnit, purchasePrice },
           allProducts
         );
         createdIdsRef.current = [...createdIdsRef.current, insumo.id];
@@ -244,6 +251,7 @@ export function useRecipeBuilder({
       if (rowId) setFocusRowId(rowId);
     },
     // crear al vuelo
+    insumoCategories,
     quickName,
     creating,
     openQuickCreate,

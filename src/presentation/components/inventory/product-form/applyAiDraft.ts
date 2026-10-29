@@ -8,7 +8,8 @@
 import type { Category, Product } from "../../../../core/entities/Entities";
 import { DishDraft, formatDishQuantity, planRecipeRow, storedUnitFor } from "../dishDraft";
 import { normalizeSearch } from "../recipeFormHelpers";
-import { createInsumo, ensureInsumoCategory } from "./insumoFactory";
+import { resolveInsumoCategory } from "../../../../core/utils/insumoCategoryChoice";
+import { createInsumo, createInsumoCategory } from "./insumoFactory";
 import type { RecipeRowDraft } from "./productFormTypes";
 
 export interface AiDraftResult {
@@ -24,7 +25,8 @@ export interface AiDraftResult {
   rows: RecipeRowDraft[];
   notices: string[];
   createdProducts: Product[];
-  createdCategory?: Category;
+  /** Categorías de insumos que se crearon para ubicar los insumos nuevos (Carnes, Verduras...). */
+  createdCategories: Category[];
 }
 
 export async function applyAiDraft(
@@ -34,7 +36,7 @@ export async function applyAiDraft(
   products: readonly Product[]
 ): Promise<AiDraftResult> {
   const notices: string[] = [];
-  const result: AiDraftResult = { name: draft.name, rows: [], notices, createdProducts: [] };
+  const result: AiDraftResult = { name: draft.name, rows: [], notices, createdProducts: [], createdCategories: [] };
 
   if (draft.price) result.price = draft.price;
   else notices.push("No dijiste el precio de venta: escríbelo antes de guardar.");
@@ -65,7 +67,6 @@ export async function applyAiDraft(
   const usedIds = new Set<string>();
   let known: Product[] = [...products];
   let knownInsumoCategories: Category[] = [...insumoCategories];
-  let insumoCategoryId: string | undefined = knownInsumoCategories[0]?.id;
 
   for (const ingredient of draft.ingredients) {
     let productId = ingredient.match?.productId;
@@ -74,18 +75,22 @@ export async function applyAiDraft(
 
     if (!productId) {
       try {
-        if (!insumoCategoryId) {
-          const ensured = await ensureInsumoCategory(knownInsumoCategories);
-          if (!ensured) throw new Error("INSUMO_CATEGORY_UNAVAILABLE");
-          insumoCategoryId = ensured.categoryId;
-          if (ensured.created) {
-            knownInsumoCategories = [...knownInsumoCategories, ensured.created];
-            result.createdCategory = ensured.created;
-          }
+        // Cada insumo nuevo va a la categoría que sugiere su nombre (no a "la primera de la lista").
+        // Las que se vayan creando quedan en `knownInsumoCategories` y se reutilizan, sin duplicar.
+        const resolved = await resolveInsumoCategory({
+          name: ingredient.name,
+          manualChoice: null,
+          categories: knownInsumoCategories,
+          createCategory: createInsumoCategory
+        });
+        if (!resolved.ok) throw new Error(resolved.reason);
+        if (resolved.created) {
+          knownInsumoCategories = [...knownInsumoCategories, resolved.created];
+          result.createdCategories.push(resolved.created);
         }
         storedUnit = storedUnitFor(ingredient.unit);
         const insumo = await createInsumo(
-          { name: ingredient.name, categoryId: insumoCategoryId, unit: storedUnit },
+          { name: ingredient.name, categoryId: resolved.categoryId, unit: storedUnit },
           known
         );
         known = [...known, insumo];

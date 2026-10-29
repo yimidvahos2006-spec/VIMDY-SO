@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import { ConfirmModal } from "../ui/ConfirmModal";
 import { QuickWasteModal } from "./QuickWasteModal";
+import { QuickInsumoModal } from "./QuickInsumoModal";
 import { useAuth } from "../../context/AuthContext";
 import { hasMaskedStock, isStockMasked, stockMaskBadge } from "../../../core/utils/stockMask";
 
@@ -44,6 +45,8 @@ const money = (value: number) => {
 };
 
 type Tab = "insumos" | "recetas" | "historial";
+
+const LEGACY_UNIT_NAMES: Record<string, string> = { lt: "litro", lb: "libra" };
 
 // Motivos de un ajuste hacia abajo, en palabras del dueño. Cada uno queda
 // guardado con su categoría de pérdida real en el historial de movimientos.
@@ -452,7 +455,23 @@ export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
         </div>
       )}
 
-      {showNewInsumo && (
+      {showNewInsumo && !editingInsumo && (
+        <QuickInsumoModal
+          categories={visibleCategories}
+          canViewCosts={canViewCosts}
+          onCreateCategory={(name) => createCategory({ name, kind: "INSUMO", requiresKitchenByDefault: false })}
+          onClose={() => setShowNewInsumo(false)}
+          onSave={async (input) => {
+            // createProduct NO lanza error: devuelve false si algo falla (nombre repetido, etc.).
+            const saved = await createProduct(input);
+            if (!saved) {
+              throw new Error("No se pudo guardar el insumo. Revisa que no tengas ya uno con ese nombre.");
+            }
+          }}
+        />
+      )}
+
+      {showNewInsumo && editingInsumo && (
         <InsumoFormModal
           insumo={editingInsumo}
           categories={visibleCategories}
@@ -469,15 +488,13 @@ export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
             // createProduct/updateProduct NO lanzan error: devuelven false si
             // algo falla (nombre repetido, etc.). Antes se ignoraba ese valor y
             // se mostraba "Insumo creado" aunque no se hubiera guardado nada.
-            const saved = editingInsumo
-              ? await updateProduct(editingInsumo.id, input)
-              : await createProduct(input);
+            const saved = await updateProduct(editingInsumo.id, input);
             if (!saved) {
               throw new Error(
                 "No se pudo guardar el insumo. Revisa que el nombre, el SKU o el código de barras no estén repetidos."
               );
             }
-            toast.success(editingInsumo ? "Insumo actualizado." : "Insumo creado.");
+            toast.success("Insumo actualizado.");
             setShowNewInsumo(false);
             setEditingInsumo(null);
             return true;
@@ -538,7 +555,8 @@ function InsumoFormModal({
   const [purchasePrice, setPurchasePrice] = useState(toMoneyInputValue(insumo?.purchasePrice ?? 0));
   const [stock, setStock] = useState(insumo?.stock ? String(insumo.stock) : "");
   const [minStock, setMinStock] = useState(insumo?.minStock ? String(insumo.minStock) : "");
-  const [unit, setUnit] = useState(insumo?.unit ?? "");
+  // "lt"/"lb" son escrituras viejas de litro/libra: se muestran bien en el selector.
+  const [unit, setUnit] = useState(LEGACY_UNIT_NAMES[insumo?.unit ?? ""] ?? insumo?.unit ?? "");
   // Solo cuando compra por Paquete / Caja: cuántas unidades trae (el precio total va en `purchasePrice`).
   const [packUnits, setPackUnits] = useState("");
   const [sku, setSku] = useState(insumo?.sku ?? "");
@@ -778,9 +796,9 @@ function InsumoFormModal({
                 <option value="">Sin unidad</option>
                 <option value="kg">Kilogramo (kg)</option>
                 <option value="g">Gramo (g)</option>
-                <option value="lt">Litro (lt)</option>
+                <option value="litro">Litro</option>
                 <option value="ml">Mililitro (ml)</option>
-                <option value="lb">Libra (lb)</option>
+                <option value="libra">Libra</option>
                 <option value="unidad">Unidad</option>
                 <option value="paquete">Paquete</option>
                 <option value="caja">Caja</option>

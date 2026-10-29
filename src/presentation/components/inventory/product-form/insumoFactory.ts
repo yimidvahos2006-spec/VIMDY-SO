@@ -4,30 +4,19 @@
 
 import type { Category, Product } from "../../../../core/entities/Entities";
 import { container } from "../../../../infrastructure/di/CompositionRoot";
+import { normalizeInsumoText } from "../../../../core/utils/insumoCategoryGuess";
 
 /**
- * Devuelve la categoría de INSUMOS a usar; si el negocio no tiene ninguna, crea
- * "Insumos". `created` viene lleno solo cuando se creó una nueva (para guardarla en el estado).
+ * Crea una categoría de INSUMOS. Si otra pestaña/dispositivo ya la creó, devuelve esa.
+ * null si no se pudo (p. ej. el nombre ya lo usa una categoría de productos).
  */
-export async function ensureInsumoCategory(
-  known: readonly Category[]
-): Promise<{ categoryId: string; created?: Category } | null> {
-  const existing = known[0];
-  if (existing) return { categoryId: existing.id };
-
+export async function createInsumoCategory(name: string): Promise<Category | null> {
+  const engine = container.categoryEngine.get();
   try {
-    const created = await container.categoryEngine.get().create({
-      name: "Insumos",
-      kind: "INSUMO",
-      requiresKitchenByDefault: false
-    });
-    return { categoryId: created.id, created };
+    return await engine.create({ name, kind: "INSUMO", requiresKitchenByDefault: false });
   } catch {
-    // Pudo haberse creado en otra pestaña/dispositivo: se busca antes de rendirse.
-    const all = await container.categoryEngine.get().listAll();
-    const found =
-      all.find((c) => c.kind === "INSUMO") ?? all.find((c) => c.name.trim().toLowerCase() === "insumos");
-    return found ? { categoryId: found.id, created: found } : null;
+    const all = await engine.listAll().catch(() => [] as Category[]);
+    return all.find((c) => c.kind === "INSUMO" && normalizeInsumoText(c.name) === normalizeInsumoText(name)) ?? null;
   }
 }
 

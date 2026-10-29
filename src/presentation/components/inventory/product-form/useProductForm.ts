@@ -109,7 +109,7 @@ export function useProductForm({ product, aiDraft, saveError, onSave, onClose, c
               void builder.discardAll();
               return;
             }
-            if (ai.createdCategory) setInsumoCategories((prev) => [...prev, ai.createdCategory!]);
+            if (ai.createdCategories.length > 0) setInsumoCategories((prev) => [...prev, ...ai.createdCategories]);
             if (ai.createdProducts.length > 0) setAllProducts((prev) => [...prev, ...ai.createdProducts]);
 
             setName(ai.name);

@@ -143,6 +143,7 @@ export function RecipeBuilder({ builder, allProducts, summary, loading }: Props)
         >
           <QuickIngredientCard
             initialName={quickName}
+            categories={builder.insumoCategories}
             creating={builder.creating}
             onSubmit={builder.submitQuickCreate}
             onCancel={builder.closeQuickCreate}
