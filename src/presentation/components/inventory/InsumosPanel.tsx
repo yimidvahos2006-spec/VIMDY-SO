@@ -37,6 +37,11 @@ import { QuickWasteModal } from "./QuickWasteModal";
 import { QuickInsumoModal } from "./QuickInsumoModal";
 import { useAuth } from "../../context/AuthContext";
 import { hasMaskedStock, isStockMasked, stockMaskBadge } from "../../../core/utils/stockMask";
+import { buildInsumoUsage } from "../../../core/utils/insumoUsage";
+import { groupInsumosByCategory } from "../../../core/utils/insumoGrouping";
+import { formatInsumoAmount, insumoUnitLabel } from "../../../core/utils/insumoDisplay";
+import { computeCostImpact } from "../../../core/utils/recipeCostImpact";
+import { CostImpactNotice, type CostImpactNoticeData } from "./CostImpactNotice";
 
 const money = (value: number) => {
   const currency = companyConfigStore.get().currency;
@@ -85,6 +90,8 @@ export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
   const [purchaseTarget, setPurchaseTarget] = useState<Product | null>(null);
   const [purchaseQty, setPurchaseQty] = useState("");
   const [purchaseCost, setPurchaseCost] = useState("");
+  const [purchaseSaving, setPurchaseSaving] = useState(false);
+  const [costNotice, setCostNotice] = useState<CostImpactNoticeData | null>(null);
   const [adjustTarget, setAdjustTarget] = useState<Product | null>(null);
   const [adjustCount, setAdjustCount] = useState("");
   const [adjustReason, setAdjustReason] = useState<LossCategory>("AJUSTE_ADMINISTRATIVO");
@@ -117,10 +124,7 @@ export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       list = list.filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          (p.sku && p.sku.toLowerCase().includes(q)) ||
-          (p.barcode && p.barcode.toLowerCase().includes(q))
+        (p) => p.name.toLowerCase().includes(q) || (p.sku && p.sku.toLowerCase().includes(q))
       );
     }
 
@@ -162,42 +166,78 @@ export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
     }
   }
 
-  // Qué productos de venta consumen cada insumo (receta vinculada).
-  const usedIn = new Map<string, string[]>();
-  products.forEach((p) => {
-    if (p.isIngredient === true || !p.recipe) return;
-    p.recipe.forEach((r) => usedIn.set(r.productId, [...(usedIn.get(r.productId) ?? []), p.name]));
-  });
-  const grouped = (() => {
-    const m = new Map<string, Product[]>();
-    filteredInsumos.forEach((i) => m.set(i.categoryId, [...(m.get(i.categoryId) ?? []), i]));
-    return [...m.entries()]
-      .map(([id, items]) => ({
-        id,
-        name: categories.find((c) => c.id === id)?.name ?? "Sin categoría",
-        items: [...items].sort((x, y) => x.name.localeCompare(y.name))
-      }))
-      .sort((x, y) => x.name.localeCompare(y.name));
-  })();
+  // En qué platos se usa cada insumo (receta base, tamaños y extras).
+  const usedIn = useMemo(() => buildInsumoUsage(products), [products]);
+  // Categorías automáticas: A-Z, "Sin categoría" al final.
+  const grouped = useMemo(
+    () => groupInsumosByCategory(filteredInsumos, [...categories, ...visibleCategories]),
+    [filteredInsumos, categories, visibleCategories]
+  );
+
+  function closePurchase() {
+    setPurchaseTarget(null);
+    setPurchaseQty("");
+    setPurchaseCost("");
+  }
+
+  // Compra en curso, leída siempre del stock/costo ACTUAL del insumo.
+  const purchaseCurrent = purchaseTarget ? products.find((p) => p.id === purchaseTarget.id) ?? purchaseTarget : null;
+  const purchaseQtyValue = purchaseQty.trim() === "" ? null : Number(purchaseQty.replace(",", "."));
+  const purchaseQtyOk = purchaseQtyValue !== null && Number.isFinite(purchaseQtyValue) && purchaseQtyValue > 0;
+  const purchaseCostValue = purchaseCost.trim() === "" ? null : parseMoneyInput(purchaseCost);
+  const purchaseCostChanges =
+    canViewCosts &&
+    purchaseCurrent !== null &&
+    purchaseCostValue !== null &&
+    Number.isFinite(purchaseCostValue) &&
+    purchaseCostValue > 0 &&
+    purchaseCostValue !== (purchaseCurrent.purchasePrice ?? 0);
 
   async function confirmPurchase() {
-    if (!purchaseTarget) return;
-    const qty = Number(purchaseQty);
-    if (!Number.isFinite(qty) || qty <= 0) {
-      toast.error("Ingresa una cantidad mayor que 0.");
+    if (!purchaseCurrent || purchaseSaving) return;
+    const target = purchaseCurrent;
+    if (!purchaseQtyOk || purchaseQtyValue === null) {
+      toast.error("Escribe cuánto entró (un número mayor que 0).");
       return;
     }
-    const cost = purchaseCost.trim() === "" ? undefined : parseMoneyInput(purchaseCost);
-    if (cost !== undefined && (!Number.isFinite(cost) || cost < 0)) {
-      toast.error("El costo unitario no es válido.");
-      return;
+    let cost: number | undefined;
+    if (canViewCosts && purchaseCostValue !== null) {
+      if (!Number.isFinite(purchaseCostValue) || purchaseCostValue <= 0) {
+        toast.error(`El costo por ${insumoUnitLabel(target.unit, 1)} debe ser mayor que 0 (o déjalo vacío).`);
+        return;
+      }
+      cost = purchaseCostValue;
     }
-    const ok = await increaseStock(purchaseTarget.id, qty, "Compra de insumo", undefined, cost);
-    if (ok) {
-      toast.success(`Entrada registrada: ${qty} ${purchaseTarget.unit ?? "und"} de ${purchaseTarget.name}.`);
-      setPurchaseTarget(null);
-      setPurchaseQty("");
-      setPurchaseCost("");
+
+    // Qué platos cambian de costo: se calcula ANTES de guardar, con el catálogo de ahora.
+    const costChanged = cost !== undefined && cost !== (target.purchasePrice ?? 0);
+    const impact =
+      costChanged && cost !== undefined ? computeCostImpact(container.recipeEngine.get(), products, target.id, cost) : [];
+
+    setPurchaseSaving(true);
+    try {
+      const ok = await increaseStock(target.id, purchaseQtyValue, "Compra de insumo", undefined, cost);
+      if (!ok) return;
+      const amount = formatInsumoAmount(purchaseQtyValue, target.unit);
+      if (costChanged && cost !== undefined) {
+        toast.success(`Entrada registrada: ${amount} de ${target.name}. Costo actualizado a ${money(cost)} por ${insumoUnitLabel(target.unit, 1)}.`);
+        setCostNotice(
+          impact.length > 0
+            ? {
+                insumoName: target.name,
+                unitLabel: insumoUnitLabel(target.unit, 1),
+                costBefore: target.purchasePrice,
+                costAfter: cost,
+                changes: impact
+              }
+            : null
+        );
+      } else {
+        toast.success(`Entrada registrada: ${amount} de ${target.name}.`);
+      }
+      closePurchase();
+    } finally {
+      setPurchaseSaving(false);
     }
   }
 
@@ -270,6 +310,10 @@ export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
         </div>
       )}
 
+      {costNotice && (
+        <CostImpactNotice data={costNotice} formatMoneyValue={money} onClose={() => setCostNotice(null)} />
+      )}
+
       <div className="flex flex-col sm:flex-row gap-2">
         <div className="relative flex-1">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-vimdy-text-tertiary" />
@@ -315,16 +359,14 @@ export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
                     <tr className="text-left text-xs text-vimdy-text-tertiary">
                       <th className="px-4 py-2 font-medium">Insumo</th>
                       <th className="px-4 py-2 font-medium">Stock actual</th>
-                      <th className="px-4 py-2 font-medium">Mínimo</th>
-                      {canViewCosts && <th className="px-4 py-2 font-medium">Costo</th>}
-                      <th className="px-4 py-2 font-medium">Usado en</th>
+                      {canViewCosts && <th className="px-4 py-2 font-medium">Costo por unidad</th>}
+                      <th className="px-4 py-2 font-medium">Se usa en</th>
                       <th className="px-4 py-2 font-medium text-right">Acciones</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-vimdy-border">
                     {group.items.map((insumo) => {
                       const status = getStockStatus(insumo);
-                      const unit = insumo.unit || "und";
                       const uses = usedIn.get(insumo.id) ?? [];
                       const rowMasked = isStockMasked(insumo);
                       return (
@@ -334,18 +376,25 @@ export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
                             {insumo.sku && <p className="text-vimdy-text-tertiary text-xs">SKU: {insumo.sku}</p>}
                           </td>
                           <td className="px-4 py-3 whitespace-nowrap">
-                            <span className="inline-flex items-center gap-2 font-medium text-vimdy-text">
-                              <span className={`w-2 h-2 rounded-full ${status === "normal" ? "bg-vimdy-success" : status === "bajo" ? "bg-vimdy-warning" : "bg-vimdy-danger"}`} />
-                              {rowMasked ? stockMaskBadge(insumo).text : `${insumo.stock} ${unit}`}
+                            <span className="inline-flex items-center gap-2 font-semibold text-vimdy-text">
+                              <span aria-hidden="true" className={`w-2 h-2 rounded-full ${status === "normal" ? "bg-vimdy-success" : status === "bajo" ? "bg-vimdy-warning" : "bg-vimdy-danger"}`} />
+                              {rowMasked ? stockMaskBadge(insumo).text : formatInsumoAmount(insumo.stock, insumo.unit)}
                             </span>
+                            {!rowMasked && status !== "normal" && (
+                              <p className={`text-xs font-semibold mt-0.5 ${status === "bajo" ? "text-vimdy-warning" : "text-vimdy-danger"}`}>
+                                {status === "bajo" ? "Stock bajo" : "Agotado"}
+                              </p>
+                            )}
+                            {!rowMasked && insumo.minStock > 0 && (
+                              <p className="text-xs text-vimdy-text-tertiary mt-0.5">Mínimo: {formatInsumoAmount(insumo.minStock, insumo.unit)}</p>
+                            )}
                           </td>
-                          <td className="px-4 py-3 text-vimdy-text-secondary whitespace-nowrap">{insumo.minStock} {unit}</td>
                           {canViewCosts && (
                           <td className="px-4 py-3 text-vimdy-text whitespace-nowrap">
                             {rowMasked ? (
                               <span className="text-vimdy-text-tertiary text-xs">Oculto durante el conteo</span>
-                            ) : insumo.purchasePrice !== undefined ? (
-                              `${money(insumo.purchasePrice)} / ${unit}`
+                            ) : insumo.purchasePrice !== undefined && insumo.purchasePrice > 0 ? (
+                              `${money(insumo.purchasePrice)} por ${insumoUnitLabel(insumo.unit, 1)}`
                             ) : (
                               <span className="text-vimdy-warning text-xs">Sin costo</span>
                             )}
@@ -353,11 +402,18 @@ export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
                           )}
                           <td className="px-4 py-3">
                             {uses.length > 0 ? (
-                              <span title={uses.join(", ")} className="text-xs px-2 py-0.5 rounded-vimdy-sm bg-vimdy-recipe/20 text-vimdy-recipe border border-vimdy-recipe/30">
-                                {uses.length} {uses.length === 1 ? "receta" : "recetas"}
-                              </span>
+                              <div className="flex flex-wrap items-center gap-1 max-w-xs" title={uses.join(", ")}>
+                                {uses.slice(0, 2).map((dish) => (
+                                  <span key={dish} className="text-xs px-2 py-0.5 rounded-vimdy-sm bg-vimdy-recipe/20 text-vimdy-recipe border border-vimdy-recipe/30">
+                                    {dish}
+                                  </span>
+                                ))}
+                                {uses.length > 2 && (
+                                  <span className="text-xs text-vimdy-text-tertiary">+{uses.length - 2} más</span>
+                                )}
+                              </div>
                             ) : (
-                              <span className="text-xs text-vimdy-text-tertiary">Sin receta</span>
+                              <span className="text-xs text-vimdy-text-tertiary">Aún no está en ninguna receta</span>
                             )}
                           </td>
                           <td className="px-4 py-3">
@@ -390,29 +446,67 @@ export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
         </div>
       )}
 
-      {purchaseTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="w-full max-w-sm rounded-vimdy-lg border border-vimdy-border bg-vimdy-surface p-6 space-y-4">
+      {purchaseTarget && purchaseCurrent && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") closePurchase();
+          }}
+        >
+          <form
+            role="dialog"
+            aria-modal="true"
+            aria-label="Registrar compra"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void confirmPurchase();
+            }}
+            className="w-full max-w-sm rounded-vimdy-lg border border-vimdy-border bg-vimdy-surface p-6 space-y-4"
+          >
             <div className="flex items-start justify-between">
               <div>
                 <h3 className="text-lg font-bold text-vimdy-text">Registrar compra</h3>
-                <p className="text-sm text-vimdy-text-secondary">{purchaseTarget.name} · stock {purchaseTarget.stock} {purchaseTarget.unit ?? "und"}</p>
+                <p className="text-sm text-vimdy-text-secondary">
+                  {purchaseCurrent.name} · hay {formatInsumoAmount(purchaseCurrent.stock, purchaseCurrent.unit)}
+                </p>
               </div>
-              <button onClick={() => setPurchaseTarget(null)} aria-label="Cerrar" className="text-vimdy-text-secondary hover:text-vimdy-text"><X size={20} /></button>
+              <button type="button" onClick={closePurchase} aria-label="Cerrar" className="text-vimdy-text-secondary hover:text-vimdy-text"><X size={20} /></button>
             </div>
-            <label className="block text-xs font-semibold text-vimdy-text-secondary">Cantidad que entra ({purchaseTarget.unit ?? "und"})
-              <input type="number" min="0" step="any" autoFocus value={purchaseQty} onChange={(e) => setPurchaseQty(e.target.value)} className="mt-1 w-full h-10 px-3 rounded-vimdy-md bg-vimdy-background border border-vimdy-border text-vimdy-text text-sm" />
+            <label className="block text-xs font-semibold text-vimdy-text-secondary">Cantidad que entra ({insumoUnitLabel(purchaseCurrent.unit)})
+              <input
+                type="text"
+                inputMode="decimal"
+                autoFocus
+                value={purchaseQty}
+                onChange={(e) => setPurchaseQty(e.target.value.replace(/[^\d.,]/g, ""))}
+                placeholder="0"
+                className="mt-1 w-full h-11 px-3 rounded-vimdy-md bg-vimdy-background border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-accent"
+              />
             </label>
             {canViewCosts && (
-            <label className="block text-xs font-semibold text-vimdy-text-secondary">Costo por {purchaseTarget.unit ?? "und"} (opcional)
-              <MoneyInput value={purchaseCost} onValueChange={setPurchaseCost} placeholder="0" className="mt-1 w-full h-10 px-3 rounded-vimdy-md bg-vimdy-background border border-vimdy-border text-vimdy-text text-sm" />
-            </label>
+              <div>
+                <label className="block text-xs font-semibold text-vimdy-text-secondary">Costo por {insumoUnitLabel(purchaseCurrent.unit, 1)}
+                  <MoneyInput value={purchaseCost} onValueChange={setPurchaseCost} placeholder="0" className="mt-1 w-full h-11 px-3 rounded-vimdy-md bg-vimdy-background border border-vimdy-border text-vimdy-text text-sm focus:outline-none focus:border-vimdy-accent" />
+                </label>
+                <p className="text-vimdy-text-tertiary text-xs mt-1">
+                  {purchaseCostChanges && purchaseCurrent.purchasePrice
+                    ? `Antes: ${money(purchaseCurrent.purchasePrice)} por ${insumoUnitLabel(purchaseCurrent.unit, 1)}. Se actualiza el costo de tus recetas.`
+                    : purchaseCurrent.purchasePrice
+                      ? "Si no cambió el precio, déjalo como está."
+                      : `Lo que te costó un ${insumoUnitLabel(purchaseCurrent.unit, 1)}. Si no lo sabes, déjalo vacío.`}
+                </p>
+              </div>
+            )}
+            {purchaseQtyOk && purchaseQtyValue !== null && (
+              <p className="text-sm text-vimdy-text-secondary" aria-live="polite">
+                Después de la compra tendrás <strong className="text-vimdy-text">{formatInsumoAmount(purchaseCurrent.stock + purchaseQtyValue, purchaseCurrent.unit)}</strong>.
+              </p>
             )}
             <div className="flex justify-end gap-2">
-              <VimdyButton variant="secondary" onClick={() => setPurchaseTarget(null)}>Cancelar</VimdyButton>
-              <VimdyButton onClick={confirmPurchase}>Guardar compra</VimdyButton>
+              <VimdyButton type="button" variant="secondary" onClick={closePurchase} disabled={purchaseSaving}>Cancelar</VimdyButton>
+              <VimdyButton type="submit" loading={purchaseSaving} disabled={!purchaseQtyOk}>Guardar compra</VimdyButton>
             </div>
-          </div>
+          </form>
         </div>
       )}
 
@@ -422,7 +516,7 @@ export function InsumosPanel({ inventory }: { inventory: InventoryState }) {
             <div className="flex items-start justify-between">
               <div>
                 <h3 className="text-lg font-bold text-vimdy-text">Ajustar stock</h3>
-                <p className="text-sm text-vimdy-text-secondary">{adjustCurrent.name} · en el sistema hay {adjustCurrent.stock} {adjustCurrent.unit ?? "und"}</p>
+                <p className="text-sm text-vimdy-text-secondary">{adjustCurrent.name} · en el sistema hay {formatInsumoAmount(adjustCurrent.stock, adjustCurrent.unit)}</p>
               </div>
               <button onClick={closeAdjust} aria-label="Cerrar" className="text-vimdy-text-secondary hover:text-vimdy-text"><X size={20} /></button>
             </div>
@@ -551,7 +645,6 @@ function InsumoFormModal({
   const canViewCosts = can("inventory.viewCosts");
   const [name, setName] = useState(insumo?.name ?? "");
   const [categoryId, setCategoryId] = useState(insumo?.categoryId ?? categories[0]?.id ?? "");
-  const [price, setPrice] = useState(insumo?.price ?? 0);
   const [purchasePrice, setPurchasePrice] = useState(toMoneyInputValue(insumo?.purchasePrice ?? 0));
   const [stock, setStock] = useState(insumo?.stock ? String(insumo.stock) : "");
   const [minStock, setMinStock] = useState(insumo?.minStock ? String(insumo.minStock) : "");
@@ -560,7 +653,6 @@ function InsumoFormModal({
   // Solo cuando compra por Paquete / Caja: cuántas unidades trae (el precio total va en `purchasePrice`).
   const [packUnits, setPackUnits] = useState("");
   const [sku, setSku] = useState(insumo?.sku ?? "");
-  const [barcode, setBarcode] = useState(insumo?.barcode ?? "");
   const [supplierId, setSupplierId] = useState(insumo?.supplierId ?? "");
   const [alternateSupplierId, setAlternateSupplierId] = useState(insumo?.alternateSupplierId ?? "");
   const [active, setActive] = useState(insumo?.active ?? true);
@@ -664,13 +756,13 @@ function InsumoFormModal({
       await onSave({
         name: trimmedName,
         categoryId,
-        price,
+        price: 0,
         purchasePrice: purchasePriceValue,
         stock: stockValue,
         minStock: minStockValue,
         unit: unitToSave,
         sku: sku.trim() || undefined,
-        barcode: barcode.trim() || undefined,
+        barcode: undefined,
         supplierId: supplierId || undefined,
         alternateSupplierId: alternateSupplierId || undefined,
         active,
@@ -869,7 +961,7 @@ function InsumoFormModal({
               <div>
                 <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Stock actual</label>
                 <p className="h-11 px-3 flex items-center rounded-vimdy-md bg-vimdy-background border border-vimdy-border text-vimdy-text text-sm">
-                  {insumo.stock} {insumo.unit ?? "und"}
+                  {formatInsumoAmount(insumo.stock, insumo.unit)}
                 </p>
                 <p className="text-vimdy-text-tertiary text-xs mt-1">Para cambiarlo usa "Registrar compra" o "Ajustar stock".</p>
               </div>
@@ -931,25 +1023,15 @@ function InsumoFormModal({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">SKU</label>
-              <input
-                value={sku}
-                onChange={(e) => setSku(e.target.value)}
-                placeholder="Ej: INS-001"
-                className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-background border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
-              />
-            </div>
-            <div>
-              <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Código de barras</label>
-              <input
-                value={barcode}
-                onChange={(e) => setBarcode(e.target.value)}
-                placeholder="Ej: 7701234567890"
-                className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-background border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
-              />
-            </div>
+          <div>
+            <label className="block text-vimdy-text-secondary text-sm font-medium mb-1">Código interno (opcional)</label>
+            <input
+              value={sku}
+              onChange={(e) => setSku(e.target.value)}
+              placeholder="Ej: INS-001"
+              className="w-full h-11 px-3 rounded-vimdy-md bg-vimdy-background border border-vimdy-border text-vimdy-text text-sm placeholder:text-vimdy-text-tertiary focus:outline-none focus:border-vimdy-accent"
+            />
+            <p className="text-vimdy-text-tertiary text-xs mt-1">Solo para identificarlo en tu bodega. Los insumos no se venden sueltos ni llevan código de barras.</p>
           </div>
 
           <div className="flex items-center gap-2">

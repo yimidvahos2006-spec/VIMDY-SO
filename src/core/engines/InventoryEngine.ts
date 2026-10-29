@@ -66,6 +66,16 @@ export class InventoryEngine {
     }
   }
 
+  /**
+   * Los insumos (materia prima) solo existen para alimentar recetas: no se
+   * venden sueltos, así que no llevan código de barras. (El precio de venta se
+   * deja en 0 DESPUÉS de validar, para que un precio inválido se siga rechazando.)
+   */
+  private static withoutDirectSaleFields(input: ProductInput): ProductInput {
+    if (input.isIngredient !== true) return input;
+    return { ...input, barcode: undefined };
+  }
+
   private kindWord(product: Pick<Product, "isIngredient">): string {
     return product.isIngredient === true ? "insumo" : "producto";
   }
@@ -194,7 +204,7 @@ export class InventoryEngine {
 
     // El código de barras es único por negocio/sucursal (índice en la base de datos, incluye productos
     // inactivos e insumos). Se avisa aquí con un mensaje claro en vez de esperar el rechazo de la base.
-    const wantedBarcode = typeof input.barcode === "string" ? input.barcode.trim() : "";
+    const wantedBarcode = !wantsIngredient && typeof input.barcode === "string" ? input.barcode.trim() : "";
     if (wantedBarcode && all.some((p) => p.id !== selfId && (p.barcode ?? "").trim() === wantedBarcode)) {
       throw new Error("BARCODE_DUPLICADO");
     }
@@ -238,6 +248,9 @@ export class InventoryEngine {
       throw new Error('PRODUCT_NAME_REQUIRED');
     }
 
+    // Un insumo no se vende suelto: nunca lleva código de barras ni precio de venta.
+    input = InventoryEngine.withoutDirectSaleFields(input);
+
     // Todas las reglas (nombre repetido, precios, receta...) en un solo lugar.
     await this.validateProductInput(input, undefined, options?.knownProducts);
 
@@ -253,7 +266,7 @@ export class InventoryEngine {
       id: input.id ?? crypto.randomUUID(),
       name,
       categoryId,
-      price: input.price ?? 0,
+      price: input.isIngredient === true ? 0 : (input.price ?? 0),
       stock: input.stock ?? 0,
       minStock: input.minStock ?? 0,
       active: input.active ?? true,
@@ -504,8 +517,15 @@ export class InventoryEngine {
       throw new Error('PRODUCT_NOT_FOUND');
     }
 
+    // Un insumo no se vende suelto: nunca lleva código de barras ni precio de venta
+    // (también limpia los que hubiera guardado antes).
+    if ((input.isIngredient ?? existing.isIngredient) === true) {
+      input = InventoryEngine.withoutDirectSaleFields({ ...input, isIngredient: true });
+    }
+
     await this.validateProductInput(input, id, preloaded);
 
+    const updatedIsIngredient = (input.isIngredient ?? existing.isIngredient) === true;
     const updated: Product = {
       ...existing,
       ...input,
@@ -515,6 +535,8 @@ export class InventoryEngine {
       // que tenía al abrirse y pisaría las ventas hechas mientras tanto. Para
       // cambiarlo existen Aumentar / Disminuir / Ajustar stock (con kardex).
       stock: existing.stock,
+      // Un insumo nunca se vende: su precio de venta siempre es 0.
+      ...(updatedIsIngredient ? { price: 0 } : {}),
       lastUpdated: new Date(),
     };
 

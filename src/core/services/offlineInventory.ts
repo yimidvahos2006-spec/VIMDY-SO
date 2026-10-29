@@ -62,6 +62,7 @@ export async function queueIncreaseStockOffline(params: {
       await localRepository.save({
         ...product,
         stock: product.stock + params.quantity,
+        ...(params.purchasePrice !== undefined ? { purchasePrice: params.purchasePrice } : {}),
         lastUpdated: new Date()
       });
     }

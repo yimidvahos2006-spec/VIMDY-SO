@@ -156,11 +156,17 @@ export function useInventory() {
    * de este cambio, así que recargar desde ahí borraría el ajuste que el
    * usuario acaba de hacer hasta que se sincronice de verdad.
    */
-  function applyLocalStockDelta(productId: string, delta: number) {
+  function applyLocalStockDelta(productId: string, delta: number, purchasePrice?: number) {
     setProducts((current) =>
       current.map((product) =>
         product.id === productId
-          ? { ...product, stock: product.stock + delta, lastUpdated: new Date() }
+          ? {
+              ...product,
+              stock: product.stock + delta,
+              // Una compra con costo nuevo cambia el costo de las recetas aunque no haya internet.
+              ...(purchasePrice !== undefined ? { purchasePrice } : {}),
+              lastUpdated: new Date()
+            }
           : product
       )
     );
@@ -191,7 +197,7 @@ export function useInventory() {
         supplierId,
         purchasePrice
       });
-      applyLocalStockDelta(productId, quantity);
+      applyLocalStockDelta(productId, quantity, purchasePrice);
       return true;
     }
 
@@ -223,7 +229,7 @@ export function useInventory() {
           supplierId,
           purchasePrice
         });
-        applyLocalStockDelta(productId, quantity);
+        applyLocalStockDelta(productId, quantity, purchasePrice);
         return true;
       }
 
