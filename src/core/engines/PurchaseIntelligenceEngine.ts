@@ -1,242 +1,210 @@
 // src/core/engines/PurchaseIntelligenceEngine.ts
-import { Product, Sale } from "../entities/Entities";
-import { IRepository } from "../../infrastructure/di/repositories/IRepository";
-import { InventoryEngine } from "./InventoryEngine";
+import type { Product, Sale } from "../entities/Entities";
+import type { IRepository } from "../../infrastructure/di/repositories/IRepository";
+import type { InventoryEngine, SaleStockItem } from "./InventoryEngine";
+import { getSaleNetItems } from "../utils/saleRefunds";
+import {
+  DEFAULT_PURCHASE_PLANNING_CONFIG,
+  EMPTY_CONSUMPTION_WINDOW,
+  buildPurchaseAnalysis,
+  statusConsumesStock,
+  type ConsumptionWindow,
+  type PurchaseAnalysis,
+  type PurchasePlanningConfig,
+  type PurchaseRecommendation
+} from "../domain/purchasing";
 
-/** Ventana reciente usada para medir el ritmo de consumo actual. */
-const RECENT_WINDOW_DAYS = 7;
-/** Ventana anterior, para comparar y saber si el consumo sube o baja (motivo real, no inventado). */
-const PREVIOUS_WINDOW_DAYS = 7;
-/** Días de cobertura que se recomienda comprar de una sola vez. */
-const REORDER_COVERAGE_DAYS = 14;
-/** Días restantes a partir de los cuales la urgencia es alta / media. */
-const URGENT_DAYS_THRESHOLD = 2;
-const WARNING_DAYS_THRESHOLD = 5;
-/** Crecimiento mínimo (%) frente a la semana anterior para mencionarlo como motivo. */
-const GROWTH_MENTION_THRESHOLD = 15;
+// Los tipos viven en el dominio; se reexportan para no romper a quienes ya
+// importan desde este archivo (Dashboard de Compras, Copiloto, Pronóstico).
+export type {
+  ConsumptionDriver,
+  PurchaseAnalysis,
+  PurchaseAnalysisSummary,
+  PurchaseRecommendation,
+  PurchaseUrgency
+} from "../domain/purchasing";
 
-export type PurchaseUrgency = "ALTA" | "MEDIA" | "BAJA";
+const MS_PER_DAY = 1000 * 60 * 60 * 24;
 
-/**
- * Una recomendación de compra para UN insumo/producto simple, con todo lo
- * que el dueño necesita para decidir sin sacar calculadora: cuánto comprar,
- * qué tan urgente es, cuántos días quedan y por qué.
- */
-export interface PurchaseRecommendation {
-  readonly productId: string;
-  readonly productName: string;
-  readonly unit: string | null;
-  readonly currentStock: number;
-  readonly recommendedQuantity: number;
-  readonly urgency: PurchaseUrgency;
-  /** null si no hay ritmo de consumo medible todavía (sin ventas recientes). */
-  readonly daysUntilStockout: number | null;
-  readonly reason: string;
-  readonly alert: string;
-  /** true si este insumo se consume (también, o solo) porque es ingrediente de una receta que se vendió — no porque se venda suelto. */
-  readonly consumedViaRecipes: boolean;
-  /** false si todavía no hay consumo real medible (negocio nuevo o producto sin ventas): la cantidad sugerida es solo "completar hasta el mínimo", no una proyección de demanda. */
-  readonly basedOnSalesHistory: boolean;
+/** Profundidad máxima al seguir tandas que usan otras tandas (evita ciclos). */
+const MAX_PRODUCTION_DEPTH = 5;
+
+interface MutableWindow {
+  totals: Map<string, number>;
+  drivers: Map<string, Map<string, number>>;
+}
+
+function emptyWindow(): MutableWindow {
+  return { totals: new Map(), drivers: new Map() };
+}
+
+function addConsumption(window: MutableWindow, ingredientId: string, drivenBy: string, quantity: number): void {
+  if (!Number.isFinite(quantity) || quantity <= 0) return;
+  window.totals.set(ingredientId, (window.totals.get(ingredientId) ?? 0) + quantity);
+  const byProduct = window.drivers.get(ingredientId) ?? new Map<string, number>();
+  byProduct.set(drivenBy, (byProduct.get(drivenBy) ?? 0) + quantity);
+  window.drivers.set(ingredientId, byProduct);
 }
 
 /**
- * PurchaseIntelligenceEngine — PASO 2.6 (Compras Inteligentes).
+ * PurchaseIntelligenceEngine — Compras Inteligentes.
  * ---------------------------------------------------------------------------
- * Analiza inventario + velocidad de venta/consumo real (directa y, vía
- * RecipeEngine/recetas, indirecta) para recomendar qué comprar, cuánto y con
- * qué urgencia. SOLO analiza: no crea órdenes de compra ni modifica stock.
- * Toda cifra sale de datos reales (ventas y recetas ya guardadas); si no hay
- * suficiente historial para un producto, simplemente no aparece en la lista
- * — nunca se inventa una cantidad o una urgencia.
+ * Mide el consumo REAL de cada insumo a partir de las ventas del POS y lo
+ * entrega al dominio (core/domain/purchasing) para decidir qué comprar, cuánto
+ * y por qué. SOLO analiza: no crea órdenes de compra ni modifica stock.
+ *
+ * El consumo se expande con InventoryEngine.previewSaleConsumption, la MISMA
+ * función que usa Caja para descontar el inventario: tamaños, extras,
+ * sub-recetas y productos sin control de stock se tratan igual en ambos
+ * lados. Además:
+ *   - Las ventas canceladas o reembolsadas por completo no cuentan, y los
+ *     reembolsos parciales descuentan las unidades devueltas.
+ *   - Un producto por TANDAS (pan, salsas) descuenta su propio stock al
+ *     venderse, pero sus ingredientes se gastan al producir: esa demanda se
+ *     deriva de la receta para que el insumo no parezca "sin consumo".
+ *   - En un negocio con menos de 7 días de ventas el promedio diario se
+ *     calcula con los días realmente observados, no con 7.
  */
 export class PurchaseIntelligenceEngine {
   constructor(
     private readonly inventoryEngine: InventoryEngine,
-    private readonly saleRepository: IRepository<Sale>
+    private readonly saleRepository: IRepository<Sale>,
+    private readonly config: Partial<PurchasePlanningConfig> = {}
   ) {}
 
+  /** Lista de recomendaciones ordenada por urgencia (compatibilidad con Copiloto/Pronóstico). */
   public async getRecommendations(): Promise<PurchaseRecommendation[]> {
+    return (await this.analyze()).recommendations;
+  }
+
+  /** Recomendaciones + resumen (conteos por urgencia, costo estimado, cobertura de datos). */
+  public async analyze(now: Date = new Date()): Promise<PurchaseAnalysis> {
     const [products, sales] = await Promise.all([this.inventoryEngine.listAll(), this.saleRepository.findAll()]);
+    const windowDays = this.config.windowDays ?? DEFAULT_PURCHASE_PLANNING_CONFIG.windowDays;
 
-    const now = new Date();
-    const recent = this.buildConsumptionMap(products, sales, now, 0, RECENT_WINDOW_DAYS);
-    const previous = this.buildConsumptionMap(
+    const consumingSales = sales.filter((sale) => statusConsumesStock(sale.status));
+
+    // Días observados: un negocio con 3 días de ventas promedia sobre 3, no sobre 7.
+    const oldestAgeDays = consumingSales.reduce((oldest, sale) => {
+      const age = Math.max((now.getTime() - new Date(sale.createdAt).getTime()) / MS_PER_DAY, 0);
+      return Number.isFinite(age) ? Math.max(oldest, age) : oldest;
+    }, 0);
+    const observedDays = consumingSales.length === 0 ? windowDays : Math.min(Math.max(Math.ceil(oldestAgeDays), 1), windowDays);
+    const previousObservedDays = Math.min(Math.max(Math.ceil(oldestAgeDays) - windowDays, 1), windowDays);
+
+    const recent = this.measureConsumption(products, consumingSales, now, 0, windowDays);
+    const previous =
+      oldestAgeDays > windowDays
+        ? this.measureConsumption(products, consumingSales, now, windowDays, windowDays * 2)
+        : EMPTY_CONSUMPTION_WINDOW;
+
+    return buildPurchaseAnalysis({
       products,
-      sales,
-      now,
-      RECENT_WINDOW_DAYS,
-      RECENT_WINDOW_DAYS + PREVIOUS_WINDOW_DAYS
-    );
-
-    const recommendations: PurchaseRecommendation[] = [];
-
-    for (const product of products) {
-      // Solo se compran insumos/productos simples: un producto CON receta se
-      // prepara, no se compra. Lo que hay que comprar son sus ingredientes,
-      // y cada uno se evalúa por su cuenta en esta misma vuelta del bucle.
-      if (product.recipe && product.recipe.length > 0) continue;
-
-      // BLOQUEANTE (bug reportado en video 2026-07-31): un producto con
-      // trackStock === false (Servicio, o Cocina sin receta, ej. Caldo de
-      // Costilla) tampoco se compra — se prepara al momento — y se queda
-      // en stock 0 a propósito. Sin este chequeo, cada venta real subía su
-      // "ritmo de consumo" mientras el stock nunca se movía, así que
-      // siempre daba daysUntilStockout=0 y recomendaba comprarlo con
-      // urgencia ALTA para siempre.
-      if (product.trackStock === false) continue;
-
-      const dailyNow =
-        (recent.direct.get(product.id) ?? 0) / RECENT_WINDOW_DAYS +
-        (recent.recipe.get(product.id) ?? 0) / RECENT_WINDOW_DAYS;
-      const dailyBefore =
-        (previous.direct.get(product.id) ?? 0) / PREVIOUS_WINDOW_DAYS +
-        (previous.recipe.get(product.id) ?? 0) / PREVIOUS_WINDOW_DAYS;
-
-      const belowMinimum = product.minStock > 0 && product.stock <= product.minStock;
-
-      // Sin ritmo de consumo real y sin estar ya por debajo del mínimo: no
-      // hay con qué recomendar nada — se omite. Nunca se recomienda "por si
-      // acaso".
-      if (dailyNow <= 0 && !belowMinimum) continue;
-
-      const daysUntilStockout = dailyNow > 0 ? Math.floor(product.stock / dailyNow) : null;
-
-      const needsAttention =
-        belowMinimum || (daysUntilStockout !== null && daysUntilStockout <= REORDER_COVERAGE_DAYS);
-      if (!needsAttention) continue;
-
-      const recommendedQuantity = Math.ceil(
-        Math.max(
-          Math.ceil(dailyNow * REORDER_COVERAGE_DAYS) - product.stock,
-          product.minStock - product.stock,
-          belowMinimum ? 1 : 0
-        )
-      );
-      if (recommendedQuantity <= 0) continue;
-
-      let urgency: PurchaseUrgency;
-      if (product.stock <= 0 || (daysUntilStockout !== null && daysUntilStockout <= URGENT_DAYS_THRESHOLD)) {
-        urgency = "ALTA";
-      } else if (belowMinimum || (daysUntilStockout !== null && daysUntilStockout <= WARNING_DAYS_THRESHOLD)) {
-        urgency = "MEDIA";
-      } else {
-        urgency = "BAJA";
-      }
-
-      const growthPercent =
-        dailyBefore > 0 ? Math.round(((dailyNow - dailyBefore) / dailyBefore) * 100) : dailyNow > 0 ? 100 : 0;
-
-      recommendations.push({
-        productId: product.id,
-        productName: product.name,
-        unit: product.unit ?? null,
-        currentStock: product.stock,
-        recommendedQuantity,
-        urgency,
-        daysUntilStockout,
-        reason: this.buildReason({
-          daysUntilStockout,
-          belowMinimum,
-          growthPercent,
-          hadPreviousData: dailyBefore > 0,
-          basedOnSalesHistory: dailyNow > 0
-        }),
-        alert: this.buildAlert(product.name, urgency, daysUntilStockout, dailyNow > 0),
-        consumedViaRecipes: (recent.recipe.get(product.id) ?? 0) > 0,
-        basedOnSalesHistory: dailyNow > 0
-      });
-    }
-
-    const urgencyRank: Record<PurchaseUrgency, number> = { ALTA: 0, MEDIA: 1, BAJA: 2 };
-    return recommendations.sort((a, b) => {
-      if (urgencyRank[a.urgency] !== urgencyRank[b.urgency]) return urgencyRank[a.urgency] - urgencyRank[b.urgency];
-      return (a.daysUntilStockout ?? 999) - (b.daysUntilStockout ?? 999);
+      recent,
+      previous,
+      recentDays: observedDays,
+      previousDays: previousObservedDays,
+      config: this.config
     });
   }
 
   /**
-   * Consumo total de cada producto en la ventana [fromDaysAgo, toDaysAgo):
-   * "direct" es lo que se vendió tal cual (item.productId === product.id);
-   * "recipe" es lo que se consumió porque es ingrediente de OTRO producto
-   * que sí se vendió (ej. Carne se consume porque se vendieron Hamburguesas,
-   * no porque "Carne" tenga una línea propia en la venta).
+   * Consumo de cada insumo en las ventas con antigüedad en [fromDaysAgo, toDaysAgo).
+   *
+   * Las líneas idénticas (mismo producto, tamaño y extras) se suman ANTES de
+   * expandir la receta: el consumo es lineal en la cantidad, así que el
+   * resultado es exacto y se hace una expansión por variante, no una por línea
+   * vendida. Cada variante conserva su tamaño y extras, que deciden la receta.
    */
-  private buildConsumptionMap(
-    products: Product[],
-    sales: Sale[],
+  private measureConsumption(
+    products: readonly Product[],
+    sales: readonly Sale[],
     now: Date,
     fromDaysAgo: number,
     toDaysAgo: number
-  ): { direct: Map<string, number>; recipe: Map<string, number> } {
-    const productById = new Map(products.map((p) => [p.id, p]));
-    const direct = new Map<string, number>();
-    const recipe = new Map<string, number>();
+  ): ConsumptionWindow {
+    const window = emptyWindow();
+    const productById = new Map(products.map((product) => [product.id, product]));
+    const variants = new Map<string, SaleStockItem>();
 
     for (const sale of sales) {
-      const ageDays = (now.getTime() - new Date(sale.createdAt).getTime()) / (1000 * 60 * 60 * 24);
-      if (ageDays < fromDaysAgo || ageDays >= toDaysAgo) continue;
+      const ageDays = Math.max((now.getTime() - new Date(sale.createdAt).getTime()) / MS_PER_DAY, 0);
+      if (!Number.isFinite(ageDays) || ageDays < fromDaysAgo || ageDays >= toDaysAgo) continue;
 
-      for (const item of sale.items) {
-        direct.set(item.productId, (direct.get(item.productId) ?? 0) + item.quantity);
+      for (const item of getSaleNetItems(sale)) {
+        const extrasKey = (item.selectedExtras ?? [])
+          .map((extra) => extra.id)
+          .sort()
+          .join(",");
+        const key = `${item.productId}|${item.selectedSize?.id ?? ""}|${extrasKey}`;
+        const existing = variants.get(key);
+        variants.set(key, {
+          productId: item.productId,
+          quantity: (existing?.quantity ?? 0) + item.quantity,
+          selectedSize: item.selectedSize,
+          selectedExtras: item.selectedExtras
+        });
+      }
+    }
 
-        const soldProduct = productById.get(item.productId);
-        if (soldProduct?.recipe) {
-          for (const ingredient of soldProduct.recipe) {
-            recipe.set(
-              ingredient.productId,
-              (recipe.get(ingredient.productId) ?? 0) + ingredient.quantity * item.quantity
-            );
-          }
+    for (const variant of variants.values()) {
+      let consumption: Map<string, number>;
+      try {
+        consumption = this.inventoryEngine.previewSaleConsumption([variant], products);
+      } catch {
+        // Producto eliminado, receta con ciclo o cantidad inválida: esa
+        // variante no se puede medir. Se omite en vez de tumbar todo el análisis.
+        continue;
+      }
+
+      for (const [ingredientId, quantity] of consumption) {
+        addConsumption(window, ingredientId, variant.productId, quantity);
+
+        const stocked = productById.get(ingredientId);
+        if (stocked?.productionMode === "BATCH" && stocked.recipe?.length) {
+          this.addProductionDemand(window, products, productById, stocked, quantity, variant.productId, 0);
         }
       }
     }
 
-    return { direct, recipe };
+    return window;
   }
 
-  private buildReason(args: {
-    daysUntilStockout: number | null;
-    belowMinimum: boolean;
-    growthPercent: number;
-    hadPreviousData: boolean;
-    basedOnSalesHistory: boolean;
-  }): string {
-    if (!args.basedOnSalesHistory) {
-      return args.belowMinimum
-        ? "Aún no hay ventas registradas de este producto — se sugiere completar hasta el stock mínimo que definiste."
-        : "Aún no hay suficientes ventas para calcular una cantidad recomendada.";
-    }
-    if (args.hadPreviousData && args.growthPercent >= GROWTH_MENTION_THRESHOLD) {
-      return `Porque su consumo subió ${args.growthPercent}% frente a la semana anterior.`;
-    }
-    if (args.belowMinimum) {
-      return "Porque ya está en o por debajo del mínimo definido para este producto.";
-    }
-    if (args.daysUntilStockout !== null) {
-      return `Porque al ritmo de consumo actual se agota en ${args.daysUntilStockout} día(s).`;
-    }
-    return "Porque el stock está bajo y no hay margen de reacción.";
-  }
+  /**
+   * Un producto por tandas se vende desde su propio stock; sus ingredientes se
+   * gastaron (o se gastarán) al producirlo. Cada unidad vendida implica
+   * reponer esa unidad, así que se le carga a los ingredientes su receta.
+   */
+  private addProductionDemand(
+    window: MutableWindow,
+    products: readonly Product[],
+    productById: ReadonlyMap<string, Product>,
+    batchProduct: Product,
+    units: number,
+    drivenBy: string,
+    depth: number
+  ): void {
+    if (depth >= MAX_PRODUCTION_DEPTH) return;
 
-  private buildAlert(
-    productName: string,
-    urgency: PurchaseUrgency,
-    daysUntilStockout: number | null,
-    basedOnSalesHistory: boolean
-  ): string {
-    if (!basedOnSalesHistory) {
-      return `${productName} no tiene ventas registradas todavía — aún no se puede calcular cuánto se vende por día. Repón hasta tu mínimo definido.`;
+    for (const ingredient of batchProduct.recipe ?? []) {
+      let consumption: Map<string, number>;
+      try {
+        consumption = this.inventoryEngine.previewSaleConsumption(
+          [{ productId: ingredient.productId, quantity: ingredient.quantity * units }],
+          products
+        );
+      } catch {
+        continue;
+      }
+
+      for (const [ingredientId, quantity] of consumption) {
+        addConsumption(window, ingredientId, drivenBy, quantity);
+
+        const nested = productById.get(ingredientId);
+        if (nested?.productionMode === "BATCH" && nested.recipe?.length && nested.id !== batchProduct.id) {
+          this.addProductionDemand(window, products, productById, nested, quantity, drivenBy, depth + 1);
+        }
+      }
     }
-    if (urgency === "ALTA") {
-      return `Compra ${productName} hoy.`;
-    }
-    if (urgency === "MEDIA") {
-      return daysUntilStockout !== null
-        ? `${productName} alcanzará solamente para ${daysUntilStockout} día(s) más.`
-        : `${productName} está por debajo del mínimo — revísalo pronto.`;
-    }
-    return `No necesitas comprar ${productName} todavía${
-      daysUntilStockout !== null ? ` (quedan ~${daysUntilStockout} día(s))` : ""
-    }.`;
   }
 }

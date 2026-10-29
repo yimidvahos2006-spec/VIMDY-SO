@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { container, productsReady } from "../../infrastructure/di/CompositionRoot";
-import { PurchaseRecommendation, PurchaseUrgency } from "../engines/PurchaseIntelligenceEngine";
+import type {
+  PurchaseAnalysisSummary,
+  PurchaseRecommendation,
+  PurchaseUrgency
+} from "../engines/PurchaseIntelligenceEngine";
 import { useVimdyEvent } from "../../hooks/useVimdyCore";
 
 /**
@@ -15,13 +19,15 @@ import { useVimdyEvent } from "../../hooks/useVimdyCore";
  */
 export function useSmartPurchasing() {
   const [recommendations, setRecommendations] = useState<PurchaseRecommendation[]>([]);
+  const [summary, setSummary] = useState<PurchaseAnalysisSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     await productsReady;
-    const result = await container.purchaseIntelligenceEngine.get().getRecommendations();
-    setRecommendations(result);
+    const result = await container.purchaseIntelligenceEngine.get().analyze();
+    setRecommendations(result.recommendations);
+    setSummary(result.summary);
   }, []);
 
   useEffect(() => {
@@ -50,6 +56,7 @@ export function useSmartPurchasing() {
 
   return {
     recommendations,
+    summary,
     loading,
     error,
     urgencyCounts,
