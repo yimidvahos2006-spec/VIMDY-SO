@@ -5,6 +5,15 @@ import { vimdyCore } from "../VimdyCore";
 import { connectionStore } from "./connectionStore";
 import { isNetworkFailure } from "../services/offlineSale";
 import { queueCreateCustomerOffline } from "../services/offlineCustomer";
+import { isCustomerPhoneConflict } from "../offline/customerPhoneConflict";
+import {
+  buildNewCustomer,
+  validateCustomerRequired,
+  type CustomerFormValues
+} from "../domain/customers/quickCreate";
+
+/** El servidor rechaza teléfonos repetidos por negocio (customers_business_phone_uniq). */
+const DUPLICATE_PHONE_MESSAGE = "Ya existe un cliente con ese teléfono.";
 
 export type LoyaltyLevel = "bronce" | "plata" | "oro";
 
@@ -132,25 +141,26 @@ export function useCustomers() {
     return productNameById.get(productId) ?? "Producto eliminado";
   }
 
-  async function createCustomer(input: {
-    name: string;
-    email?: string;
-    phone?: string;
-    documentType?: Customer["documentType"];
-    documentNumber?: string;
-  }) {
+  async function createCustomer(input: CustomerFormValues) {
     setError(null);
 
-    const customer: Customer = {
+    // Alta ultrarrápida: SOLO nombre y teléfono son obligatorios (ver
+    // domain/customers/quickCreate.ts). El modal ya lo valida; esto es la red
+    // de seguridad para cualquier otro llamador de createCustomer().
+    const check = validateCustomerRequired(input);
+    if (!check.ok) {
+      setError(
+        check.field === "name"
+          ? "Escribe el nombre del cliente."
+          : "El teléfono es obligatorio y debe tener al menos 7 dígitos."
+      );
+      return false;
+    }
+
+    const customer = buildNewCustomer(input, {
       id: crypto.randomUUID(),
-      name: input.name.trim(),
-      email: input.email?.trim() ?? "",
-      documentType: input.documentType,
-      documentNumber: input.documentNumber?.trim() || undefined,
-      phone: input.phone?.trim() || undefined,
-      points: 0,
       createdAt: new Date(),
-    };
+    });
 
     // PASO 1.9 (Cola offline para escrituras) — sin conexión real ni
     // siquiera se intenta hablar con Supabase: se va directo al camino
@@ -174,7 +184,11 @@ export function useCustomers() {
         return true;
       }
 
-      setError(e.message ?? "No se pudo crear el cliente.");
+      setError(
+        isCustomerPhoneConflict(e)
+          ? DUPLICATE_PHONE_MESSAGE
+          : e.message ?? "No se pudo crear el cliente."
+      );
       return false;
     }
   }
@@ -186,7 +200,11 @@ export function useCustomers() {
       await load();
       return true;
     } catch (e: any) {
-      setError(e.message ?? "No se pudo actualizar el cliente.");
+      setError(
+        isCustomerPhoneConflict(e)
+          ? DUPLICATE_PHONE_MESSAGE
+          : e.message ?? "No se pudo actualizar el cliente."
+      );
       return false;
     }
   }

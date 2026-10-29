@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from "react";
-import { Star, X, Pencil, Trash2, Receipt, Phone, Mail, Calendar, Loader2, MapPin, StickyNote } from "lucide-react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Star, X, Pencil, Trash2, Receipt, Phone, Mail, Calendar, Loader2, MapPin, StickyNote, Heart, TrendingUp } from "lucide-react";
 
 import { getLoyaltyInfo, CustomerWithStats } from "../../../core/store/useCustomers";
 import { Sale } from "../../../core/entities/Entities";
 import { getSaleNetTotal } from "../../../core/utils/saleRefunds";
+import { buildCustomerVipProfile, getTierProgress } from "../../../core/domain/customers";
 import { useTranslation } from "../../../core/i18n/useTranslation";
 import { LEVEL_ICON } from "./LevelBadge";
 
@@ -34,9 +35,17 @@ export function CustomerDetailModal({
   const [sales, setSales] = useState<Sale[] | null>(null);
   const [salesError, setSalesError] = useState(false);
 
+  // Se vuelve a pedir el historial cada vez que la pantalla recarga clientes
+  // (por ejemplo, porque Caja acaba de cobrar una venta a este cliente), pero
+  // sin vaciar la tarjeta: solo se muestra el spinner al abrir otro cliente.
+  const loadedFor = useRef<string | null>(null);
+
   useEffect(() => {
     let cancelled = false;
-    setSales(null);
+    if (loadedFor.current !== customer.id) {
+      setSales(null);
+      loadedFor.current = customer.id;
+    }
     setSalesError(false);
 
     fetchSales(customer.id)
@@ -51,6 +60,18 @@ export function CustomerDetailModal({
       cancelled = true;
     };
   }, [customer.id, fetchSales]);
+
+  // Perfil VIP: se calcula con las ventas del cliente apenas llegan (mismas
+  // reglas que fidelización: solo PAID/CLOSED, neto de reembolsos). Mientras
+  // cargan, se muestran los totales que ya trae la lista de Clientes.
+  const vip = useMemo(() => (sales === null ? null : buildCustomerVipProfile(sales)), [sales]);
+  const totalSpent = vip?.totalSpent ?? customer.ltv;
+  const visitCount = vip?.visitCount ?? customer.purchaseCount;
+  const averageTicket =
+    vip?.averageTicket ?? (customer.purchaseCount > 0 ? customer.ltv / customer.purchaseCount : 0);
+  const lastVisitAt = vip?.lastVisitAt ?? customer.lastPurchaseAt;
+  const firstVisitAt = vip?.firstVisitAt ?? null;
+  const progress = getTierProgress(customer.points ?? 0);
 
   return (
     <div
@@ -88,11 +109,71 @@ export function CustomerDetailModal({
           </button>
         </div>
 
-        <div className="grid grid-cols-3 gap-3 mb-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+          <MiniStat label="Total gastado" value={money(totalSpent)} />
+          <MiniStat label="Visitas" value={visitCount.toLocaleString("es-CO")} />
+          <MiniStat label="Ticket promedio" value={money(averageTicket)} />
           <MiniStat label="Puntos" value={(customer.points ?? 0).toLocaleString("es-CO")} />
-          <MiniStat label="Compras" value={customer.purchaseCount.toString()} />
-          <MiniStat label="Valor total" value={money(customer.ltv)} />
         </div>
+
+        {progress.nextTier && progress.pointsToNextTier !== null && (
+          <div className="mb-4">
+            <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
+              <span className="flex items-center gap-1">
+                <TrendingUp size={12} />
+                Faltan {progress.pointsToNextTier.toLocaleString("es-CO")} puntos para {progress.nextTier}
+              </span>
+              <span>{Math.round(progress.progress * 100)}%</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
+              <div
+                className="h-full bg-vimdy-accent"
+                style={{ width: `${Math.round(progress.progress * 100)}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        <div className="mb-4">
+          <div className="flex items-center gap-2 text-slate-400 text-xs font-semibold uppercase tracking-wide mb-2">
+            <Heart size={13} />
+            Lo que más pide
+          </div>
+          {vip === null ? (
+            <p className="text-slate-500 text-sm py-2">Calculando favoritos...</p>
+          ) : vip.favorites.length === 0 ? (
+            <p className="text-slate-500 text-sm py-2">Aún no hay suficientes compras para ver sus favoritos.</p>
+          ) : (
+            <ol className="space-y-1.5">
+              {vip.favorites.map((favorite, index) => (
+                <li
+                  key={favorite.productId}
+                  className="flex items-center justify-between gap-3 rounded-xl bg-slate-800/60 border border-slate-800 px-3 py-2"
+                >
+                  <span className="flex items-center gap-2 min-w-0">
+                    <span className="text-vimdy-accent-hover text-xs font-bold w-4">{index + 1}</span>
+                    <span className="text-white text-sm truncate">{getProductName(favorite.productId)}</span>
+                  </span>
+                  <span className="text-slate-400 text-xs flex-shrink-0">
+                    {favorite.units.toLocaleString("es-CO")} {favorite.units === 1 ? "unidad" : "unidades"}
+                    {" · "}
+                    {favorite.visits} {favorite.visits === 1 ? "visita" : "visitas"}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+
+        {customer.notes && (
+          <div className="mb-4 rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-3 py-2.5">
+            <div className="flex items-center gap-2 text-yellow-300 text-xs font-semibold uppercase tracking-wide mb-1">
+              <StickyNote size={13} />
+              Notas y preferencias
+            </div>
+            <p className="text-slate-200 text-sm whitespace-pre-line">{customer.notes}</p>
+          </div>
+        )}
 
         <div className="space-y-2 mb-4 text-sm">
           {customer.phone && (
@@ -119,16 +200,15 @@ export function CustomerDetailModal({
               {customer.address}
             </div>
           )}
-          {customer.notes && (
-            <div className="flex items-start gap-2 text-slate-300">
-              <StickyNote size={14} className="text-slate-500 flex-shrink-0 mt-0.5" />
-              <span className="whitespace-pre-line">{customer.notes}</span>
-            </div>
-          )}
-          {customer.lastPurchaseAt && (
+          {lastVisitAt && (
             <div className="flex items-center gap-2 text-slate-300">
               <Calendar size={14} className="text-slate-500" />
-              Última compra: {customer.lastPurchaseAt.toLocaleDateString("es-CO")}
+              Última visita: {lastVisitAt.toLocaleDateString("es-CO")}
+              {firstVisitAt && firstVisitAt.getTime() !== lastVisitAt.getTime() && (
+                <span className="text-slate-500">
+                  {" · "}Cliente desde {firstVisitAt.toLocaleDateString("es-CO")}
+                </span>
+              )}
             </div>
           )}
         </div>

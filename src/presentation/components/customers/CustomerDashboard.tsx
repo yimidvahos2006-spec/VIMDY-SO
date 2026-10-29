@@ -51,7 +51,14 @@ export function CustomerDashboard() {
 
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
-  const [selected, setSelected] = useState<CustomerWithStats | null>(null);
+  const [selectedSnapshot, setSelected] = useState<CustomerWithStats | null>(null);
+  // La tarjeta abierta se mantiene "viva": si Caja cobra una venta a este
+  // cliente, useCustomers recarga la lista y la tarjeta muestra los números
+  // nuevos sin cerrarla. Si el cliente ya no está en la lista, se conserva
+  // la última copia vista para no cerrarla de golpe.
+  const selected = selectedSnapshot
+    ? customers.find((customer) => customer.id === selectedSnapshot.id) ?? selectedSnapshot
+    : null;
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<CustomerWithStats | null>(null);
 

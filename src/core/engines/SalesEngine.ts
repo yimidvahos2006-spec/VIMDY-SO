@@ -2125,23 +2125,15 @@ export class SalesEngine {
       return;
     }
 
-    try {
-      const profile = await this.customer.getCustomerProfile(customerId);
-      const earnedPoints = Math.floor(
-        sale.total * this.config.loyaltyPointsPerCurrencyUnit
-      );
+    const earnedPoints = Math.floor(
+      sale.total * this.config.loyaltyPointsPerCurrencyUnit
+    );
 
-      await this.customer.update({
-        ...profile.customer,
-        points: (profile.customer.points ?? 0) + earnedPoints
-      });
-    } catch (error) {
-      if (error instanceof Error && error.message === "CUSTOMER_NOT_FOUND") {
-        return;
-      }
-
-      throw error;
-    }
+    // CustomerEngine suma los puntos, reintenta ante una carrera entre cajas
+    // y avisa a las pantallas abiertas (evento "customer"). Un cliente que ya
+    // no existe se ignora; cualquier otro error sube a registerPayment, que
+    // lo registra como advertencia sin deshacer el cobro.
+    await this.customer.recordPurchase(customerId, sale, earnedPoints);
   }
 
   /**

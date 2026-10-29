@@ -454,7 +454,11 @@ export interface Sale {
 
 export interface Customer {
   readonly id: string;
-  /** Datos fiscales opcionales para facturación electrónica. */
+  /**
+   * Datos fiscales opcionales para facturación electrónica:
+   * `documentType` = tipo de documento (CC, CE, NIT...) y `documentNumber` =
+   * número fiscal. Solo se guarda `documentType` junto con un `documentNumber`.
+   */
   readonly documentType?: "CC" | "CE" | "NIT" | "PASSPORT" | "OTHER";
   readonly documentNumber?: string;
   /**
@@ -467,9 +471,25 @@ export interface Customer {
    * (antes del primer save) todavía no tienen versión.
    */
   readonly version?: number;
+  /** Obligatorio al crear (junto con `phone`). */
   readonly name: string;
-  readonly email: string;
+  /**
+   * Opcional. Antes era `string` obligatorio y cada alta guardaba "" a mano;
+   * ahora simplemente no se guarda. Los registros viejos con "" siguen siendo
+   * válidos (un "" se trata igual que "sin correo").
+   */
+  readonly email?: string;
+  /**
+   * Obligatorio al CREAR un cliente (alta rápida en panel y Caja). Sigue
+   * siendo `?` en el tipo porque los clientes anteriores a esta regla pueden
+   * no tenerlo y siguen siendo válidos (el índice único del servidor es
+   * parcial justamente por eso).
+   */
   readonly phone?: string;
+  /** Opcional: dirección de entrega o de facturación. */
+  readonly address?: string;
+  /** Opcional: notas libres y preferencias ("sin cebolla", "alérgico al maní", "mesa junto a la ventana"). */
+  readonly notes?: string;
   readonly points?: number;
   readonly createdAt?: Date;
   readonly businessId?: string;

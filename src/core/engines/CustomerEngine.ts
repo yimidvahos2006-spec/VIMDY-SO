@@ -3,11 +3,17 @@ import { IRepository } from '../../infrastructure/di/repositories/IRepository';
 import { SaleRepository } from '../../infrastructure/di/repositories/SaleRepository';
 import { AuditEngine } from './AuditEngine';
 import { getSaleNetTotal, isRevenueSaleStatus } from '../utils/saleRefunds';
+import { isOptimisticLockError } from '../errors/OptimisticLockError';
+import { vimdyCore } from '../VimdyCore';
+import { buildCustomerVipProfile, type CustomerVipProfile } from '../domain/customers/vipProfile';
+import { isLoyaltyEligibleCustomer } from '../domain/customers/loyalty';
 
 export interface CustomerProfile {
   readonly customer: Customer;
   readonly sales: Sale[];
   readonly ltv: number;
+  /** Resumen VIP derivado de las ventas: gasto, visitas, favoritos, nivel. */
+  readonly vip: CustomerVipProfile;
 }
 
 /**
@@ -64,8 +70,61 @@ export class CustomerEngine {
     return {
       customer,
       sales: customerSales,
-      ltv
+      ltv,
+      vip: buildCustomerVipProfile(customerSales)
     };
+  }
+
+  /**
+   * Conexión Caja → Clientes. Se llama cuando una venta con cliente asociado
+   * ya quedó COBRADA (SalesEngine.registerPayment).
+   *
+   * - Suma los puntos ganados al cliente. Si otro dispositivo guardó al mismo
+   *   cliente justo antes (OptimisticLockError) se relee y se reintenta una
+   *   vez, para no perder puntos por una carrera entre cajas.
+   * - El historial y los totales (gasto, visitas, favoritos) no se guardan en
+   *   el cliente: se derivan de las ventas, así que ya incluyen esta venta.
+   * - Avisa con el evento "customer" para que cualquier pantalla abierta
+   *   (Clientes, Dashboard) se refresque sola en segundo plano.
+   *
+   * Los clientes genéricos de mostrador y los inexistentes se ignoran.
+   * Devuelve true si se registró la compra en un cliente real.
+   */
+  public async recordPurchase(
+    customerId: string | null | undefined,
+    sale: Sale,
+    earnedPoints: number
+  ): Promise<boolean> {
+    if (!isLoyaltyEligibleCustomer(customerId)) return false;
+
+    const points = Number.isFinite(earnedPoints) ? Math.max(Math.floor(earnedPoints), 0) : 0;
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const customer = await this.customerRepository.findById(customerId as string);
+      if (!customer) return false;
+
+      if (points === 0) break;
+
+      try {
+        await this.customerRepository.update({
+          ...customer,
+          points: (customer.points ?? 0) + points
+        });
+        break;
+      } catch (error) {
+        if (isOptimisticLockError(error) && attempt === 0) continue;
+        throw error;
+      }
+    }
+
+    vimdyCore.emit('customer', {
+      action: 'customer.purchase_recorded',
+      customerId,
+      saleId: sale.id,
+      source: 'pos'
+    });
+
+    return true;
   }
 
   public async getAllCustomers(): Promise<Customer[]> {

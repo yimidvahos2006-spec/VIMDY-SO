@@ -11,9 +11,12 @@ import { createCustomerFromCheckout } from "../../../core/services/offlineCustom
 import { useCustomerSearch } from "../../../hooks/useCustomerSearch";
 import {
   findCustomerByPhone,
-  phoneDigits,
   splitNameAndPhone
 } from "../../../core/domain/customers/search";
+import {
+  buildNewCustomer,
+  validateCustomerRequired
+} from "../../../core/domain/customers/quickCreate";
 
 /**
  * CustomerCheckoutModal
@@ -35,12 +38,15 @@ import {
  * sin internet. A diferencia del modal anterior de PosCustomer, que guardaba
  * directo contra el servidor y fallaba sin conexión.
  *
+ * ALTA ULTRARRÁPIDA: lo ÚNICO obligatorio es Nombre y Teléfono. Correo,
+ * documento, número fiscal, dirección y notas están en "Más datos (opcional)",
+ * plegado por defecto, y nunca bloquean el guardado (regla compartida con el
+ * panel de Clientes en domain/customers/quickCreate.ts).
+ *
  * El modal NO escribe en usePayment: avisa con onSelect() y el padre decide.
  */
 
 const MAX_RESULTS = 8;
-const MIN_NAME_LENGTH = 2;
-const MIN_PHONE_DIGITS = 7;
 
 type Mode = "search" | "create";
 type DocumentType = NonNullable<Customer["documentType"]>;
@@ -69,9 +75,12 @@ export function CustomerCheckoutModal({ open, onClose, onSelect }: CustomerCheck
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [showInvoice, setShowInvoice] = useState(false);
+  const [showMore, setShowMore] = useState(false);
+  const [email, setEmail] = useState("");
   const [documentType, setDocumentType] = useState<DocumentType>("CC");
   const [documentNumber, setDocumentNumber] = useState("");
+  const [address, setAddress] = useState("");
+  const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -90,9 +99,12 @@ export function CustomerCheckoutModal({ open, onClose, onSelect }: CustomerCheck
     setActive(0);
     setName("");
     setPhone("");
-    setShowInvoice(false);
+    setShowMore(false);
+    setEmail("");
     setDocumentType("CC");
     setDocumentNumber("");
+    setAddress("");
+    setNotes("");
     setSaving(false);
     setError(null);
   }, [open]);
@@ -182,32 +194,26 @@ export function CustomerCheckoutModal({ open, onClose, onSelect }: CustomerCheck
       return;
     }
 
-    const cleanName = name.trim();
-    if (cleanName.length < MIN_NAME_LENGTH) {
-      setError(t("pos.customerModal.errorName"));
-      nameRef.current?.focus();
+    // Solo nombre y teléfono son obligatorios; el resto nunca bloquea.
+    const check = validateCustomerRequired({ name, phone });
+    if (!check.ok) {
+      setError(
+        t(
+          check.error === "NAME_REQUIRED"
+            ? "pos.customerModal.errorName"
+            : check.error === "PHONE_REQUIRED"
+              ? "pos.customerModal.errorPhoneRequired"
+              : "pos.customerModal.errorPhone"
+        )
+      );
+      (check.field === "name" ? nameRef : phoneRef).current?.focus();
       return;
     }
 
-    const cleanPhone = phone.trim();
-    if (cleanPhone && phoneDigits(cleanPhone).length < MIN_PHONE_DIGITS) {
-      setError(t("pos.customerModal.errorPhone"));
-      phoneRef.current?.focus();
-      return;
-    }
-
-    const cleanDocument = documentNumber.trim();
-
-    const customer: Customer = {
-      id: crypto.randomUUID(),
-      name: cleanName,
-      email: "",
-      phone: cleanPhone || undefined,
-      documentType: cleanDocument ? documentType : undefined,
-      documentNumber: cleanDocument || undefined,
-      points: 0,
-      createdAt: new Date()
-    };
+    const customer: Customer = buildNewCustomer(
+      { name, phone, email, documentType, documentNumber, address, notes },
+      { id: crypto.randomUUID(), createdAt: new Date() }
+    );
 
     setSaving(true);
     setError(null);
@@ -366,7 +372,7 @@ export function CustomerCheckoutModal({ open, onClose, onSelect }: CustomerCheck
 
           <div>
             <label htmlFor="customer-checkout-name" className="text-vimdy-micro text-vimdy-text-secondary">
-              {t("pos.customerModal.nameLabel")}
+              {t("pos.customerModal.nameLabel")} <span aria-hidden="true" className="text-vimdy-accent">*</span>
             </label>
             <input
               id="customer-checkout-name"
@@ -376,6 +382,14 @@ export function CustomerCheckoutModal({ open, onClose, onSelect }: CustomerCheck
                 setName(event.target.value);
                 setError(null);
               }}
+              onKeyDown={(event) => {
+                // Enter en Nombre con el teléfono vacío: el cursor pasa al
+                // teléfono en vez de intentar guardar y mostrar un error.
+                if (event.key === "Enter" && name.trim() && !phone.trim()) {
+                  event.preventDefault();
+                  phoneRef.current?.focus();
+                }
+              }}
               autoComplete="off"
               placeholder={t("pos.customerModal.namePlaceholder")}
               className={inputClass}
@@ -384,7 +398,7 @@ export function CustomerCheckoutModal({ open, onClose, onSelect }: CustomerCheck
 
           <div>
             <label htmlFor="customer-checkout-phone" className="text-vimdy-micro text-vimdy-text-secondary">
-              {t("pos.customerModal.phoneLabel")}
+              {t("pos.customerModal.phoneLabel")} <span aria-hidden="true" className="text-vimdy-accent">*</span>
             </label>
             <input
               id="customer-checkout-phone"
@@ -415,49 +429,94 @@ export function CustomerCheckoutModal({ open, onClose, onSelect }: CustomerCheck
             <div>
               <button
                 type="button"
-                onClick={() => setShowInvoice((current) => !current)}
-                aria-expanded={showInvoice}
+                onClick={() => setShowMore((current) => !current)}
+                aria-expanded={showMore}
                 className="flex items-center gap-1.5 text-vimdy-text-secondary text-vimdy-small hover:text-vimdy-text transition-colors"
               >
                 <ChevronDown
                   size={14}
-                  className={showInvoice ? "rotate-180 transition-transform" : "transition-transform"}
+                  className={showMore ? "rotate-180 transition-transform" : "transition-transform"}
                   aria-hidden="true"
                 />
                 {t("pos.customerModal.invoiceToggle")}
               </button>
 
-              {showInvoice && (
-                <div className="mt-2 grid grid-cols-[96px_1fr] gap-2">
+              {showMore && (
+                <div className="mt-2 space-y-3">
                   <div>
-                    <label htmlFor="customer-checkout-doctype" className="text-vimdy-micro text-vimdy-text-secondary">
-                      {t("pos.customerModal.documentType")}
-                    </label>
-                    <select
-                      id="customer-checkout-doctype"
-                      value={documentType}
-                      onChange={(event) => setDocumentType(event.target.value as DocumentType)}
-                      className={`${inputClass} px-2`}
-                    >
-                      <option value="CC">CC</option>
-                      <option value="CE">CE</option>
-                      <option value="NIT">NIT</option>
-                      <option value="PASSPORT">Pasaporte</option>
-                      <option value="OTHER">Otro</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="customer-checkout-docnumber" className="text-vimdy-micro text-vimdy-text-secondary">
-                      {t("pos.customerModal.documentNumber")}
+                    <label htmlFor="customer-checkout-email" className="text-vimdy-micro text-vimdy-text-secondary">
+                      {t("pos.customerModal.emailLabel")}
                     </label>
                     <input
-                      id="customer-checkout-docnumber"
-                      value={documentNumber}
-                      onChange={(event) => setDocumentNumber(event.target.value)}
-                      inputMode="numeric"
+                      id="customer-checkout-email"
+                      type="email"
+                      inputMode="email"
+                      value={email}
+                      onChange={(event) => setEmail(event.target.value)}
                       autoComplete="off"
-                      placeholder="123456789"
+                      placeholder="cliente@correo.com"
                       className={inputClass}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-[96px_1fr] gap-2">
+                    <div>
+                      <label htmlFor="customer-checkout-doctype" className="text-vimdy-micro text-vimdy-text-secondary">
+                        {t("pos.customerModal.documentType")}
+                      </label>
+                      <select
+                        id="customer-checkout-doctype"
+                        value={documentType}
+                        onChange={(event) => setDocumentType(event.target.value as DocumentType)}
+                        className={`${inputClass} px-2`}
+                      >
+                        <option value="CC">CC</option>
+                        <option value="CE">CE</option>
+                        <option value="NIT">NIT</option>
+                        <option value="PASSPORT">Pasaporte</option>
+                        <option value="OTHER">Otro</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label htmlFor="customer-checkout-docnumber" className="text-vimdy-micro text-vimdy-text-secondary">
+                        {t("pos.customerModal.documentNumber")}
+                      </label>
+                      <input
+                        id="customer-checkout-docnumber"
+                        value={documentNumber}
+                        onChange={(event) => setDocumentNumber(event.target.value)}
+                        inputMode="numeric"
+                        autoComplete="off"
+                        placeholder="123456789"
+                        className={inputClass}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label htmlFor="customer-checkout-address" className="text-vimdy-micro text-vimdy-text-secondary">
+                      {t("pos.customerModal.addressLabel")}
+                    </label>
+                    <input
+                      id="customer-checkout-address"
+                      value={address}
+                      onChange={(event) => setAddress(event.target.value)}
+                      autoComplete="off"
+                      className={inputClass}
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="customer-checkout-notes" className="text-vimdy-micro text-vimdy-text-secondary">
+                      {t("pos.customerModal.notesLabel")}
+                    </label>
+                    <textarea
+                      id="customer-checkout-notes"
+                      rows={2}
+                      value={notes}
+                      onChange={(event) => setNotes(event.target.value)}
+                      placeholder={t("pos.customerModal.notesPlaceholder")}
+                      className="mt-1 w-full rounded-vimdy-md bg-vimdy-surface-active border border-vimdy-border px-3 py-2 text-vimdy-text text-vimdy-small outline-none focus:border-vimdy-accent transition-colors placeholder:text-vimdy-text-tertiary resize-none"
                     />
                   </div>
                 </div>
