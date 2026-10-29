@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ShoppingCart, Package, ShoppingBag, ClipboardList, History as HistoryIcon, FilePlus2 } from "lucide-react";
 
@@ -13,11 +13,49 @@ import { PurchaseHistoryTable } from "./PurchaseHistoryTable";
 
 import { useSmartPurchasing } from "../../../core/store/useSmartPurchasing";
 import type { PurchaseRecommendation } from "../../../core/engines/PurchaseIntelligenceEngine";
+import type { PurchaseOrder as OrderEntity, PurchaseOrderStatus as OrderEntityStatus } from "../../../core/entities/Entities";
+import {
+  isPurchasableProduct,
+  resolveUnitCost
+} from "../../../core/domain/purchasing";
+import type {
+  PurchaseOrder as PanelOrder,
+  PurchaseOrderStatus as PanelOrderStatus
+} from "../../../core/domain/purchasing/orders";
 import { usePurchaseOrders } from "../../../hooks/usePurchaseOrders";
 import { useSuppliers } from "../../../hooks/useSuppliers";
 import { useProducts } from "../../../hooks/useProducts";
 
 type Tab = "recomendaciones" | "ordenes" | "historial";
+
+/**
+ * PurchaseOrdersPanel trabaja con el modelo de dominio (estados "Pendiente" /
+ * "Enviada"…), no con el del servidor ("PENDIENTE" / "PARCIAL"…). Las órdenes
+ * abiertas se traducen aquí: PARCIAL ya salió del proveedor ("Enviada") y
+ * POSPUESTO sigue esperando ("Pendiente").
+ */
+const PANEL_STATUS: Record<OrderEntityStatus, PanelOrderStatus> = {
+  PENDIENTE: "Pendiente",
+  POSPUESTO: "Pendiente",
+  PARCIAL: "Enviada",
+  COMPRADO: "Recibida",
+  CANCELADO: "Cancelada"
+};
+
+function toPanelOrder(order: OrderEntity): PanelOrder {
+  return {
+    id: order.id,
+    supplierId: order.supplierId,
+    status: PANEL_STATUS[order.status],
+    createdAt: new Date(order.createdAt).toISOString(),
+    receivedAt: order.receivedAt ? new Date(order.receivedAt).toISOString() : undefined,
+    items: order.items.map((item) => ({
+      itemId: item.productId,
+      quantity: item.quantity,
+      unitCost: item.unitPrice
+    }))
+  };
+}
 
 /**
  * SmartPurchasingDashboard — VIMDY FASE 5, PASO 2.6 + 2.7 (Compras Inteligentes).
@@ -41,6 +79,20 @@ export function SmartPurchasingDashboard() {
   const [directPurchaseOpen, setDirectPurchaseOpen] = useState(false);
 
   const orderTargetProduct = orderTarget ? products.find((p) => p.id === orderTarget.productId) ?? null : null;
+
+  const panelOrders = useMemo(() => purchaseOrders.openOrders.map(toPanelOrder), [purchaseOrders.openOrders]);
+  const inventory = useMemo(() => Object.fromEntries(products.map((p) => [p.id, p.stock])), [products]);
+  const itemLabels = useMemo(() => Object.fromEntries(products.map((p) => [p.id, p.name])), [products]);
+  const directPurchaseItems = useMemo(
+    () =>
+      products.filter(isPurchasableProduct).map((p) => ({
+        id: p.id,
+        name: p.name,
+        unit: p.unit,
+        lastUnitCost: resolveUnitCost(p) ?? undefined
+      })),
+    [products]
+  );
 
   const TABS: { key: Tab; label: string; icon: React.ReactNode; count?: number }[] = [
     { key: "recomendaciones", label: "Recomendaciones", icon: <ShoppingBag size={15} />, count: recommendations.length },
@@ -114,10 +166,14 @@ export function SmartPurchasingDashboard() {
 
       {tab === "ordenes" && (
         <PurchaseOrdersPanel
-          orders={purchaseOrders.openOrders}
-          suppliers={suppliers}
-          products={products}
-          actions={purchaseOrders}
+          orders={panelOrders}
+          inventory={inventory}
+          itemLabels={itemLabels}
+          onReceived={({ orderId }) => {
+            // El panel solo confirma la recepción: el inventario real lo
+            // actualiza el servidor al marcar la orden como comprada.
+            void purchaseOrders.markAsPurchased(orderId);
+          }}
         />
       )}
 
@@ -158,13 +214,24 @@ export function SmartPurchasingDashboard() {
       )}
 
       <DirectPurchaseModal
-        open={directPurchaseOpen}
+        isOpen={directPurchaseOpen}
         onClose={() => setDirectPurchaseOpen(false)}
         suppliers={suppliers}
-        products={products}
-        onConfirm={async (input) => {
-          const messages = await purchaseOrders.recordDirectPurchase(input);
-          return messages !== null;
+        items={directPurchaseItems}
+        onSaveDirectPurchase={async (payload) => {
+          const messages = await purchaseOrders.recordDirectPurchase({
+            supplierId: payload.supplierId,
+            invoiceNumber: payload.invoiceNumber,
+            items: payload.lines.map((line) => ({
+              productId: line.itemId,
+              quantity: line.quantity,
+              unitPrice: line.unitCost
+            }))
+          });
+          // Si lanza, el modal sigue abierto y deja reintentar.
+          if (messages === null) {
+            throw new Error("No se pudo registrar la compra directa.");
+          }
         }}
       />
 
