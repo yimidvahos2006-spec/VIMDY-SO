@@ -9,9 +9,9 @@ export function CustomerKpiGrid({ kpis }: { kpis: CustomersKpis }) {
   const { money } = useTranslation();
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-4 gap-4">
       <CustomerKpiCard
-        icon={<Users size={20} className="text-cyan-400" />}
+        icon={<Users size={20} className="text-vimdy-accent-hover" />}
         label="Total de clientes"
         value={kpis.totalCustomers.toString()}
       />

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useDeferredValue, useMemo, useState } from "react";
 import { Users, UserPlus } from "lucide-react";
 import { confirmDialog } from "../../../core/store/confirmStore";
 
@@ -13,11 +13,13 @@ import { NeverPurchasedBanner } from "./NeverPurchasedBanner";
 import { CustomerTable } from "./CustomerTable";
 import { CustomerDetailModal } from "./CustomerDetailModal";
 import { CustomerFormModal } from "./CustomerFormModal";
+import { normalizeCustomerFields } from "../../../core/domain/customers/quickCreate";
 import {
   DEFAULT_SORT,
   SortKey,
   SortState,
-  filterAndSortCustomers,
+  buildCustomerSearchIndex,
+  filterAndSortWithIndex,
   getNeverPurchased,
   nextSortState
 } from "./customerListing";
@@ -61,9 +63,16 @@ export function CustomerDashboard() {
 
   const neverPurchased = useMemo(() => getNeverPurchased(customers), [customers]);
 
+  // Buscador instantáneo: el texto de cada cliente se prepara UNA vez por lista
+  // (índice) y cada tecla solo compara contra eso. El campo de texto se
+  // actualiza al instante; el filtrado usa el valor "diferido", así que con
+  // miles de clientes escribir nunca se siente trabado.
+  const searchIndex = useMemo(() => buildCustomerSearchIndex(customers), [customers]);
+  const deferredSearch = useDeferredValue(search);
+
   const filtered = useMemo(
-    () => filterAndSortCustomers(customers, search, sort),
-    [customers, search, sort]
+    () => filterAndSortWithIndex(searchIndex, deferredSearch, sort),
+    [searchIndex, deferredSearch, sort]
   );
 
   function handleSort(key: SortKey) {
@@ -103,7 +112,7 @@ export function CustomerDashboard() {
         </div>
         <button
           onClick={() => setCreating(true)}
-          className="flex items-center gap-2 bg-cyan-500 hover:bg-cyan-400 transition px-4 py-2.5 rounded-xl text-slate-950 font-semibold self-start sm:self-auto mt-14 sm:mt-16"
+          className="flex items-center gap-2 bg-vimdy-accent hover:bg-vimdy-accent-hover transition px-4 py-2.5 rounded-vimdy-md text-white font-semibold self-start sm:self-auto mt-14 sm:mt-16 focus-visible:outline-none focus-visible:shadow-vimdy-accent"
         >
           <UserPlus size={18} />
           Nuevo cliente
@@ -131,12 +140,14 @@ export function CustomerDashboard() {
 
           <CustomerTable
             customers={filtered}
+            totalCount={customers.length}
             search={search}
             sortKey={sort.key}
             sortDir={sort.dir}
             onSearchChange={setSearch}
             onSort={handleSort}
             onSelect={setSelected}
+            onEdit={setEditing}
           />
         </>
       )}
@@ -169,13 +180,15 @@ export function CustomerDashboard() {
       {(creating || editing) && (
         <CustomerFormModal
           customer={editing}
+          existingCustomers={customers}
+          error={error}
           onClose={() => {
             setCreating(false);
             setEditing(null);
           }}
           onSubmit={async (values) => {
             const ok = editing
-              ? await updateCustomer({ ...editing, ...values })
+              ? await updateCustomer({ ...editing, ...normalizeCustomerFields(values) })
               : await createCustomer(values);
             if (ok) {
               setCreating(false);

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Star, X, Pencil, Trash2, Receipt, Phone, Mail, Calendar, Loader2 } from "lucide-react";
+import { Star, X, Pencil, Trash2, Receipt, Phone, Mail, Calendar, Loader2, MapPin, StickyNote } from "lucide-react";
 
 import { getLoyaltyInfo, CustomerWithStats } from "../../../core/store/useCustomers";
 import { Sale } from "../../../core/entities/Entities";
@@ -63,7 +63,7 @@ export function CustomerDetailModal({
       >
         <div className="flex items-start justify-between gap-3 mb-4">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-14 h-14 rounded-full bg-cyan-500 flex items-center justify-center flex-shrink-0 text-slate-950 font-bold text-xl">
+            <div className="w-14 h-14 rounded-full bg-vimdy-accent flex items-center justify-center flex-shrink-0 text-white font-bold text-xl">
               {customer.name.charAt(0).toUpperCase()}
             </div>
             <div className="min-w-0">
@@ -113,6 +113,18 @@ export function CustomerDetailModal({
               {customer.documentType ?? "Documento"}: {customer.documentNumber}
             </div>
           )}
+          {customer.address && (
+            <div className="flex items-center gap-2 text-slate-300">
+              <MapPin size={14} className="text-slate-500 flex-shrink-0" />
+              {customer.address}
+            </div>
+          )}
+          {customer.notes && (
+            <div className="flex items-start gap-2 text-slate-300">
+              <StickyNote size={14} className="text-slate-500 flex-shrink-0 mt-0.5" />
+              <span className="whitespace-pre-line">{customer.notes}</span>
+            </div>
+          )}
           {customer.lastPurchaseAt && (
             <div className="flex items-center gap-2 text-slate-300">
               <Calendar size={14} className="text-slate-500" />
@@ -124,7 +136,7 @@ export function CustomerDetailModal({
         <div className="flex gap-2 mb-4">
           <button
             onClick={onEdit}
-            className="flex-1 flex items-center justify-center gap-2 h-10 rounded-xl bg-slate-800 border border-slate-700 hover:border-cyan-500 text-white text-sm font-semibold transition"
+            className="flex-1 flex items-center justify-center gap-2 h-10 rounded-xl bg-slate-800 border border-slate-700 hover:border-vimdy-accent text-white text-sm font-semibold transition"
           >
             <Pencil size={14} />
             Editar
@@ -167,7 +179,7 @@ export function CustomerDetailModal({
                     <span className="text-white text-sm font-semibold">
                       {sale.code ?? sale.id.slice(0, 8)}
                     </span>
-                    <span className="text-cyan-400 text-sm font-bold">{money(getSaleNetTotal(sale))}</span>
+                    <span className="text-vimdy-accent-hover text-sm font-bold">{money(getSaleNetTotal(sale))}</span>
                   </div>
                   <div className="flex items-center justify-between mt-1">
                     <span className="text-slate-500 text-xs">
