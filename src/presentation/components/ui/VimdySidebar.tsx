@@ -22,8 +22,6 @@ import { NavLink } from "react-router-dom";
 import { VimdyLogo } from "./VimdyLogo";
 import { useSidebar } from "../../../core/store/useSidebar";
 import { useMobileSidebar } from "../../../core/store/useMobileSidebar";
-import { useCopilot } from "../../../core/store/useCopilot";
-import { copilotStore } from "../../../core/store/copilotStore";
 import { useCashierShiftStatus } from "../../../hooks/useCashierShiftStatus";
 import { useCanUse } from "../../../hooks/useCanUse";
 import { useAuth } from "../../../presentation/context/AuthContext";
@@ -70,7 +68,6 @@ const menu = [
 export function VimdySidebar() {
   const { expanded, toggle } = useSidebar();
   const { open: mobileOpen, close: closeMobile } = useMobileSidebar();
-  const { isOpen: copilotOpen } = useCopilot();
   const shiftOpen = useCashierShiftStatus();
   const { logout, can, role } = useAuth();
   const capabilities: Partial<Record<string, BusinessCapabilityId>> = {
@@ -225,52 +222,6 @@ export function VimdySidebar() {
               item.title === "Compras" ||
               item.title === "VIMDY IA" ||
               item.title === "Notificaciones";
-
-            // VIMDY IA no es una pantalla: abre/cierra el panel flotante por
-            // encima del módulo actual, sin navegar.
-            if (item.path === "/ia") {
-              return (
-                <React.Fragment key={item.title}>
-                  {showSeparator && <div className="h-px bg-vimdy-border my-3" />}
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      closeMobile();
-                      copilotStore.toggle();
-                    }}
-                    aria-haspopup="dialog"
-                    aria-expanded={copilotOpen}
-                    className={`
-                      flex
-                      items-center
-                      justify-start
-                      px-4
-                      gap-4
-                      ${!expanded ? "md:justify-center md:px-0" : ""}
-                      h-12
-                      w-full
-                      rounded-xl
-                      transition-all
-                      duration-200
-                      ${
-                        copilotOpen
-                          ? "bg-vimdy-surface-hover text-vimdy-text"
-                          : "text-vimdy-text-secondary hover:bg-vimdy-surface hover:text-vimdy-text"
-                      }
-                    `}
-                  >
-                    <Icon
-                      size={20}
-                      className={`flex-shrink-0 transition-all ${
-                        copilotOpen ? "text-vimdy-text" : "text-vimdy-text-secondary"
-                      }`}
-                    />
-                    <span className={`text-sm font-medium tracking-wide ${labelClass}`}>{item.title}</span>
-                  </button>
-                </React.Fragment>
-              );
-            }
 
             return (
               <React.Fragment key={item.title}>

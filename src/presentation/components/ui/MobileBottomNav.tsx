@@ -22,7 +22,6 @@ import {
 import { useCanUse } from "../../../hooks/useCanUse";
 import type { BusinessCapabilityId } from "../../../core/config/businessOperatingProfile";
 import { useAuth } from "../../context/AuthContext";
-import { copilotStore } from "../../../core/store/copilotStore";
 import { canAccessPath, homePathForRole } from "../../../core/config/roleAccess";
 
 const MAIN_ITEMS = [
@@ -122,9 +121,7 @@ export function MobileBottomNav() {
               <button
                 key={item.path}
                 onClick={() => {
-                  // VIMDY IA abre el panel flotante encima de la pantalla actual.
-                  if (item.path === "/ia") copilotStore.open();
-                  else navigate(item.path);
+                  navigate(item.path);
                   setMoreOpen(false);
                 }}
                 className={`
