@@ -2,7 +2,7 @@ import React from "react";
 import { User } from "lucide-react";
 
 import type { CopilotMessage } from "../../../core/types/CopilotTypes";
-import { CopilotOrb } from "./CopilotOrb";
+import { AiAvatar } from "./AiAvatar";
 
 /* ---------------------------------------------------------------------------
  * Contenido del mensaje
@@ -175,7 +175,7 @@ export function CopilotMessageBubble({ message, userName, compact = false }: Cop
   return (
     <div className={`flex items-start animate-vimdy-slide-up ${compact ? "gap-2" : "gap-3"}`}>
       <div className="mt-0.5 shrink-0">
-        <CopilotOrb size={compact ? 28 : 40} animated={false} />
+        <AiAvatar size={compact ? 28 : 40} />
       </div>
 
       <div className={`min-w-0 ${compact ? "max-w-[88%]" : "max-w-[88%] sm:max-w-[80%]"}`}>
@@ -196,7 +196,7 @@ export function CopilotThinkingBubble({ compact = false }: { compact?: boolean }
   return (
     <div className={`flex items-start animate-vimdy-fade-in ${compact ? "gap-2" : "gap-3"}`}>
       <div className="mt-0.5 shrink-0">
-        <CopilotOrb size={compact ? 28 : 40} animated={false} />
+        <AiAvatar size={compact ? 28 : 40} />
       </div>
 
       <div className="min-w-0">

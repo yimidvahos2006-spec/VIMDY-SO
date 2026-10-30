@@ -1,8 +1,15 @@
 import React from 'react';
 
-export const AiAvatar: React.FC = () => {
-  return (
-    <div className="relative flex items-center justify-center w-10 h-10 group select-none">
+interface AiAvatarProps {
+  /** Diámetro total en px (por defecto 40, el tamaño de diseño). Escala todo el conjunto. */
+  size?: number;
+}
+
+const BASE_SIZE = 40;
+
+export const AiAvatar: React.FC<AiAvatarProps> = ({ size = BASE_SIZE }) => {
+  const avatar = (
+    <div className="relative flex items-center justify-center w-10 h-10 group select-none" aria-hidden="true">
       {/* 1. Aura energética exterior con pulso suave */}
       <div className="absolute inset-0 rounded-full bg-cyan-500/20 blur-md animate-pulse"></div>
 
@@ -20,6 +27,16 @@ export const AiAvatar: React.FC = () => {
 
         {/* 6. Reflejo secundario inferior para dar volumen */}
         <div className="absolute bottom-1 right-1.5 w-1.5 h-0.5 bg-cyan-300/40 rounded-full blur-[0.8px]"></div>
+      </div>
+    </div>
+  );
+
+  if (size === BASE_SIZE) return avatar;
+
+  return (
+    <div className="shrink-0" style={{ width: size, height: size }}>
+      <div style={{ transform: `scale(${size / BASE_SIZE})`, transformOrigin: "top left", width: BASE_SIZE, height: BASE_SIZE }}>
+        {avatar}
       </div>
     </div>
   );

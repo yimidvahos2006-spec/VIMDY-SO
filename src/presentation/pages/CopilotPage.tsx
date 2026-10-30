@@ -11,7 +11,8 @@ import { companyConfigStore } from "../../core/store/companyConfigStore";
 import { startSpeechRecognition } from "../../core/voice/speechRecognition";
 import { RequirePermission } from "../navigation/RequirePermission";
 import { useAuth } from "../context/AuthContext";
-import { CopilotOrb, type CopilotOrbState } from "../components/copilot/CopilotOrb";
+import type { CopilotOrbState } from "../components/copilot/CopilotOrb";
+import { AiAvatar } from "../components/copilot/AiAvatar";
 import { CopilotMessageBubble, CopilotThinkingBubble } from "../components/copilot/CopilotMessageBubble";
 import { CopilotSuggestions } from "../components/copilot/CopilotSuggestions";
 import { detectReplyReaction, detectUserReaction, type CopilotReaction } from "../components/copilot/copilotMood";
@@ -194,7 +195,7 @@ function CopilotPageContent() {
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-cyan-500/20 bg-gradient-to-b from-[#0D1A2B] to-[#08111F] shadow-vimdy-lg">
           {/* Encabezado */}
           <div className="flex items-center gap-4 border-b border-cyan-500/10 px-5 py-3 sm:px-6">
-            {!showHero && <CopilotOrb state={orbState} size={64} />}
+            {!showHero && <AiAvatar size={48} />}
             <div className="min-w-0">
               <h1 className="text-lg font-bold tracking-tight text-slate-100">VIMDY IA</h1>
               <p
@@ -236,7 +237,7 @@ function CopilotPageContent() {
           >
             {showHero ? (
               <div className="flex min-h-full flex-col items-center justify-center gap-6 py-4 text-center">
-                <CopilotOrb state={orbState} size={168} />
+                <AiAvatar size={160} />
                 <div className="space-y-1.5">
                   <h2 className="text-2xl font-bold tracking-tight text-slate-100">¿En qué te ayudo hoy?</h2>
                   <p className="mx-auto max-w-md text-sm text-slate-400">
