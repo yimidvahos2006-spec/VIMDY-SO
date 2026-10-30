@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { container } from "../infrastructure/di/CompositionRoot";
-import { PurchaseOrder, PurchaseOrderItem } from "../core/entities/Entities";
+import { IsoDateString, PurchaseOrder, PurchaseOrderItem } from "../core/entities/Entities";
 import { vimdyCore } from "../core/VimdyCore";
 import { useVimdyEvent } from "./useVimdyCore";
 import { userSessionStore } from "../core/store/userSessionStore";
@@ -48,10 +48,15 @@ export interface UsePurchaseOrdersResult {
     expectedDeliveryDate?: Date;
   }) => Promise<PurchaseOrder | null>;
 
-  /** Marca como comprado y actualiza inventario. Devuelve los mensajes del Gerente Inteligente. */
+  /**
+   * Marca como comprado y actualiza inventario. Devuelve los mensajes del Gerente Inteligente.
+   * `expiryByProduct` (productId -> YYYY-MM-DD) agrega el vencimiento del lote que llegó a
+   * cada línea recibida; los productos sin fecha entran igual que siempre.
+   */
   markAsPurchased: (
     orderId: string,
-    receivedNow?: PurchaseOrderItem[]
+    receivedNow?: PurchaseOrderItem[],
+    expiryByProduct?: Readonly<Record<string, IsoDateString>>
   ) => Promise<string[] | null>;
 
   /**
@@ -70,6 +75,9 @@ export interface UsePurchaseOrdersResult {
 }
 
 function friendlyError(message: string): string {
+  if (message.includes("INVALID_EXPIRES_AT")) {
+    return "La fecha de vencimiento no es válida. Revísala e intenta de nuevo.";
+  }
   if (message.startsWith("DUPLICATE_PURCHASE")) {
     return message.replace("DUPLICATE_PURCHASE: ", "");
   }
@@ -225,7 +233,11 @@ export function usePurchaseOrders(): UsePurchaseOrdersResult {
   );
 
   const markAsPurchased = useCallback(
-    async (orderId: string, receivedNow?: PurchaseOrderItem[]): Promise<string[] | null> => {
+    async (
+      orderId: string,
+      receivedNow?: PurchaseOrderItem[],
+      expiryByProduct?: Readonly<Record<string, IsoDateString>>
+    ): Promise<string[] | null> => {
       setError(null);
       try {
         const session = userSessionStore.get();
@@ -251,6 +263,12 @@ export function usePurchaseOrders(): UsePurchaseOrdersResult {
         }
         if (items.length === 0) {
           throw new Error("PURCHASE_ITEMS_INVALID");
+        }
+        if (expiryByProduct) {
+          items = items.map((item) => {
+            const expiresAt = expiryByProduct[item.productId];
+            return expiresAt !== undefined ? { ...item, expiresAt } : item;
+          });
         }
 
         const outcome = await submitPurchase({

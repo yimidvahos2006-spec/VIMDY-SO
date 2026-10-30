@@ -2,7 +2,7 @@ import { pendingInventoryAdjustmentsStore } from "../offline/pendingInventoryAdj
 import { productCatalogStore } from "../store/productCatalogStore";
 import { toast } from "../store/toastStore";
 import { isStockMasked } from "../utils/stockMask";
-import { LossCategory } from "../entities/Entities";
+import { IsoDateString, LossCategory } from "../entities/Entities";
 import { ProductLocalRepository } from "../../infrastructure/di/repositories/ProductLocalRepository";
 import { logWarning } from "../../infrastructure/logging/opsLogger";
 
@@ -36,6 +36,8 @@ export async function queueIncreaseStockOffline(params: {
   performedBy?: string;
   supplierId?: string;
   purchasePrice?: number;
+  /** Vencimiento del lote que entra: viaja con el ajuste hasta que se sincronice. */
+  expiresAt?: IsoDateString;
 }): Promise<void> {
   const offlineId = params.id ?? crypto.randomUUID();
 
@@ -48,7 +50,8 @@ export async function queueIncreaseStockOffline(params: {
     reason: params.reason,
     performedBy: params.performedBy,
     supplierId: params.supplierId,
-    purchasePrice: params.purchasePrice
+    purchasePrice: params.purchasePrice,
+    ...(params.expiresAt !== undefined ? { expiresAt: params.expiresAt } : {})
   });
 
   productCatalogStore.applyStockDelta(params.productId, params.quantity);

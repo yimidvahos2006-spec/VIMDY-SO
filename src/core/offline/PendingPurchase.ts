@@ -102,8 +102,15 @@ export interface PurchaseFingerprintInput {
  * para recepciones, y compartida por la cola persistente.
  */
 export function buildPurchaseFingerprint(input: PurchaseFingerprintInput): string {
+  // El vencimiento solo entra a la huella cuando existe: así las compras ya
+  // guardadas en la cola (sin fecha) conservan su huella y un doble clic tras
+  // actualizar no las duplica. Con otra fecha es otra compra distinta.
   const lines = input.items
-    .map((item) => [item.productId, item.quantity, item.unitPrice ?? null])
+    .map((item) =>
+      item.expiresAt === undefined
+        ? [item.productId, item.quantity, item.unitPrice ?? null]
+        : [item.productId, item.quantity, item.unitPrice ?? null, item.expiresAt]
+    )
     .map((line) => JSON.stringify(line))
     .sort();
 

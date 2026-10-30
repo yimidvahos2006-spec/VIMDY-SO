@@ -3,6 +3,24 @@ import { container, productsReady, categoriesReady } from "../../infrastructure/
 import { Category, InventoryMovement, LossCategory, Product, Sale, User } from "../entities/Entities";
 import { Profitability } from "../engines/RecipeEngine";
 import { LOSS_CATEGORY_LABEL, LOSS_CATEGORY_ORDER } from "../engines/lossCategoryLabels";
+import {
+  filterLossesByPeriod,
+  findExpiryRisk,
+  summarizeLosses,
+  type LossSummary
+} from "../domain/loss/lossEngine";
+import {
+  buildExpiringLots,
+  buildLossRows,
+  isoDayToUtcMs,
+  movementsToLossRecords,
+  productsToLossInventory
+} from "../domain/loss/lossCenterAdapter";
+import type {
+  ExpiryAlert,
+  LossPeriod,
+  LossRow
+} from "../../presentation/components/loss/LossCenterDashboard";
 import { useVimdyEvent } from "../../hooks/useVimdyCore";
 import { getSaleNetTotal } from "../utils/saleRefunds";
 import { companyConfigStore } from "./companyConfigStore";
@@ -29,12 +47,13 @@ import {
  * (mismo criterio que costUnreliable en useProfitCenter).
  */
 
-export type LossRange = "hoy" | "semana" | "mes" | "año" | "todo";
+export type LossRange = "hoy" | "semana" | "mes" | "trimestre" | "año" | "todo";
 
 export const LOSS_RANGE_LABEL: Record<LossRange, string> = {
   hoy: "Hoy",
   semana: "Esta semana",
   mes: "Este mes",
+  trimestre: "Este trimestre",
   año: "Este año",
   todo: "Todo"
 };
@@ -98,13 +117,58 @@ export interface LossBucket {
   value: number;
 }
 
-function rangeStart(range: LossRange, tz: string): Date | null {
-  const now = new Date();
+/** Inicio del trimestre calendario (ene/abr/jul/oct) en la zona horaria del negocio. */
+function startOfBusinessQuarter(date: Date, tz: string): Date {
+  const monthsIntoQuarter = (Number(getBusinessMonthKey(date, tz).slice(5, 7)) - 1) % 3;
+  let start = startOfBusinessMonth(date, tz);
+  for (let i = 0; i < monthsIntoQuarter; i += 1) {
+    // 1 ms antes del inicio del mes cae en el mes anterior.
+    start = startOfBusinessMonth(new Date(start.getTime() - 1), tz);
+  }
+  return start;
+}
+
+function rangeStart(range: LossRange, tz: string, now: Date = new Date()): Date | null {
   if (range === "hoy") return startOfBusinessDay(now, tz);
   if (range === "semana") return startOfBusinessWeek(now, tz);
   if (range === "mes") return startOfBusinessMonth(now, tz);
+  if (range === "trimestre") return startOfBusinessQuarter(now, tz);
   if (range === "año") return startOfBusinessYear(now, tz);
   return null;
+}
+
+/** Periodos del dashboard ↔ rangos del hook. "todo" no existe en el dashboard: se muestra como "year". */
+const PERIOD_TO_RANGE: Record<LossPeriod, LossRange> = {
+  today: "hoy",
+  week: "semana",
+  month: "mes",
+  quarter: "trimestre",
+  year: "año"
+};
+
+const RANGE_TO_PERIOD: Record<LossRange, LossPeriod> = {
+  hoy: "today",
+  semana: "week",
+  mes: "month",
+  trimestre: "quarter",
+  año: "year",
+  todo: "year"
+};
+
+/** Días de anticipación para marcar un producto como "por vencer". */
+export const LOSS_EXPIRY_WARNING_DAYS = 3;
+
+/** Todo lo que `LossCenterDashboard` necesita, listo para pasarlo como props. */
+export interface LossCenterDashboardData {
+  readonly rows: readonly LossRow[];
+  readonly expiryRisk: readonly ExpiryAlert[];
+  readonly expiryWarningDays: number;
+  readonly period: LossPeriod;
+  readonly revenue: number | null;
+  readonly previousTotalCost: number | null;
+  readonly currency: string;
+  readonly loading: boolean;
+  readonly error: string | null;
 }
 
 function fixed2(value: number): number {
@@ -471,7 +535,11 @@ export function useLossCenter() {
   const lossTimeSeries: LossBucket[] = useMemo(() => {
     const tz = companyConfigStore.get().timezone || "America/Bogota";
     const granularity: "day" | "week" | "month" =
-      filters.range === "hoy" || filters.range === "semana" ? "day" : filters.range === "mes" ? "week" : "month";
+      filters.range === "hoy" || filters.range === "semana"
+        ? "day"
+        : filters.range === "mes" || filters.range === "trimestre"
+          ? "week"
+          : "month";
 
     const buckets = new Map<string, { order: number; value: number }>();
 
@@ -530,6 +598,83 @@ export function useLossCenter() {
     [topAffectedProducts]
   );
 
+  // ---------------------------------------------------------------------
+  // CENTRO DE PÉRDIDAS (lossEngine) — alimenta a LossCenterDashboard.
+  // Movimiento del Kardex → LossRecord (normalizeLossCategory) → motor.
+  // Aquí NO se aplican los filtros de categoría/producto/empleado: el
+  // dashboard filtra por su cuenta y sus totales salen de `rows`, que debe
+  // traer TODOS los ítems con pérdida del periodo.
+  // ---------------------------------------------------------------------
+  const recordsBundle = useMemo(
+    () => movementsToLossRecords(movements, productById, profitability),
+    [movements, productById, profitability]
+  );
+
+  const lossEngineView = useMemo(() => {
+    const tz = companyConfigStore.get().timezone || "America/Bogota";
+    const now = new Date();
+    const fromDate = rangeStart(filters.range, tz, now);
+    const fromMs = fromDate ? fromDate.getTime() : null;
+    const toMs = now.getTime() + 1; // [from, to) incluye lo registrado en este mismo instante
+    const period = { from: fromMs ?? undefined, to: toMs };
+
+    const inventory = productsToLossInventory(products, profitability);
+
+    const revenue = sales
+      .filter((s) => {
+        if (!s.createdAt) return false;
+        const at = new Date(s.createdAt).getTime();
+        if (fromMs !== null && at < fromMs) return false;
+        return s.status === "PAID" || s.status === "CLOSED" || !s.status;
+      })
+      .reduce((sum, s) => sum + getSaleNetTotal(s), 0);
+
+    const summary: LossSummary = summarizeLosses({
+      records: recordsBundle.records,
+      inventory,
+      period,
+      revenue,
+      options: { now, expiryWarningDays: LOSS_EXPIRY_WARNING_DAYS }
+    });
+
+    const rows = buildLossRows({
+      records: filterLossesByPeriod(recordsBundle.records, period),
+      products,
+      movements,
+      periodFromMs: fromMs,
+      periodToMs: toMs,
+      unitCosts: profitability
+    });
+
+    // Vencimientos: el vencimiento es un DÍA del calendario del negocio, así que
+    // "hoy" y la fecha del lote se comparan como días (daysLeft exacto, sin husos).
+    const todayDay = isoDayToUtcMs(getBusinessDateKey(now, tz)) ?? now.getTime();
+    const expiryRisk = findExpiryRisk(
+      buildExpiringLots(movements, products, profitability),
+      todayDay,
+      LOSS_EXPIRY_WARNING_DAYS
+    );
+
+    return { summary, rows, expiryRisk, revenue };
+  }, [filters.range, products, profitability, sales, movements, recordsBundle]);
+
+  const dashboard: LossCenterDashboardData = useMemo(
+    () => ({
+      rows: lossEngineView.rows,
+      expiryRisk: lossEngineView.expiryRisk,
+      expiryWarningDays: LOSS_EXPIRY_WARNING_DAYS,
+      period: RANGE_TO_PERIOD[filters.range],
+      revenue: lossEngineView.revenue > 0 ? lossEngineView.revenue : null,
+      previousTotalCost: lossEngineView.summary.previousTotalCost,
+      currency: companyConfigStore.get().currency || "COP",
+      loading,
+      error
+    }),
+    [lossEngineView, filters.range, loading, error]
+  );
+
+  const setPeriod = useCallback((period: LossPeriod) => setFilters((f) => ({ ...f, range: PERIOD_TO_RANGE[period] })), []);
+
   const setRange = useCallback((range: LossRange) => setFilters((f) => ({ ...f, range })), []);
   const setCategory = useCallback((category: LossCategory | "all") => setFilters((f) => ({ ...f, category })), []);
   const setProductId = useCallback((productId: string) => setFilters((f) => ({ ...f, productId })), []);
@@ -570,6 +715,13 @@ export function useLossCenter() {
     lossTimeSeries,
     monthlyComparison,
     lossByProductChart,
+
+    // Centro de Pérdidas (motor): props para LossCenterDashboard.
+    dashboard,
+    setPeriod,
+    lossSummary: lossEngineView.summary,
+    /** Salidas cuyo motivo el motor no reconoce (hoy "OTRO"); se contabilizan como Faltante. */
+    unmappedLossCount: recordsBundle.unmappedCount,
 
     hasAnyData: lossMovements.length > 0,
     hasFilteredData: productRows.length > 0

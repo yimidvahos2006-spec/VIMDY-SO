@@ -3,8 +3,9 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { X } from "lucide-react";
 import { toast } from "../../../core/store/toastStore";
-import type { Product } from "../../../core/entities/Entities";
+import type { IsoDateString, Product } from "../../../core/entities/Entities";
 import { isStockMasked, stockMaskBadge } from "../../../core/utils/stockMask";
+import { checkExpiryInput, getBusinessTodayIsoDate } from "../../../core/utils/isoDate";
 import { VimdyButton } from "../ui/VimdyButton";
 import {
   allowsDecimals,
@@ -18,8 +19,16 @@ const qtyFormatter = new Intl.NumberFormat("es-CO", { maximumFractionDigits: 3 }
 export interface RestockModalProps {
   /** Pasa la versión VIVA del producto (de la lista) para que el stock se refresque tras guardar. */
   product: Product;
-  /** Compatible con `increaseStock` de useInventory. Devuelve false si falló. */
-  onConfirm: (productId: string, quantity: number, reason: string) => Promise<boolean>;
+  /**
+   * Devuelve false si falló. `expiresAt` solo viaja cuando la persona escribió el
+   * vencimiento del lote que llegó (campo opcional); sin fecha se llama igual que antes.
+   */
+  onConfirm: (
+    productId: string,
+    quantity: number,
+    reason: string,
+    expiresAt?: IsoDateString
+  ) => Promise<boolean>;
   onClose: () => void;
 }
 
@@ -39,9 +48,12 @@ function formatWithUnit(quantity: number, unit?: string): string {
  *  · Anti doble-toque con ref (increaseStock genera un movimiento por llamada).
  *  · No se puede cerrar mientras guarda; si falla, conserva lo escrito.
  *  · Conteo a ciegas: nunca muestra cifras reales (usa el badge de estado).
+ *  · Vencimiento del lote: campo opcional; si se escribe debe ser una fecha real,
+ *    de hoy en adelante, y viaja al Kardex junto con la entrada.
  */
 export function RestockModal({ product, onConfirm, onClose }: RestockModalProps) {
   const [rawQuantity, setRawQuantity] = useState("");
+  const [rawExpiry, setRawExpiry] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmedLarge, setConfirmedLarge] = useState(false);
@@ -58,6 +70,9 @@ export function RestockModal({ product, onConfirm, onClose }: RestockModalProps)
     () => parseRestockQuantity(rawQuantity, currentStock),
     [rawQuantity, currentStock]
   );
+
+  const today = useMemo(() => getBusinessTodayIsoDate(), []);
+  const expiry = useMemo(() => checkExpiryInput(rawExpiry, { today }), [rawExpiry, today]);
 
   const quantity = parsed.status === "valid" ? parsed.quantity : null;
   const needsLargeConfirm = parsed.status === "valid" && parsed.unusuallyLarge && !confirmedLarge;
@@ -81,9 +96,14 @@ export function RestockModal({ product, onConfirm, onClose }: RestockModalProps)
     setError(null);
   }
 
+  function handleExpiryChange(value: string) {
+    setRawExpiry(value);
+    setError(null);
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (submittingRef.current || parsed.status !== "valid") return;
+    if (submittingRef.current || parsed.status !== "valid" || !expiry.ok) return;
 
     // Cantidad inusual: el primer toque solo pide confirmar.
     if (parsed.unusuallyLarge && !confirmedLarge) {
@@ -95,7 +115,7 @@ export function RestockModal({ product, onConfirm, onClose }: RestockModalProps)
     setSaving(true);
     setError(null);
     try {
-      const ok = await onConfirm(product.id, parsed.quantity, RESTOCK_REASON);
+      const ok = await onConfirm(product.id, parsed.quantity, RESTOCK_REASON, expiry.value);
       if (ok) {
         toast.success(`+${formatWithUnit(parsed.quantity, unit)} de ${product.name}.`);
         onClose();
@@ -207,6 +227,31 @@ export function RestockModal({ product, onConfirm, onClose }: RestockModalProps)
           </div>
         </div>
 
+        {/* Vencimiento del lote (opcional) */}
+        <div className="mt-vimdy-md">
+          <label htmlFor="restock-expiry" className="block text-vimdy-small text-vimdy-text-secondary">
+            Fecha de vencimiento <span className="text-vimdy-text-tertiary">(opcional)</span>
+          </label>
+          <input
+            id="restock-expiry"
+            type="date"
+            min={today}
+            value={rawExpiry}
+            disabled={saving}
+            onChange={(e) => handleExpiryChange(e.target.value)}
+            aria-invalid={!expiry.ok}
+            aria-describedby={!expiry.ok ? "restock-expiry-error" : undefined}
+            className={`mt-2 w-full h-11 rounded-vimdy-md border bg-vimdy-background px-vimdy-md text-vimdy-body text-vimdy-text focus:outline-none focus:shadow-vimdy-accent disabled:opacity-60 transition-colors duration-vimdy-fast ${
+              !expiry.ok ? "border-vimdy-danger" : "border-vimdy-border focus:border-vimdy-accent"
+            }`}
+          />
+          {!expiry.ok && (
+            <p id="restock-expiry-error" className="mt-1 text-vimdy-small text-vimdy-danger-hover">
+              {expiry.message}
+            </p>
+          )}
+        </div>
+
         {error && (
           <p role="alert" className="mt-2 rounded-vimdy-sm border border-vimdy-danger/30 bg-vimdy-danger-bg px-3 py-2 text-vimdy-small text-vimdy-danger-hover">
             {error}
@@ -219,7 +264,7 @@ export function RestockModal({ product, onConfirm, onClose }: RestockModalProps)
             size="lg"
             fullWidth
             loading={saving}
-            disabled={parsed.status !== "valid"}
+            disabled={parsed.status !== "valid" || !expiry.ok}
           >
             {buttonLabel}
           </VimdyButton>

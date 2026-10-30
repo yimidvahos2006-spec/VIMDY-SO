@@ -4,7 +4,7 @@ import {
   PendingInventoryAdjustmentType
 } from "./PendingInventoryAdjustment";
 import { PendingInventoryAdjustmentRepository } from "../../infrastructure/di/repositories/PendingInventoryAdjustmentRepository";
-import { LossCategory } from "../entities/Entities";
+import { IsoDateString, LossCategory } from "../entities/Entities";
 import { getCurrentBranchId, requireCurrentBusinessId } from "../../infrastructure/supabase/supabaseClient";
 
 const repository = new PendingInventoryAdjustmentRepository();
@@ -71,6 +71,7 @@ class PendingInventoryAdjustmentsStore extends ObservableStore<PendingInventoryA
     supplierId?: string;
     purchasePrice?: number;
     lossCategory?: LossCategory;
+    expiresAt?: IsoDateString;
   }): Promise<PendingInventoryAdjustment> {
     const existing = await repository.findById(params.id);
 
@@ -85,6 +86,7 @@ class PendingInventoryAdjustmentsStore extends ObservableStore<PendingInventoryA
       supplierId: params.supplierId,
       purchasePrice: params.purchasePrice,
       lossCategory: params.lossCategory,
+      ...(params.expiresAt !== undefined ? { expiresAt: params.expiresAt } : {}),
       status: "PENDING_SYNC",
       queuedAt: existing?.queuedAt ?? new Date(),
       attempts: existing?.attempts ?? 0,

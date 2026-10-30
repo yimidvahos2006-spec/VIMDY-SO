@@ -827,7 +827,9 @@ export function InventoryDashboard({
       {restockProduct && (
         <RestockModal
           product={allProducts.find((p) => p.id === restockProduct.id) ?? restockProduct}
-          onConfirm={increaseStock}
+          onConfirm={(productId, quantity, reason, expiresAt) =>
+            increaseStock(productId, quantity, reason, undefined, undefined, expiresAt)
+          }
           onClose={() => setRestockProduct(null)}
         />
       )}

@@ -1,4 +1,6 @@
 import { useId, useMemo, useState } from 'react';
+import type { IsoDateString } from '../../../core/entities/Entities';
+import { checkExpiryInput, getBusinessTodayIsoDate } from '../../../core/utils/isoDate';
 import {
   PurchaseOrderError,
   applyOrderToInventory,
@@ -18,6 +20,11 @@ export interface PurchaseOrdersPanelProps {
     orderId: string;
     orders: PurchaseOrder[];
     inventory: InventoryStock;
+    /**
+     * Vencimiento del lote que llegó, por itemId (YYYY-MM-DD). Solo trae los ítems
+     * para los que la persona escribió una fecha; sin fechas es `undefined`.
+     */
+    expiryByItem?: Readonly<Record<string, IsoDateString>>;
   }) => void;
   /** Nombres legibles por itemId. Si falta, se muestra el itemId. */
   itemLabels?: Readonly<Record<string, string>>;
@@ -82,6 +89,12 @@ const STYLES = `
 .po-confirm{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;
   margin:0 14px 14px;padding:10px 12px;border:1px solid var(--po-accent);border-radius:8px;background:var(--po-info-bg)}
 .po-confirm p{margin:0;font-size:.9rem;line-height:1.4}
+.po-expiry{flex:1 1 100%;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+.po-expiry-field{display:flex;flex-direction:column;gap:4px;min-width:0}
+.po-expiry-field label{font-size:.85rem;font-weight:600;overflow-wrap:anywhere}
+.po-expiry-field input{font:inherit;font-size:.9rem;min-height:40px;padding:6px 10px;border-radius:8px;
+  border:1px solid var(--po-line);background:var(--po-surface);color:var(--po-ink)}
+.po-expiry-field input:focus-visible{outline:2px solid var(--po-accent);outline-offset:2px}
 .po-confirm-actions{display:flex;gap:8px}
 .po-empty{background:var(--po-surface);border:1px dashed var(--po-line);border-radius:10px;padding:28px 16px;text-align:center;color:var(--po-muted)}
 .po-empty strong{display:block;color:var(--po-ink);margin-bottom:4px}
@@ -144,6 +157,8 @@ export function PurchaseOrdersPanel({
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
+  /** Vencimientos escritos para la orden que se está confirmando (itemId -> texto del input). */
+  const [expiryDrafts, setExpiryDrafts] = useState<Readonly<Record<string, string>>>({});
 
   const activeOrders = useMemo(() => getActiveOrders(orders), [orders]);
 
@@ -156,15 +171,35 @@ export function PurchaseOrdersPanel({
   const startReceive = (orderId: string) => {
     setFeedback(null);
     setExpandedId(orderId);
+    setExpiryDrafts({});
     setConfirmingId(orderId);
   };
 
   const confirmReceive = (order: PurchaseOrder) => {
     const units = totalUnits(order);
+
+    // Vencimientos (opcionales): se validan ANTES de recibir. Si alguno está mal,
+    // la confirmación sigue abierta para corregirlo y no se mueve inventario.
+    const today = getBusinessTodayIsoDate();
+    const expiryByItem: Record<string, IsoDateString> = {};
+    for (const itemId of new Set(order.items.map((item) => item.itemId))) {
+      const check = checkExpiryInput(expiryDrafts[itemId] ?? '', { today });
+      if (!check.ok) {
+        setFeedback({ kind: 'error', text: `${labelFor(itemId)}: ${check.message}` });
+        return;
+      }
+      if (check.value !== undefined) expiryByItem[itemId] = check.value;
+    }
+
     try {
       const next = receiveOrderById(orders, order.id, inventory);
-      onReceived({ orderId: order.id, ...next });
+      onReceived({
+        orderId: order.id,
+        ...next,
+        ...(Object.keys(expiryByItem).length > 0 ? { expiryByItem } : {}),
+      });
       setConfirmingId(null);
+      setExpiryDrafts({});
       setFeedback({
         kind: 'ok',
         text: `Orden ${order.id} recibida. Se sumaron ${pluralUnits(units, locale)} al inventario.`,
@@ -256,6 +291,25 @@ export function PurchaseOrdersPanel({
                     <p>
                       Se sumarán {pluralUnits(units, locale)} al inventario. Esta acción no se puede repetir.
                     </p>
+                    <div className="po-expiry">
+                      {Array.from(new Set(order.items.map((item) => item.itemId))).map((itemId) => (
+                        <div className="po-expiry-field" key={itemId}>
+                          <label htmlFor={`${uid}-exp-${order.id}-${itemId}`}>
+                            Vencimiento de {labelFor(itemId)} (opcional)
+                          </label>
+                          <input
+                            id={`${uid}-exp-${order.id}-${itemId}`}
+                            type="date"
+                            min={getBusinessTodayIsoDate()}
+                            value={expiryDrafts[itemId] ?? ''}
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              setExpiryDrafts((current) => ({ ...current, [itemId]: value }));
+                            }}
+                          />
+                        </div>
+                      ))}
+                    </div>
                     <div className="po-confirm-actions">
                       <button type="button" className="po-btn" onClick={() => confirmReceive(order)}>
                         Confirmar recepción
@@ -264,7 +318,10 @@ export function PurchaseOrdersPanel({
                         type="button"
                         className="po-btn"
                         data-variant="ghost"
-                        onClick={() => setConfirmingId(null)}
+                        onClick={() => {
+                          setConfirmingId(null);
+                          setExpiryDrafts({});
+                        }}
                       >
                         Cancelar
                       </button>

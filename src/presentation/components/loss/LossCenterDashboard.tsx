@@ -58,8 +58,25 @@ export interface LossRow {
   readonly lastIncidentAt?: Date | string | null;
 }
 
+/** Producto (o lote) con stock que vence pronto. Misma forma que `ExpiryRiskItem` de lossEngine. */
+export interface ExpiryAlert {
+  readonly itemId: string;
+  readonly itemName: string;
+  readonly unit: string | null;
+  /** Existencias que vencen. */
+  readonly stock: number;
+  /** Días enteros hasta vencer: 0 = hoy, negativo = ya vencido con stock. */
+  readonly daysLeft: number;
+  /** Costo de lo que está en riesgo (0 si no hay costo confiable). */
+  readonly valueAtRisk: number;
+}
+
 export interface LossCenterDashboardProps {
   readonly rows?: readonly LossRow[];
+  /** Productos por vencer (pérdida potencial). Se muestran aunque no haya pérdidas en el período. */
+  readonly expiryRisk?: readonly ExpiryAlert[];
+  /** Días de anticipación con los que se calculó `expiryRisk`, solo para el texto. */
+  readonly expiryWarningDays?: number;
   /** Período activo (modo controlado). Si no se envía, el componente lo maneja. */
   readonly period?: LossPeriod;
   /** Período inicial cuando no es controlado. Por defecto "month". */
@@ -322,10 +339,71 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   );
 }
 
+/* ═══════════════════════════════ Productos por vencer ═══════════════════════════════ */
+
+function expiryLabel(daysLeft: number): string {
+  if (daysLeft < 0) {
+    const d = Math.abs(daysLeft);
+    return `Vencido hace ${d} ${d === 1 ? "día" : "días"}`;
+  }
+  if (daysLeft === 0) return "Vence hoy";
+  return `Vence en ${daysLeft} ${daysLeft === 1 ? "día" : "días"}`;
+}
+
+function ExpiryRiskPanel({
+  items,
+  warningDays,
+  money
+}: {
+  readonly items: readonly ExpiryAlert[];
+  readonly warningDays: number;
+  readonly money: (n: number) => string;
+}) {
+  const expired = items.filter((i) => i.daysLeft < 0).length;
+  const atRisk = items.reduce((sum, i) => sum + safe(i.valueAtRisk), 0);
+  const MAX_VISIBLE = 6;
+  const visible = items.slice(0, MAX_VISIBLE);
+  const hidden = items.length - visible.length;
+
+  return (
+    <section className="lcd-expiry" aria-label="Productos próximos a vencer" role="status">
+      <div className="lcd-expiry-head">
+        <Icon name="clock" size={18} />
+        <div>
+          <p className="lcd-expiry-title">
+            {items.length} {items.length === 1 ? "producto vence" : "productos vencen"} en {warningDays}{" "}
+            {warningDays === 1 ? "día" : "días"} o menos
+            {expired > 0 ? ` · ${expired} ya vencido${expired === 1 ? "" : "s"}` : ""}
+          </p>
+          <p className="lcd-expiry-sub">
+            {atRisk > 0 ? `Valor en riesgo: ${money(atRisk)}. ` : ""}
+            Véndelos, úsalos en producción o regístralos como vencimiento antes de perderlos.
+          </p>
+        </div>
+      </div>
+      <ul className="lcd-expiry-list">
+        {visible.map((item, index) => (
+          <li key={`${item.itemId}-${index}`} className="lcd-expiry-item" data-tone={item.daysLeft < 0 ? "danger" : "warn"}>
+            <span className="lcd-expiry-name">{item.itemName}</span>
+            <span className="lcd-expiry-qty">
+              {item.stock} {item.unit ?? ""}
+            </span>
+            <span className="lcd-expiry-when">{expiryLabel(item.daysLeft)}</span>
+            {item.valueAtRisk > 0 && <span className="lcd-expiry-value">{money(item.valueAtRisk)}</span>}
+          </li>
+        ))}
+      </ul>
+      {hidden > 0 && <p className="lcd-expiry-more">y {hidden} más…</p>}
+    </section>
+  );
+}
+
 /* ═══════════════════════════════ Componente principal ═══════════════════════════════ */
 
 export function LossCenterDashboard({
   rows = [],
+  expiryRisk = [],
+  expiryWarningDays = 3,
   period,
   defaultPeriod = "month",
   onPeriodChange,
@@ -493,6 +571,10 @@ export function LossCenterDashboard({
           <Icon name="alert" size={18} />
           <span>{error}</span>
         </div>
+      )}
+
+      {!loading && expiryRisk.length > 0 && (
+        <ExpiryRiskPanel items={expiryRisk} warningDays={expiryWarningDays} money={money} />
       )}
 
       {loading ? (
@@ -952,6 +1034,20 @@ const CSS = `
 .lcd-btn-ghost[aria-pressed="true"] { border-color: var(--lcd-accent); color: var(--lcd-accent-hover); }
 
 /* Error */
+.lcd-expiry {
+  display: grid; gap: 10px; padding: 14px 16px; margin-bottom: 16px; border-radius: 14px;
+  color: var(--lcd-warning); background: color-mix(in srgb, var(--lcd-warning) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--lcd-warning) 35%, transparent);
+}
+.lcd-expiry-head { display: flex; gap: 10px; align-items: flex-start; }
+.lcd-expiry-title { margin: 0; font-weight: 700; }
+.lcd-expiry-sub { margin: 2px 0 0; font-size: 13px; opacity: 0.85; }
+.lcd-expiry-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.lcd-expiry-item { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; font-size: 13px; }
+.lcd-expiry-item[data-tone="danger"] { color: var(--lcd-danger); }
+.lcd-expiry-name { font-weight: 600; }
+.lcd-expiry-qty, .lcd-expiry-when, .lcd-expiry-value { opacity: 0.9; }
+.lcd-expiry-more { margin: 0; font-size: 12px; opacity: 0.8; }
 .lcd-error {
   display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-radius: 12px;
   color: var(--lcd-danger); background: color-mix(in srgb, var(--lcd-danger) 10%, transparent);

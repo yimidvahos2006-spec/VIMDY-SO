@@ -1,8 +1,9 @@
 // src/core/engines/PurchaseOrderEngine.ts
-import { Product, PurchaseOrder, PurchaseOrderItem, PurchaseOrderStatus } from "../entities/Entities";
+import { IsoDateString, Product, PurchaseOrder, PurchaseOrderItem, PurchaseOrderStatus } from "../entities/Entities";
 import { IRepository } from "../../infrastructure/di/repositories/IRepository";
 import { InventoryEngine } from "./InventoryEngine";
 import { RecipeEngine } from "./RecipeEngine";
+import { isIsoDateString } from "../utils/isoDate";
 
 /** Productos con receta cuya capacidad real de producción mejoró al recibir una compra. */
 export interface CapacityImprovement {
@@ -27,6 +28,27 @@ export interface PurchaseReceiptInput {
   readonly productId: string;
   readonly quantity: number;
   readonly unitPrice?: number;
+  /** Vencimiento del lote recibido (YYYY-MM-DD). Opcional. */
+  readonly expiresAt?: IsoDateString;
+}
+
+/** Línea de una recepción tal como se manda al servidor: solo lleva `expiresAt` si hay valor. */
+function toReceiptInput(item: PurchaseOrderItem): PurchaseReceiptInput {
+  return {
+    productId: item.productId,
+    quantity: item.quantity,
+    unitPrice: item.unitPrice,
+    ...(item.expiresAt !== undefined ? { expiresAt: item.expiresAt } : {})
+  };
+}
+
+/** El servidor rechaza una fecha mal formada con INVALID_EXPIRES_AT; aquí se corta antes de guardar nada. */
+function assertValidExpiry(items: readonly PurchaseOrderItem[]): void {
+  for (const item of items) {
+    if (item.expiresAt !== undefined && !isIsoDateString(item.expiresAt)) {
+      throw new Error("INVALID_EXPIRES_AT");
+    }
+  }
 }
 
 /**
@@ -218,12 +240,13 @@ export class PurchaseOrderEngine {
     if (itemsNow.length === 0) {
       throw new Error("PURCHASE_ITEMS_INVALID");
     }
+    assertValidExpiry(itemsNow);
 
     // Mismo identificador mientras sean las mismas cantidades y no haya
     // terminado bien: protege contra el doble clic y contra reintentos tras
     // un corte de internet.
     const receiptKey = `${orderId}|${JSON.stringify(
-      itemsNow.map((i) => [i.productId, i.quantity, i.unitPrice]).sort()
+      itemsNow.map((i) => [i.productId, i.quantity, i.unitPrice, i.expiresAt ?? null]).sort()
     )}`;
     const operationId = providedOperationId ?? this.pendingReceipts.get(receiptKey) ?? crypto.randomUUID();
     if (!providedOperationId) {
@@ -235,7 +258,7 @@ export class PurchaseOrderEngine {
       await receiver({
         purchaseOrderId: orderId,
         operationId,
-        items: itemsNow.map((i) => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice })),
+        items: itemsNow.map(toReceiptInput),
         performedBy
       });
       this.pendingReceipts.delete(receiptKey);
@@ -269,6 +292,7 @@ export class PurchaseOrderEngine {
       }
       seen.add(item.productId);
     }
+    assertValidExpiry(input.items);
     if (typeof this.repository.recordDirect !== "function") {
       throw new Error("PURCHASE_RECORD_UNAVAILABLE");
     }
@@ -277,13 +301,14 @@ export class PurchaseOrderEngine {
     const itemsNow: PurchaseOrderItem[] = input.items.map((i) => ({
       productId: i.productId,
       quantity: i.quantity,
-      unitPrice: i.unitPrice
+      unitPrice: i.unitPrice,
+      ...(i.expiresAt !== undefined ? { expiresAt: i.expiresAt } : {})
     }));
 
     // Mismo identificador para el mismo documento mientras no termine bien:
     // el doble clic o un reintento tras un corte de internet no suma dos veces.
     const directKey = `${input.supplierId}|${invoiceNumber ?? ""}|${JSON.stringify(
-      itemsNow.map((i) => [i.productId, i.quantity, i.unitPrice]).sort()
+      itemsNow.map((i) => [i.productId, i.quantity, i.unitPrice, i.expiresAt ?? null]).sort()
     )}`;
     const operationId = input.operationId ?? this.pendingDirectPurchases.get(directKey) ?? crypto.randomUUID();
     if (!input.operationId) {
@@ -307,7 +332,7 @@ export class PurchaseOrderEngine {
       const result = await recorder({
         operationId,
         supplierId: input.supplierId,
-        items: itemsNow.map((i) => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice })),
+        items: itemsNow.map(toReceiptInput),
         invoiceNumber,
         note: input.note,
         performedBy: input.performedBy

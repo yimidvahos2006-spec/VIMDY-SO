@@ -1,4 +1,4 @@
-import { LossCategory } from "../entities/Entities";
+import { IsoDateString, LossCategory } from "../entities/Entities";
 
 /**
  * PendingInventoryAdjustment
@@ -58,6 +58,8 @@ export interface PendingInventoryAdjustment {
   /** Solo aplica a INCREASE (entrada por compra a proveedor). */
   readonly supplierId?: string;
   readonly purchasePrice?: number;
+  /** Solo aplica a INCREASE: vencimiento del lote que entra (YYYY-MM-DD). */
+  readonly expiresAt?: IsoDateString;
   /** Solo aplica a DECREASE manual (merma, vencimiento, consumo interno, robo, error). */
   readonly lossCategory?: LossCategory;
   readonly status: PendingInventoryAdjustmentStatus;

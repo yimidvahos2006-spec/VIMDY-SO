@@ -1,4 +1,4 @@
-import { InventoryMovement, LossCategory, Product } from "../../../core/entities/Entities";
+import { InventoryMovement, IsoDateString, LossCategory, Product } from "../../../core/entities/Entities";
 import { IRepository } from "./IRepository";
 
 /**
@@ -126,5 +126,12 @@ export interface StockMovementBatchItem {
    * recepciones de compra.
    */
   allowNegative?: boolean;
+  /**
+   * Vencimiento del lote que entra. SOLO con type INCREASE: el RPC
+   * `adjust_stock_batch_with_kardex` rechaza la fecha en cualquier otro tipo
+   * (INVALID_INVENTORY_BATCH_ITEM) y un formato distinto de YYYY-MM-DD
+   * (INVALID_EXPIRES_AT). Queda en el Kardex (`inventory_movements.expires_at`).
+   */
+  expiresAt?: IsoDateString;
   extraFields?: Record<string, unknown>;
 }

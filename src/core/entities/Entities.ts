@@ -717,6 +717,15 @@ export type LossCategory =
   | "AJUSTE_ADMINISTRATIVO"
   | "OTRO";
 
+/**
+ * Fecha calendario SIN hora ni zona, formato ISO `YYYY-MM-DD` (ej. "2026-12-01").
+ * Se usa para vencimientos: un vencimiento es un día del calendario, no un
+ * instante. Por eso es un string y NO un Date: `new Date("2026-12-01")` es
+ * medianoche UTC y en Colombia (UTC-5) se vería como el 30 de noviembre.
+ * Validar con `isIsoDateString` / `parseIsoDateString` (core/utils/isoDate.ts).
+ */
+export type IsoDateString = `${number}-${number}-${number}`;
+
 export interface InventoryMovement {
   readonly id: string;
   /**
@@ -763,6 +772,13 @@ export interface InventoryMovement {
    readonly branchId?: string;
    readonly stockBefore?: number;
    readonly stockAfter?: number;
+  /**
+   * Vencimiento del lote que ENTRA (Centro de Pérdidas). Solo aplica a
+   * movimientos INCREASE; ausente = no se informó. En la base vive en
+   * `data->>'expiresAt'` y se expone como la columna generada
+   * `inventory_movements.expires_at` (date, nullable, indexada).
+   */
+  readonly expiresAt?: IsoDateString;
  }
 
 /**
@@ -942,6 +958,12 @@ export interface PurchaseOrderItem {
   readonly quantity: number;
   /** Precio unitario esperado/pactado al crear la orden. Puede ajustarse al recibir si llegó distinto. */
   readonly unitPrice: number;
+  /**
+   * Vencimiento del lote que llega, informado AL RECIBIR (o en la factura de una
+   * compra directa). Pasa al Kardex del movimiento INCREASE. Una fecha por
+   * producto y recepción: otro lote con otra fecha entra en otra recepción.
+   */
+  readonly expiresAt?: IsoDateString;
 }
 
 /**

@@ -1,4 +1,4 @@
-import { PurchaseOrder } from "../../../core/entities/Entities";
+import { IsoDateString, PurchaseOrder } from "../../../core/entities/Entities";
 import { SupabaseRepository } from "./SupabaseRepository";
 import { supabase, getCurrentBusinessId, getCurrentBranchId } from "../../supabase/supabaseClient";
 
@@ -7,6 +7,18 @@ export interface PurchaseReceiptLine {
   readonly productId: string;
   readonly quantity: number;
   readonly unitPrice?: number;
+  /** Vencimiento del lote recibido (YYYY-MM-DD). Opcional; el servidor lo valida. */
+  readonly expiresAt?: IsoDateString;
+}
+
+/** Línea tal como viaja al RPC: solo incluye las llaves opcionales que traen valor. */
+function toRpcLine(item: PurchaseReceiptLine): Record<string, unknown> {
+  return {
+    productId: item.productId,
+    quantity: item.quantity,
+    ...(item.unitPrice !== undefined ? { unitPrice: item.unitPrice } : {}),
+    ...(item.expiresAt !== undefined ? { expiresAt: item.expiresAt } : {})
+  };
 }
 
 /**
@@ -35,13 +47,7 @@ export class PurchaseOrderRepository extends SupabaseRepository<PurchaseOrder> {
     const { data, error } = await supabase.rpc("receive_purchase_order_atomic", {
       p_operation_id: params.operationId,
       p_purchase_order_id: params.purchaseOrderId,
-      p_received_items: params.items
-        ? params.items.map((item) => ({
-            productId: item.productId,
-            quantity: item.quantity,
-            ...(item.unitPrice !== undefined ? { unitPrice: item.unitPrice } : {})
-          }))
-        : null,
+      p_received_items: params.items ? params.items.map(toRpcLine) : null,
       p_note: params.note ?? null,
       p_performed_by: params.performedBy ?? null
     });
@@ -78,11 +84,7 @@ export class PurchaseOrderRepository extends SupabaseRepository<PurchaseOrder> {
       p_business_id: businessId,
       p_branch_id: branchId,
       p_supplier_id: params.supplierId,
-      p_items: params.items.map((item) => ({
-        productId: item.productId,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice
-      })),
+      p_items: params.items.map(toRpcLine),
       p_invoice_number: params.invoiceNumber ?? null,
       p_note: params.note ?? null,
       p_performed_by: params.performedBy ?? null

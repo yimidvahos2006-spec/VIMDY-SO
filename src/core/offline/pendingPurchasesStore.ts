@@ -102,7 +102,8 @@ class PendingPurchasesStore extends ObservableStore<PendingPurchasesSnapshot> {
       items: params.items.map((item) => ({
         productId: item.productId,
         quantity: item.quantity,
-        unitPrice: item.unitPrice
+        unitPrice: item.unitPrice,
+        ...(item.expiresAt !== undefined ? { expiresAt: item.expiresAt } : {})
       })),
       supplierId: params.supplierId,
       invoiceNumber: params.invoiceNumber,

@@ -7,6 +7,8 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from 'react';
+import type { IsoDateString } from '../../../core/entities/Entities';
+import { checkExpiryInput, getBusinessTodayIsoDate } from '../../../core/utils/isoDate';
 
 /* ------------------------------------------------------------------ */
 /* Tipos públicos                                                      */
@@ -24,6 +26,12 @@ export interface DirectPurchaseItemOption {
   readonly unit?: string;
   /** Último costo unitario conocido; se sugiere al elegir el ítem. */
   readonly lastUnitCost?: number;
+  /**
+   * Si es true, la fecha de vencimiento es OBLIGATORIA para este ítem (perecederos).
+   * Por defecto es opcional: hoy el producto no trae una marca de "perecedero", así
+   * que quien arme la lista decide cuáles la exigen.
+   */
+  readonly expiryRequired?: boolean;
 }
 
 export interface DirectPurchaseLine {
@@ -33,6 +41,8 @@ export interface DirectPurchaseLine {
   readonly unitCost: number;
   /** quantity * unitCost, redondeado a 2 decimales. */
   readonly lineTotal: number;
+  /** Vencimiento del lote comprado (YYYY-MM-DD). Solo presente si se informó. */
+  readonly expiresAt?: IsoDateString;
 }
 
 /**
@@ -85,12 +95,15 @@ interface LineDraft {
   readonly unitCost: string;
   /** Si la persona ya tocó el costo, no se vuelve a sugerir uno. */
   readonly costEdited: boolean;
+  /** Valor crudo del input type="date" (YYYY-MM-DD o vacío). */
+  readonly expiresAt: string;
 }
 
 interface LineErrors {
   item?: string;
   quantity?: string;
   unitCost?: string;
+  expiresAt?: string;
 }
 
 interface Validation {
@@ -133,6 +146,7 @@ function validate(
   supplierId: string,
   lines: readonly LineDraft[],
   itemsById: ReadonlyMap<string, DirectPurchaseItemOption>,
+  today: IsoDateString,
 ): Validation {
   const lineErrors = new Map<number, LineErrors>();
   let hasErrors = false;
@@ -151,7 +165,14 @@ function validate(
     if (!isPositive(parseAmount(line.unitCost))) {
       errors.unitCost = 'Ingresa un costo mayor a 0.';
     }
-    if (errors.item || errors.quantity || errors.unitCost) {
+    const expiry = checkExpiryInput(line.expiresAt, {
+      required: itemsById.get(line.itemId)?.expiryRequired === true,
+      today,
+    });
+    if (!expiry.ok) {
+      errors.expiresAt = expiry.message;
+    }
+    if (errors.item || errors.quantity || errors.unitCost || errors.expiresAt) {
       hasErrors = true;
       lineErrors.set(line.key, errors);
     }
@@ -211,6 +232,7 @@ const STYLES = `
 .dp-line{padding:12px;border:1px solid var(--dp-line);border-radius:10px;background:var(--dp-surface)}
 .dp-line-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) auto;
   gap:10px;align-items:start}
+.dp-line-expiry{margin-top:10px;max-width:260px}
 .dp-line-total{display:flex;flex-direction:column;gap:4px}
 .dp-line-total .dp-amount{min-height:42px;display:flex;align-items:center;font-weight:600;font-variant-numeric:tabular-nums}
 .dp-remove{align-self:end}
@@ -268,7 +290,7 @@ function DirectPurchaseForm({
   const [supplierId, setSupplierId] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [lines, setLines] = useState<readonly LineDraft[]>([
-    { key: 1, itemId: '', quantity: '', unitCost: '', costEdited: false },
+    { key: 1, itemId: '', quantity: '', unitCost: '', costEdited: false, expiresAt: '' },
   ]);
   const [attempts, setAttempts] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -276,7 +298,11 @@ function DirectPurchaseForm({
 
   const formatter = useMemo(() => makeFormatter(locale, currency), [locale, currency]);
   const itemsById = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
-  const validation = useMemo(() => validate(supplierId, lines, itemsById), [supplierId, lines, itemsById]);
+  const today = useMemo(() => getBusinessTodayIsoDate(), []);
+  const validation = useMemo(
+    () => validate(supplierId, lines, itemsById, today),
+    [supplierId, lines, itemsById, today],
+  );
   const showErrors = attempts > 0;
 
   const lineTotals = useMemo(
@@ -323,7 +349,10 @@ function DirectPurchaseForm({
   const addLine = () => {
     const key = nextKey.current;
     nextKey.current += 1;
-    setLines((current) => [...current, { key, itemId: '', quantity: '', unitCost: '', costEdited: false }]);
+    setLines((current) => [
+      ...current,
+      { key, itemId: '', quantity: '', unitCost: '', costEdited: false, expiresAt: '' },
+    ]);
   };
 
   const removeLine = (key: number) => {
@@ -375,12 +404,17 @@ function DirectPurchaseForm({
       if (!item) continue;
       const quantity = parseAmount(line.quantity);
       const unitCost = parseAmount(line.unitCost);
+      const expiry = checkExpiryInput(line.expiresAt, {
+        required: item.expiryRequired === true,
+        today,
+      });
       purchaseLines.push({
         itemId: item.id,
         itemName: item.name,
         quantity,
         unitCost,
         lineTotal: round2(quantity * unitCost),
+        ...(expiry.ok && expiry.value !== undefined ? { expiresAt: expiry.value } : {}),
       });
       stockIncrements[item.id] = (stockIncrements[item.id] ?? 0) + quantity;
       unitCostUpdates[item.id] = unitCost;
@@ -586,11 +620,33 @@ function DirectPurchaseForm({
                       </button>
                     </div>
 
+                    <div className="dp-field dp-line-expiry">
+                      <label className="dp-label" htmlFor={`${base}-exp`}>
+                        Fecha de vencimiento
+                        {item?.expiryRequired ? null : <span className="dp-hint"> (opcional)</span>}
+                      </label>
+                      <input
+                        id={`${base}-exp`}
+                        className="dp-input"
+                        type="date"
+                        min={today}
+                        value={line.expiresAt}
+                        disabled={saving}
+                        aria-invalid={errors?.expiresAt ? true : undefined}
+                        aria-describedby={errors ? `${base}-err` : undefined}
+                        onChange={(event) => {
+                          const expiresAt = event.target.value;
+                          updateLine(line.key, (current) => ({ ...current, expiresAt }));
+                        }}
+                      />
+                    </div>
+
                     {errors ? (
                       <div className="dp-line-errors" id={`${base}-err`}>
                         {errors.item ? <p className="dp-error">{errors.item}</p> : null}
                         {errors.quantity ? <p className="dp-error">{errors.quantity}</p> : null}
                         {errors.unitCost ? <p className="dp-error">{errors.unitCost}</p> : null}
+                        {errors.expiresAt ? <p className="dp-error">{errors.expiresAt}</p> : null}
                       </div>
                     ) : null}
                   </li>

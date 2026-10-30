@@ -64,7 +64,8 @@ async function syncOne(pending: PendingInventoryAdjustment): Promise<void> {
       pending.supplierId,
       pending.purchasePrice,
       pending.id,
-      pending.branchId
+      pending.branchId,
+      pending.expiresAt
     );
     return;
   }

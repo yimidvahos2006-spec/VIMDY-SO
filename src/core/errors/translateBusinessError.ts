@@ -104,6 +104,9 @@ const CODE_MESSAGES: Record<string, (detail: string) => string> = {
   ONBOARDING_PRODUCT_REQUIRED: () =>
     "Crea al menos un producto activo antes de terminar la configuración.",
   SUPABASE_ADJUST_STOCK_FAILED: () => "No se pudo actualizar el stock. Intenta de nuevo.",
+  INVALID_EXPIRES_AT: () => "La fecha de vencimiento no es válida. Revísala e intenta de nuevo.",
+  EXPIRES_AT_UNSUPPORTED_WITH_COST: () =>
+    "Por ahora el vencimiento no se puede registrar en una entrada con costo o proveedor. Regístralo desde una compra.",
 
   // Turno de caja
   SHIFT_ALREADY_OPEN: () => "Ya hay un turno abierto para esa caja física. Cierra ese turno antes de abrir otro.",

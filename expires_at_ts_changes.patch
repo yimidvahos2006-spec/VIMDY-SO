@@ -1,0 +1,2764 @@
+diff -ruN '--exclude=node_modules' '--exclude=.git' orig/src/core/engines/PurchaseOrderEngine.ts src/src/core/engines/PurchaseOrderEngine.ts
+--- orig/src/core/engines/PurchaseOrderEngine.ts	2026-10-26 14:15:13.000000000 -0500
++++ src/src/core/engines/PurchaseOrderEngine.ts	2026-10-29 17:16:14.095360679 -0500
+@@ -1,426 +1,446 @@
+-// src/core/engines/PurchaseOrderEngine.ts
+-import { Product, PurchaseOrder, PurchaseOrderItem, PurchaseOrderStatus } from "../entities/Entities";
+-import { IRepository } from "../../infrastructure/di/repositories/IRepository";
+-import { InventoryEngine } from "./InventoryEngine";
+-import { RecipeEngine } from "./RecipeEngine";
+-
+-/** Productos con receta cuya capacidad real de producción mejoró al recibir una compra. */
+-export interface CapacityImprovement {
+-  readonly productName: string;
+-  readonly beforeMaxUnits: number;
+-  readonly afterMaxUnits: number;
+-}
+-
+-/** Resultado de marcar una orden como comprada: para que la UI arme los mensajes del Gerente Inteligente. */
+-export interface PurchaseReceiptResult {
+-  readonly order: PurchaseOrder;
+-  /** Productos con receta que ahora se pueden preparar en más cantidad gracias a esta compra. */
+-  readonly capacityImproved: readonly CapacityImprovement[];
+-  /** Nombres de los productos/ingredientes comprados que estaban en riesgo de desabastecimiento (agotados o bajo mínimo) y dejaron de estarlo. */
+-  readonly stockoutResolved: readonly string[];
+-}
+-
+-const OPEN_STATUSES: readonly PurchaseOrderStatus[] = ["PENDIENTE", "POSPUESTO", "PARCIAL"];
+-
+-/** Lo que llegó de un producto en una recepción (el repositorio lo manda al servidor). */
+-export interface PurchaseReceiptInput {
+-  readonly productId: string;
+-  readonly quantity: number;
+-  readonly unitPrice?: number;
+-}
+-
+-/**
+- * Recibir mercancía de verdad ocurre en el servidor, en una sola operación
+- * atómica (stock + kardex + estado de la orden). El motor solo la pide.
+- */
+-export interface PurchaseOrderReceiver {
+-  receive(params: {
+-    purchaseOrderId: string;
+-    operationId: string;
+-    items?: readonly PurchaseReceiptInput[];
+-    note?: string;
+-    performedBy?: string;
+-  }): Promise<{ status: string; idempotent: boolean }>;
+-}
+-
+-/**
+- * Flujo B (compra directa): factura / nota de entrega sin orden previa. El
+- * servidor crea la orden y la recibe con el MISMO motor del flujo A, en una
+- * sola transacción.
+- */
+-export interface DirectPurchaseRecorder {
+-  recordDirect(params: {
+-    operationId: string;
+-    supplierId: string;
+-    items: readonly PurchaseReceiptInput[];
+-    invoiceNumber?: string;
+-    note?: string;
+-    performedBy?: string;
+-  }): Promise<{ status: string; idempotent: boolean; purchaseOrderId: string }>;
+-}
+-
+-/** Lo que se captura al registrar una compra directa (factura / nota de entrega). */
+-export interface DirectPurchaseInput {
+-  readonly supplierId: string;
+-  /** Una línea por producto, con la cantidad y el precio unitario reales de la factura. */
+-  readonly items: readonly PurchaseOrderItem[];
+-  readonly invoiceNumber?: string;
+-  readonly note?: string;
+-  readonly performedBy?: string;
+-  /**
+-   * Clave de idempotencia ya generada y guardada de forma persistente (cola
+-   * offline de compras). Si se indica, se usa tal cual: un reintento después
+-   * de reiniciar el navegador manda el MISMO id y el servidor no vuelve a
+-   * sumar el stock. Si no se indica, el engine genera uno y lo recuerda en memoria.
+-   */
+-  readonly operationId?: string;
+-}
+-
+-/** Cuánto falta por recibir de un item de la orden. */
+-export function remainingQuantity(order: PurchaseOrder, item: PurchaseOrderItem): number {
+-  const received = order.receivedQuantities?.[item.productId] ?? 0;
+-  return Math.max(0, Math.round((item.quantity - received) * 1e6) / 1e6);
+-}
+-
+-/**
+- * PurchaseOrderEngine — PASO 2.7 (Compras Inteligentes, ejecución).
+- * ---------------------------------------------------------------------------
+- * Convierte una recomendación de compra (PurchaseIntelligenceEngine, PASO
+- * 2.6, que SOLO analiza) en una acción real con estado e historial. Nunca
+- * duplica lógica de inventario: al recibir una compra, reutiliza
+- * InventoryEngine.increaseStock() por cada item — el mismo motor que ya usa
+- * el "Aumentar stock" manual de Inventario. Nunca borra órdenes: cancelar y
+- * posponer solo cambian `status`, preservando el historial completo.
+- */
+-export class PurchaseOrderEngine {
+-  /**
+-   * Operaciones de recepción en curso. Si un intento falla por la red y la
+-   * persona vuelve a pulsar "Recibir" con las mismas cantidades, se reutiliza
+-   * el MISMO identificador: así, si el servidor sí alcanzó a guardar, el
+-   * reintento no vuelve a sumar el stock.
+-   */
+-  private readonly pendingReceipts = new Map<string, string>();
+-  /** Igual que pendingReceipts, para compras directas (flujo B). */
+-  private readonly pendingDirectPurchases = new Map<string, string>();
+-
+-  constructor(
+-    private readonly repository: IRepository<PurchaseOrder> & Partial<PurchaseOrderReceiver> & Partial<DirectPurchaseRecorder>,
+-    private readonly inventoryEngine: InventoryEngine,
+-    private readonly recipeEngine: RecipeEngine
+-  ) {}
+-
+-  public async listAll(): Promise<PurchaseOrder[]> {
+-    const orders = await this.repository.findAll();
+-    return orders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+-  }
+-
+-  public async listByStatus(status: PurchaseOrderStatus): Promise<PurchaseOrder[]> {
+-    const orders = await this.listAll();
+-    return orders.filter((o) => o.status === status);
+-  }
+-
+-  public async getById(id: string): Promise<PurchaseOrder | null> {
+-    return this.repository.findById(id);
+-  }
+-
+-  /**
+-   * Crea una orden de compra PENDIENTE.
+-   * Regla "nunca duplicar compras": si ya existe una orden abierta
+-   * (PENDIENTE o POSPUESTO) que incluya alguno de los mismos productos, se
+-   * rechaza — hay que recibir, posponer o cancelar esa orden primero.
+-   */
+-  public async create(input: {
+-    items: PurchaseOrderItem[];
+-    supplierId: string;
+-    expectedDeliveryDate?: Date;
+-    createdBy?: string;
+-  }): Promise<PurchaseOrder> {
+-    if (!input.supplierId) {
+-      throw new Error("SUPPLIER_REQUIRED");
+-    }
+-    if (!input.items || input.items.length === 0) {
+-      throw new Error("ITEMS_REQUIRED");
+-    }
+-    for (const item of input.items) {
+-      if (!item.productId || item.quantity <= 0) {
+-        throw new Error("INVALID_ITEM: cada ítem necesita producto y cantidad mayor a cero.");
+-      }
+-    }
+-
+-    const openOrders = await this.listAll();
+-    const requestedProductIds = new Set(input.items.map((i) => i.productId));
+-
+-    for (const order of openOrders) {
+-      if (!OPEN_STATUSES.includes(order.status)) continue;
+-      const duplicated = order.items.find((item) => requestedProductIds.has(item.productId));
+-      if (duplicated) {
+-        throw new Error(
+-          `DUPLICATE_PURCHASE: Ya existe una orden ${order.status.toLowerCase()} (creada el ` +
+-            `${new Date(order.createdAt).toLocaleDateString("es-CO")}) que incluye este producto. ` +
+-            `Recíbela, pospónla o cancélala antes de crear una nueva.`
+-        );
+-      }
+-    }
+-
+-    const order: PurchaseOrder = {
+-      id: crypto.randomUUID(),
+-      items: input.items,
+-      supplierId: input.supplierId,
+-      status: "PENDIENTE",
+-      createdBy: input.createdBy,
+-      createdAt: new Date(),
+-      expectedDeliveryDate: input.expectedDeliveryDate
+-    };
+-
+-    await this.repository.save(order);
+-    return order;
+-  }
+-
+-  /**
+-   * Recibe mercancía de una orden y la lleva al inventario real. Todo el
+-   * trabajo importante (sumar stock, escribir el kardex y actualizar la
+-   * orden) lo hace el servidor en UNA sola transacción: o entra todo o no
+-   * entra nada, y repetir la misma operación no duplica el stock.
+-   *
+-   * @param receivedNow Lo que llegó ahora. Si no se indica, se recibe todo
+-   * lo que falta de la orden. Si llega menos de lo pedido, la orden queda
+-   * PARCIAL y se puede seguir recibiendo hasta completarla (COMPRADO). No se
+-   * puede recibir más de lo que falta.
+-   * @param providedOperationId Clave de idempotencia persistente (cola offline).
+-   * Si se indica, es un REINTENTO posible de una operación que el servidor
+-   * quizá ya aplicó: se omite el chequeo local de "orden abierta" y el servidor
+-   * decide (responde idempotente si ya la aplicó, o la rechaza si no corresponde).
+-   */
+-  public async markAsPurchased(
+-    orderId: string,
+-    performedBy?: string,
+-    receivedNow?: PurchaseOrderItem[],
+-    providedOperationId?: string
+-  ): Promise<PurchaseReceiptResult> {
+-    const order = await this.repository.findById(orderId);
+-    if (!order) {
+-      throw new Error("PURCHASE_ORDER_NOT_FOUND");
+-    }
+-    if (!providedOperationId && !OPEN_STATUSES.includes(order.status)) {
+-      throw new Error(`PURCHASE_ORDER_NOT_OPEN: la orden ya está en estado ${order.status}.`);
+-    }
+-    if (typeof this.repository.receive !== "function") {
+-      throw new Error("PURCHASE_RECEIVE_UNAVAILABLE");
+-    }
+-
+-    const itemsNow: PurchaseOrderItem[] =
+-      receivedNow && receivedNow.length > 0
+-        ? receivedNow.filter((i) => i.quantity > 0)
+-        : order.items
+-            .map((item) => ({ ...item, quantity: remainingQuantity(order, item) }))
+-            .filter((item) => item.quantity > 0);
+-
+-    if (itemsNow.length === 0) {
+-      throw new Error("PURCHASE_ITEMS_INVALID");
+-    }
+-
+-    // Mismo identificador mientras sean las mismas cantidades y no haya
+-    // terminado bien: protege contra el doble clic y contra reintentos tras
+-    // un corte de internet.
+-    const receiptKey = `${orderId}|${JSON.stringify(
+-      itemsNow.map((i) => [i.productId, i.quantity, i.unitPrice]).sort()
+-    )}`;
+-    const operationId = providedOperationId ?? this.pendingReceipts.get(receiptKey) ?? crypto.randomUUID();
+-    if (!providedOperationId) {
+-      this.pendingReceipts.set(receiptKey, operationId);
+-    }
+-
+-    const receiver = this.repository.receive.bind(this.repository);
+-    return this.applyWithImpact(itemsNow, order, async () => {
+-      await receiver({
+-        purchaseOrderId: orderId,
+-        operationId,
+-        items: itemsNow.map((i) => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice })),
+-        performedBy
+-      });
+-      this.pendingReceipts.delete(receiptKey);
+-      return orderId;
+-    });
+-  }
+-
+-  /**
+-   * FLUJO B — compra directa: la factura o nota de entrega llegó sin una
+-   * orden previa. Va al MISMO motor del servidor que el flujo A (la orden se
+-   * crea y se recibe dentro de una sola transacción: stock + kardex + precio
+-   * de compra + auditoría). Repetir la misma operación no duplica el stock.
+-   */
+-  public async recordDirectPurchase(input: DirectPurchaseInput): Promise<PurchaseReceiptResult> {
+-    if (!input.supplierId) {
+-      throw new Error("SUPPLIER_REQUIRED");
+-    }
+-    if (!input.items || input.items.length === 0) {
+-      throw new Error("ITEMS_REQUIRED");
+-    }
+-    const seen = new Set<string>();
+-    for (const item of input.items) {
+-      if (!item.productId || !Number.isFinite(item.quantity) || item.quantity <= 0) {
+-        throw new Error("PURCHASE_ITEM_INVALID");
+-      }
+-      if (!Number.isFinite(item.unitPrice) || item.unitPrice <= 0) {
+-        throw new Error("PURCHASE_UNIT_PRICE_REQUIRED");
+-      }
+-      if (seen.has(item.productId)) {
+-        throw new Error("PURCHASE_ITEM_DUPLICATED");
+-      }
+-      seen.add(item.productId);
+-    }
+-    if (typeof this.repository.recordDirect !== "function") {
+-      throw new Error("PURCHASE_RECORD_UNAVAILABLE");
+-    }
+-
+-    const invoiceNumber = input.invoiceNumber?.trim() || undefined;
+-    const itemsNow: PurchaseOrderItem[] = input.items.map((i) => ({
+-      productId: i.productId,
+-      quantity: i.quantity,
+-      unitPrice: i.unitPrice
+-    }));
+-
+-    // Mismo identificador para el mismo documento mientras no termine bien:
+-    // el doble clic o un reintento tras un corte de internet no suma dos veces.
+-    const directKey = `${input.supplierId}|${invoiceNumber ?? ""}|${JSON.stringify(
+-      itemsNow.map((i) => [i.productId, i.quantity, i.unitPrice]).sort()
+-    )}`;
+-    const operationId = input.operationId ?? this.pendingDirectPurchases.get(directKey) ?? crypto.randomUUID();
+-    if (!input.operationId) {
+-      this.pendingDirectPurchases.set(directKey, operationId);
+-    }
+-
+-    const placeholder: PurchaseOrder = {
+-      id: operationId,
+-      items: itemsNow,
+-      supplierId: input.supplierId,
+-      status: "COMPRADO",
+-      source: "DIRECTA",
+-      invoiceNumber,
+-      createdBy: input.performedBy,
+-      createdAt: new Date(),
+-      receivedAt: new Date()
+-    };
+-
+-    const recorder = this.repository.recordDirect.bind(this.repository);
+-    return this.applyWithImpact(itemsNow, placeholder, async () => {
+-      const result = await recorder({
+-        operationId,
+-        supplierId: input.supplierId,
+-        items: itemsNow.map((i) => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice })),
+-        invoiceNumber,
+-        note: input.note,
+-        performedBy: input.performedBy
+-      });
+-      this.pendingDirectPurchases.delete(directKey);
+-      return result.purchaseOrderId;
+-    });
+-  }
+-
+-  /**
+-   * Compartido por los DOS flujos: toma una foto del inventario antes de
+-   * recibir, ejecuta la recepción en el servidor y compara después para
+-   * armar los mensajes del Gerente Inteligente (capacidad de producción
+-   * mejorada, desabastecimiento resuelto).
+-   */
+-  private async applyWithImpact(
+-    itemsNow: readonly PurchaseOrderItem[],
+-    fallbackOrder: PurchaseOrder,
+-    execute: () => Promise<string>
+-  ): Promise<PurchaseReceiptResult> {
+-    // Foto ANTES de recibir: capacidad de producción de todo producto con
+-    // receta que use alguno de los ingredientes comprados, y quiénes de los
+-    // productos comprados estaban agotados/bajo mínimo.
+-    const productsBefore = await this.inventoryEngine.listAll();
+-    const productMapBefore = new Map(productsBefore.map((p) => [p.id, p]));
+-    const purchasedIds = new Set(itemsNow.map((i) => i.productId));
+-
+-    const dependentProducts = productsBefore.filter(
+-      (p) => p.recipe && p.recipe.some((ing) => purchasedIds.has(ing.productId))
+-    );
+-    const capacityBefore = new Map(
+-      dependentProducts.map((p) => [p.id, this.recipeEngine.getProductionCapacity(p, productMapBefore)])
+-    );
+-
+-    const wasAtRisk = new Set(
+-      itemsNow
+-        .map((item) => productMapBefore.get(item.productId))
+-        .filter((p): p is Product => !!p && (p.stock <= 0 || p.stock <= p.minStock))
+-        .map((p) => p.id)
+-    );
+-
+-    const orderId = await execute();
+-
+-    // Foto DESPUÉS: mismo cálculo, con inventario ya actualizado.
+-    const productsAfter = await this.inventoryEngine.listAll();
+-    const productMapAfter = new Map(productsAfter.map((p) => [p.id, p]));
+-
+-    const capacityImproved: CapacityImprovement[] = [];
+-    for (const product of dependentProducts) {
+-      const before = capacityBefore.get(product.id);
+-      const productAfter = productMapAfter.get(product.id);
+-      if (!before || !productAfter) continue;
+-      const after = this.recipeEngine.getProductionCapacity(productAfter, productMapAfter);
+-      if (after && after.maxUnits > before.maxUnits) {
+-        capacityImproved.push({
+-          productName: product.name,
+-          beforeMaxUnits: before.maxUnits,
+-          afterMaxUnits: after.maxUnits
+-        });
+-      }
+-    }
+-
+-    const stockoutResolved: string[] = [];
+-    for (const item of itemsNow) {
+-      if (!wasAtRisk.has(item.productId)) continue;
+-      const productAfter = productMapAfter.get(item.productId);
+-      if (productAfter && productAfter.stock > productAfter.minStock && productAfter.stock > 0) {
+-        stockoutResolved.push(productAfter.name);
+-      }
+-    }
+-
+-    // El estado final (PARCIAL o COMPRADO) lo decidió el servidor: se lee de vuelta.
+-    const updatedOrder = (await this.repository.findById(orderId)) ?? fallbackOrder;
+-
+-    return { order: updatedOrder, capacityImproved, stockoutResolved };
+-  }
+-
+-  /** Pospone una orden abierta a una nueva fecha estimada. Nunca borra el registro. */
+-  public async postpone(orderId: string, newExpectedDate: Date, note?: string): Promise<PurchaseOrder> {
+-    const order = await this.repository.findById(orderId);
+-    if (!order) {
+-      throw new Error("PURCHASE_ORDER_NOT_FOUND");
+-    }
+-    if (!OPEN_STATUSES.includes(order.status)) {
+-      throw new Error(`PURCHASE_ORDER_NOT_OPEN: la orden ya está en estado ${order.status}.`);
+-    }
+-
+-    const updated: PurchaseOrder = {
+-      ...order,
+-      status: "POSPUESTO",
+-      expectedDeliveryDate: newExpectedDate,
+-      statusNote: note
+-    };
+-    await this.repository.update(updated);
+-    return updated;
+-  }
+-
+-  /** Cancela una orden abierta. Nunca borra el registro (queda en el historial como CANCELADO). */
+-  public async cancel(orderId: string, note?: string): Promise<PurchaseOrder> {
+-    const order = await this.repository.findById(orderId);
+-    if (!order) {
+-      throw new Error("PURCHASE_ORDER_NOT_FOUND");
+-    }
+-    if (!OPEN_STATUSES.includes(order.status)) {
+-      throw new Error(`PURCHASE_ORDER_NOT_OPEN: la orden ya está en estado ${order.status}.`);
+-    }
+-
+-    const updated: PurchaseOrder = {
+-      ...order,
+-      status: "CANCELADO",
+-      statusNote: note
+-    };
+-    await this.repository.update(updated);
+-    return updated;
+-  }
++// src/core/engines/PurchaseOrderEngine.ts
++import { IsoDateString, Product, PurchaseOrder, PurchaseOrderItem, PurchaseOrderStatus } from "../entities/Entities";
++import { IRepository } from "../../infrastructure/di/repositories/IRepository";
++import { InventoryEngine } from "./InventoryEngine";
++import { RecipeEngine } from "./RecipeEngine";
++
++/** Productos con receta cuya capacidad real de producción mejoró al recibir una compra. */
++export interface CapacityImprovement {
++  readonly productName: string;
++  readonly beforeMaxUnits: number;
++  readonly afterMaxUnits: number;
++}
++
++/** Resultado de marcar una orden como comprada: para que la UI arme los mensajes del Gerente Inteligente. */
++export interface PurchaseReceiptResult {
++  readonly order: PurchaseOrder;
++  /** Productos con receta que ahora se pueden preparar en más cantidad gracias a esta compra. */
++  readonly capacityImproved: readonly CapacityImprovement[];
++  /** Nombres de los productos/ingredientes comprados que estaban en riesgo de desabastecimiento (agotados o bajo mínimo) y dejaron de estarlo. */
++  readonly stockoutResolved: readonly string[];
++}
++
++const OPEN_STATUSES: readonly PurchaseOrderStatus[] = ["PENDIENTE", "POSPUESTO", "PARCIAL"];
++
++/** Lo que llegó de un producto en una recepción (el repositorio lo manda al servidor). */
++export interface PurchaseReceiptInput {
++  readonly productId: string;
++  readonly quantity: number;
++  readonly unitPrice?: number;
++  /** Vencimiento del lote recibido (YYYY-MM-DD). */
++  readonly expiresAt?: IsoDateString;
++}
++
++/** Línea de compra → lo que se manda al servidor (incluye el vencimiento si se informó). */
++function toReceiptInput(item: PurchaseOrderItem): PurchaseReceiptInput {
++  return {
++    productId: item.productId,
++    quantity: item.quantity,
++    unitPrice: item.unitPrice,
++    ...(item.expiresAt !== undefined ? { expiresAt: item.expiresAt } : {})
++  };
++}
++
++/**
++ * Huella de las líneas para reutilizar el mismo operationId en reintentos. DEBE incluir el
++ * vencimiento: el servidor responde "idempotente" por operationId sin comparar el contenido,
++ * así que si la persona corrige la fecha y se reutiliza el id, la corrección se perdería en silencio.
++ */
++function receiptLinesKey(items: readonly PurchaseOrderItem[]): string {
++  return JSON.stringify(
++    items.map((i) => [i.productId, i.quantity, i.unitPrice, i.expiresAt ?? null]).sort()
++  );
++}
++
++/**
++ * Recibir mercancía de verdad ocurre en el servidor, en una sola operación
++ * atómica (stock + kardex + estado de la orden). El motor solo la pide.
++ */
++export interface PurchaseOrderReceiver {
++  receive(params: {
++    purchaseOrderId: string;
++    operationId: string;
++    items?: readonly PurchaseReceiptInput[];
++    note?: string;
++    performedBy?: string;
++  }): Promise<{ status: string; idempotent: boolean }>;
++}
++
++/**
++ * Flujo B (compra directa): factura / nota de entrega sin orden previa. El
++ * servidor crea la orden y la recibe con el MISMO motor del flujo A, en una
++ * sola transacción.
++ */
++export interface DirectPurchaseRecorder {
++  recordDirect(params: {
++    operationId: string;
++    supplierId: string;
++    items: readonly PurchaseReceiptInput[];
++    invoiceNumber?: string;
++    note?: string;
++    performedBy?: string;
++  }): Promise<{ status: string; idempotent: boolean; purchaseOrderId: string }>;
++}
++
++/** Lo que se captura al registrar una compra directa (factura / nota de entrega). */
++export interface DirectPurchaseInput {
++  readonly supplierId: string;
++  /** Una línea por producto, con la cantidad y el precio unitario reales de la factura. */
++  readonly items: readonly PurchaseOrderItem[];
++  readonly invoiceNumber?: string;
++  readonly note?: string;
++  readonly performedBy?: string;
++  /**
++   * Clave de idempotencia ya generada y guardada de forma persistente (cola
++   * offline de compras). Si se indica, se usa tal cual: un reintento después
++   * de reiniciar el navegador manda el MISMO id y el servidor no vuelve a
++   * sumar el stock. Si no se indica, el engine genera uno y lo recuerda en memoria.
++   */
++  readonly operationId?: string;
++}
++
++/** Cuánto falta por recibir de un item de la orden. */
++export function remainingQuantity(order: PurchaseOrder, item: PurchaseOrderItem): number {
++  const received = order.receivedQuantities?.[item.productId] ?? 0;
++  return Math.max(0, Math.round((item.quantity - received) * 1e6) / 1e6);
++}
++
++/**
++ * PurchaseOrderEngine — PASO 2.7 (Compras Inteligentes, ejecución).
++ * ---------------------------------------------------------------------------
++ * Convierte una recomendación de compra (PurchaseIntelligenceEngine, PASO
++ * 2.6, que SOLO analiza) en una acción real con estado e historial. Nunca
++ * duplica lógica de inventario: al recibir una compra, reutiliza
++ * InventoryEngine.increaseStock() por cada item — el mismo motor que ya usa
++ * el "Aumentar stock" manual de Inventario. Nunca borra órdenes: cancelar y
++ * posponer solo cambian `status`, preservando el historial completo.
++ */
++export class PurchaseOrderEngine {
++  /**
++   * Operaciones de recepción en curso. Si un intento falla por la red y la
++   * persona vuelve a pulsar "Recibir" con las mismas cantidades, se reutiliza
++   * el MISMO identificador: así, si el servidor sí alcanzó a guardar, el
++   * reintento no vuelve a sumar el stock.
++   */
++  private readonly pendingReceipts = new Map<string, string>();
++  /** Igual que pendingReceipts, para compras directas (flujo B). */
++  private readonly pendingDirectPurchases = new Map<string, string>();
++
++  constructor(
++    private readonly repository: IRepository<PurchaseOrder> & Partial<PurchaseOrderReceiver> & Partial<DirectPurchaseRecorder>,
++    private readonly inventoryEngine: InventoryEngine,
++    private readonly recipeEngine: RecipeEngine
++  ) {}
++
++  public async listAll(): Promise<PurchaseOrder[]> {
++    const orders = await this.repository.findAll();
++    return orders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
++  }
++
++  public async listByStatus(status: PurchaseOrderStatus): Promise<PurchaseOrder[]> {
++    const orders = await this.listAll();
++    return orders.filter((o) => o.status === status);
++  }
++
++  public async getById(id: string): Promise<PurchaseOrder | null> {
++    return this.repository.findById(id);
++  }
++
++  /**
++   * Crea una orden de compra PENDIENTE.
++   * Regla "nunca duplicar compras": si ya existe una orden abierta
++   * (PENDIENTE o POSPUESTO) que incluya alguno de los mismos productos, se
++   * rechaza — hay que recibir, posponer o cancelar esa orden primero.
++   */
++  public async create(input: {
++    items: PurchaseOrderItem[];
++    supplierId: string;
++    expectedDeliveryDate?: Date;
++    createdBy?: string;
++  }): Promise<PurchaseOrder> {
++    if (!input.supplierId) {
++      throw new Error("SUPPLIER_REQUIRED");
++    }
++    if (!input.items || input.items.length === 0) {
++      throw new Error("ITEMS_REQUIRED");
++    }
++    for (const item of input.items) {
++      if (!item.productId || item.quantity <= 0) {
++        throw new Error("INVALID_ITEM: cada ítem necesita producto y cantidad mayor a cero.");
++      }
++    }
++
++    const openOrders = await this.listAll();
++    const requestedProductIds = new Set(input.items.map((i) => i.productId));
++
++    for (const order of openOrders) {
++      if (!OPEN_STATUSES.includes(order.status)) continue;
++      const duplicated = order.items.find((item) => requestedProductIds.has(item.productId));
++      if (duplicated) {
++        throw new Error(
++          `DUPLICATE_PURCHASE: Ya existe una orden ${order.status.toLowerCase()} (creada el ` +
++            `${new Date(order.createdAt).toLocaleDateString("es-CO")}) que incluye este producto. ` +
++            `Recíbela, pospónla o cancélala antes de crear una nueva.`
++        );
++      }
++    }
++
++    const order: PurchaseOrder = {
++      id: crypto.randomUUID(),
++      items: input.items,
++      supplierId: input.supplierId,
++      status: "PENDIENTE",
++      createdBy: input.createdBy,
++      createdAt: new Date(),
++      expectedDeliveryDate: input.expectedDeliveryDate
++    };
++
++    await this.repository.save(order);
++    return order;
++  }
++
++  /**
++   * Recibe mercancía de una orden y la lleva al inventario real. Todo el
++   * trabajo importante (sumar stock, escribir el kardex y actualizar la
++   * orden) lo hace el servidor en UNA sola transacción: o entra todo o no
++   * entra nada, y repetir la misma operación no duplica el stock.
++   *
++   * @param receivedNow Lo que llegó ahora. Si no se indica, se recibe todo
++   * lo que falta de la orden. Si llega menos de lo pedido, la orden queda
++   * PARCIAL y se puede seguir recibiendo hasta completarla (COMPRADO). No se
++   * puede recibir más de lo que falta.
++   * @param providedOperationId Clave de idempotencia persistente (cola offline).
++   * Si se indica, es un REINTENTO posible de una operación que el servidor
++   * quizá ya aplicó: se omite el chequeo local de "orden abierta" y el servidor
++   * decide (responde idempotente si ya la aplicó, o la rechaza si no corresponde).
++   */
++  public async markAsPurchased(
++    orderId: string,
++    performedBy?: string,
++    receivedNow?: PurchaseOrderItem[],
++    providedOperationId?: string
++  ): Promise<PurchaseReceiptResult> {
++    const order = await this.repository.findById(orderId);
++    if (!order) {
++      throw new Error("PURCHASE_ORDER_NOT_FOUND");
++    }
++    if (!providedOperationId && !OPEN_STATUSES.includes(order.status)) {
++      throw new Error(`PURCHASE_ORDER_NOT_OPEN: la orden ya está en estado ${order.status}.`);
++    }
++    if (typeof this.repository.receive !== "function") {
++      throw new Error("PURCHASE_RECEIVE_UNAVAILABLE");
++    }
++
++    const itemsNow: PurchaseOrderItem[] =
++      receivedNow && receivedNow.length > 0
++        ? receivedNow.filter((i) => i.quantity > 0)
++        : order.items
++            .map((item) => ({ ...item, quantity: remainingQuantity(order, item) }))
++            .filter((item) => item.quantity > 0);
++
++    if (itemsNow.length === 0) {
++      throw new Error("PURCHASE_ITEMS_INVALID");
++    }
++
++    // Mismo identificador mientras sean las mismas cantidades y no haya
++    // terminado bien: protege contra el doble clic y contra reintentos tras
++    // un corte de internet.
++    const receiptKey = `${orderId}|${receiptLinesKey(itemsNow)}`;
++    const operationId = providedOperationId ?? this.pendingReceipts.get(receiptKey) ?? crypto.randomUUID();
++    if (!providedOperationId) {
++      this.pendingReceipts.set(receiptKey, operationId);
++    }
++
++    const receiver = this.repository.receive.bind(this.repository);
++    return this.applyWithImpact(itemsNow, order, async () => {
++      await receiver({
++        purchaseOrderId: orderId,
++        operationId,
++        items: itemsNow.map(toReceiptInput),
++        performedBy
++      });
++      this.pendingReceipts.delete(receiptKey);
++      return orderId;
++    });
++  }
++
++  /**
++   * FLUJO B — compra directa: la factura o nota de entrega llegó sin una
++   * orden previa. Va al MISMO motor del servidor que el flujo A (la orden se
++   * crea y se recibe dentro de una sola transacción: stock + kardex + precio
++   * de compra + auditoría). Repetir la misma operación no duplica el stock.
++   */
++  public async recordDirectPurchase(input: DirectPurchaseInput): Promise<PurchaseReceiptResult> {
++    if (!input.supplierId) {
++      throw new Error("SUPPLIER_REQUIRED");
++    }
++    if (!input.items || input.items.length === 0) {
++      throw new Error("ITEMS_REQUIRED");
++    }
++    const seen = new Set<string>();
++    for (const item of input.items) {
++      if (!item.productId || !Number.isFinite(item.quantity) || item.quantity <= 0) {
++        throw new Error("PURCHASE_ITEM_INVALID");
++      }
++      if (!Number.isFinite(item.unitPrice) || item.unitPrice <= 0) {
++        throw new Error("PURCHASE_UNIT_PRICE_REQUIRED");
++      }
++      if (seen.has(item.productId)) {
++        throw new Error("PURCHASE_ITEM_DUPLICATED");
++      }
++      seen.add(item.productId);
++    }
++    if (typeof this.repository.recordDirect !== "function") {
++      throw new Error("PURCHASE_RECORD_UNAVAILABLE");
++    }
++
++    const invoiceNumber = input.invoiceNumber?.trim() || undefined;
++    const itemsNow: PurchaseOrderItem[] = input.items.map((i) => ({
++      productId: i.productId,
++      quantity: i.quantity,
++      unitPrice: i.unitPrice,
++      ...(i.expiresAt !== undefined ? { expiresAt: i.expiresAt } : {})
++    }));
++
++    // Mismo identificador para el mismo documento mientras no termine bien:
++    // el doble clic o un reintento tras un corte de internet no suma dos veces.
++    const directKey = `${input.supplierId}|${invoiceNumber ?? ""}|${receiptLinesKey(itemsNow)}`;
++    const operationId = input.operationId ?? this.pendingDirectPurchases.get(directKey) ?? crypto.randomUUID();
++    if (!input.operationId) {
++      this.pendingDirectPurchases.set(directKey, operationId);
++    }
++
++    const placeholder: PurchaseOrder = {
++      id: operationId,
++      items: itemsNow,
++      supplierId: input.supplierId,
++      status: "COMPRADO",
++      source: "DIRECTA",
++      invoiceNumber,
++      createdBy: input.performedBy,
++      createdAt: new Date(),
++      receivedAt: new Date()
++    };
++
++    const recorder = this.repository.recordDirect.bind(this.repository);
++    return this.applyWithImpact(itemsNow, placeholder, async () => {
++      const result = await recorder({
++        operationId,
++        supplierId: input.supplierId,
++        items: itemsNow.map(toReceiptInput),
++        invoiceNumber,
++        note: input.note,
++        performedBy: input.performedBy
++      });
++      this.pendingDirectPurchases.delete(directKey);
++      return result.purchaseOrderId;
++    });
++  }
++
++  /**
++   * Compartido por los DOS flujos: toma una foto del inventario antes de
++   * recibir, ejecuta la recepción en el servidor y compara después para
++   * armar los mensajes del Gerente Inteligente (capacidad de producción
++   * mejorada, desabastecimiento resuelto).
++   */
++  private async applyWithImpact(
++    itemsNow: readonly PurchaseOrderItem[],
++    fallbackOrder: PurchaseOrder,
++    execute: () => Promise<string>
++  ): Promise<PurchaseReceiptResult> {
++    // Foto ANTES de recibir: capacidad de producción de todo producto con
++    // receta que use alguno de los ingredientes comprados, y quiénes de los
++    // productos comprados estaban agotados/bajo mínimo.
++    const productsBefore = await this.inventoryEngine.listAll();
++    const productMapBefore = new Map(productsBefore.map((p) => [p.id, p]));
++    const purchasedIds = new Set(itemsNow.map((i) => i.productId));
++
++    const dependentProducts = productsBefore.filter(
++      (p) => p.recipe && p.recipe.some((ing) => purchasedIds.has(ing.productId))
++    );
++    const capacityBefore = new Map(
++      dependentProducts.map((p) => [p.id, this.recipeEngine.getProductionCapacity(p, productMapBefore)])
++    );
++
++    const wasAtRisk = new Set(
++      itemsNow
++        .map((item) => productMapBefore.get(item.productId))
++        .filter((p): p is Product => !!p && (p.stock <= 0 || p.stock <= p.minStock))
++        .map((p) => p.id)
++    );
++
++    const orderId = await execute();
++
++    // Foto DESPUÉS: mismo cálculo, con inventario ya actualizado.
++    const productsAfter = await this.inventoryEngine.listAll();
++    const productMapAfter = new Map(productsAfter.map((p) => [p.id, p]));
++
++    const capacityImproved: CapacityImprovement[] = [];
++    for (const product of dependentProducts) {
++      const before = capacityBefore.get(product.id);
++      const productAfter = productMapAfter.get(product.id);
++      if (!before || !productAfter) continue;
++      const after = this.recipeEngine.getProductionCapacity(productAfter, productMapAfter);
++      if (after && after.maxUnits > before.maxUnits) {
++        capacityImproved.push({
++          productName: product.name,
++          beforeMaxUnits: before.maxUnits,
++          afterMaxUnits: after.maxUnits
++        });
++      }
++    }
++
++    const stockoutResolved: string[] = [];
++    for (const item of itemsNow) {
++      if (!wasAtRisk.has(item.productId)) continue;
++      const productAfter = productMapAfter.get(item.productId);
++      if (productAfter && productAfter.stock > productAfter.minStock && productAfter.stock > 0) {
++        stockoutResolved.push(productAfter.name);
++      }
++    }
++
++    // El estado final (PARCIAL o COMPRADO) lo decidió el servidor: se lee de vuelta.
++    const updatedOrder = (await this.repository.findById(orderId)) ?? fallbackOrder;
++
++    return { order: updatedOrder, capacityImproved, stockoutResolved };
++  }
++
++  /** Pospone una orden abierta a una nueva fecha estimada. Nunca borra el registro. */
++  public async postpone(orderId: string, newExpectedDate: Date, note?: string): Promise<PurchaseOrder> {
++    const order = await this.repository.findById(orderId);
++    if (!order) {
++      throw new Error("PURCHASE_ORDER_NOT_FOUND");
++    }
++    if (!OPEN_STATUSES.includes(order.status)) {
++      throw new Error(`PURCHASE_ORDER_NOT_OPEN: la orden ya está en estado ${order.status}.`);
++    }
++
++    const updated: PurchaseOrder = {
++      ...order,
++      status: "POSPUESTO",
++      expectedDeliveryDate: newExpectedDate,
++      statusNote: note
++    };
++    await this.repository.update(updated);
++    return updated;
++  }
++
++  /** Cancela una orden abierta. Nunca borra el registro (queda en el historial como CANCELADO). */
++  public async cancel(orderId: string, note?: string): Promise<PurchaseOrder> {
++    const order = await this.repository.findById(orderId);
++    if (!order) {
++      throw new Error("PURCHASE_ORDER_NOT_FOUND");
++    }
++    if (!OPEN_STATUSES.includes(order.status)) {
++      throw new Error(`PURCHASE_ORDER_NOT_OPEN: la orden ya está en estado ${order.status}.`);
++    }
++
++    const updated: PurchaseOrder = {
++      ...order,
++      status: "CANCELADO",
++      statusNote: note
++    };
++    await this.repository.update(updated);
++    return updated;
++  }
+ }
+\ No newline at end of file
+diff -ruN '--exclude=node_modules' '--exclude=.git' orig/src/core/entities/Entities.ts src/src/core/entities/Entities.ts
+--- orig/src/core/entities/Entities.ts	2026-10-29 00:25:48.000000000 -0500
++++ src/src/core/entities/Entities.ts	2026-10-29 17:15:49.346677270 -0500
+@@ -717,6 +717,16 @@
+   | "AJUSTE_ADMINISTRATIVO"
+   | "OTRO";
+ 
++/**
++ * Fecha calendario SIN hora ni zona, formato ISO `YYYY-MM-DD` (ej. "2026-12-01").
++ * Se usa para vencimientos: un vencimiento es un día del calendario, no un
++ * instante. Por eso es un string y NO un Date: `new Date("2026-12-01")` es
++ * medianoche UTC y en Colombia (UTC-5) se vería como el 30 de noviembre.
++ * SupabaseRepository.reviveDates tampoco lo convierte a Date (solo revive
++ * timestamps con hora). Validar con `isIsoDateString` (core/utils/isoDate.ts).
++ */
++export type IsoDateString = `${number}-${number}-${number}`;
++
+ export interface InventoryMovement {
+   readonly id: string;
+   /**
+@@ -763,6 +773,13 @@
+    readonly branchId?: string;
+    readonly stockBefore?: number;
+    readonly stockAfter?: number;
++  /**
++   * Vencimiento del lote que ENTRA (Centro de Pérdidas). Solo aplica a
++   * movimientos INCREASE; ausente = no se informó. En la base vive en
++   * `data->>'expiresAt'` y se expone como la columna generada
++   * `inventory_movements.expires_at` (date, nullable, indexada).
++   */
++  readonly expiresAt?: IsoDateString;
+  }
+ 
+ /**
+@@ -942,6 +959,12 @@
+   readonly quantity: number;
+   /** Precio unitario esperado/pactado al crear la orden. Puede ajustarse al recibir si llegó distinto. */
+   readonly unitPrice: number;
++  /**
++   * Vencimiento del lote que llega, informado AL RECIBIR (o en la factura de una
++   * compra directa). Pasa al Kardex del movimiento INCREASE. Una fecha por
++   * producto y recepción: otro lote con otra fecha entra en otra recepción.
++   */
++  readonly expiresAt?: IsoDateString;
+ }
+ 
+ /**
+diff -ruN '--exclude=node_modules' '--exclude=.git' orig/src/core/offline/PendingPurchase.ts src/src/core/offline/PendingPurchase.ts
+--- orig/src/core/offline/PendingPurchase.ts	2026-10-26 14:15:13.000000000 -0500
++++ src/src/core/offline/PendingPurchase.ts	2026-10-29 17:16:14.095793929 -0500
+@@ -1,122 +1,122 @@
+-import type { PurchaseOrderItem } from "../entities/Entities";
+-
+-/**
+- * PendingPurchase
+- * ---------------------------------------------------------------------------
+- * Cola offline DEDICADA de Compras. Lo que se guarda en el navegador (ver
+- * PendingPurchaseRepository.ts) cuando una compra se registra:
+- *
+- *   - sin internet, o
+- *   - con internet pero la respuesta del servidor nunca llegó (corte de red,
+- *     cierre de la pestaña, reinicio del navegador a mitad de la operación).
+- *
+- * Es el mismo patrón de PendingSale / PendingInventoryAdjustment, pero
+- * AISLADO: una compra mueve stock, Kardex, costo promedio, estado del
+- * documento y auditoría en el servidor (receive_purchase_order_atomic), así
+- * que no se mezcla con los ajustes sueltos de inventario.
+- *
+- * DOS TIPOS (los dos flujos del servidor, mismo motor):
+- *   - DIRECT : compra directa (factura / nota de entrega, sin orden previa)
+- *              -> record_direct_purchase_atomic.
+- *   - RECEIPT: recepción (total o parcial) de una orden previa
+- *              -> receive_purchase_order_atomic.
+- *
+- * IDEMPOTENCIA PERSISTENTE: `id` ES la clave de idempotencia
+- * (p_operation_id) que viaja al servidor. Se genera UNA sola vez, antes de
+- * llamar al servidor, y queda guardada en IndexedDB. Antes vivía en un Map
+- * en memoria del engine: al reiniciar el navegador se perdía y un reintento
+- * generaba otro id (y por tanto otra entrada de stock). Ahora cada reintento
+- * — en esta sesión o después de reiniciar — usa exactamente el mismo id, y el
+- * servidor responde "idempotent" en vez de sumar el stock otra vez.
+- *
+- * DECISIÓN DE DISEÑO: se guarda la "receta" completa de la compra (líneas,
+- * precios, proveedor, factura), ya resuelta. En una recepción SIEMPRE se
+- * guardan las líneas explícitas: si se guardara "recibir lo que falte" y el
+- * primer intento sí llegó al servidor, el reintento calcularía 0 pendiente y
+- * fallaría en vez de confirmar que ya se aplicó.
+- */
+-
+-export type PendingPurchaseStatus =
+-  /** Recién guardada, esperando que vuelva la conexión (o el próximo ciclo). */
+-  | "PENDING_SYNC"
+-  /** Se está enviando ahora mismo. */
+-  | "SYNCING"
+-  /**
+-   * Falló por algo que no es de negocio y no se pudo confirmar (ej. error
+-   * inesperado). Se saca del ciclo automático y espera revisión/reintento.
+-   */
+-  | "FAILED"
+-  /**
+-   * El servidor la rechazó por una regla de negocio (factura repetida, sin
+-   * permiso, producto ajeno…) o se agotaron los intentos. No se reintenta sola.
+-   */
+-  | "PERMANENT_FAILURE";
+-
+-export type PendingPurchaseKind = "DIRECT" | "RECEIPT";
+-
+-export interface PendingPurchase {
+-  /** Clave de idempotencia — ver nota arriba. Es el p_operation_id del servidor. */
+-  readonly id: string;
+-  readonly kind: PendingPurchaseKind;
+-  /**
+-   * Huella del contenido (tipo + proveedor + factura + orden + líneas). Evita
+-   * guardar dos veces la misma compra si la persona pulsa dos veces o la
+-   * vuelve a registrar mientras la primera sigue en cola.
+-   */
+-  readonly fingerprint: string;
+-  /** Líneas ya resueltas (producto, cantidad y precio unitario real). */
+-  readonly items: readonly PurchaseOrderItem[];
+-  /** Solo DIRECT. */
+-  readonly supplierId?: string;
+-  readonly invoiceNumber?: string;
+-  /** Solo RECEIPT. */
+-  readonly purchaseOrderId?: string;
+-  readonly note?: string;
+-  readonly performedBy?: string;
+-  /** Texto corto para mostrar en la UI (ej. "Compra directa · 3 productos"). */
+-  readonly summary: string;
+-  /** Suma cantidad × precio, solo informativo para la UI. */
+-  readonly totalCost: number;
+-  readonly status: PendingPurchaseStatus;
+-  /** Cuándo se registró localmente (el momento real de la compra). */
+-  readonly queuedAt: Date;
+-  readonly attempts: number;
+-  readonly lastAttemptAt?: Date;
+-  readonly lastError?: string;
+-  /** Multi-tenant: contexto de negocio/sucursal al momento de encolar. */
+-  readonly businessId: string;
+-  readonly branchId: string;
+-}
+-
+-export interface PurchaseFingerprintInput {
+-  readonly kind: PendingPurchaseKind;
+-  readonly supplierId?: string;
+-  readonly invoiceNumber?: string;
+-  readonly purchaseOrderId?: string;
+-  readonly items: readonly PurchaseOrderItem[];
+-}
+-
+-/**
+- * Huella estable del contenido de una compra. Mismo criterio que usaba el
+- * engine en memoria (proveedor + factura + líneas ordenadas), ahora también
+- * para recepciones, y compartida por la cola persistente.
+- */
+-export function buildPurchaseFingerprint(input: PurchaseFingerprintInput): string {
+-  const lines = input.items
+-    .map((item) => [item.productId, item.quantity, item.unitPrice ?? null])
+-    .map((line) => JSON.stringify(line))
+-    .sort();
+-
+-  return [
+-    input.kind,
+-    input.purchaseOrderId ?? "",
+-    input.supplierId ?? "",
+-    (input.invoiceNumber ?? "").trim().toLowerCase(),
+-    `[${lines.join(",")}]`
+-  ].join("|");
+-}
+-
+-export function totalCostOf(items: readonly PurchaseOrderItem[]): number {
+-  const total = items.reduce((sum, item) => sum + item.quantity * (item.unitPrice ?? 0), 0);
+-  return Math.round(total * 10000) / 10000;
++import type { PurchaseOrderItem } from "../entities/Entities";
++
++/**
++ * PendingPurchase
++ * ---------------------------------------------------------------------------
++ * Cola offline DEDICADA de Compras. Lo que se guarda en el navegador (ver
++ * PendingPurchaseRepository.ts) cuando una compra se registra:
++ *
++ *   - sin internet, o
++ *   - con internet pero la respuesta del servidor nunca llegó (corte de red,
++ *     cierre de la pestaña, reinicio del navegador a mitad de la operación).
++ *
++ * Es el mismo patrón de PendingSale / PendingInventoryAdjustment, pero
++ * AISLADO: una compra mueve stock, Kardex, costo promedio, estado del
++ * documento y auditoría en el servidor (receive_purchase_order_atomic), así
++ * que no se mezcla con los ajustes sueltos de inventario.
++ *
++ * DOS TIPOS (los dos flujos del servidor, mismo motor):
++ *   - DIRECT : compra directa (factura / nota de entrega, sin orden previa)
++ *              -> record_direct_purchase_atomic.
++ *   - RECEIPT: recepción (total o parcial) de una orden previa
++ *              -> receive_purchase_order_atomic.
++ *
++ * IDEMPOTENCIA PERSISTENTE: `id` ES la clave de idempotencia
++ * (p_operation_id) que viaja al servidor. Se genera UNA sola vez, antes de
++ * llamar al servidor, y queda guardada en IndexedDB. Antes vivía en un Map
++ * en memoria del engine: al reiniciar el navegador se perdía y un reintento
++ * generaba otro id (y por tanto otra entrada de stock). Ahora cada reintento
++ * — en esta sesión o después de reiniciar — usa exactamente el mismo id, y el
++ * servidor responde "idempotent" en vez de sumar el stock otra vez.
++ *
++ * DECISIÓN DE DISEÑO: se guarda la "receta" completa de la compra (líneas,
++ * precios, proveedor, factura), ya resuelta. En una recepción SIEMPRE se
++ * guardan las líneas explícitas: si se guardara "recibir lo que falte" y el
++ * primer intento sí llegó al servidor, el reintento calcularía 0 pendiente y
++ * fallaría en vez de confirmar que ya se aplicó.
++ */
++
++export type PendingPurchaseStatus =
++  /** Recién guardada, esperando que vuelva la conexión (o el próximo ciclo). */
++  | "PENDING_SYNC"
++  /** Se está enviando ahora mismo. */
++  | "SYNCING"
++  /**
++   * Falló por algo que no es de negocio y no se pudo confirmar (ej. error
++   * inesperado). Se saca del ciclo automático y espera revisión/reintento.
++   */
++  | "FAILED"
++  /**
++   * El servidor la rechazó por una regla de negocio (factura repetida, sin
++   * permiso, producto ajeno…) o se agotaron los intentos. No se reintenta sola.
++   */
++  | "PERMANENT_FAILURE";
++
++export type PendingPurchaseKind = "DIRECT" | "RECEIPT";
++
++export interface PendingPurchase {
++  /** Clave de idempotencia — ver nota arriba. Es el p_operation_id del servidor. */
++  readonly id: string;
++  readonly kind: PendingPurchaseKind;
++  /**
++   * Huella del contenido (tipo + proveedor + factura + orden + líneas). Evita
++   * guardar dos veces la misma compra si la persona pulsa dos veces o la
++   * vuelve a registrar mientras la primera sigue en cola.
++   */
++  readonly fingerprint: string;
++  /** Líneas ya resueltas (producto, cantidad y precio unitario real). */
++  readonly items: readonly PurchaseOrderItem[];
++  /** Solo DIRECT. */
++  readonly supplierId?: string;
++  readonly invoiceNumber?: string;
++  /** Solo RECEIPT. */
++  readonly purchaseOrderId?: string;
++  readonly note?: string;
++  readonly performedBy?: string;
++  /** Texto corto para mostrar en la UI (ej. "Compra directa · 3 productos"). */
++  readonly summary: string;
++  /** Suma cantidad × precio, solo informativo para la UI. */
++  readonly totalCost: number;
++  readonly status: PendingPurchaseStatus;
++  /** Cuándo se registró localmente (el momento real de la compra). */
++  readonly queuedAt: Date;
++  readonly attempts: number;
++  readonly lastAttemptAt?: Date;
++  readonly lastError?: string;
++  /** Multi-tenant: contexto de negocio/sucursal al momento de encolar. */
++  readonly businessId: string;
++  readonly branchId: string;
++}
++
++export interface PurchaseFingerprintInput {
++  readonly kind: PendingPurchaseKind;
++  readonly supplierId?: string;
++  readonly invoiceNumber?: string;
++  readonly purchaseOrderId?: string;
++  readonly items: readonly PurchaseOrderItem[];
++}
++
++/**
++ * Huella estable del contenido de una compra. Mismo criterio que usaba el
++ * engine en memoria (proveedor + factura + líneas ordenadas), ahora también
++ * para recepciones, y compartida por la cola persistente.
++ */
++export function buildPurchaseFingerprint(input: PurchaseFingerprintInput): string {
++  const lines = input.items
++    .map((item) => [item.productId, item.quantity, item.unitPrice ?? null, item.expiresAt ?? null])
++    .map((line) => JSON.stringify(line))
++    .sort();
++
++  return [
++    input.kind,
++    input.purchaseOrderId ?? "",
++    input.supplierId ?? "",
++    (input.invoiceNumber ?? "").trim().toLowerCase(),
++    `[${lines.join(",")}]`
++  ].join("|");
++}
++
++export function totalCostOf(items: readonly PurchaseOrderItem[]): number {
++  const total = items.reduce((sum, item) => sum + item.quantity * (item.unitPrice ?? 0), 0);
++  return Math.round(total * 10000) / 10000;
+ }
+\ No newline at end of file
+diff -ruN '--exclude=node_modules' '--exclude=.git' orig/src/core/offline/pendingPurchasesStore.ts src/src/core/offline/pendingPurchasesStore.ts
+--- orig/src/core/offline/pendingPurchasesStore.ts	2026-10-26 14:15:13.000000000 -0500
++++ src/src/core/offline/pendingPurchasesStore.ts	2026-10-29 17:16:14.096042322 -0500
+@@ -1,225 +1,226 @@
+-import { ObservableStore } from "../store/ObservableStore";
+-import {
+-  PendingPurchase,
+-  PendingPurchaseKind,
+-  buildPurchaseFingerprint,
+-  totalCostOf
+-} from "./PendingPurchase";
+-import type { PurchaseOrderItem } from "../entities/Entities";
+-import { PendingPurchaseRepository } from "../../infrastructure/di/repositories/PendingPurchaseRepository";
+-import { getCurrentBranchId, requireCurrentBusinessId } from "../../infrastructure/supabase/supabaseClient";
+-
+-const repository = new PendingPurchaseRepository();
+-
+-export interface PendingPurchasesSnapshot {
+-  readonly items: PendingPurchase[];
+-  /** false hasta que se hace la primera lectura de IndexedDB al arrancar. */
+-  readonly loaded: boolean;
+-}
+-
+-const EMPTY_SNAPSHOT: PendingPurchasesSnapshot = { items: [], loaded: false };
+-
+-/** Estados en los que la compra todavía no se confirmó ni se descartó: sirven para no duplicarla. */
+-const REUSABLE_STATUSES: readonly PendingPurchase["status"][] = ["PENDING_SYNC", "SYNCING", "FAILED"];
+-
+-/**
+- * pendingPurchasesStore
+- * ---------------------------------------------------------------------------
+- * Capa reactiva (ObservableStore) sobre PendingPurchaseRepository — mismo
+- * patrón de pendingInventoryAdjustmentsStore, aplicado a Compras.
+- *
+- * `enqueue()` guarda la compra ANTES de llamar al servidor (patrón "outbox"):
+- * así, aunque el navegador se cierre a mitad de la llamada, la compra y su
+- * clave de idempotencia siguen en IndexedDB y el reintento usa el mismo id.
+- *
+- * Se auto-hidrata al importarse el módulo.
+- */
+-class PendingPurchasesStore extends ObservableStore<PendingPurchasesSnapshot> {
+-  constructor() {
+-    super(EMPTY_SNAPSHOT);
+-    if (typeof indexedDB !== "undefined") {
+-      void this.refresh();
+-    }
+-  }
+-
+-  async refresh(): Promise<void> {
+-    const items = (await repository.findAll()).sort((a, b) => {
+-      const byDate = a.queuedAt.getTime() - b.queuedAt.getTime();
+-      return byDate !== 0 ? byDate : a.id.localeCompare(b.id);
+-    });
+-    this.publish({ items, loaded: true });
+-  }
+-
+-  /** Lee directamente de la cola persistida solo las que esperan turno. */
+-  async findSyncable(): Promise<PendingPurchase[]> {
+-    return repository.findSyncable();
+-  }
+-
+-  async findById(id: string): Promise<PendingPurchase | null> {
+-    return repository.findById(id);
+-  }
+-
+-  /**
+-   * Busca una compra con el mismo contenido que todavía no se confirmó ni se
+-   * descartó. Si existe, quien registra debe REUSAR su id (su clave de
+-   * idempotencia) en vez de crear otra.
+-   */
+-  async findReusable(fingerprint: string): Promise<PendingPurchase | null> {
+-    const all = await repository.findAll();
+-    return (
+-      all.find(
+-        (purchase) =>
+-          purchase.fingerprint === fingerprint && REUSABLE_STATUSES.includes(purchase.status)
+-      ) ?? null
+-    );
+-  }
+-
+-  /**
+-   * Guarda una compra en la cola local. `id` es la clave de idempotencia que
+-   * viaja al servidor (ver PendingPurchase.ts). Con `startSyncing` queda ya
+-   * como SYNCING (la va a enviar quien la registra ahora mismo) para que el
+-   * ciclo automático no la envíe al mismo tiempo.
+-   */
+-  async enqueue(params: {
+-    id: string;
+-    kind: PendingPurchaseKind;
+-    items: readonly PurchaseOrderItem[];
+-    supplierId?: string;
+-    invoiceNumber?: string;
+-    purchaseOrderId?: string;
+-    note?: string;
+-    performedBy?: string;
+-    summary: string;
+-    startSyncing?: boolean;
+-  }): Promise<PendingPurchase> {
+-    const existing = await repository.findById(params.id);
+-    const now = new Date();
+-
+-    const pendingPurchase: PendingPurchase = {
+-      id: params.id,
+-      kind: params.kind,
+-      fingerprint: buildPurchaseFingerprint(params),
+-      items: params.items.map((item) => ({
+-        productId: item.productId,
+-        quantity: item.quantity,
+-        unitPrice: item.unitPrice
+-      })),
+-      supplierId: params.supplierId,
+-      invoiceNumber: params.invoiceNumber,
+-      purchaseOrderId: params.purchaseOrderId,
+-      note: params.note,
+-      performedBy: params.performedBy,
+-      summary: params.summary,
+-      totalCost: totalCostOf(params.items),
+-      status: params.startSyncing ? "SYNCING" : "PENDING_SYNC",
+-      queuedAt: existing?.queuedAt ?? now,
+-      attempts: (existing?.attempts ?? 0) + (params.startSyncing ? 1 : 0),
+-      lastAttemptAt: params.startSyncing ? now : existing?.lastAttemptAt,
+-      lastError: existing?.lastError,
+-      businessId: requireCurrentBusinessId(),
+-      branchId: getCurrentBranchId() ?? ""
+-    };
+-
+-    await repository.save(pendingPurchase);
+-    await this.refresh();
+-
+-    return pendingPurchase;
+-  }
+-
+-  /** Antes de reintentar contra el servidor: marca "sincronizando" y suma un intento. */
+-  async markSyncing(id: string): Promise<boolean> {
+-    const current = await repository.findById(id);
+-    if (!current) return false;
+-
+-    await repository.update({
+-      ...current,
+-      status: "SYNCING",
+-      attempts: current.attempts + 1,
+-      lastAttemptAt: new Date()
+-    });
+-    await this.refresh();
+-    return true;
+-  }
+-
+-  /** El intento falló sin poder confirmarse: registra el motivo y la saca del ciclo automático. */
+-  async markFailed(id: string, error: string): Promise<void> {
+-    const current = await repository.findById(id);
+-    if (!current) return;
+-
+-    await repository.update({
+-      ...current,
+-      status: "FAILED",
+-      lastError: error,
+-      lastAttemptAt: new Date()
+-    });
+-    await this.refresh();
+-  }
+-
+-  /** Error permanente de negocio: ya no se reintentará automáticamente. */
+-  async markPermanentFailure(id: string, error: string): Promise<void> {
+-    const current = await repository.findById(id);
+-    if (!current) return;
+-
+-    await repository.update({
+-      ...current,
+-      status: "PERMANENT_FAILURE",
+-      lastError: error,
+-      lastAttemptAt: new Date()
+-    });
+-    await this.refresh();
+-  }
+-
+-  /** Vuelve a dejarla disponible para el próximo ciclo (falló la red, o reintento manual). */
+-  async requeue(id: string, lastError?: string): Promise<void> {
+-    const current = await repository.findById(id);
+-    if (!current) return;
+-
+-    await repository.update({
+-      ...current,
+-      status: "PENDING_SYNC",
+-      lastError: lastError ?? current.lastError
+-    });
+-    await this.refresh();
+-  }
+-
+-  /** La compra ya quedó confirmada en Supabase (o se descartó por error de negocio): sale de la cola. */
+-  async remove(id: string): Promise<void> {
+-    await repository.delete(id);
+-    await this.refresh();
+-  }
+-
+-  /** Vuelve a poner en cola las que quedaron en SYNCING por un cierre/recarga abrupta. */
+-  async recoverStuckSyncing(): Promise<void> {
+-    const items = await repository.findAll();
+-    const stuck = items.filter((purchase) => purchase.status === "SYNCING");
+-
+-    if (stuck.length === 0) return;
+-
+-    await Promise.all(
+-      stuck.map((purchase) => repository.update({ ...purchase, status: "PENDING_SYNC" }))
+-    );
+-
+-    await this.refresh();
+-  }
+-
+-  /** Compras que siguen esperando turno para sincronizarse (no las que ya están en curso). */
+-  syncable(): PendingPurchase[] {
+-    return this.snapshot.items.filter((purchase) => purchase.status === "PENDING_SYNC");
+-  }
+-
+-  list(): PendingPurchase[] {
+-    return this.snapshot.items;
+-  }
+-
+-  /** Cuántas compras hay en la cola en total. */
+-  count(): number {
+-    return this.snapshot.items.length;
+-  }
+-
+-  async clear(): Promise<void> {
+-    await repository.clear();
+-    await this.refresh();
+-  }
+-}
+-
++import { ObservableStore } from "../store/ObservableStore";
++import {
++  PendingPurchase,
++  PendingPurchaseKind,
++  buildPurchaseFingerprint,
++  totalCostOf
++} from "./PendingPurchase";
++import type { PurchaseOrderItem } from "../entities/Entities";
++import { PendingPurchaseRepository } from "../../infrastructure/di/repositories/PendingPurchaseRepository";
++import { getCurrentBranchId, requireCurrentBusinessId } from "../../infrastructure/supabase/supabaseClient";
++
++const repository = new PendingPurchaseRepository();
++
++export interface PendingPurchasesSnapshot {
++  readonly items: PendingPurchase[];
++  /** false hasta que se hace la primera lectura de IndexedDB al arrancar. */
++  readonly loaded: boolean;
++}
++
++const EMPTY_SNAPSHOT: PendingPurchasesSnapshot = { items: [], loaded: false };
++
++/** Estados en los que la compra todavía no se confirmó ni se descartó: sirven para no duplicarla. */
++const REUSABLE_STATUSES: readonly PendingPurchase["status"][] = ["PENDING_SYNC", "SYNCING", "FAILED"];
++
++/**
++ * pendingPurchasesStore
++ * ---------------------------------------------------------------------------
++ * Capa reactiva (ObservableStore) sobre PendingPurchaseRepository — mismo
++ * patrón de pendingInventoryAdjustmentsStore, aplicado a Compras.
++ *
++ * `enqueue()` guarda la compra ANTES de llamar al servidor (patrón "outbox"):
++ * así, aunque el navegador se cierre a mitad de la llamada, la compra y su
++ * clave de idempotencia siguen en IndexedDB y el reintento usa el mismo id.
++ *
++ * Se auto-hidrata al importarse el módulo.
++ */
++class PendingPurchasesStore extends ObservableStore<PendingPurchasesSnapshot> {
++  constructor() {
++    super(EMPTY_SNAPSHOT);
++    if (typeof indexedDB !== "undefined") {
++      void this.refresh();
++    }
++  }
++
++  async refresh(): Promise<void> {
++    const items = (await repository.findAll()).sort((a, b) => {
++      const byDate = a.queuedAt.getTime() - b.queuedAt.getTime();
++      return byDate !== 0 ? byDate : a.id.localeCompare(b.id);
++    });
++    this.publish({ items, loaded: true });
++  }
++
++  /** Lee directamente de la cola persistida solo las que esperan turno. */
++  async findSyncable(): Promise<PendingPurchase[]> {
++    return repository.findSyncable();
++  }
++
++  async findById(id: string): Promise<PendingPurchase | null> {
++    return repository.findById(id);
++  }
++
++  /**
++   * Busca una compra con el mismo contenido que todavía no se confirmó ni se
++   * descartó. Si existe, quien registra debe REUSAR su id (su clave de
++   * idempotencia) en vez de crear otra.
++   */
++  async findReusable(fingerprint: string): Promise<PendingPurchase | null> {
++    const all = await repository.findAll();
++    return (
++      all.find(
++        (purchase) =>
++          purchase.fingerprint === fingerprint && REUSABLE_STATUSES.includes(purchase.status)
++      ) ?? null
++    );
++  }
++
++  /**
++   * Guarda una compra en la cola local. `id` es la clave de idempotencia que
++   * viaja al servidor (ver PendingPurchase.ts). Con `startSyncing` queda ya
++   * como SYNCING (la va a enviar quien la registra ahora mismo) para que el
++   * ciclo automático no la envíe al mismo tiempo.
++   */
++  async enqueue(params: {
++    id: string;
++    kind: PendingPurchaseKind;
++    items: readonly PurchaseOrderItem[];
++    supplierId?: string;
++    invoiceNumber?: string;
++    purchaseOrderId?: string;
++    note?: string;
++    performedBy?: string;
++    summary: string;
++    startSyncing?: boolean;
++  }): Promise<PendingPurchase> {
++    const existing = await repository.findById(params.id);
++    const now = new Date();
++
++    const pendingPurchase: PendingPurchase = {
++      id: params.id,
++      kind: params.kind,
++      fingerprint: buildPurchaseFingerprint(params),
++      items: params.items.map((item) => ({
++        productId: item.productId,
++        quantity: item.quantity,
++        unitPrice: item.unitPrice,
++        ...(item.expiresAt !== undefined ? { expiresAt: item.expiresAt } : {})
++      })),
++      supplierId: params.supplierId,
++      invoiceNumber: params.invoiceNumber,
++      purchaseOrderId: params.purchaseOrderId,
++      note: params.note,
++      performedBy: params.performedBy,
++      summary: params.summary,
++      totalCost: totalCostOf(params.items),
++      status: params.startSyncing ? "SYNCING" : "PENDING_SYNC",
++      queuedAt: existing?.queuedAt ?? now,
++      attempts: (existing?.attempts ?? 0) + (params.startSyncing ? 1 : 0),
++      lastAttemptAt: params.startSyncing ? now : existing?.lastAttemptAt,
++      lastError: existing?.lastError,
++      businessId: requireCurrentBusinessId(),
++      branchId: getCurrentBranchId() ?? ""
++    };
++
++    await repository.save(pendingPurchase);
++    await this.refresh();
++
++    return pendingPurchase;
++  }
++
++  /** Antes de reintentar contra el servidor: marca "sincronizando" y suma un intento. */
++  async markSyncing(id: string): Promise<boolean> {
++    const current = await repository.findById(id);
++    if (!current) return false;
++
++    await repository.update({
++      ...current,
++      status: "SYNCING",
++      attempts: current.attempts + 1,
++      lastAttemptAt: new Date()
++    });
++    await this.refresh();
++    return true;
++  }
++
++  /** El intento falló sin poder confirmarse: registra el motivo y la saca del ciclo automático. */
++  async markFailed(id: string, error: string): Promise<void> {
++    const current = await repository.findById(id);
++    if (!current) return;
++
++    await repository.update({
++      ...current,
++      status: "FAILED",
++      lastError: error,
++      lastAttemptAt: new Date()
++    });
++    await this.refresh();
++  }
++
++  /** Error permanente de negocio: ya no se reintentará automáticamente. */
++  async markPermanentFailure(id: string, error: string): Promise<void> {
++    const current = await repository.findById(id);
++    if (!current) return;
++
++    await repository.update({
++      ...current,
++      status: "PERMANENT_FAILURE",
++      lastError: error,
++      lastAttemptAt: new Date()
++    });
++    await this.refresh();
++  }
++
++  /** Vuelve a dejarla disponible para el próximo ciclo (falló la red, o reintento manual). */
++  async requeue(id: string, lastError?: string): Promise<void> {
++    const current = await repository.findById(id);
++    if (!current) return;
++
++    await repository.update({
++      ...current,
++      status: "PENDING_SYNC",
++      lastError: lastError ?? current.lastError
++    });
++    await this.refresh();
++  }
++
++  /** La compra ya quedó confirmada en Supabase (o se descartó por error de negocio): sale de la cola. */
++  async remove(id: string): Promise<void> {
++    await repository.delete(id);
++    await this.refresh();
++  }
++
++  /** Vuelve a poner en cola las que quedaron en SYNCING por un cierre/recarga abrupta. */
++  async recoverStuckSyncing(): Promise<void> {
++    const items = await repository.findAll();
++    const stuck = items.filter((purchase) => purchase.status === "SYNCING");
++
++    if (stuck.length === 0) return;
++
++    await Promise.all(
++      stuck.map((purchase) => repository.update({ ...purchase, status: "PENDING_SYNC" }))
++    );
++
++    await this.refresh();
++  }
++
++  /** Compras que siguen esperando turno para sincronizarse (no las que ya están en curso). */
++  syncable(): PendingPurchase[] {
++    return this.snapshot.items.filter((purchase) => purchase.status === "PENDING_SYNC");
++  }
++
++  list(): PendingPurchase[] {
++    return this.snapshot.items;
++  }
++
++  /** Cuántas compras hay en la cola en total. */
++  count(): number {
++    return this.snapshot.items.length;
++  }
++
++  async clear(): Promise<void> {
++    await repository.clear();
++    await this.refresh();
++  }
++}
++
+ export const pendingPurchasesStore = new PendingPurchasesStore();
+\ No newline at end of file
+diff -ruN '--exclude=node_modules' '--exclude=.git' orig/src/core/utils/isoDate.ts src/src/core/utils/isoDate.ts
+--- orig/src/core/utils/isoDate.ts	1969-12-31 19:00:00.000000000 -0500
++++ src/src/core/utils/isoDate.ts	2026-10-29 17:15:42.070676838 -0500
+@@ -0,0 +1,30 @@
++import type { IsoDateString } from "../entities/Entities";
++
++const ISO_DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
++
++/**
++ * Type guard de una fecha calendario `YYYY-MM-DD` REAL (rechaza "2026-02-31").
++ * Es el mismo formato que valida el servidor (`normalize_expires_at`).
++ *
++ * Para construir la fecha de "hoy" en la zona del negocio usa
++ * `getBusinessDateKey(date, tz)` de `businessTime.ts`: nunca `toISOString()`
++ * (devuelve UTC y en Colombia, UTC-5, corre la fecha un día después de las 7 pm).
++ */
++export function isIsoDateString(value: unknown): value is IsoDateString {
++  if (typeof value !== "string") return false;
++  const match = ISO_DATE_ONLY_RE.exec(value);
++  if (!match) return false;
++  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
++  const probe = new Date(Date.UTC(year, month - 1, day));
++  return (
++    probe.getUTCFullYear() === year &&
++    probe.getUTCMonth() === month - 1 &&
++    probe.getUTCDate() === day
++  );
++}
++
++/** Valida un valor de formulario/CSV: `IsoDateString` o `undefined` si viene vacío o inválido. */
++export function parseIsoDateString(value: string | null | undefined): IsoDateString | undefined {
++  const trimmed = value?.trim();
++  return trimmed && isIsoDateString(trimmed) ? trimmed : undefined;
++}
+diff -ruN '--exclude=node_modules' '--exclude=.git' orig/src/infrastructure/di/repositories/IProductRepository.ts src/src/infrastructure/di/repositories/IProductRepository.ts
+--- orig/src/infrastructure/di/repositories/IProductRepository.ts	2026-10-26 18:09:30.000000000 -0500
++++ src/src/infrastructure/di/repositories/IProductRepository.ts	2026-10-29 17:15:56.402677689 -0500
+@@ -1,4 +1,4 @@
+-import { InventoryMovement, LossCategory, Product } from "../../../core/entities/Entities";
++import { InventoryMovement, IsoDateString, LossCategory, Product } from "../../../core/entities/Entities";
+ import { IRepository } from "./IRepository";
+ 
+ /**
+@@ -126,5 +126,12 @@
+    * recepciones de compra.
+    */
+   allowNegative?: boolean;
++  /**
++   * Vencimiento del lote que entra. SOLO con type INCREASE: el RPC
++   * `adjust_stock_batch_with_kardex` rechaza la fecha en cualquier otro tipo
++   * (INVALID_INVENTORY_BATCH_ITEM) y un formato distinto de YYYY-MM-DD
++   * (INVALID_EXPIRES_AT). Queda en el Kardex (`inventory_movements.expires_at`).
++   */
++  expiresAt?: IsoDateString;
+   extraFields?: Record<string, unknown>;
+ }
+\ No newline at end of file
+diff -ruN '--exclude=node_modules' '--exclude=.git' orig/src/infrastructure/di/repositories/PurchaseOrderRepository.ts src/src/infrastructure/di/repositories/PurchaseOrderRepository.ts
+--- orig/src/infrastructure/di/repositories/PurchaseOrderRepository.ts	2026-10-26 14:15:14.000000000 -0500
++++ src/src/infrastructure/di/repositories/PurchaseOrderRepository.ts	2026-10-29 17:16:02.970678080 -0500
+@@ -1,4 +1,4 @@
+-import { PurchaseOrder } from "../../../core/entities/Entities";
++import { IsoDateString, PurchaseOrder } from "../../../core/entities/Entities";
+ import { SupabaseRepository } from "./SupabaseRepository";
+ import { supabase, getCurrentBusinessId, getCurrentBranchId } from "../../supabase/supabaseClient";
+ 
+@@ -7,6 +7,18 @@
+   readonly productId: string;
+   readonly quantity: number;
+   readonly unitPrice?: number;
++  /** Vencimiento del lote recibido (YYYY-MM-DD). Opcional; el servidor lo valida. */
++  readonly expiresAt?: IsoDateString;
++}
++
++/** Línea tal como viaja al RPC: solo incluye las llaves opcionales que traen valor. */
++function toRpcLine(item: PurchaseReceiptLine): Record<string, unknown> {
++  return {
++    productId: item.productId,
++    quantity: item.quantity,
++    ...(item.unitPrice !== undefined ? { unitPrice: item.unitPrice } : {}),
++    ...(item.expiresAt !== undefined ? { expiresAt: item.expiresAt } : {})
++  };
+ }
+ 
+ /**
+@@ -35,13 +47,7 @@
+     const { data, error } = await supabase.rpc("receive_purchase_order_atomic", {
+       p_operation_id: params.operationId,
+       p_purchase_order_id: params.purchaseOrderId,
+-      p_received_items: params.items
+-        ? params.items.map((item) => ({
+-            productId: item.productId,
+-            quantity: item.quantity,
+-            ...(item.unitPrice !== undefined ? { unitPrice: item.unitPrice } : {})
+-          }))
+-        : null,
++      p_received_items: params.items ? params.items.map(toRpcLine) : null,
+       p_note: params.note ?? null,
+       p_performed_by: params.performedBy ?? null
+     });
+@@ -78,11 +84,7 @@
+       p_business_id: businessId,
+       p_branch_id: branchId,
+       p_supplier_id: params.supplierId,
+-      p_items: params.items.map((item) => ({
+-        productId: item.productId,
+-        quantity: item.quantity,
+-        unitPrice: item.unitPrice
+-      })),
++      p_items: params.items.map(toRpcLine),
+       p_invoice_number: params.invoiceNumber ?? null,
+       p_note: params.note ?? null,
+       p_performed_by: params.performedBy ?? null
+diff -ruN '--exclude=node_modules' '--exclude=.git' orig/supabase/migrations/20261116000000_inventory_movements_expires_at.sql src/supabase/migrations/20261116000000_inventory_movements_expires_at.sql
+--- orig/supabase/migrations/20261116000000_inventory_movements_expires_at.sql	1969-12-31 19:00:00.000000000 -0500
++++ src/supabase/migrations/20261116000000_inventory_movements_expires_at.sql	2026-10-29 17:13:14.173254133 -0500
+@@ -0,0 +1,972 @@
++-- ============================================================================
++-- 20261116000000_inventory_movements_expires_at.sql
++-- ----------------------------------------------------------------------------
++-- Centro de Perdidas: fecha de vencimiento en las ENTRADAS de inventario.
++--
++--   1. public.immutable_date(text)        helper IMMUTABLE text -> date (NULL si es
++--                                         invalida; nunca rompe un INSERT).
++--   2. public.normalize_expires_at(jsonb) validador del RPC: formato YYYY-MM-DD,
++--                                         fecha real, entre 2000-01-01 y hoy + 20 anios.
++--   3. inventory_movements.expires_at     date NULL, columna GENERADA desde
++--                                         data->>'expiresAt' (mismo patron que
++--                                         movement_date / movement_product_id: una sola
++--                                         fuente de verdad, imposible que diverjan).
++--                                         Indice parcial para el Centro de Perdidas.
++--   4. RPCs (misma firma, mismos permisos; CREATE OR REPLACE):
++--        adjust_stock_batch_with_kardex   item.expiresAt (solo INCREASE)
++--        receive_purchase_order_atomic    item.expiresAt por linea recibida
++--        record_direct_purchase_atomic    item.expiresAt por linea facturada
++--
++-- Compatibilidad: expiresAt es opcional. Sin el, todo funciona igual que antes
++-- y expires_at queda NULL. Los movimientos historicos quedan NULL (no se inventa
++-- un vencimiento). El valor viaja dentro del payload, asi que ya entra al hash
++-- de idempotencia (mismo operation_id con otra fecha => IDEMPOTENCY_KEY_REUSED).
++--
++-- Nota operativa: ADD COLUMN ... GENERATED STORED reescribe la tabla y toma
++-- ACCESS EXCLUSIVE un momento (igual que formalize_hot_columns). Correr fuera de
++-- hora pico si inventory_movements es grande.
++--
++-- Migracion NUEVA: no se modifican las historicas 20261112/20261114/20261115.
++-- ============================================================================
++
++BEGIN;
++
++-- 1) Helper IMMUTABLE (requerido por la columna generada) -------------------
++CREATE OR REPLACE FUNCTION public.immutable_date(p_text text)
++RETURNS date
++LANGUAGE plpgsql
++IMMUTABLE
++PARALLEL SAFE
++SET search_path = pg_catalog
++AS $$
++BEGIN
++  IF p_text IS NULL OR p_text !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' THEN
++    RETURN NULL;
++  END IF;
++  RETURN pg_catalog.make_date(
++    pg_catalog.substr(p_text, 1, 4)::int,
++    pg_catalog.substr(p_text, 6, 2)::int,
++    pg_catalog.substr(p_text, 9, 2)::int
++  );
++EXCEPTION WHEN OTHERS THEN
++  RETURN NULL;  -- p.ej. 2026-02-31: la columna queda NULL, el RPC ya lo rechaza antes
++END;
++$$;
++
++-- 2) Validador usado por los RPCs ---------------------------------------------
++CREATE OR REPLACE FUNCTION public.normalize_expires_at(p_value jsonb)
++RETURNS date
++LANGUAGE plpgsql
++STABLE
++SET search_path = ''
++AS $$
++DECLARE
++  v_date date;
++BEGIN
++  IF p_value IS NULL OR pg_catalog.jsonb_typeof(p_value) = 'null' THEN
++    RETURN NULL;
++  END IF;
++  IF pg_catalog.jsonb_typeof(p_value) <> 'string' THEN
++    RAISE EXCEPTION 'INVALID_EXPIRES_AT' USING ERRCODE = 'P0001';
++  END IF;
++
++  v_date := public.immutable_date(p_value #>> '{}');
++  IF v_date IS NULL
++     OR v_date < DATE '2000-01-01'
++     OR v_date > (CURRENT_DATE + INTERVAL '20 years')::date THEN
++    RAISE EXCEPTION 'INVALID_EXPIRES_AT' USING ERRCODE = 'P0001';
++  END IF;
++  RETURN v_date;
++END;
++$$;
++
++REVOKE ALL ON FUNCTION public.normalize_expires_at(jsonb) FROM PUBLIC, anon;
++GRANT EXECUTE ON FUNCTION public.normalize_expires_at(jsonb) TO authenticated, service_role;
++
++-- 3) Columna generada + indice ---------------------------------------------------
++ALTER TABLE public.inventory_movements
++  ADD COLUMN IF NOT EXISTS expires_at date
++    GENERATED ALWAYS AS (public.immutable_date(data->>'expiresAt')) STORED;
++
++COMMENT ON COLUMN public.inventory_movements.expires_at IS
++  'Vencimiento del lote que entra (solo INCREASE). Generada desde data->>''expiresAt'' (YYYY-MM-DD). NULL = sin fecha informada.';
++
++-- Centro de Perdidas: "que entradas vencen pronto" por negocio/sucursal.
++CREATE INDEX IF NOT EXISTS inventory_movements_expiry_idx
++  ON public.inventory_movements (business_id, branch_id, expires_at)
++  WHERE expires_at IS NOT NULL;
++
++-- 4) RPCs ----------------------------------------------------------------------------
++
++CREATE OR REPLACE FUNCTION public.adjust_stock_batch_with_kardex(
++  p_operation_id text,
++  p_movements jsonb
++)
++RETURNS jsonb
++LANGUAGE plpgsql
++SECURITY DEFINER
++SET search_path = ''
++AS $$
++DECLARE
++  v_item jsonb;
++  v_product_id text;
++  v_delta numeric;
++  v_reason text;
++  v_type text;
++  v_branch_id uuid;
++  v_extra_fields jsonb;
++  v_allow_negative boolean;
++  v_expires_at date;
++  v_product_data jsonb;
++  v_product_name text;
++  v_product_business_id uuid;
++  v_operation_business_id uuid;
++  v_product_branch_id uuid;
++  v_operation_branch_id uuid;
++  v_payload_hash text;
++  v_existing_payload_hash text;
++  v_existing_movement_count integer;
++  v_rows_inserted integer;
++  v_actor_role text := auth.role();
++  v_movement_id uuid;
++  v_existing_movement jsonb;
++  v_result jsonb;
++  v_results jsonb := '[]'::jsonb;
++BEGIN
++  IF NULLIF(btrim(p_operation_id), '') IS NULL THEN
++    RAISE EXCEPTION 'INVENTORY_OPERATION_ID_REQUIRED' USING ERRCODE = 'P0001';
++  END IF;
++  IF jsonb_typeof(p_movements) IS DISTINCT FROM 'array'
++     OR jsonb_array_length(p_movements) = 0
++     OR jsonb_array_length(p_movements) > 500 THEN
++    RAISE EXCEPTION 'INVALID_INVENTORY_BATCH' USING ERRCODE = 'P0001';
++  END IF;
++  IF EXISTS (
++    SELECT 1
++    FROM pg_catalog.jsonb_array_elements(p_movements) AS entry(value)
++    GROUP BY entry.value->>'productId', entry.value->>'type'
++    HAVING count(*) > 1
++  ) THEN
++    RAISE EXCEPTION 'DUPLICATE_INVENTORY_BATCH_ITEM' USING ERRCODE = 'P0001';
++  END IF;
++
++  PERFORM pg_catalog.pg_advisory_xact_lock(
++    pg_catalog.hashtextextended(p_operation_id, 0)
++  );
++
++  v_product_id := NULLIF(p_movements->0->>'productId', '');
++  v_operation_branch_id := NULLIF(p_movements->0->>'branchId', '')::uuid;
++  SELECT product.business_id
++    INTO v_operation_business_id
++  FROM public.products AS product
++  WHERE product.id = v_product_id::uuid
++  FOR UPDATE;
++  IF NOT FOUND THEN
++    RAISE EXCEPTION 'PRODUCT_NOT_FOUND' USING ERRCODE = 'P0002';
++  END IF;
++
++  IF v_operation_branch_id IS NOT NULL AND NOT EXISTS (
++    SELECT 1
++    FROM public.branches AS branch
++    WHERE branch.id = v_operation_branch_id
++      AND branch.business_id = v_operation_business_id
++  ) THEN
++    RAISE EXCEPTION 'BRANCH_SCOPE_VIOLATION' USING ERRCODE = '42501';
++  END IF;
++
++  IF v_actor_role IS DISTINCT FROM 'service_role' THEN
++    IF auth.uid() IS NULL
++       OR NOT public.has_business_role(
++         v_operation_business_id,
++         ARRAY['ADMIN', 'GERENTE', 'INVENTARIO']
++       )
++       OR NOT public.is_business_subscription_active(v_operation_business_id) THEN
++      RAISE EXCEPTION 'INVENTORY_BATCH_FORBIDDEN' USING ERRCODE = '42501';
++    END IF;
++    IF v_operation_branch_id IS NOT NULL
++       AND NOT EXISTS (
++         SELECT 1
++         WHERE v_operation_branch_id = ANY (public.auth_branch_ids())
++       ) THEN
++      RAISE EXCEPTION 'BRANCH_SCOPE_VIOLATION' USING ERRCODE = '42501';
++    END IF;
++  END IF;
++
++  SELECT pg_catalog.encode(extensions.digest(ordered_movements.value::text, 'sha256'), 'hex')
++    INTO v_payload_hash
++  FROM (
++    SELECT pg_catalog.jsonb_agg(
++      entry.value ORDER BY entry.value->>'productId', entry.value->>'type'
++    ) AS value
++    FROM pg_catalog.jsonb_array_elements(p_movements) AS entry(value)
++  ) AS ordered_movements;
++
++  INSERT INTO public.inventory_batch_operations (
++    business_id, branch_id, operation_id, payload_hash, movement_count
++  )
++  VALUES (
++    v_operation_business_id, v_operation_branch_id, p_operation_id,
++    v_payload_hash, jsonb_array_length(p_movements)
++  )
++  ON CONFLICT (business_id, operation_id) DO NOTHING;
++  GET DIAGNOSTICS v_rows_inserted = ROW_COUNT;
++
++  IF v_rows_inserted = 0 THEN
++    SELECT operation.payload_hash, operation.movement_count
++      INTO v_existing_payload_hash, v_existing_movement_count
++    FROM public.inventory_batch_operations AS operation
++    WHERE operation.business_id = v_operation_business_id
++      AND operation.operation_id = p_operation_id
++      AND operation.branch_id IS NOT DISTINCT FROM v_operation_branch_id
++    FOR UPDATE;
++
++    IF NOT FOUND
++       OR v_existing_payload_hash IS DISTINCT FROM v_payload_hash
++       OR v_existing_movement_count <> jsonb_array_length(p_movements) THEN
++      RAISE EXCEPTION 'IDEMPOTENCY_KEY_REUSED' USING ERRCODE = 'P0001';
++    END IF;
++
++    FOR v_item IN
++      SELECT entry.value
++      FROM pg_catalog.jsonb_array_elements(p_movements) AS entry(value)
++      ORDER BY entry.value->>'productId', entry.value->>'type'
++    LOOP
++      SELECT product.data INTO v_result
++      FROM public.products AS product
++      WHERE product.id = (v_item->>'productId')::uuid;
++      IF NOT FOUND THEN
++        RAISE EXCEPTION 'PRODUCT_NOT_FOUND' USING ERRCODE = 'P0002';
++      END IF;
++      v_results := v_results || pg_catalog.jsonb_build_array(v_result);
++    END LOOP;
++    RETURN v_results;
++  END IF;
++
++  FOR v_item IN
++    SELECT entry.value
++    FROM pg_catalog.jsonb_array_elements(p_movements) AS entry(value)
++    ORDER BY entry.value->>'productId', entry.value->>'type'
++  LOOP
++    v_product_id := NULLIF(v_item->>'productId', '');
++    v_delta := (v_item->>'delta')::numeric;
++    v_reason := NULLIF(btrim(v_item->>'reason'), '');
++    v_type := v_item->>'type';
++    v_branch_id := NULLIF(v_item->>'branchId', '')::uuid;
++    v_extra_fields := COALESCE(v_item->'extraFields', '{}'::jsonb);
++
++    -- Opcion B: SOLO el descuento por venta puede dejar el stock en negativo.
++    -- El flag es opcional; si viene debe ser booleano y solo con DECREASE.
++    -- Sin flag (o false) el comportamiento es el de siempre: INSUFFICIENT_STOCK.
++    IF jsonb_typeof(v_item->'allowNegative') IS NOT NULL
++       AND jsonb_typeof(v_item->'allowNegative') <> 'boolean' THEN
++      RAISE EXCEPTION 'INVALID_INVENTORY_BATCH_ITEM' USING ERRCODE = 'P0001';
++    END IF;
++    v_allow_negative := COALESCE((v_item->>'allowNegative')::boolean, false);
++    IF v_allow_negative AND v_type IS DISTINCT FROM 'DECREASE' THEN
++      RAISE EXCEPTION 'INVALID_INVENTORY_BATCH_ITEM' USING ERRCODE = 'P0001';
++    END IF;
++
++    -- Vencimiento del lote que entra (Centro de Perdidas). Opcional, solo en
++    -- entradas (INCREASE). Formato estricto YYYY-MM-DD; si no, INVALID_EXPIRES_AT.
++    v_expires_at := public.normalize_expires_at(v_item->'expiresAt');
++    IF v_expires_at IS NOT NULL AND v_type IS DISTINCT FROM 'INCREASE' THEN
++      RAISE EXCEPTION 'INVALID_INVENTORY_BATCH_ITEM' USING ERRCODE = 'P0001';
++    END IF;
++
++     IF v_product_id IS NULL OR v_reason IS NULL OR v_delta IS NULL OR v_delta = 0
++       OR v_type IS NULL OR v_type NOT IN ('INCREASE', 'DECREASE')
++       OR (v_type = 'DECREASE' AND v_delta >= 0)
++       OR (v_type = 'INCREASE' AND v_delta <= 0)
++       OR jsonb_typeof(v_extra_fields) IS DISTINCT FROM 'object'
++       OR EXISTS (
++         SELECT 1
++         FROM pg_catalog.jsonb_object_keys(v_extra_fields) AS fields(key)
++         WHERE fields.key <> 'lastUpdated'
++       ) THEN
++      RAISE EXCEPTION 'INVALID_INVENTORY_BATCH_ITEM' USING ERRCODE = 'P0001';
++    END IF;
++
++    v_movement_id := pg_catalog.substr(
++      pg_catalog.encode(
++        extensions.digest(p_operation_id || ':' || v_product_id || ':' || v_type, 'sha256'),
++        'hex'
++      ),
++      1,
++      32
++    )::uuid;
++
++    SELECT product.data, product.business_id, product.branch_id,
++           product.data->>'name'
++      INTO v_product_data, v_product_business_id, v_product_branch_id,
++           v_product_name
++    FROM public.products AS product
++    WHERE product.id = v_product_id::uuid
++    FOR UPDATE;
++
++    IF NOT FOUND OR v_product_name IS NULL THEN
++      RAISE EXCEPTION 'PRODUCT_NOT_FOUND' USING ERRCODE = 'P0002';
++    END IF;
++
++    IF v_branch_id IS DISTINCT FROM v_product_branch_id THEN
++      RAISE EXCEPTION 'BRANCH_SCOPE_VIOLATION' USING ERRCODE = '42501';
++    END IF;
++     IF v_branch_id IS DISTINCT FROM v_operation_branch_id
++       OR v_product_business_id IS DISTINCT FROM v_operation_business_id THEN
++      RAISE EXCEPTION 'INVENTORY_BATCH_SCOPE_MISMATCH' USING ERRCODE = '42501';
++    END IF;
++    IF v_branch_id IS NOT NULL AND NOT EXISTS (
++      SELECT 1
++      FROM public.branches AS branch
++      WHERE branch.id = v_branch_id
++        AND branch.business_id = v_product_business_id
++    ) THEN
++      RAISE EXCEPTION 'BRANCH_SCOPE_VIOLATION' USING ERRCODE = '42501';
++    END IF;
++
++    SELECT movement.data
++      INTO v_existing_movement
++    FROM public.inventory_movements AS movement
++    WHERE movement.id = v_movement_id
++    FOR UPDATE;
++
++    IF FOUND THEN
++      IF v_existing_movement->>'productId' IS DISTINCT FROM v_product_id
++         OR (v_existing_movement->>'quantity')::numeric IS DISTINCT FROM abs(v_delta)
++         OR v_existing_movement->>'type' IS DISTINCT FROM v_type
++         OR v_existing_movement->>'reason' IS DISTINCT FROM v_reason
++         OR v_existing_movement->>'branchId' IS DISTINCT FROM v_branch_id::text THEN
++        RAISE EXCEPTION 'IDEMPOTENCY_KEY_REUSED' USING ERRCODE = 'P0001';
++      END IF;
++      v_result := v_product_data;
++    ELSE
++      v_result := public.adjust_stock_with_kardex_and_fields(
++        v_product_id,
++        v_delta,
++        v_reason,
++        v_type,
++        NULL,
++        NULL,
++        NULL,
++        NULL,
++        v_movement_id::text,
++        v_branch_id,
++        v_allow_negative,
++        v_extra_fields
++      );
++      UPDATE public.inventory_movements AS movement
++      SET data = movement.data || jsonb_build_object(
++        'operationId', p_operation_id,
++        'payloadHash', v_payload_hash
++      ) || CASE
++        -- Trazabilidad Opcion B: stock antes/despues y marca de negativo, igual
++        -- que create_sale_fulfillment_atomic. adjust_stock_with_kardex no los escribe.
++        WHEN v_result->>'stock' IS NOT NULL THEN pg_catalog.jsonb_build_object(
++          'stockBefore', (v_result->>'stock')::numeric - v_delta,
++          'stockAfter', (v_result->>'stock')::numeric,
++          'negative', (v_result->>'stock')::numeric < 0
++        )
++        ELSE '{}'::jsonb
++      END || CASE
++        -- Fecha de vencimiento: queda en data->>'expiresAt' y la columna generada
++        -- inventory_movements.expires_at la expone indexada.
++        WHEN v_expires_at IS NOT NULL
++          THEN pg_catalog.jsonb_build_object('expiresAt', v_expires_at)
++        ELSE '{}'::jsonb
++      END
++      WHERE movement.id = v_movement_id
++        AND movement.business_id = v_product_business_id;
++    END IF;
++
++    v_results := v_results || pg_catalog.jsonb_build_array(v_result);
++  END LOOP;
++
++  RETURN v_results;
++END;
++$$;
++
++CREATE OR REPLACE FUNCTION public.receive_purchase_order_atomic(
++  p_operation_id text,
++  p_purchase_order_id uuid,
++  p_received_items jsonb DEFAULT NULL::jsonb,
++  p_note text DEFAULT NULL::text,
++  p_performed_by text DEFAULT NULL::text
++)
++RETURNS jsonb
++LANGUAGE plpgsql
++SECURITY DEFINER
++SET search_path TO ''
++AS $function$
++DECLARE
++  v_order public.purchase_orders%ROWTYPE;
++  v_actor_id uuid := auth.uid();
++  v_actor_role text := auth.role();
++  v_business_id uuid;
++  v_branch_id uuid;
++  v_status text;
++  v_supplier_id text;
++  v_ordered jsonb;
++  v_ordered_item jsonb;
++  v_items jsonb;
++  v_item jsonb;
++  v_movements jsonb := '[]'::jsonb;
++  v_price_updates jsonb := '[]'::jsonb;
++  v_received jsonb;
++  v_new_received jsonb;
++  v_ops jsonb;
++  v_product_id uuid;
++  v_product_key text;
++  v_quantity numeric;
++  v_unit_price numeric;
++  v_ordered_qty numeric;
++  v_already numeric;
++  v_product_branch_id uuid;
++  v_now timestamptz := clock_timestamp();
++  v_results jsonb;
++  v_audit_id uuid;
++  v_lock_key text;
++  v_all_done boolean := true;
++  v_new_status text;
++  v_remaining_json jsonb := '{}'::jsonb;
++  v_cost_lines jsonb := '[]'::jsonb;
++  v_stock_before numeric;
++  v_old_avg numeric;
++  v_new_avg numeric;
++  v_expires_at date;
++BEGIN
++  IF NULLIF(btrim(p_operation_id), '') IS NULL THEN
++    RAISE EXCEPTION 'PURCHASE_OPERATION_ID_REQUIRED' USING ERRCODE = 'P0001';
++  END IF;
++  IF p_purchase_order_id IS NULL THEN
++    RAISE EXCEPTION 'PURCHASE_ORDER_ID_REQUIRED' USING ERRCODE = 'P0001';
++  END IF;
++
++  -- Serializa recepciones concurrentes de la MISMA orden.
++  v_lock_key := 'purchase-order:' || p_purchase_order_id::text;
++  PERFORM pg_catalog.pg_advisory_xact_lock(
++    pg_catalog.hashtextextended(v_lock_key, 0)
++  );
++
++  SELECT purchase_order.*
++    INTO v_order
++  FROM public.purchase_orders AS purchase_order
++  WHERE purchase_order.id = p_purchase_order_id
++  FOR UPDATE;
++  IF NOT FOUND THEN
++    RAISE EXCEPTION 'PURCHASE_ORDER_NOT_FOUND' USING ERRCODE = 'P0002';
++  END IF;
++
++  v_business_id := v_order.business_id;
++  v_branch_id := v_order.branch_id;
++  v_status := v_order.data->>'status';
++  v_supplier_id := v_order.data->>'supplierId';
++
++  -- Permisos (antes de revelar cualquier dato de la orden).
++  IF v_actor_role IS DISTINCT FROM 'service_role' THEN
++    IF v_actor_id IS NULL THEN
++      RAISE EXCEPTION 'PURCHASE_AUTH_REQUIRED' USING ERRCODE = '42501';
++    END IF;
++    IF NOT public.has_business_role(
++      v_business_id, ARRAY['ADMIN', 'GERENTE', 'INVENTARIO']
++    ) THEN
++      RAISE EXCEPTION 'PURCHASE_RECEIVE_FORBIDDEN' USING ERRCODE = '42501';
++    END IF;
++    IF NOT public.is_business_subscription_active(v_business_id) THEN
++      RAISE EXCEPTION 'PURCHASE_SUBSCRIPTION_INACTIVE' USING ERRCODE = '42501';
++    END IF;
++    IF v_branch_id IS NOT NULL
++       AND NOT COALESCE(v_branch_id = ANY (public.auth_branch_ids()), false) THEN
++      RAISE EXCEPTION 'PURCHASE_BRANCH_FORBIDDEN' USING ERRCODE = '42501';
++    END IF;
++  END IF;
++
++  v_ops := COALESCE(NULLIF(v_order.data->'receivedOperationIds', 'null'::jsonb), '[]'::jsonb);
++  IF jsonb_typeof(v_ops) IS DISTINCT FROM 'array' THEN
++    v_ops := '[]'::jsonb;
++  END IF;
++
++  -- Idempotencia por operacion: si esta operacion ya se aplico, se devuelve
++  -- el resultado sin volver a mover stock.
++  IF v_ops @> pg_catalog.jsonb_build_array(p_operation_id)
++     OR (
++       v_order.data->>'receivedOperationId' IS NOT DISTINCT FROM p_operation_id
++       AND v_status IN ('COMPRADO', 'PARCIAL')
++     ) THEN
++    RETURN pg_catalog.jsonb_build_object(
++      'success', true,
++      'idempotent', true,
++      'operationId', p_operation_id,
++      'purchaseOrderId', p_purchase_order_id,
++      'status', v_status,
++      'receivedAt', v_order.data->>'receivedAt'
++    );
++  END IF;
++
++  IF v_status NOT IN ('PENDIENTE', 'POSPUESTO', 'PARCIAL') THEN
++    RAISE EXCEPTION 'PURCHASE_ORDER_NOT_OPEN: la orden ya esta en estado %', v_status
++      USING ERRCODE = 'P0001';
++  END IF;
++
++  v_ordered := COALESCE(NULLIF(v_order.data->'items', 'null'::jsonb), '[]'::jsonb);
++  IF jsonb_typeof(v_ordered) IS DISTINCT FROM 'array'
++     OR jsonb_array_length(v_ordered) = 0 THEN
++    RAISE EXCEPTION 'PURCHASE_ITEMS_INVALID' USING ERRCODE = 'P0001';
++  END IF;
++
++  v_received := COALESCE(NULLIF(v_order.data->'receivedQuantities', 'null'::jsonb), '{}'::jsonb);
++  IF jsonb_typeof(v_received) IS DISTINCT FROM 'object' THEN
++    v_received := '{}'::jsonb;
++  END IF;
++  v_new_received := v_received;
++
++  -- Si no se indican cantidades, se recibe todo lo que falta.
++  IF p_received_items IS NULL OR p_received_items = 'null'::jsonb THEN
++    v_items := '[]'::jsonb;
++    FOR v_ordered_item IN
++      SELECT entry.value FROM pg_catalog.jsonb_array_elements(v_ordered) AS entry(value)
++    LOOP
++      v_ordered_qty := (v_ordered_item->>'quantity')::numeric;
++      v_already := COALESCE((v_received->>(v_ordered_item->>'productId'))::numeric, 0);
++      IF v_ordered_qty - v_already > 0.000001 THEN
++        v_items := v_items || pg_catalog.jsonb_build_array(
++          pg_catalog.jsonb_build_object(
++            'productId', v_ordered_item->>'productId',
++            'quantity', v_ordered_qty - v_already,
++            'unitPrice', v_ordered_item->'unitPrice'
++          )
++        );
++      END IF;
++    END LOOP;
++  ELSE
++    v_items := p_received_items;
++  END IF;
++
++  IF jsonb_typeof(v_items) IS DISTINCT FROM 'array'
++     OR jsonb_array_length(v_items) = 0 THEN
++    RAISE EXCEPTION 'PURCHASE_ITEMS_INVALID' USING ERRCODE = 'P0001';
++  END IF;
++
++  -- Orden estable por productId: dos compras simultaneas que tocan los mismos
++  -- productos bloquean las filas en el mismo orden y no pueden hacer deadlock.
++  SELECT COALESCE(pg_catalog.jsonb_agg(entry.value ORDER BY entry.value->>'productId'), '[]'::jsonb)
++    INTO v_items
++  FROM pg_catalog.jsonb_array_elements(v_items) AS entry(value);
++
++  FOR v_item IN
++    SELECT entry.value FROM pg_catalog.jsonb_array_elements(v_items) AS entry(value)
++  LOOP
++    v_product_key := NULLIF(v_item->>'productId', '');
++    v_product_id := v_product_key::uuid;
++    v_quantity := (v_item->>'quantity')::numeric;
++    v_unit_price := NULLIF(v_item->>'unitPrice', '')::numeric;
++    -- Vencimiento del lote recibido (opcional, YYYY-MM-DD). Una fecha por
++    -- producto y recepcion: otro lote con otra fecha entra en otra recepcion.
++    v_expires_at := public.normalize_expires_at(v_item->'expiresAt');
++
++    IF v_product_id IS NULL OR v_quantity IS NULL OR v_quantity <= 0
++       OR v_quantity::text IN ('NaN', 'Infinity', '-Infinity') THEN
++      RAISE EXCEPTION 'PURCHASE_ITEM_INVALID' USING ERRCODE = 'P0001';
++    END IF;
++
++    -- El producto debe estar en la orden: nunca se aceptan productos ajenos.
++    SELECT entry.value
++      INTO v_ordered_item
++    FROM pg_catalog.jsonb_array_elements(v_ordered) AS entry(value)
++    WHERE entry.value->>'productId' = v_product_key
++    LIMIT 1;
++    IF v_ordered_item IS NULL THEN
++      RAISE EXCEPTION 'PURCHASE_ITEM_NOT_IN_ORDER' USING ERRCODE = 'P0001';
++    END IF;
++
++    v_ordered_qty := (v_ordered_item->>'quantity')::numeric;
++    v_already := COALESCE((v_new_received->>v_product_key)::numeric, 0);
++    IF v_already + v_quantity - v_ordered_qty > 0.000001 THEN
++      RAISE EXCEPTION 'PURCHASE_RECEIVED_EXCEEDS_ORDERED' USING ERRCODE = 'P0001';
++    END IF;
++    v_new_received := v_new_received || pg_catalog.jsonb_build_object(
++      v_product_key, v_already + v_quantity
++    );
++
++    -- El producto debe pertenecer al negocio y a la sucursal de la orden.
++    SELECT product.branch_id,
++           COALESCE(NULLIF(product.data->>'stock', '')::numeric, 0),
++           COALESCE(NULLIF(product.data->>'averageCost', '')::numeric,
++                    NULLIF(product.data->>'purchasePrice', '')::numeric)
++      INTO v_product_branch_id, v_stock_before, v_old_avg
++    FROM public.products AS product
++    WHERE product.id = v_product_id
++      AND product.business_id = v_business_id
++    FOR UPDATE;
++    IF NOT FOUND THEN
++      RAISE EXCEPTION 'PURCHASE_PRODUCT_NOT_IN_BUSINESS' USING ERRCODE = 'P0001';
++    END IF;
++    IF v_product_branch_id IS DISTINCT FROM v_branch_id THEN
++      RAISE EXCEPTION 'PURCHASE_BRANCH_MISMATCH' USING ERRCODE = 'P0001';
++    END IF;
++
++    -- Precio: el indicado al recibir, o el pactado en la orden.
++    IF v_unit_price IS NULL THEN
++      v_unit_price := NULLIF(v_ordered_item->>'unitPrice', '')::numeric;
++    END IF;
++    IF v_unit_price IS NOT NULL THEN
++      IF v_unit_price < 0 OR v_unit_price::text IN ('NaN', 'Infinity', '-Infinity') THEN
++        RAISE EXCEPTION 'PURCHASE_UNIT_PRICE_INVALID' USING ERRCODE = 'P0001';
++      END IF;
++      -- Costo promedio ponderado: (stock*promedio + compra*precio) / (stock+compra).
++      -- Sin stock previo o sin costo previo, el promedio es el precio de esta compra.
++      IF v_stock_before <= 0 OR v_old_avg IS NULL THEN
++        v_new_avg := v_unit_price;
++      ELSE
++        v_new_avg := round(
++          (v_stock_before * v_old_avg + v_quantity * v_unit_price)
++          / (v_stock_before + v_quantity), 4);
++      END IF;
++      v_price_updates := v_price_updates || pg_catalog.jsonb_build_array(
++        pg_catalog.jsonb_build_object(
++          'productId', v_product_id::text,
++          'purchasePrice', v_unit_price,
++          'averageCost', v_new_avg
++        )
++      );
++      v_cost_lines := v_cost_lines || pg_catalog.jsonb_build_array(
++        pg_catalog.jsonb_build_object(
++          'productId', v_product_id::text,
++          'unitCost', v_unit_price,
++          'totalCost', round(v_quantity * v_unit_price, 4),
++          'averageCostAfter', v_new_avg
++        )
++      );
++    END IF;
++
++    v_movements := v_movements || pg_catalog.jsonb_build_array(
++      pg_catalog.jsonb_build_object(
++        'productId', v_product_id::text,
++        'delta', v_quantity,
++        'type', 'INCREASE',
++        'branchId', v_branch_id::text,
++        'reason', format('PURCHASE %s', COALESCE(v_order.data->>'code', p_purchase_order_id::text)),
++        'extraFields', pg_catalog.jsonb_build_object('lastUpdated', v_now)
++      ) || CASE
++        WHEN v_expires_at IS NOT NULL
++          THEN pg_catalog.jsonb_build_object('expiresAt', v_expires_at)
++        ELSE '{}'::jsonb
++      END
++    );
++  END LOOP;
++
++  -- Punto de no retorno: una sola transaccion para TODO lo siguiente.
++  v_results := public.adjust_stock_batch_with_kardex(p_operation_id, v_movements);
++
++  -- Costo en el Kardex: cada INCREASE de esta operacion guarda a que costo entro.
++  FOR v_item IN
++    SELECT entry.value FROM pg_catalog.jsonb_array_elements(v_cost_lines) AS entry(value)
++  LOOP
++    UPDATE public.inventory_movements AS movement
++    SET data = movement.data || pg_catalog.jsonb_build_object(
++      'unitCost', (v_item->>'unitCost')::numeric,
++      'totalCost', (v_item->>'totalCost')::numeric,
++      'averageCostAfter', (v_item->>'averageCostAfter')::numeric
++    )
++    WHERE movement.business_id = v_business_id
++      AND movement.data->>'operationId' = p_operation_id
++      AND movement.data->>'productId' = v_item->>'productId'
++      AND movement.data->>'type' = 'INCREASE';
++  END LOOP;
++
++  FOR v_item IN
++    SELECT entry.value FROM pg_catalog.jsonb_array_elements(v_price_updates) AS entry(value)
++  LOOP
++    UPDATE public.products AS product
++    SET data = product.data || pg_catalog.jsonb_build_object(
++          'purchasePrice', (v_item->>'purchasePrice')::numeric,
++          'averageCost', (v_item->>'averageCost')::numeric,
++          'lastPurchaseDate', v_now,
++          'lastUpdated', v_now
++        ),
++        version = product.version + 1,
++        updated_at = v_now
++    WHERE product.id = (v_item->>'productId')::uuid
++      AND product.business_id = v_business_id;
++  END LOOP;
++
++  -- Lo pedido vs lo recibido: decide si queda PARCIAL o COMPRADO.
++  FOR v_ordered_item IN
++    SELECT entry.value FROM pg_catalog.jsonb_array_elements(v_ordered) AS entry(value)
++  LOOP
++    v_ordered_qty := (v_ordered_item->>'quantity')::numeric;
++    v_already := COALESCE((v_new_received->>(v_ordered_item->>'productId'))::numeric, 0);
++    IF v_ordered_qty - v_already > 0.000001 THEN
++      v_all_done := false;
++      v_remaining_json := v_remaining_json || pg_catalog.jsonb_build_object(
++        v_ordered_item->>'productId', v_ordered_qty - v_already
++      );
++    END IF;
++  END LOOP;
++  v_new_status := CASE WHEN v_all_done THEN 'COMPRADO' ELSE 'PARCIAL' END;
++
++  UPDATE public.purchase_orders AS purchase_order
++  SET data = purchase_order.data || pg_catalog.jsonb_build_object(
++        'status', v_new_status,
++        'receivedQuantities', v_new_received,
++        'receivedOperationIds', v_ops || pg_catalog.jsonb_build_array(p_operation_id),
++        'receivedOperationId', p_operation_id,
++        'lastReceivedAt', v_now,
++        'receivedBy', COALESCE(p_performed_by, v_actor_id::text),
++        'supplierId', v_supplier_id
++      ) || CASE
++        WHEN v_all_done THEN pg_catalog.jsonb_build_object('receivedAt', v_now)
++        ELSE '{}'::jsonb
++      END,
++      version = purchase_order.version + 1,
++      updated_at = v_now
++  WHERE purchase_order.id = p_purchase_order_id
++    AND purchase_order.business_id = v_business_id
++    AND purchase_order.version = v_order.version;
++
++  IF NOT FOUND THEN
++    RAISE EXCEPTION 'PURCHASE_ORDER_UPDATE_CONFLICT' USING ERRCODE = 'P0001';
++  END IF;
++
++  v_audit_id := pg_catalog.gen_random_uuid();
++  INSERT INTO public.audit_logs (id, business_id, branch_id, version, data, created_at, updated_at)
++  VALUES (
++    v_audit_id, v_business_id, v_branch_id, 1,
++    pg_catalog.jsonb_build_object(
++      'id', v_audit_id::text,
++      'actorId', COALESCE(p_performed_by, v_actor_id::text),
++      'action', 'PURCHASE_ORDER_RECEIVED',
++      'module', 'inventory',
++      'entityId', p_purchase_order_id::text,
++      'description', CASE WHEN v_all_done
++        THEN format('Recepcion completa de la compra %s aplicada al inventario', p_purchase_order_id::text)
++        ELSE format('Recepcion parcial de la compra %s aplicada al inventario', p_purchase_order_id::text)
++      END,
++      'date', v_now,
++      'operationId', p_operation_id,
++      'idempotencyKey', p_operation_id,
++      'note', NULLIF(btrim(COALESCE(p_note, '')), ''),
++      'result', 'SUCCESS'
++    ),
++    v_now, v_now
++  );
++
++  RETURN pg_catalog.jsonb_build_object(
++    'success', true,
++    'idempotent', false,
++    'operationId', p_operation_id,
++    'purchaseOrderId', p_purchase_order_id,
++    'status', v_new_status,
++    'receivedAt', v_now,
++    'receivedQuantities', v_new_received,
++    'remaining', v_remaining_json,
++    'products', v_results
++  );
++END;
++$function$;
++
++CREATE OR REPLACE FUNCTION public.record_direct_purchase_atomic(
++  p_operation_id text,
++  p_business_id uuid,
++  p_branch_id uuid,
++  p_supplier_id text,
++  p_items jsonb,
++  p_invoice_number text DEFAULT NULL::text,
++  p_note text DEFAULT NULL::text,
++  p_performed_by text DEFAULT NULL::text
++)
++RETURNS jsonb
++LANGUAGE plpgsql
++SECURITY DEFINER
++SET search_path TO ''
++AS $function$
++DECLARE
++  v_actor_id uuid := auth.uid();
++  v_actor_role text := auth.role();
++  v_order_id uuid;
++  v_supplier_uuid uuid;
++  v_invoice text := NULLIF(pg_catalog.btrim(COALESCE(p_invoice_number, '')), '');
++  v_item jsonb;
++  v_items jsonb := '[]'::jsonb;
++  v_seen text[] := ARRAY[]::text[];
++  v_product_key text;
++  v_quantity numeric;
++  v_unit_price numeric;
++  v_expires_at date;
++  v_now timestamptz := pg_catalog.clock_timestamp();
++  v_code text;
++  v_result jsonb;
++BEGIN
++  IF NULLIF(pg_catalog.btrim(COALESCE(p_operation_id, '')), '') IS NULL THEN
++    RAISE EXCEPTION 'PURCHASE_OPERATION_ID_REQUIRED' USING ERRCODE = 'P0001';
++  END IF;
++  IF p_business_id IS NULL OR p_branch_id IS NULL THEN
++    RAISE EXCEPTION 'PURCHASE_SCOPE_REQUIRED' USING ERRCODE = 'P0001';
++  END IF;
++
++  -- Permisos ANTES de revelar o escribir cualquier cosa (misma regla que recibir una orden).
++  IF v_actor_role IS DISTINCT FROM 'service_role' THEN
++    IF v_actor_id IS NULL THEN
++      RAISE EXCEPTION 'PURCHASE_AUTH_REQUIRED' USING ERRCODE = '42501';
++    END IF;
++    IF NOT public.has_business_role(p_business_id, ARRAY['ADMIN', 'GERENTE', 'INVENTARIO']) THEN
++      RAISE EXCEPTION 'PURCHASE_RECEIVE_FORBIDDEN' USING ERRCODE = '42501';
++    END IF;
++    IF NOT public.is_business_subscription_active(p_business_id) THEN
++      RAISE EXCEPTION 'PURCHASE_SUBSCRIPTION_INACTIVE' USING ERRCODE = '42501';
++    END IF;
++    IF NOT COALESCE(p_branch_id = ANY (public.auth_branch_ids()), false) THEN
++      RAISE EXCEPTION 'PURCHASE_BRANCH_FORBIDDEN' USING ERRCODE = '42501';
++    END IF;
++  END IF;
++
++  -- La sucursal debe ser de este negocio.
++  IF NOT EXISTS (
++    SELECT 1 FROM public.branches AS branch
++    WHERE branch.id = p_branch_id AND branch.business_id = p_business_id
++  ) THEN
++    RAISE EXCEPTION 'PURCHASE_BRANCH_MISMATCH' USING ERRCODE = 'P0001';
++  END IF;
++
++  -- El proveedor debe existir y ser de este negocio.
++  BEGIN
++    v_supplier_uuid := NULLIF(pg_catalog.btrim(COALESCE(p_supplier_id, '')), '')::uuid;
++  EXCEPTION WHEN invalid_text_representation THEN
++    v_supplier_uuid := NULL;
++  END;
++  IF v_supplier_uuid IS NULL THEN
++    RAISE EXCEPTION 'PURCHASE_SUPPLIER_REQUIRED' USING ERRCODE = 'P0001';
++  END IF;
++  IF NOT EXISTS (
++    SELECT 1 FROM public.suppliers AS supplier
++    WHERE supplier.id = v_supplier_uuid AND supplier.business_id = p_business_id
++  ) THEN
++    RAISE EXCEPTION 'PURCHASE_SUPPLIER_NOT_FOUND' USING ERRCODE = 'P0001';
++  END IF;
++
++  -- Lineas: una por producto, con cantidad y precio unitario reales de la factura.
++  IF p_items IS NULL
++     OR pg_catalog.jsonb_typeof(p_items) IS DISTINCT FROM 'array'
++     OR pg_catalog.jsonb_array_length(p_items) = 0
++     OR pg_catalog.jsonb_array_length(p_items) > 200 THEN
++    RAISE EXCEPTION 'PURCHASE_ITEMS_INVALID' USING ERRCODE = 'P0001';
++  END IF;
++
++  FOR v_item IN
++    SELECT entry.value FROM pg_catalog.jsonb_array_elements(p_items) AS entry(value)
++  LOOP
++    v_product_key := NULLIF(pg_catalog.btrim(COALESCE(v_item->>'productId', '')), '');
++    v_quantity := NULLIF(v_item->>'quantity', '')::numeric;
++    v_unit_price := NULLIF(v_item->>'unitPrice', '')::numeric;
++    v_expires_at := public.normalize_expires_at(v_item->'expiresAt');
++
++    IF v_product_key IS NULL
++       OR v_quantity IS NULL OR v_quantity <= 0
++       OR v_quantity::text IN ('NaN', 'Infinity', '-Infinity') THEN
++      RAISE EXCEPTION 'PURCHASE_ITEM_INVALID' USING ERRCODE = 'P0001';
++    END IF;
++    -- En una factura el precio es obligatorio: un 0 pisaria el costo del producto.
++    IF v_unit_price IS NULL OR v_unit_price <= 0
++       OR v_unit_price::text IN ('NaN', 'Infinity', '-Infinity') THEN
++      RAISE EXCEPTION 'PURCHASE_UNIT_PRICE_REQUIRED' USING ERRCODE = 'P0001';
++    END IF;
++    IF v_product_key = ANY (v_seen) THEN
++      RAISE EXCEPTION 'PURCHASE_ITEM_DUPLICATED' USING ERRCODE = 'P0001';
++    END IF;
++    v_seen := v_seen || v_product_key;
++
++    v_items := v_items || pg_catalog.jsonb_build_array(
++      pg_catalog.jsonb_build_object(
++        'productId', v_product_key,
++        'quantity', v_quantity,
++        'unitPrice', v_unit_price
++      ) || CASE
++        WHEN v_expires_at IS NOT NULL
++          THEN pg_catalog.jsonb_build_object('expiresAt', v_expires_at)
++        ELSE '{}'::jsonb
++      END
++    );
++  END LOOP;
++
++  -- Id de la orden determinista: reintentar la misma operacion reutiliza la misma fila.
++  v_order_id := pg_catalog.md5(
++    'direct-purchase:' || p_business_id::text || ':' || pg_catalog.btrim(p_operation_id)
++  )::uuid;
++
++  -- Una misma factura de un proveedor no se registra dos veces (se serializa
++  -- por factura para que dos pestañas a la vez tampoco la dupliquen).
++  IF v_invoice IS NOT NULL THEN
++    PERFORM pg_catalog.pg_advisory_xact_lock(
++      pg_catalog.hashtextextended(
++        'direct-purchase-invoice:' || p_business_id::text || ':' || v_supplier_uuid::text || ':' || pg_catalog.lower(v_invoice),
++        0
++      )
++    );
++    IF EXISTS (
++      SELECT 1
++      FROM public.purchase_orders AS purchase_order
++      WHERE purchase_order.business_id = p_business_id
++        AND purchase_order.id <> v_order_id
++        AND purchase_order.data->>'source' = 'DIRECTA'
++        AND purchase_order.data->>'supplierId' = v_supplier_uuid::text
++        AND pg_catalog.lower(purchase_order.data->>'invoiceNumber') = pg_catalog.lower(v_invoice)
++        AND purchase_order.data->>'status' IS DISTINCT FROM 'CANCELADO'
++    ) THEN
++      RAISE EXCEPTION 'PURCHASE_INVOICE_DUPLICATED' USING ERRCODE = 'P0001';
++    END IF;
++  END IF;
++
++  v_code := 'CD-' || pg_catalog.upper(pg_catalog.substr(v_order_id::text, 1, 8));
++
++  -- Paso 1: la orden (origen DIRECTA) con exactamente lo facturado.
++  -- Si es un reintento, la fila ya existe y no se toca.
++  INSERT INTO public.purchase_orders (id, business_id, branch_id, version, data, created_at, updated_at)
++  VALUES (
++    v_order_id, p_business_id, p_branch_id, 1,
++    pg_catalog.jsonb_build_object(
++      'id', v_order_id::text,
++      'code', v_code,
++      'source', 'DIRECTA',
++      'supplierId', v_supplier_uuid::text,
++      'status', 'PENDIENTE',
++      'items', v_items,
++      'invoiceNumber', v_invoice,
++      'statusNote', NULLIF(pg_catalog.btrim(COALESCE(p_note, '')), ''),
++      'createdBy', COALESCE(p_performed_by, v_actor_id::text),
++      'createdAt', v_now
++    ),
++    v_now, v_now
++  )
++  ON CONFLICT (id) DO NOTHING;
++
++  -- Paso 2: el MISMO motor de recepcion que usa el flujo A. Recibe todo lo
++  -- facturado: stock + Kardex + precio de compra + estado + auditoria.
++  v_result := public.receive_purchase_order_atomic(
++    p_operation_id,
++    v_order_id,
++    v_items,
++    p_note,
++    p_performed_by
++  );
++
++  RETURN v_result || pg_catalog.jsonb_build_object(
++    'source', 'DIRECTA',
++    'purchaseOrderId', v_order_id,
++    'code', v_code
++  );
++END;
++$function$;
++
++-- Grants: identicos a los de las versiones anteriores (CREATE OR REPLACE los conserva;
++-- se repiten para que la migracion sea autosuficiente).
++REVOKE ALL ON FUNCTION public.adjust_stock_batch_with_kardex(text, jsonb) FROM PUBLIC, anon;
++GRANT EXECUTE ON FUNCTION public.adjust_stock_batch_with_kardex(text, jsonb) TO authenticated, service_role;
++
++REVOKE ALL ON FUNCTION public.receive_purchase_order_atomic(text, uuid, jsonb, text, text) FROM PUBLIC, anon;
++GRANT EXECUTE ON FUNCTION public.receive_purchase_order_atomic(text, uuid, jsonb, text, text) TO authenticated, service_role;
++
++REVOKE ALL ON FUNCTION public.record_direct_purchase_atomic(text, uuid, uuid, text, jsonb, text, text, text) FROM PUBLIC, anon;
++GRANT EXECUTE ON FUNCTION public.record_direct_purchase_atomic(text, uuid, uuid, text, jsonb, text, text, text) TO authenticated, service_role;
++
++COMMENT ON FUNCTION public.adjust_stock_batch_with_kardex(text, jsonb) IS
++  'Applies a bounded set of stock and Kardex changes in one transaction. Stable operation/product/type movement IDs make retries idempotent; conflicting payload reuse is rejected. A DECREASE item may carry allowNegative=true (sale discount only, Option B); an INCREASE item may carry expiresAt (YYYY-MM-DD) stored in the Kardex.';
++
++COMMIT;
+diff -ruN '--exclude=node_modules' '--exclude=.git' orig/tests/unit/expiresAt.test.ts src/tests/unit/expiresAt.test.ts
+--- orig/tests/unit/expiresAt.test.ts	1969-12-31 19:00:00.000000000 -0500
++++ src/tests/unit/expiresAt.test.ts	2026-10-29 17:17:13.918682297 -0500
+@@ -0,0 +1,45 @@
++import { describe, expect, it } from "vitest";
++import { isIsoDateString, parseIsoDateString } from "../../src/core/utils/isoDate";
++import { buildPurchaseFingerprint } from "../../src/core/offline/PendingPurchase";
++
++describe("isIsoDateString", () => {
++  it("acepta fechas reales YYYY-MM-DD", () => {
++    expect(isIsoDateString("2026-12-01")).toBe(true);
++    expect(isIsoDateString("2028-02-29")).toBe(true); // bisiesto
++  });
++
++  it("rechaza fechas imposibles, otros formatos y tipos que no son string", () => {
++    expect(isIsoDateString("2026-02-31")).toBe(false);
++    expect(isIsoDateString("2027-02-29")).toBe(false);
++    expect(isIsoDateString("2026-13-01")).toBe(false);
++    expect(isIsoDateString("01/12/2026")).toBe(false);
++    expect(isIsoDateString("2026-12-01T00:00:00Z")).toBe(false);
++    expect(isIsoDateString("")).toBe(false);
++    expect(isIsoDateString(20261201)).toBe(false);
++    expect(isIsoDateString(null)).toBe(false);
++  });
++});
++
++describe("parseIsoDateString", () => {
++  it("devuelve la fecha limpia o undefined", () => {
++    expect(parseIsoDateString(" 2026-12-01 ")).toBe("2026-12-01");
++    expect(parseIsoDateString("")).toBeUndefined();
++    expect(parseIsoDateString(undefined)).toBeUndefined();
++    expect(parseIsoDateString("2026-02-31")).toBeUndefined();
++  });
++});
++
++describe("buildPurchaseFingerprint con vencimiento", () => {
++  const base = { kind: "DIRECT" as const, supplierId: "s1", invoiceNumber: "F-1" };
++
++  it("cambia si cambia el vencimiento (no se confunde con un doble clic)", () => {
++    const a = buildPurchaseFingerprint({ ...base, items: [{ productId: "p1", quantity: 2, unitPrice: 100, expiresAt: "2026-12-01" }] });
++    const b = buildPurchaseFingerprint({ ...base, items: [{ productId: "p1", quantity: 2, unitPrice: 100, expiresAt: "2026-12-02" }] });
++    expect(a).not.toBe(b);
++  });
++
++  it("es estable para el mismo contenido, con o sin fecha", () => {
++    const item = { productId: "p1", quantity: 2, unitPrice: 100 };
++    expect(buildPurchaseFingerprint({ ...base, items: [item] })).toBe(buildPurchaseFingerprint({ ...base, items: [{ ...item }] }));
++  });
++});

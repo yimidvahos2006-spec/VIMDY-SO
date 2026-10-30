@@ -169,10 +169,11 @@ export function SmartPurchasingDashboard() {
           orders={panelOrders}
           inventory={inventory}
           itemLabels={itemLabels}
-          onReceived={({ orderId }) => {
+          onReceived={({ orderId, expiryByItem }) => {
             // El panel solo confirma la recepción: el inventario real lo
-            // actualiza el servidor al marcar la orden como comprada.
-            void purchaseOrders.markAsPurchased(orderId);
+            // actualiza el servidor al marcar la orden como comprada. Los
+            // vencimientos que la persona escribió viajan con la recepción.
+            void purchaseOrders.markAsPurchased(orderId, undefined, expiryByItem);
           }}
         />
       )}
@@ -225,7 +226,8 @@ export function SmartPurchasingDashboard() {
             items: payload.lines.map((line) => ({
               productId: line.itemId,
               quantity: line.quantity,
-              unitPrice: line.unitCost
+              unitPrice: line.unitCost,
+              ...(line.expiresAt !== undefined ? { expiresAt: line.expiresAt } : {})
             }))
           });
           // Si lanza, el modal sigue abierto y deja reintentar.

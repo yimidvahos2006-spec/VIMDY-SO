@@ -1,7 +1,7 @@
 // src/core/store/useInventory.ts
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { container, productsReady } from "../../infrastructure/di/CompositionRoot";
-import { Product, InventoryMovement, LossCategory, Category, AuditLog } from "../entities/Entities";
+import { Product, InventoryMovement, IsoDateString, LossCategory, Category, AuditLog } from "../entities/Entities";
 import { INVENTORY_AUDIT_MODULE } from "../utils/inventoryFeed";
 import { productCatalogStore } from "./productCatalogStore";
 import { ProductInput } from "../engines/InventoryEngine";
@@ -177,7 +177,8 @@ export function useInventory() {
     quantity: number,
     reason: string,
     supplierId?: string,
-    purchasePrice?: number
+    purchasePrice?: number,
+    expiresAt?: IsoDateString
   ) {
     setError(null);
     const movementId = crypto.randomUUID();
@@ -195,7 +196,8 @@ export function useInventory() {
         reason,
         performedBy,
         supplierId,
-        purchasePrice
+        purchasePrice,
+        expiresAt
       });
       applyLocalStockDelta(productId, quantity, purchasePrice);
       return true;
@@ -210,7 +212,8 @@ export function useInventory() {
         supplierId,
         purchasePrice,
         movementId,
-        getCurrentBranchId()
+        getCurrentBranchId(),
+        expiresAt
       );
       await load();
       return true;
@@ -227,7 +230,8 @@ export function useInventory() {
           reason,
           performedBy,
           supplierId,
-          purchasePrice
+          purchasePrice,
+          expiresAt
         });
         applyLocalStockDelta(productId, quantity, purchasePrice);
         return true;

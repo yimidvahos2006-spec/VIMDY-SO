@@ -1,6 +1,7 @@
 import type {
   Category,
   InventoryMovement,
+  IsoDateString,
   LossCategory,
   Product,
   ProductExtraOption,
@@ -13,6 +14,7 @@ import type { IProductRepository } from "../../infrastructure/di/repositories/IP
 import { KardexEngine } from "./KardexEngine";
 import { getCurrentBranchId } from "../../infrastructure/supabase/supabaseClient";
 import { INVENTORY_AUDIT_ACTIONS, INVENTORY_AUDIT_MODULE } from "../utils/inventoryFeed";
+import { isIsoDateString } from "../utils/isoDate";
 
 /** Lo mínimo que InventoryEngine necesita del registro de auditoría (AuditEngine lo cumple). */
 export interface InventoryAuditSink {
@@ -642,7 +644,8 @@ export class InventoryEngine {
     supplierId?: string,
     purchasePrice?: number,
     movementId?: string,
-    branchId?: string | null
+    branchId?: string | null,
+    expiresAt?: IsoDateString
   ): Promise<void> {
     if (quantity === 0) return;
     if (!Number.isFinite(quantity) || quantity < 0) {
@@ -658,7 +661,8 @@ export class InventoryEngine {
       purchasePrice,
       movementId,
       branchId,
-      lossCategory: undefined
+      lossCategory: undefined,
+      expiresAt
     });
   }
 
@@ -702,6 +706,8 @@ export class InventoryEngine {
      * Los ajustes manuales (increaseStock/decreaseStock) siguen estrictos.
      */
     allowNegative?: boolean;
+    /** Vencimiento del lote que entra (solo entradas). Ver la rama "expiresAt" más abajo. */
+    expiresAt?: IsoDateString;
   }): Promise<void> {
     const repository = this.getRepository();
     const product = await repository.findById(params.productId);
@@ -749,6 +755,37 @@ export class InventoryEngine {
       allowNegative: params.allowNegative ?? false,
       extraFields
     };
+
+    // Entrada CON vencimiento: solo el RPC por lote (`adjust_stock_batch_with_kardex`)
+    // guarda `expiresAt` en el Kardex; el RPC de un solo movimiento no lo conoce.
+    // El RPC por lote solo acepta `lastUpdated` en extraFields, así que una entrada
+    // con costo o proveedor no puede llevar vencimiento todavía: se rechaza en voz
+    // alta en vez de perder la fecha en silencio.
+    if (params.expiresAt !== undefined) {
+      if (type !== "INCREASE" || !isIsoDateString(params.expiresAt)) {
+        throw new Error("INVALID_EXPIRES_AT");
+      }
+      if (params.purchasePrice !== undefined || params.supplierId) {
+        throw new Error("EXPIRES_AT_UNSUPPORTED_WITH_COST");
+      }
+      if (!repository.adjustStockBatchWithKardex) {
+        throw new Error("EXPIRES_AT_UNSUPPORTED");
+      }
+      // movementId hace de operationId: un reintento (cola offline) repite el
+      // mismo id y el servidor responde idempotente en vez de sumar dos veces.
+      await repository.adjustStockBatchWithKardex(movementId, [
+        {
+          productId: params.productId,
+          delta: params.quantity,
+          reason: params.reason,
+          type: "INCREASE",
+          branchId,
+          expiresAt: params.expiresAt,
+          extraFields: { lastUpdated: extraFields.lastUpdated }
+        }
+      ]);
+      return;
+    }
 
     if (repository.adjustStockWithKardex) {
       await repository.adjustStockWithKardex(movement);
