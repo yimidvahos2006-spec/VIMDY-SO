@@ -80,8 +80,8 @@ describe("descarga del mes", () => {
     expect(d.csv.startsWith("sep=;")).toBe(true);
     expect(d.csv).toContain('"Mi Negocio — Reporte de Octubre 2026"');
     // 10000 + 5000 + 20000 + 7000 + 9999; la venta cancelada no cuenta
-    expect(d.csv).toContain('"Ventas netas (ya sin devoluciones)";"51999"');
-    expect(d.csv).toContain('"Número de ventas";"5"');
+    expect(d.csv).toContain('"Ventas netas (ya sin devoluciones)";51999\r\n');
+    expect(d.csv).toContain('"Número de ventas";5\r\n');
     expect(d.csv).not.toContain("99999");
   });
 
@@ -93,10 +93,10 @@ describe("descarga del mes", () => {
 
   it("mide el mes con la zona horaria del negocio, no la del equipo", () => {
     const bogota = buildMonthDownload(sales, [], TZ, "2026-11", "X", "COP");
-    expect(bogota.csv).toContain('"Ventas netas (ya sin devoluciones)";"3000"');
+    expect(bogota.csv).toContain('"Ventas netas (ya sin devoluciones)";3000\r\n');
     // En Nueva Zelanda (UTC+13 en esas fechas) las ventas d, e y f ya son de noviembre.
     const auckland = buildMonthDownload(sales, [], "Pacific/Auckland", "2026-11", "X", "COP");
-    expect(auckland.csv).toContain('"Ventas netas (ya sin devoluciones)";"19999"');
+    expect(auckland.csv).toContain('"Ventas netas (ya sin devoluciones)";19999\r\n');
   });
 
   it("resta las devoluciones", () => {
@@ -104,13 +104,13 @@ describe("descarga del mes", () => {
       refunds: [{ amount: 4000, items: [{ productId: "p1", quantity: 0 }] }] as never
     });
     const d = buildMonthDownload([refunded], [], TZ, "2026-10", "X", "COP");
-    expect(d.csv).toContain('"Ventas netas (ya sin devoluciones)";"6000"');
-    expect(d.csv).toContain('"Devoluciones";"4000"');
+    expect(d.csv).toContain('"Ventas netas (ya sin devoluciones)";6000\r\n');
+    expect(d.csv).toContain('"Devoluciones";4000\r\n');
   });
 
   it("usa los decimales de la moneda", () => {
     const d = buildMonthDownload(sales, [], TZ, "2026-10", "X", "USD");
-    expect(d.csv).toContain('"Ventas netas (ya sin devoluciones)";"51999.00"');
+    expect(d.csv).toContain('"Ventas netas (ya sin devoluciones)";51999,00\r\n');
   });
 
   it("detecta un mes sin ventas para no descargar un archivo vacío", () => {
@@ -128,18 +128,18 @@ describe("descarga de una semana", () => {
     expect(d!.fileName).toBe("reporte-vimdy-2026-10-semana-1.csv");
     expect(d!.csv.startsWith("sep=;")).toBe(true);
     expect(d!.csv).toContain('"Mi Negocio — Semana 1 · 1 oct al 4 oct (Octubre 2026)"');
-    expect(d!.csv).toContain('"Ventas netas (ya sin devoluciones)";"15000"');
-    expect(d!.csv).toContain('"Número de ventas";"2"');
+    expect(d!.csv).toContain('"Ventas netas (ya sin devoluciones)";15000\r\n');
+    expect(d!.csv).toContain('"Número de ventas";2\r\n');
   });
 
   it("la suma de las semanas descargadas es el total del mes", () => {
     const total = report.weeks.reduce((sum, w) => {
       const d = weekDownloadFromReport(report, w.index, "X", "COP")!;
-      const match = d.csv.match(/"Ventas netas \(ya sin devoluciones\)";"(\d+)"/);
+      const match = d.csv.match(/"Ventas netas \(ya sin devoluciones\)";(\d+)\r\n/);
       return sum + Number(match![1]);
     }, 0);
     const month = monthDownloadFromReport(report, "X", "COP");
-    expect(month.csv).toContain(`"Ventas netas (ya sin devoluciones)";"${total}"`);
+    expect(month.csv).toContain(`"Ventas netas (ya sin devoluciones)";${total}\r\n`);
     expect(total).toBe(51999);
   });
 
