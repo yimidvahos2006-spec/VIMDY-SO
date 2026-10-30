@@ -304,6 +304,29 @@ textarea:focus-visible,
   animation: vimdyGlow 4s ease-in-out infinite;
 }
 
+/* Avatar del Copiloto (AiAvatar): núcleo líquido en movimiento continuo */
+@keyframes shaderSpin {
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+  50% {
+    transform: rotate(180deg) scale(1.06);
+  }
+  100% {
+    transform: rotate(360deg) scale(1);
+  }
+}
+
+.animate-shader-spin {
+  animation: shaderSpin 12s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-shader-spin {
+    animation: none;
+  }
+}
+
 @keyframes vimdyWave {
   0% { background-position: 0% 50%; }
   50% { background-position: 100% 50%; }

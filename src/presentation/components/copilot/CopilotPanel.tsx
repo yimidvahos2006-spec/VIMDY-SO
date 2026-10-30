@@ -10,7 +10,8 @@ import { businessStore } from "../../../core/store/businessStore";
 import { companyConfigStore } from "../../../core/store/companyConfigStore";
 import { startSpeechRecognition } from "../../../core/voice/speechRecognition";
 import { useAuth } from "../../context/AuthContext";
-import { CopilotOrb, type CopilotOrbState } from "./CopilotOrb";
+import type { CopilotOrbState } from "./CopilotOrb";
+import { AiAvatar } from "./AiAvatar";
 import { CopilotMessageBubble, CopilotThinkingBubble } from "./CopilotMessageBubble";
 import { CopilotSuggestions } from "./CopilotSuggestions";
 
@@ -165,7 +166,7 @@ export function CopilotPanel() {
       {/* Cabecera */}
       <header className="relative flex items-center gap-3 border-b border-cyan-400/10 bg-white/[0.03] px-4 py-3">
         <div className="shrink-0">
-          <CopilotOrb state={orbState} size={44} />
+          <AiAvatar />
         </div>
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-base font-bold leading-tight tracking-tight text-slate-100">VIMDY IA</h2>
