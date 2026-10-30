@@ -1,43 +1,43 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+// src/core/store/useReports.ts
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { container, productsReady } from "../../infrastructure/di/CompositionRoot";
 import { SalesAI } from "../ia/SalesAI";
 import type { ProductRanking } from "../ia/SalesAI";
-import type { Customer, Product, Sale } from "../entities/Entities";
+import type { Customer, InventoryMovement, Product, Sale } from "../entities/Entities";
+import type { Profitability } from "../engines/RecipeEngine";
 import { useVimdyEvent } from "../../hooks/useVimdyCore";
-import { getSaleNetItems, getSaleNetTotal } from "../utils/saleRefunds";
+import { getSaleNetItems, getSaleNetTotal, isRevenueSaleStatus } from "../utils/saleRefunds";
 import { companyConfigStore } from "../store/companyConfigStore";
 import {
-  startOfBusinessDay,
-  startOfBusinessMonth,
+  addBusinessDays,
+  getBusinessDateKey,
   getBusinessHour,
-  getBusinessDateKey
+  startOfBusinessDay
 } from "../utils/businessTime";
+import {
+  REPORT_RANGE_LABEL,
+  filterByReportRange,
+  getPreviousReportRange,
+  normalizeReportTimezone,
+  resolveReportRange
+} from "../utils/reportRanges";
+import type { ReportRange, ResolvedReportRange } from "../utils/reportRanges";
+import { buildFinancialReport } from "../domain/finance/financialReport";
+import type { FinancialReport } from "../domain/finance/financialReport";
+import type { ProfitCatalogItem, ProfitSaleLine } from "../domain/profit/profitEngine";
 
 const salesAI = new SalesAI();
 
-export type ReportRange = "hoy" | "7d" | "30d" | "mes" | "todo";
+/**
+ * Los rangos viven en `reportRanges.ts` (fuente única). Se re-exportan aquí
+ * para no romper a quien ya importa `ReportRange` / `RANGE_LABEL` desde este hook.
+ */
+export type { ReportRange, ResolvedReportRange };
+export const RANGE_LABEL: Record<ReportRange, string> = REPORT_RANGE_LABEL;
 
-export const RANGE_LABEL: Record<ReportRange, string> = {
-  hoy: "Hoy",
-  "7d": "Últimos 7 días",
-  "30d": "Últimos 30 días",
-  mes: "Este mes",
-  todo: "Todo"
-};
-
-function rangeStart(range: ReportRange, tz: string): Date | null {
-  const now = new Date();
-  if (range === "hoy") return startOfBusinessDay(now, tz);
-  if (range === "7d") return startOfBusinessDay(new Date(now.getTime() - 6 * 86400000), tz);
-  if (range === "30d") return startOfBusinessDay(new Date(now.getTime() - 29 * 86400000), tz);
-  if (range === "mes") return startOfBusinessMonth(now, tz);
-  return null;
-}
-
-function addUTCDays(date: Date, days: number): Date {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + days));
-}
+/** Máximo de días que dibuja la gráfica diaria (se muestran los más recientes). */
+const MAX_DAILY_BUCKETS = 60;
 
 export interface DayBucket {
   label: string;
@@ -77,6 +77,16 @@ export interface UseReportsResult {
   hourlySeries: HourBucket[];
   paymentMethodBreakdown: PaymentMethodBreakdown[];
   exportCsv: () => void;
+  /** Ventana exacta del rango elegido (inicio incluido, fin excluido, en zona del negocio). */
+  resolvedRange: ResolvedReportRange;
+  /**
+   * Reporte financiero consolidado del rango: ventas netas, COGS, utilidad
+   * bruta, pérdidas del Kardex y utilidad real. `null` mientras no hay datos
+   * del Kardex/costos o si fallaron (ver `financialError`).
+   */
+  financial: FinancialReport | null;
+  /** Error al cargar Kardex/costos. Los reportes de ventas siguen funcionando. */
+  financialError: string | null;
 }
 
 /** Revenue uses the payment date when known; old records fall back to createdAt. */
@@ -89,13 +99,6 @@ function getRevenueDate(sale: Sale): Date {
     : new Date(0);
 }
 
-function countsAsRevenue(sale: Sale): boolean {
-  const rawStatus = sale.status;
-  if (rawStatus == null || String(rawStatus).trim() === "") return true;
-  const status = String(rawStatus).trim().toUpperCase();
-  return status === "PAID" || status === "CLOSED";
-}
-
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === "object" && error !== null && "message" in error) {
@@ -105,24 +108,94 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Adaptadores hacia el motor financiero (mismas reglas que Centro de          */
+/* Ganancias: costo promedio ponderado, si no el último precio de compra;      */
+/* líneas netas de reembolsos y descuento de la venta repartido por línea).    */
+/* -------------------------------------------------------------------------- */
+
+function buildProfitCatalog(products: readonly Product[]): ProfitCatalogItem[] {
+  return products.map((product) => {
+    const average = product.averageCost;
+    const cost = typeof average === "number" && average > 0 ? average : product.purchasePrice;
+    return {
+      id: product.id,
+      name: product.name,
+      unitCost: typeof cost === "number" && Number.isFinite(cost) && cost > 0 ? cost : null,
+      recipe: (product.recipe ?? []).map((line) => ({ ingredientId: line.productId, quantity: line.quantity }))
+    };
+  });
+}
+
+function buildProfitSaleLines(sales: readonly Sale[]): ProfitSaleLine[] {
+  return sales.flatMap((sale) => {
+    const netItems = getSaleNetItems(sale);
+    const gross = netItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    const rawDiscount = Number(sale.discount);
+    const saleDiscount = Number.isFinite(rawDiscount) && rawDiscount > 0 ? Math.min(rawDiscount, gross) : 0;
+    return netItems.map((item): ProfitSaleLine => {
+      const lineGross = item.price * item.quantity;
+      return {
+        productId: item.productId,
+        quantity: item.quantity,
+        unitPrice: item.price,
+        discount: gross > 0 ? (saleDiscount * lineGross) / gross : 0
+      };
+    });
+  });
+}
+
+interface FinancialSources {
+  readonly movements: InventoryMovement[];
+  readonly profitability: Map<string, Profitability>;
+}
+
 export function useReports(): UseReportsResult {
   const [sales, setSales] = useState<Sale[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [financialSources, setFinancialSources] = useState<FinancialSources | null>(null);
+  const [financialError, setFinancialError] = useState<string | null>(null);
+  const [now, setNow] = useState<Date>(() => new Date());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [range, setRange] = useState<ReportRange>("7d");
+  const loadRunRef = useRef(0);
 
   const load = useCallback(async () => {
+    const runId = ++loadRunRef.current;
     await productsReady;
-    const [allSales, allProducts, allCustomers] = await Promise.all([
+
+    const corePromise = Promise.all([
       container.salesEngine.get().getAllSales(),
       container.inventoryEngine.get().listAll(),
       container.customerEngine.get().getAllCustomers()
     ]);
+    const financialPromise = Promise.all([
+      container.kardexEngine.get().getAllMovements(),
+      container.recipeEngine.get().getAllProfitability()
+    ]);
+    // Si el núcleo falla primero, esta promesa no debe quedar como "unhandled".
+    financialPromise.catch(() => undefined);
+
+    const [allSales, allProducts, allCustomers] = await corePromise;
+    if (runId !== loadRunRef.current) return;
     setSales(allSales);
     setProducts(allProducts);
     setCustomers(allCustomers);
+    setNow(new Date());
+
+    // Kardex y costos son opcionales para Reportes: si fallan, las ventas siguen.
+    try {
+      const [movements, profitability] = await financialPromise;
+      if (runId !== loadRunRef.current) return;
+      setFinancialSources({ movements, profitability });
+      setFinancialError(null);
+    } catch (cause: unknown) {
+      if (runId !== loadRunRef.current) return;
+      setFinancialSources(null);
+      setFinancialError(getErrorMessage(cause, "No se pudo cargar el reporte financiero."));
+    }
   }, []);
 
   useEffect(() => {
@@ -133,22 +206,26 @@ export function useReports(): UseReportsResult {
       .finally(() => setLoading(false));
   }, [load]);
 
-  useVimdyEvent("sale", () => {
+  const refresh = useCallback(() => {
     load().catch((cause: unknown) => setError(getErrorMessage(cause, "No se pudieron cargar los reportes.")));
-  });
-  useVimdyEvent("payment", () => {
-    load().catch((cause: unknown) => setError(getErrorMessage(cause, "No se pudieron cargar los reportes.")));
-  });
+  }, [load]);
 
-  const tz = useMemo(() => companyConfigStore.get().timezone || "America/Bogota", []);
+  useVimdyEvent("sale", refresh);
+  useVimdyEvent("payment", refresh);
+  // Una pérdida/ajuste del Kardex cambia las pérdidas y la utilidad real.
+  useVimdyEvent("inventory", refresh);
 
-  const paidSales = useMemo(() => sales.filter(countsAsRevenue), [sales]);
+  const tz = useMemo(() => normalizeReportTimezone(companyConfigStore.get().timezone), []);
 
-  const filteredSales = useMemo(() => {
-    const from = rangeStart(range, tz);
-    if (!from) return paidSales;
-    return paidSales.filter((sale) => getRevenueDate(sale).getTime() >= from.getTime());
-  }, [paidSales, range, tz]);
+  /** Ventana exacta [inicio, fin) del rango elegido, en días calendario del negocio. */
+  const resolvedRange = useMemo(() => resolveReportRange(range, now, tz), [range, now, tz]);
+
+  const paidSales = useMemo(() => sales.filter((sale) => isRevenueSaleStatus(sale.status)), [sales]);
+
+  const filteredSales = useMemo(
+    () => filterByReportRange(paidSales, getRevenueDate, resolvedRange),
+    [paidSales, resolvedRange]
+  );
 
   /**
    * Fase 3 (5.2 / consistencia con reembolso parcial): una venta con
@@ -176,17 +253,29 @@ export function useReports(): UseReportsResult {
   );
 
   const previousPeriodTotal = useMemo(() => {
-    const from = rangeStart(range, tz);
-    if (!from) return 0;
-    const spanMs = Date.now() - from.getTime();
-    const previousFrom = new Date(from.getTime() - spanMs);
-    return paidSales
-      .filter((s) => {
-        const t = getRevenueDate(s).getTime();
-        return t >= previousFrom.getTime() && t < from.getTime();
-      })
+    const previous = getPreviousReportRange(resolvedRange);
+    if (!previous) return 0;
+    return filterByReportRange(paidSales, getRevenueDate, previous)
       .reduce((sum, s) => sum + getSaleNetTotal(s), 0);
-  }, [paidSales, range, tz]);
+  }, [paidSales, resolvedRange]);
+
+  /** Reporte financiero consolidado (ventas netas − COGS − pérdidas del Kardex). */
+  const financial = useMemo<FinancialReport | null>(() => {
+    if (!financialSources) return null;
+    return buildFinancialReport({
+      catalog: buildProfitCatalog(products),
+      sales: buildProfitSaleLines(filteredSales),
+      movements: financialSources.movements,
+      products,
+      unitCosts: financialSources.profitability,
+      // "Todo" no tiene límites: sin periodo = todo el histórico de pérdidas.
+      period: resolvedRange.start || resolvedRange.endExclusive
+        ? { from: resolvedRange.start?.getTime(), to: resolvedRange.endExclusive?.getTime() }
+        : undefined,
+      now,
+      businessToday: getBusinessDateKey(now, tz)
+    });
+  }, [financialSources, products, filteredSales, resolvedRange, now, tz]);
 
   const productNameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -226,28 +315,40 @@ export function useReports(): UseReportsResult {
   }, [netFilteredSales, customerNameById]);
 
   const dailySeries: DayBucket[] = useMemo(() => {
-    const from = rangeStart(range, tz) ?? startOfBusinessDay(
-      filteredSales.length
-        ? new Date(Math.min(...filteredSales.map((sale) => getRevenueDate(sale).getTime())))
-        : new Date(),
-      tz
-    );
-    const today = startOfBusinessDay(new Date(), tz);
+    const today = startOfBusinessDay(now, tz);
+    // Solo se dibujan los últimos MAX_DAILY_BUCKETS días: no se recorre más atrás.
+    const oldestShown = addBusinessDays(today, tz, -(MAX_DAILY_BUCKETS - 1));
+
+    let from: Date;
+    if (resolvedRange.start) {
+      from = resolvedRange.start;
+    } else {
+      // "Todo": desde la primera venta (o hoy si no hay ventas).
+      const earliest = filteredSales.reduce(
+        (min, sale) => Math.min(min, getRevenueDate(sale).getTime()),
+        Number.POSITIVE_INFINITY
+      );
+      from = startOfBusinessDay(Number.isFinite(earliest) ? new Date(earliest) : now, tz);
+    }
+    if (from.getTime() < oldestShown.getTime()) from = oldestShown;
+
     const days: DayBucket[] = [];
-    for (let cursor = new Date(from); cursor.getTime() <= today.getTime(); cursor = addUTCDays(cursor, 1)) {
-      days.push({
-        label: cursor.toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit" }),
-        date: new Date(cursor),
+    const bucketByKey = new Map<string, DayBucket>();
+    for (let cursor = from; cursor.getTime() <= today.getTime(); cursor = addBusinessDays(cursor, tz, 1)) {
+      const bucket: DayBucket = {
+        label: cursor.toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit", timeZone: tz }),
+        date: cursor,
         value: 0
-      });
+      };
+      days.push(bucket);
+      bucketByKey.set(getBusinessDateKey(cursor, tz), bucket);
     }
     netFilteredSales.forEach((sale) => {
-      const dayKey = getBusinessDateKey(getRevenueDate(sale), tz);
-      const bucket = days.find((d) => getBusinessDateKey(d.date, tz) === dayKey);
+      const bucket = bucketByKey.get(getBusinessDateKey(getRevenueDate(sale), tz));
       if (bucket) bucket.value += sale.total;
     });
-    return days.length > 60 ? days.slice(-60) : days;
-  }, [filteredSales, netFilteredSales, range, tz]);
+    return days;
+  }, [filteredSales, netFilteredSales, resolvedRange, now, tz]);
 
   const hourlySeries: HourBucket[] = useMemo(() => {
     const hours: HourBucket[] = Array.from({ length: 24 }, (_, hour) => ({ hour, value: 0 }));
@@ -320,6 +421,9 @@ export function useReports(): UseReportsResult {
     dailySeries,
     hourlySeries,
     paymentMethodBreakdown,
-    exportCsv
+    exportCsv,
+    resolvedRange,
+    financial,
+    financialError
   };
 }

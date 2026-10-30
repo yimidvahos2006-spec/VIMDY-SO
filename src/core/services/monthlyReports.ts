@@ -15,6 +15,13 @@
 import type { Product, Sale } from "../entities/Entities";
 import { getSaleNetItems, getSaleNetTotal, getSaleRefundedTotal, isRevenueSaleStatus } from "../utils/saleRefunds";
 import { getBusinessDateKey, getBusinessMonthKey } from "../utils/businessTime";
+import {
+  buildCsv,
+  csvMoney,
+  downloadCsvFile,
+  formatCsvNumber,
+  type CsvRow
+} from "../utils/csv";
 
 export interface MethodRow {
   method: string;
@@ -340,65 +347,64 @@ export function buildMonthReport(
 }
 
 /* ───────────────────────── Descarga (CSV para Excel) ───────────────────────── */
+/* El formato (BOM, "sep=;", números con coma decimal y anti-inyección de
+   fórmulas) vive en ../utils/csv. Aquí solo se arman las filas: los textos
+   (nombres de negocio y de productos) van como string y se sanitizan; los
+   montos van con csvMoney para salir como número real que Excel puede sumar. */
 
-function cell(value: string | number): string {
-  return `"${String(value).replace(/"/g, '""')}"`;
-}
-
-function num(value: number, decimals: number): string {
-  return decimals === 0 ? String(Math.round(value)) : value.toFixed(decimals);
-}
-
-function csvOf(rows: (string | number)[][]): string {
-  // "sep=;" hace que Excel separe las columnas sin importar el idioma del equipo.
-  return "sep=;\r\n" + rows.map((r) => r.map(cell).join(";")).join("\r\n");
-}
-
-function summaryRows(title: string, s: PeriodSummary, decimals: number): (string | number)[][] {
-  const rows: (string | number)[][] = [
+function summaryRows(title: string, s: PeriodSummary, decimals: number): CsvRow[] {
+  const rows: CsvRow[] = [
     [title],
-    ["Ventas netas (ya sin devoluciones)", num(s.sales, decimals)],
+    ["Ventas netas (ya sin devoluciones)", csvMoney(s.sales, decimals)],
     ["Número de ventas", s.tickets],
-    ["Venta promedio", num(s.averageTicket, decimals)],
-    ["Devoluciones", num(s.refunds, decimals)],
-    ["Propinas incluidas en las ventas", num(s.tips, decimals)],
-    ["Mejor día", s.bestDay ? `${s.bestDay.dateKey} (${num(s.bestDay.sales, decimals)})` : "—"],
+    ["Venta promedio", csvMoney(s.averageTicket, decimals)],
+    ["Devoluciones", csvMoney(s.refunds, decimals)],
+    ["Propinas incluidas en las ventas", csvMoney(s.tips, decimals)],
+    [
+      "Mejor día",
+      s.bestDay ? `${s.bestDay.dateKey} (${formatCsvNumber(s.bestDay.sales, decimals)})` : "—"
+    ],
     [],
     ["Método de pago", "Ventas", "Total"]
   ];
-  for (const m of s.byMethod) rows.push([m.label, m.tickets, num(m.total, decimals)]);
+  for (const m of s.byMethod) rows.push([m.label, m.tickets, csvMoney(m.total, decimals)]);
   rows.push([], ["Producto", "Unidades", "Vendido"]);
-  for (const p of s.topProducts) rows.push([p.name, p.units, num(p.revenue, decimals)]);
+  for (const p of s.topProducts) rows.push([p.name, p.units, csvMoney(p.revenue, decimals)]);
   return rows;
 }
 
-function dayTable(days: readonly DayRow[], decimals: number): (string | number)[][] {
-  return [["Fecha", "Día", "Ventas", "Total"], ...days.map((d) => [d.dateKey, d.weekdayLabel, d.tickets, num(d.sales, decimals)])];
+function dayTable(days: readonly DayRow[], decimals: number): CsvRow[] {
+  return [
+    ["Fecha", "Día", "Ventas", "Total"],
+    ...days.map((d): CsvRow => [d.dateKey, d.weekdayLabel, d.tickets, csvMoney(d.sales, decimals)])
+  ];
 }
 
 export function monthReportToCsv(report: MonthReport, businessName: string, decimals = 0): string {
-  const rows: (string | number)[][] = [
+  const rows: CsvRow[] = [
     [businessName ? `${businessName} — Reporte de ${report.label}` : `Reporte de ${report.label}`],
     [],
     ...summaryRows(`Resumen de ${report.label}`, report.summary, decimals),
     [],
     ["Semana", "Del", "Al", "Ventas", "Total"],
-    ...report.weeks.map((w) => [`Semana ${w.index}`, w.startKey, w.endKey, w.summary.tickets, num(w.summary.sales, decimals)]),
+    ...report.weeks.map(
+      (w): CsvRow => [`Semana ${w.index}`, w.startKey, w.endKey, w.summary.tickets, csvMoney(w.summary.sales, decimals)]
+    ),
     [],
     ...dayTable(report.days, decimals)
   ];
-  return csvOf(rows);
+  return buildCsv(rows);
 }
 
 export function weekReportToCsv(week: WeekReport, monthLabelText: string, businessName: string, decimals = 0): string {
-  const rows: (string | number)[][] = [
+  const rows: CsvRow[] = [
     [businessName ? `${businessName} — ${week.label} (${monthLabelText})` : `${week.label} (${monthLabelText})`],
     [],
     ...summaryRows(week.label, week.summary, decimals),
     [],
     ...dayTable(week.days, decimals)
   ];
-  return csvOf(rows);
+  return buildCsv(rows);
 }
 
 export function monthReportFileName(report: MonthReport): string {
@@ -409,14 +415,7 @@ export function weekReportFileName(report: MonthReport, week: WeekReport): strin
   return `reporte-vimdy-${report.monthKey}-semana-${week.index}.csv`;
 }
 
+/** Envoltorio: se conserva el nombre para no tocar a quienes ya lo importan. */
 export function downloadCsv(fileName: string, csv: string): void {
-  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  downloadCsvFile(fileName, csv);
 }

@@ -10,13 +10,15 @@ import {
   Minus,
   Trophy,
   Users,
-  Wallet
+  Wallet,
+  Scale
 } from "lucide-react";
 import { EmptyState } from "../ui/EmptyState";
 import { Skeleton, SkeletonCards, SkeletonPanel } from "../ui/Skeleton";
 import { VimdyButton } from "../ui/VimdyButton";
 
 import { useReports, RANGE_LABEL, ReportRange } from "../../../core/store/useReports";
+import type { FinancialReport } from "../../../core/domain/finance/financialReport";
 import { useTranslation } from "../../../core/i18n/useTranslation";
 import { useAuth } from "../../context/AuthContext";
 import { businessStore } from "../../../core/store/businessStore";
@@ -53,7 +55,9 @@ export function ReportsDashboard() {
     dailySeries,
     hourlySeries,
     paymentMethodBreakdown,
-    exportCsv
+    exportCsv,
+    financial,
+    financialError
   } = useReports();
 
   const [tab, setTab] = useState<ReportsTab>("resumen");
@@ -231,6 +235,17 @@ export function ReportsDashboard() {
           value={sales.length ? `${summary.analysis.bestHour}:00` : "—"}
         />
       </div>
+
+      {/* Reporte financiero: ventas netas → COGS → utilidad bruta → pérdidas → utilidad real */}
+      {financial ? (
+        <FinancialCard report={financial} money={money} />
+      ) : (
+        financialError && (
+          <div className="rounded-xl border border-vimdy-warning/40 bg-vimdy-warning/10 text-vimdy-warning text-sm px-4 py-3">
+            {financialError}
+          </div>
+        )
+      )}
 
       {/* Recomendación IA */}
       <div className="rounded-2xl border border-vimdy-accent/20 bg-vimdy-accent/5 px-5 py-4">
@@ -426,6 +441,103 @@ function KpiCard({
         </div>
       </div>
       {footer && <div className="mt-2">{footer}</div>}
+    </div>
+  );
+}
+
+function FinancialRow({
+  label,
+  value,
+  hint,
+  strong,
+  tone
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  strong?: boolean;
+  tone?: "positive" | "negative";
+}) {
+  const valueColor =
+    tone === "negative" ? "text-vimdy-danger" : tone === "positive" ? "text-vimdy-success" : "text-vimdy-text";
+
+  return (
+    <div className={`flex items-baseline justify-between gap-4 py-2 ${strong ? "border-t border-vimdy-border" : ""}`}>
+      <div className="min-w-0">
+        <p className={`text-sm ${strong ? "text-vimdy-text font-bold" : "text-vimdy-text-secondary"}`}>{label}</p>
+        {hint && <p className="text-xs text-vimdy-text-tertiary">{hint}</p>}
+      </div>
+      <p className={`${strong ? "text-lg font-bold" : "text-sm font-semibold"} ${valueColor} whitespace-nowrap`}>
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function formatPercent(value: number): string {
+  return `${value.toLocaleString("es-CO", { maximumFractionDigits: 1 })} %`;
+}
+
+function FinancialCard({ report, money }: { report: FinancialReport; money: (value: number) => string }) {
+  const { lossByCategory } = report;
+  const expiryLoss = lossByCategory.VENCIMIENTO;
+  const shrinkLoss = lossByCategory.DESPERDICIO + lossByCategory.MERMA_PREPARACION;
+  const otherLoss = lossByCategory.CORTESIA + lossByCategory.FALTANTE; // para que las filas sumen el total
+  const warnings = report.dataQuality.warnings.filter((w) => w.affectsTotals);
+
+  return (
+    <div className="rounded-2xl border border-vimdy-border bg-vimdy-surface-hover p-5">
+      <div className="flex items-center gap-2 mb-3">
+        <Scale size={16} className="text-vimdy-accent" />
+        <h3 className="text-vimdy-text font-bold">Reporte financiero</h3>
+      </div>
+
+      <div className="divide-y divide-vimdy-border-subtle">
+        <FinancialRow label="Ventas netas" hint="Después de devoluciones y descuentos" value={money(report.netSales)} />
+        <FinancialRow label="Costo de lo vendido (COGS)" value={`− ${money(report.cogs)}`} />
+        <FinancialRow
+          label="Utilidad bruta"
+          hint={`Margen ${formatPercent(report.grossMarginPercent)}`}
+          value={money(report.grossProfit)}
+          strong
+          tone={report.grossProfit < 0 ? "negative" : undefined}
+        />
+        <FinancialRow label="Pérdidas por vencimiento" value={`− ${money(expiryLoss)}`} />
+        <FinancialRow
+          label="Pérdidas por mermas"
+          hint="Desperdicio y merma de preparación"
+          value={`− ${money(shrinkLoss)}`}
+        />
+        {otherLoss > 0 && (
+          <FinancialRow label="Otras pérdidas" hint="Cortesías y faltantes" value={`− ${money(otherLoss)}`} />
+        )}
+        <FinancialRow
+          label="Utilidad real"
+          hint={`Margen ${formatPercent(report.realMarginPercent)} · no incluye gastos operativos`}
+          value={money(report.realProfit)}
+          strong
+          tone={report.realProfit < 0 ? "negative" : "positive"}
+        />
+      </div>
+
+      {report.expiryRiskValue > 0 && (
+        <p className="text-xs text-vimdy-text-secondary mt-3">
+          Por vencer pronto: {money(report.expiryRiskValue)} en stock. Aún no es pérdida y no se resta de la utilidad real.
+        </p>
+      )}
+
+      {!report.dataQuality.isComplete && warnings.length > 0 && (
+        <div className="mt-3 rounded-xl border border-vimdy-warning/40 bg-vimdy-warning/10 px-4 py-3">
+          <p className="text-vimdy-warning text-xs font-semibold">La utilidad real es un estimado</p>
+          <ul className="mt-1 space-y-0.5">
+            {warnings.map((w) => (
+              <li key={w.code} className="text-vimdy-text-secondary text-xs">
+                {w.message}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
