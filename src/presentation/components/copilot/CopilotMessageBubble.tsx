@@ -92,7 +92,7 @@ export function CopilotMessageContent({ content }: { content: string }) {
               <ul key={index} className="space-y-1.5">
                 {block.items.map((item, i) => (
                   <li key={i} className="flex gap-2.5">
-                    <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-400" />
+                    <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-500" />
                     <span className="min-w-0">{renderInline(item)}</span>
                   </li>
                 ))}
@@ -103,7 +103,7 @@ export function CopilotMessageContent({ content }: { content: string }) {
               <ol key={index} className="space-y-1.5">
                 {block.items.map((item, i) => (
                   <li key={i} className="flex gap-2.5">
-                    <span className="w-5 shrink-0 text-right font-semibold text-cyan-300">{i + 1}.</span>
+                    <span className="w-5 shrink-0 text-right font-semibold text-zinc-400">{i + 1}.</span>
                     <span className="min-w-0">{renderInline(item)}</span>
                   </li>
                 ))}
@@ -147,7 +147,7 @@ export function CopilotMessageBubble({ message, userName, compact = false }: Cop
     return (
       <div className={`flex flex-row-reverse items-start animate-vimdy-slide-up ${compact ? "gap-2" : "gap-3"}`}>
         <div
-          className={`mt-0.5 flex shrink-0 items-center justify-center rounded-full border border-slate-600/60 bg-gradient-to-br from-slate-600 to-slate-800 font-semibold text-slate-100 ${
+          className={`mt-0.5 flex shrink-0 items-center justify-center rounded-full border border-zinc-800 bg-zinc-900 font-semibold text-zinc-200 ${
             compact ? "h-7 w-7 text-xs" : "h-9 w-9 text-sm"
           }`}
           aria-hidden="true"
@@ -161,10 +161,10 @@ export function CopilotMessageBubble({ message, userName, compact = false }: Cop
           }`}
         >
           <div className="mb-1 flex items-baseline gap-2">
-            {time && <span className="text-xs text-slate-500">{time}</span>}
-            <span className="text-xs font-semibold tracking-wide text-slate-300">Tú</span>
+            {time && <span className="text-xs text-zinc-600">{time}</span>}
+            <span className="text-xs font-semibold tracking-wide text-zinc-400">Tú</span>
           </div>
-          <div className="rounded-2xl rounded-tr-md bg-gradient-to-br from-cyan-500 to-blue-600 px-4 py-3 text-sm leading-relaxed text-white shadow-vimdy-sm">
+          <div className="rounded-2xl rounded-tr-md border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm leading-relaxed text-zinc-100">
             <p className="whitespace-pre-wrap break-words">{message.content}</p>
           </div>
         </div>
@@ -180,10 +180,10 @@ export function CopilotMessageBubble({ message, userName, compact = false }: Cop
 
       <div className={`min-w-0 ${compact ? "max-w-[88%]" : "max-w-[88%] sm:max-w-[80%]"}`}>
         <div className="mb-1 flex items-baseline gap-2">
-          <span className="text-xs font-semibold tracking-wide text-cyan-300">VIMDY IA</span>
-          {time && <span className="text-xs text-slate-500">{time}</span>}
+          <span className="text-xs font-semibold tracking-wide text-zinc-300">VIMDY IA</span>
+          {time && <span className="text-xs text-zinc-600">{time}</span>}
         </div>
-        <div className="break-words rounded-2xl rounded-tl-md border border-cyan-500/15 bg-[#0F1A2B] px-4 py-3 text-sm leading-relaxed text-slate-200 shadow-vimdy-sm">
+        <div className="break-words rounded-2xl rounded-tl-md border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm leading-relaxed text-zinc-200">
           <CopilotMessageContent content={message.content} />
         </div>
       </div>
@@ -201,19 +201,19 @@ export function CopilotThinkingBubble({ compact = false }: { compact?: boolean }
 
       <div className="min-w-0">
         <div className="mb-1">
-          <span className="text-xs font-semibold tracking-wide text-cyan-300">VIMDY IA</span>
+          <span className="text-xs font-semibold tracking-wide text-zinc-300">VIMDY IA</span>
         </div>
-        <div className="flex items-center gap-3 rounded-2xl rounded-tl-md border border-cyan-500/15 bg-[#0F1A2B] px-4 py-3 shadow-vimdy-sm">
+        <div className="flex items-center gap-3 rounded-2xl rounded-tl-md border border-zinc-800 bg-zinc-950 px-4 py-3">
           <span className="flex items-center gap-1" aria-hidden="true">
             {[0, 1, 2].map((i) => (
               <span
                 key={i}
-                className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-400"
+                className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-400"
                 style={{ animationDelay: `${i * 0.15}s` }}
               />
             ))}
           </span>
-          <span className="text-sm text-slate-400">Analizando tu negocio…</span>
+          <span className="text-sm text-zinc-500">Analizando tu negocio…</span>
         </div>
       </div>
     </div>

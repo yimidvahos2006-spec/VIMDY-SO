@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Send, Mic, MicOff, MessageSquarePlus, X } from "lucide-react";
+import { ArrowUp, Maximize2, Mic, MicOff, MessageSquarePlus, X } from "lucide-react";
 
 import { useCopilot } from "../../../core/store/useCopilot";
 import { copilotStore } from "../../../core/store/copilotStore";
@@ -151,29 +151,22 @@ export function CopilotPanel() {
         sm:inset-x-auto sm:right-6 sm:bottom-28 sm:w-[400px]
         h-[600px] max-h-[calc(100dvh-7.5rem)] sm:max-h-[calc(100dvh-8.5rem)]
         flex flex-col overflow-hidden rounded-3xl
-        border border-cyan-400/20 bg-[#0B1522]/75
-        backdrop-blur-2xl backdrop-saturate-150
-        shadow-[0_24px_64px_-12px_rgba(0,0,0,0.65),0_0_48px_rgba(34,211,238,0.07)]
+        border border-zinc-800 bg-black
+        shadow-[0_24px_64px_-12px_rgba(0,0,0,0.8)]
         animate-vimdy-slide-up
       "
     >
-      {/* Brillo sutil superior (glass) */}
-      <div
-        className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-cyan-400/[0.07] to-transparent"
-        aria-hidden="true"
-      />
-
       {/* Cabecera */}
-      <header className="relative flex items-center gap-3 border-b border-cyan-400/10 bg-white/[0.03] px-4 py-3">
+      <header className="relative flex items-center gap-3 border-b border-zinc-900 px-4 py-3">
         <div className="shrink-0">
           <AiAvatar />
         </div>
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-base font-bold leading-tight tracking-tight text-slate-100">VIMDY IA</h2>
-          <p className="flex items-center gap-1.5 text-xs text-slate-400" role="status" aria-live="polite">
+          <h2 className="truncate text-base font-bold leading-tight tracking-tight text-zinc-100">VIMDY IA</h2>
+          <p className="flex items-center gap-1.5 text-xs text-zinc-500" role="status" aria-live="polite">
             <span
               className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                orbState === "idle" ? "bg-emerald-400" : "animate-pulse bg-cyan-400"
+                orbState === "idle" ? "bg-emerald-400" : "animate-pulse bg-zinc-300"
               }`}
               aria-hidden="true"
             />
@@ -187,7 +180,7 @@ export function CopilotPanel() {
           disabled={!hasConversation || isLoading || isListening}
           title="Nuevo chat"
           aria-label="Nuevo chat: limpiar la conversación"
-          className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-cyan-400/20 bg-white/[0.04] px-3 text-xs font-medium text-cyan-200 transition hover:border-cyan-400/40 hover:bg-cyan-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/50 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-cyan-400/20 disabled:hover:bg-white/[0.04]"
+          className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-zinc-800 bg-zinc-950 px-3 text-xs font-medium text-zinc-200 transition hover:border-zinc-700 hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-600 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <MessageSquarePlus size={16} aria-hidden="true" />
           <span className="hidden min-[400px]:inline">Nuevo chat</span>
@@ -195,10 +188,23 @@ export function CopilotPanel() {
 
         <button
           type="button"
+          onClick={() => {
+            copilotStore.close();
+            navigate("/ia");
+          }}
+          title="Abrir en pantalla completa"
+          aria-label="Abrir VIMDY IA en pantalla completa"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-zinc-400 transition hover:bg-zinc-900 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-600"
+        >
+          <Maximize2 size={17} aria-hidden="true" />
+        </button>
+
+        <button
+          type="button"
           onClick={() => copilotStore.close()}
           title="Cerrar"
           aria-label="Cerrar panel"
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-400 transition hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/50"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-zinc-400 transition hover:bg-zinc-900 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-600"
         >
           <X size={18} aria-hidden="true" />
         </button>
@@ -228,7 +234,7 @@ export function CopilotPanel() {
       </div>
 
       {/* Entrada */}
-      <div className="relative space-y-2.5 border-t border-cyan-400/10 bg-[#08111F]/60 px-3.5 pb-3 pt-3 sm:px-4">
+      <div className="relative space-y-2.5 border-t border-zinc-900 bg-black px-3.5 pb-3 pt-3 sm:px-4">
         {/* Sugerencias: una sola fila compacta con scroll horizontal */}
         <CopilotSuggestions variant="chips" onSelect={handleAsk} disabled={isLoading || isListening} />
 
@@ -243,7 +249,7 @@ export function CopilotPanel() {
             placeholder={isListening ? "Escuchando…" : "Pregúntale algo a tu negocio…"}
             aria-label="Escribe tu pregunta"
             disabled={isListening}
-            className="min-w-0 flex-1 rounded-2xl border border-cyan-400/15 bg-white/[0.05] px-4 py-3 text-base text-white placeholder-slate-500 outline-none transition focus:border-cyan-400/50 focus:shadow-vimdy-accent disabled:opacity-60 sm:text-sm"
+            className="min-w-0 flex-1 rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-base text-zinc-100 placeholder-zinc-600 outline-none transition focus:border-zinc-600 disabled:opacity-60 sm:text-sm"
           />
           <button
             type="button"
@@ -254,13 +260,13 @@ export function CopilotPanel() {
             className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl transition disabled:opacity-40 ${
               isListening
                 ? "animate-pulse bg-red-500 hover:bg-red-400"
-                : "border border-cyan-400/20 bg-white/[0.05] hover:bg-cyan-500/15"
+                : "border border-zinc-800 bg-zinc-950 hover:bg-zinc-900"
             }`}
           >
             {isListening ? (
               <MicOff size={18} className="text-white" />
             ) : (
-              <Mic size={18} className="text-cyan-300" />
+              <Mic size={18} className="text-zinc-300" />
             )}
           </button>
           <button
@@ -268,13 +274,13 @@ export function CopilotPanel() {
             onClick={() => handleAsk(draft)}
             disabled={isLoading || isListening || !draft.trim()}
             aria-label="Enviar pregunta"
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 transition hover:from-cyan-400 hover:to-blue-500 disabled:opacity-40 disabled:hover:from-cyan-500 disabled:hover:to-blue-600"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white text-black transition hover:bg-zinc-200 disabled:bg-zinc-800 disabled:text-zinc-600 disabled:hover:bg-zinc-800"
           >
-            <Send size={18} className="text-white" />
+            <ArrowUp size={19} strokeWidth={2.4} aria-hidden="true" />
           </button>
         </div>
 
-        <p className="text-center text-[11px] leading-snug text-slate-500">
+        <p className="text-center text-[11px] leading-snug text-zinc-600">
           VIMDY IA puede cometer errores. Verifique la información importante.
         </p>
       </div>

@@ -300,7 +300,7 @@ function resetBusinessScopedState(): void {
   cartStore.clear();
   paymentStore.reset();
   businessStore.clear();
-  copilotStore.reset();
+  copilotStore.clearAll();
   copilotStore.close();
 }
 

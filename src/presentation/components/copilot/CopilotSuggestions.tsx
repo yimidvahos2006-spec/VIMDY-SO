@@ -58,9 +58,9 @@ export function CopilotSuggestions({ variant, onSelect, disabled = false }: Copi
             type="button"
             onClick={() => onSelect(question)}
             disabled={disabled}
-            className="inline-flex shrink-0 snap-start items-center gap-1.5 whitespace-nowrap rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3.5 py-2 text-xs text-cyan-200 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex shrink-0 snap-start items-center gap-1.5 whitespace-nowrap rounded-full border border-zinc-800 bg-zinc-950 px-3.5 py-2 text-xs text-zinc-300 transition hover:border-zinc-700 hover:bg-zinc-900 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <Icon size={13} className="text-cyan-400" aria-hidden="true" />
+            <Icon size={13} className="text-zinc-500" aria-hidden="true" />
             {question}
           </button>
         ))}
@@ -70,7 +70,7 @@ export function CopilotSuggestions({ variant, onSelect, disabled = false }: Copi
 
   return (
     <div
-      className="grid w-full max-w-2xl grid-cols-1 gap-2.5 sm:grid-cols-2"
+      className="grid w-full max-w-2xl text-left grid-cols-1 gap-2.5 sm:grid-cols-2"
       role="group"
       aria-label="Preguntas rápidas"
     >
@@ -80,14 +80,14 @@ export function CopilotSuggestions({ variant, onSelect, disabled = false }: Copi
           type="button"
           onClick={() => onSelect(question)}
           disabled={disabled}
-          className="group flex items-center gap-3 rounded-2xl border border-cyan-500/15 bg-[#0F1A2B] px-4 py-3 text-left transition hover:border-cyan-400/40 hover:bg-[#13233A] disabled:cursor-not-allowed disabled:opacity-50 sm:last:odd:col-span-2"
+          className="group flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-left sm:px-4 sm:py-3 transition hover:border-zinc-700 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-50 sm:last:odd:col-span-2"
         >
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-cyan-500/10 text-cyan-300 transition group-hover:bg-cyan-500/20">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-zinc-900 sm:h-9 sm:w-9 text-zinc-300 transition group-hover:bg-zinc-800">
             <Icon size={18} aria-hidden="true" />
           </span>
           <span className="min-w-0">
-            <span className="block text-sm font-medium text-slate-100">{question}</span>
-            <span className="block text-xs text-slate-500">{hint}</span>
+            <span className="block text-sm font-medium text-zinc-100">{question}</span>
+            <span className="hidden text-xs text-zinc-500 sm:block">{hint}</span>
           </span>
         </button>
       ))}

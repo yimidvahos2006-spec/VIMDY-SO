@@ -1,43 +1,86 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from "react";
+
+import { obsidianRenderer } from "./obsidianRenderer";
 
 interface AiAvatarProps {
-  /** Diámetro total en px (por defecto 40, el tamaño de diseño). Escala todo el conjunto. */
+  /** Diámetro en px (por defecto 40). */
   size?: number;
+  className?: string;
 }
 
 const BASE_SIZE = 40;
+const MAX_DPR = 2;
 
-export const AiAvatar: React.FC<AiAvatarProps> = ({ size = BASE_SIZE }) => {
-  const avatar = (
-    <div className="relative flex items-center justify-center w-10 h-10 group select-none" aria-hidden="true">
-      {/* 1. Aura energética exterior con pulso suave */}
-      <div className="absolute inset-0 rounded-full bg-cyan-500/20 blur-md animate-pulse"></div>
+/** Esfera estática (sin WebGL): mismo lenguaje visual, solo sin movimiento. */
+const FALLBACK_BACKGROUND = [
+  "radial-gradient(ellipse 30% 18% at 33% 27%, rgba(255,255,255,0.70) 0%, rgba(255,255,255,0) 100%)",
+  "radial-gradient(circle at 36% 32%, #25272e 0%, #0c0c10 42%, #000000 78%)"
+].join(", ");
 
-      {/* 2. Esfera principal con efecto Glassmorphism 3D */}
-      <div className="relative w-8 h-8 rounded-full overflow-hidden shadow-2xl shadow-cyan-950/90 bg-gradient-to-br from-slate-950 via-black to-cyan-950 border border-cyan-400/40 backdrop-blur-md">
+/**
+ * AiAvatar
+ * ---------------------------------------------------------------------------
+ * Avatar de VIMDY IA: una esfera de obsidiana líquida. Negro profundo y
+ * carbón, con reflejos especulares que fluyen y ondas de luz sutiles que se
+ * mueven de forma constante (shader en obsidianRenderer.ts).
+ *
+ * Se usa en la cabecera, en la pantalla principal y en cada burbuja del chat;
+ * todos comparten un único contexto WebGL. Si WebGL no está disponible se
+ * muestra una esfera oscura estática.
+ */
+export const AiAvatar: React.FC<AiAvatarProps> = ({ size = BASE_SIZE, className = "" }) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const redrawRef = useRef<(() => void) | null>(null);
+  const [useFallback, setUseFallback] = useState(false);
 
-        {/* 3. Núcleo interno con movimiento fluido tipo shader */}
-        <div className="absolute -inset-3 bg-gradient-to-tr from-cyan-600 via-blue-600 to-indigo-950 rounded-full opacity-85 blur-[2.5px] animate-shader-spin"></div>
+  const dpr = typeof window === "undefined" ? 1 : Math.min(MAX_DPR, window.devicePixelRatio || 1);
+  const pixels = Math.max(16, Math.round(size * dpr));
 
-        {/* 4. Capa de refracción líquida secundaria */}
-        <div className="absolute inset-0 bg-gradient-to-bl from-transparent via-cyan-400/25 to-blue-900/60 rounded-full mix-blend-screen animate-pulse"></div>
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
-        {/* 5. Reflejo especular superior (Efecto brillo de cristal real) */}
-        <div className="absolute top-1 left-1.5 w-2.5 h-1 bg-white/70 rounded-full blur-[0.4px] -rotate-45"></div>
+    const handle = obsidianRenderer.register(canvas);
+    if (!handle) {
+      setUseFallback(true);
+      return;
+    }
+    redrawRef.current = handle.redraw;
 
-        {/* 6. Reflejo secundario inferior para dar volumen */}
-        <div className="absolute bottom-1 right-1.5 w-1.5 h-0.5 bg-cyan-300/40 rounded-full blur-[0.8px]"></div>
-      </div>
-    </div>
-  );
+    let observer: IntersectionObserver | undefined;
+    if (typeof IntersectionObserver !== "undefined") {
+      observer = new IntersectionObserver((entries) => {
+        const latest = entries[entries.length - 1];
+        if (latest) handle.setVisible(latest.isIntersecting);
+      });
+      observer.observe(canvas);
+    }
 
-  if (size === BASE_SIZE) return avatar;
+    return () => {
+      observer?.disconnect();
+      redrawRef.current = null;
+      handle.dispose();
+    };
+  }, []);
+
+  // Si cambia el tamaño, el canvas se limpia: se pide un nuevo cuadro (útil con movimiento reducido).
+  useEffect(() => {
+    redrawRef.current?.();
+  }, [pixels]);
 
   return (
-    <div className="shrink-0" style={{ width: size, height: size }}>
-      <div style={{ transform: `scale(${size / BASE_SIZE})`, transformOrigin: "top left", width: BASE_SIZE, height: BASE_SIZE }}>
-        {avatar}
-      </div>
+    <div
+      className={`relative shrink-0 select-none overflow-hidden rounded-full bg-black ${className}`}
+      style={{ width: size, height: size }}
+      aria-hidden="true"
+    >
+      {useFallback ? (
+        <div className="h-full w-full rounded-full" style={{ background: FALLBACK_BACKGROUND }} />
+      ) : (
+        <canvas ref={canvasRef} width={pixels} height={pixels} className="block h-full w-full" />
+      )}
     </div>
   );
 };
+
+export default AiAvatar;

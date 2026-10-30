@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import { Send, Mic, MicOff, MessageSquarePlus } from "lucide-react";
+import { ArrowUp, Mic, MicOff, MessageSquarePlus, PanelLeft } from "lucide-react";
 
 import { useCopilot } from "../../core/store/useCopilot";
 import { copilotStore } from "../../core/store/copilotStore";
@@ -15,6 +16,7 @@ import type { CopilotOrbState } from "../components/copilot/CopilotOrb";
 import { AiAvatar } from "../components/copilot/AiAvatar";
 import { CopilotMessageBubble, CopilotThinkingBubble } from "../components/copilot/CopilotMessageBubble";
 import { CopilotSuggestions } from "../components/copilot/CopilotSuggestions";
+import { CopilotSidebar } from "../components/copilot/CopilotSidebar";
 import { detectReplyReaction, detectUserReaction, type CopilotReaction } from "../components/copilot/copilotMood";
 
 const STATUS_LABEL: Record<CopilotOrbState, string> = {
@@ -45,7 +47,16 @@ const REACTION_MS = 3500;
  * sugerencias en tarjetas. La lógica de handleAsk / handleVoice no cambió.
  */
 function CopilotPageContent() {
-  const { isLoading, error, messages } = useCopilot();
+  const {
+    isLoading,
+    error,
+    messages,
+    conversations,
+    activeConversationId,
+    startNewConversation,
+    selectConversation,
+    deleteConversation
+  } = useCopilot();
   const { user } = useAuth();
   const [draft, setDraft] = useState("");
   const [isListening, setIsListening] = useState(false);
@@ -55,6 +66,14 @@ function CopilotPageContent() {
   const reactionTimer = useRef<number | undefined>(undefined);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastSeenMessageId = useRef<string | undefined>(messages[messages.length - 1]?.id);
+  const lastConversationId = useRef(activeConversationId);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches
+  );
+  const [heroSize, setHeroSize] = useState(() =>
+    typeof window !== "undefined" && window.innerWidth < 640 ? 120 : window.innerHeight < 760 ? 132 : 168
+  );
   const navigate = useNavigate();
 
   function showReaction(next: CopilotReaction) {
@@ -70,8 +89,61 @@ function CopilotPageContent() {
   useEffect(() => () => window.clearTimeout(reactionTimer.current), []);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    const el = scrollRef.current;
+    if (!el) return;
+    // Pantalla de bienvenida: se queda arriba; con conversación, baja al último mensaje.
+    const atWelcome = messages.length <= 1 && !isLoading;
+    el.scrollTo({ top: atWelcome ? 0 : el.scrollHeight, behavior: atWelcome ? "auto" : "smooth" });
   }, [messages, isLoading]);
+
+  // Cambiar de chat: ir al final al instante, sin animar y sin disparar "Respondiendo…".
+  useLayoutEffect(() => {
+    if (lastConversationId.current === activeConversationId) return;
+    lastConversationId.current = activeConversationId;
+    lastSeenMessageId.current = messages[messages.length - 1]?.id;
+    window.clearTimeout(reactionTimer.current);
+    reactionRef.current = null;
+    setReaction(null);
+    setIsResponding(false);
+    setDraft("");
+    const el = scrollRef.current;
+    if (el) el.scrollTo({ top: messages.length <= 1 ? 0 : el.scrollHeight });
+  }, [activeConversationId, messages]);
+
+  // La página ocupa toda la pantalla: se bloquea el scroll del fondo y se
+  // cierra el panel flotante (ya no tiene sentido tener los dos a la vez).
+  useEffect(() => {
+    copilotStore.close();
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, []);
+
+  useEffect(() => {
+    const onResize = () => setHeroSize(window.innerWidth < 640 ? 120 : window.innerHeight < 760 ? 132 : 168);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  // Escape cierra el cajón del historial en móvil.
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && window.innerWidth < 768) setSidebarOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [sidebarOpen]);
+
+  // El cuadro de texto crece con el contenido (hasta ~6 líneas).
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 168)}px`;
+  }, [draft]);
 
   // "Respondiendo": cuando llega una respuesta NUEVA del asistente, el orbe
   // muestra las ondas de audio un rato proporcional al largo del texto. No se
@@ -166,14 +238,25 @@ function CopilotPageContent() {
     await handleAsk(speech.text);
   }
 
-  // Nuevo chat: no se puede reiniciar mientras se espera una respuesta o se
-  // escucha (la respuesta pendiente caería en la conversación nueva), ni
-  // cuando no hay nada que borrar.
+  // Nuevo chat: el actual queda guardado en el historial. No se puede mientras
+  // se espera una respuesta o se escucha (caería en la conversación nueva).
   function handleNewChat() {
     if (isLoading || isListening) return;
     setDraft("");
     setIsResponding(false);
-    copilotStore.reset();
+    startNewConversation();
+    if (window.innerWidth < 768) setSidebarOpen(false);
+    textareaRef.current?.focus();
+  }
+
+  function handleSelectChat(id: string) {
+    if (isLoading || isListening) return;
+    selectConversation(id);
+    if (window.innerWidth < 768) setSidebarOpen(false);
+  }
+
+  function handleExit() {
+    navigate("/");
   }
 
   const orbState: CopilotOrbState = isListening
@@ -189,111 +272,136 @@ function CopilotPageContent() {
   // Pantalla inicial: solo existe el mensaje de bienvenida y no hay nada en curso.
   const showHero = messages.length <= 1 && !isLoading;
 
-  return (
-    <div className="flex h-full flex-col px-4 py-4 sm:px-6 sm:py-6">
-      <div className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col">
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-cyan-500/20 bg-gradient-to-b from-[#0D1A2B] to-[#08111F] shadow-vimdy-lg">
-          {/* Encabezado */}
-          <div className="flex items-center gap-4 border-b border-cyan-500/10 px-5 py-3 sm:px-6">
-            {!showHero && <AiAvatar size={48} />}
-            <div className="min-w-0">
-              <h1 className="text-lg font-bold tracking-tight text-slate-100">VIMDY IA</h1>
-              <p
-                className="flex items-center gap-2 text-sm text-slate-400"
-                role="status"
-                aria-live="polite"
-              >
-                <span
-                  className={`h-2 w-2 rounded-full ${
-                    orbState === "idle" ? "bg-emerald-400" : "animate-pulse bg-cyan-400"
-                  }`}
-                  aria-hidden="true"
-                />
-                {STATUS_LABEL[orbState]}
-              </p>
-            </div>
+  const busy = isLoading || isListening;
 
-            {!showHero && (
-            <button
-              type="button"
-              onClick={handleNewChat}
-              disabled={isLoading || isListening}
-              title="Nuevo chat"
-              aria-label="Nuevo chat: limpiar la conversación"
-              className="ml-auto inline-flex shrink-0 items-center gap-2 rounded-xl border border-cyan-500/20 bg-[#0F1A2B] px-3 py-2 text-sm text-cyan-200 transition hover:border-cyan-400/40 hover:bg-cyan-500/15 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[#0F1A2B]"
-            >
-              <MessageSquarePlus size={16} aria-hidden="true" />
-              <span className="hidden sm:inline">Nuevo chat</span>
-            </button>
-            )}
-          </div>
+  const page = (
+    <div
+      className="fixed inset-0 z-[70] flex h-[100dvh] w-screen overflow-hidden bg-black text-zinc-100"
+      role="region"
+      aria-label="VIMDY IA"
+    >
+      <CopilotSidebar
+        conversations={conversations}
+        activeConversationId={activeConversationId}
+        busy={busy}
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        onNewChat={handleNewChat}
+        onSelect={handleSelectChat}
+        onDelete={deleteConversation}
+        onExit={handleExit}
+      />
 
-          {/* Conversación */}
-          <div
-            ref={scrollRef}
-            role="log"
-            aria-label="Conversación con VIMDY IA"
-            className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6"
+      <section className="flex min-w-0 flex-1 flex-col">
+        {/* Cabecera */}
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b border-zinc-900 px-3 pt-[env(safe-area-inset-top)] sm:px-4">
+          <button
+            type="button"
+            onClick={() => setSidebarOpen((v) => !v)}
+            aria-label={sidebarOpen ? "Ocultar historial" : "Mostrar historial"}
+            aria-expanded={sidebarOpen}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-zinc-400 transition hover:bg-zinc-900 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-600"
           >
-            {showHero ? (
-              <div className="flex min-h-full flex-col items-center justify-center gap-6 py-4 text-center">
-                <AiAvatar size={160} />
-                <div className="space-y-1.5">
-                  <h2 className="text-2xl font-bold tracking-tight text-slate-100">¿En qué te ayudo hoy?</h2>
-                  <p className="mx-auto max-w-md text-sm text-slate-400">
-                    Veo tus ventas, tu inventario y tus alertas en tiempo real. Pregúntame lo que quieras sobre tu negocio.
-                  </p>
-                </div>
-                <CopilotSuggestions variant="grid" onSelect={handleAsk} disabled={isLoading || isListening} />
-              </div>
-            ) : (
-              <div className="mx-auto w-full max-w-3xl space-y-5">
-                {messages.map((message) => (
-                  <CopilotMessageBubble key={message.id} message={message} userName={user?.name} />
-                ))}
+            <PanelLeft size={20} aria-hidden="true" />
+          </button>
 
-                {isLoading && <CopilotThinkingBubble />}
-
-                {error && (
-                  <div
-                    role="alert"
-                    className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400"
-                  >
-                    {error}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {showHero && error && (
-              <div
-                role="alert"
-                className="mx-auto mt-4 max-w-2xl rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400"
-              >
-                {error}
-              </div>
-            )}
+          <AiAvatar size={30} />
+          <div className="min-w-0">
+            <h1 className="truncate text-sm font-semibold leading-tight tracking-tight text-zinc-100">VIMDY IA</h1>
+            <p
+              className="flex items-center gap-1.5 text-xs leading-tight text-zinc-500"
+              role="status"
+              aria-live="polite"
+            >
+              <span
+                className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                  orbState === "idle" ? "bg-emerald-400" : "animate-pulse bg-zinc-300"
+                }`}
+                aria-hidden="true"
+              />
+              <span className="truncate">{STATUS_LABEL[orbState]}</span>
+            </p>
           </div>
 
-          {/* Entrada */}
-          <div className="space-y-3 border-t border-cyan-500/10 bg-[#08111F]/80 px-4 py-3 sm:px-6 sm:py-4">
-            {!showHero && (
-              <div className="mx-auto w-full max-w-3xl">
-                <CopilotSuggestions variant="chips" onSelect={handleAsk} disabled={isLoading || isListening} />
-              </div>
-            )}
+          <button
+            type="button"
+            onClick={handleNewChat}
+            disabled={busy || showHero}
+            title="Nuevo chat"
+            aria-label="Nuevo chat"
+            className="ml-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-zinc-400 transition hover:bg-zinc-900 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-600 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-zinc-400"
+          >
+            <MessageSquarePlus size={19} aria-hidden="true" />
+          </button>
+        </header>
 
-            <div className="mx-auto flex w-full max-w-3xl items-center gap-2">
-              <input
+        {/* Conversación */}
+        <div
+          ref={scrollRef}
+          role="log"
+          aria-label="Conversación con VIMDY IA"
+          className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-4 py-6 [scrollbar-color:#27272a_transparent] [scrollbar-width:thin] sm:px-6"
+        >
+          {showHero ? (
+            <div className="mx-auto my-auto flex w-full max-w-3xl shrink-0 flex-col items-center gap-5 py-4 text-center sm:gap-6">
+              <AiAvatar size={heroSize} />
+              <div className="space-y-2">
+                <h2 className="text-2xl font-semibold tracking-tight text-zinc-50 sm:text-3xl">¿En qué te ayudo hoy?</h2>
+                <p className="mx-auto max-w-md text-sm leading-relaxed text-zinc-500">
+                  Veo tus ventas, tu inventario y tus alertas en tiempo real. Pregúntame lo que quieras sobre tu negocio.
+                </p>
+              </div>
+              <CopilotSuggestions variant="grid" onSelect={handleAsk} disabled={busy} />
+              {error && (
+                <div
+                  role="alert"
+                  className="w-full max-w-2xl rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400"
+                >
+                  {error}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="mx-auto w-full max-w-3xl shrink-0 space-y-6">
+              {messages.map((message) => (
+                <CopilotMessageBubble key={message.id} message={message} userName={user?.name} />
+              ))}
+
+              {isLoading && <CopilotThinkingBubble />}
+
+              {error && (
+                <div
+                  role="alert"
+                  className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400"
+                >
+                  {error}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Entrada */}
+        <div className="shrink-0 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-6">
+          <div className="mx-auto w-full max-w-3xl space-y-2.5">
+            {!showHero && <CopilotSuggestions variant="chips" onSelect={handleAsk} disabled={busy} />}
+
+            <div className="flex items-end gap-2 rounded-3xl border border-zinc-800 bg-zinc-950 p-2 pl-4 transition focus-within:border-zinc-600">
+              <textarea
+                ref={textareaRef}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.nativeEvent.isComposing) handleAsk(draft);
+                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    handleAsk(draft);
+                  }
                 }}
+                rows={1}
                 placeholder={isListening ? "Escuchando…" : "Pregúntale algo a tu negocio…"}
                 aria-label="Escribe tu pregunta"
                 disabled={isListening}
-                className="min-w-0 flex-1 rounded-2xl border border-cyan-500/15 bg-[#0F1A2B] px-4 py-3 text-sm text-white placeholder-slate-500 outline-none transition focus:border-cyan-400/50 focus:shadow-vimdy-accent disabled:opacity-60"
+                className="max-h-[168px] min-w-0 flex-1 resize-none self-center !border-0 !bg-transparent py-2 text-base leading-6 !text-zinc-100 placeholder-zinc-600 shadow-none focus-visible:!outline-none disabled:opacity-60 sm:text-sm"
               />
               <button
                 type="button"
@@ -301,37 +409,34 @@ function CopilotPageContent() {
                 disabled={isLoading}
                 title="Hablarle al Copiloto"
                 aria-label={isListening ? "Escuchando" : "Hablarle al Copiloto"}
-                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl transition disabled:opacity-40 ${
-                  isListening
-                    ? "animate-pulse bg-red-500 hover:bg-red-400"
-                    : "border border-cyan-500/20 bg-[#0F1A2B] hover:bg-cyan-500/15"
+                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 disabled:opacity-40 ${
+                  isListening ? "animate-pulse bg-red-500 text-white hover:bg-red-400" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
                 }`}
               >
-                {isListening ? (
-                  <MicOff size={18} className="text-white" />
-                ) : (
-                  <Mic size={18} className="text-cyan-300" />
-                )}
+                {isListening ? <MicOff size={18} aria-hidden="true" /> : <Mic size={18} aria-hidden="true" />}
               </button>
               <button
                 type="button"
                 onClick={() => handleAsk(draft)}
-                disabled={isLoading || isListening || !draft.trim()}
+                disabled={busy || !draft.trim()}
                 aria-label="Enviar pregunta"
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 transition hover:from-cyan-400 hover:to-blue-500 disabled:opacity-40 disabled:hover:from-cyan-500 disabled:hover:to-blue-600"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white text-black transition hover:bg-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 disabled:bg-zinc-800 disabled:text-zinc-600 disabled:hover:bg-zinc-800"
               >
-                <Send size={18} className="text-white" />
+                <ArrowUp size={19} strokeWidth={2.4} aria-hidden="true" />
               </button>
             </div>
 
-            <p className="mx-auto w-full max-w-3xl text-center text-xs text-slate-500">
+            <p className="text-center text-[11px] leading-snug text-zinc-600">
               VIMDY IA puede cometer errores. Verifique la información importante del negocio.
             </p>
           </div>
         </div>
-      </div>
+      </section>
     </div>
   );
+
+  // Portal al <body>: cubre por completo el menú y la barra de la app.
+  return createPortal(page, document.body);
 }
 
 export function CopilotPage() {
