@@ -32,8 +32,11 @@ export const COPILOT_SUGGESTIONS: readonly Suggestion[] = [
 ];
 
 interface CopilotSuggestionsProps {
-  /** "grid": tarjetas grandes (pantalla inicial). "chips": fila compacta con scroll horizontal. */
-  variant: "grid" | "chips";
+  /**
+   * "grid": tarjetas en 2 columnas (pantalla ancha). "list": tarjetas en 1 columna
+   * (panel flotante angosto). "chips": fila compacta con scroll horizontal.
+   */
+  variant: "grid" | "list" | "chips";
   onSelect: (question: string) => void;
   disabled?: boolean;
 }
@@ -68,9 +71,11 @@ export function CopilotSuggestions({ variant, onSelect, disabled = false }: Copi
     );
   }
 
+  const isList = variant === "list";
+
   return (
     <div
-      className="grid w-full max-w-2xl text-left grid-cols-1 gap-2.5 sm:grid-cols-2"
+      className={`grid w-full text-left grid-cols-1 gap-2 ${isList ? "" : "max-w-2xl gap-2.5 sm:grid-cols-2"}`}
       role="group"
       aria-label="Preguntas rápidas"
     >
@@ -80,14 +85,16 @@ export function CopilotSuggestions({ variant, onSelect, disabled = false }: Copi
           type="button"
           onClick={() => onSelect(question)}
           disabled={disabled}
-          className="group flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-left sm:px-4 sm:py-3 transition hover:border-zinc-700 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-50 sm:last:odd:col-span-2"
+          className={`group flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-left transition hover:border-zinc-700 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-50 ${
+            isList ? "" : "sm:px-4 sm:py-3 sm:last:odd:col-span-2"
+          }`}
         >
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-zinc-900 sm:h-9 sm:w-9 text-zinc-300 transition group-hover:bg-zinc-800">
-            <Icon size={18} aria-hidden="true" />
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-zinc-900 text-zinc-300 transition group-hover:bg-zinc-800">
+            <Icon size={17} aria-hidden="true" />
           </span>
           <span className="min-w-0">
             <span className="block text-sm font-medium text-zinc-100">{question}</span>
-            <span className="hidden text-xs text-zinc-500 sm:block">{hint}</span>
+            <span className={`text-xs text-zinc-500 ${isList ? "block" : "hidden sm:block"}`}>{hint}</span>
           </span>
         </button>
       ))}

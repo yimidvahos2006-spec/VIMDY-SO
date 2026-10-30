@@ -163,6 +163,10 @@ export default {
           "0%": { opacity: "0", transform: "translateY(8px)" },
           "100%": { opacity: "1", transform: "translateY(0)" }
         },
+        "vimdy-slide-in-right": {
+          "0%": { opacity: "0", transform: "translateX(24px)" },
+          "100%": { opacity: "1", transform: "translateX(0)" }
+        },
         "vimdy-slide-down": {
           "0%": { opacity: "0", transform: "translateY(-8px)" },
           "100%": { opacity: "1", transform: "translateY(0)" }
@@ -217,6 +221,7 @@ export default {
       animation: {
         "vimdy-fade-in": "vimdy-fade-in 200ms ease-out",
         "vimdy-slide-up": "vimdy-slide-up 200ms cubic-bezier(0.16,1,0.3,1)",
+        "vimdy-slide-in-right": "vimdy-slide-in-right 260ms cubic-bezier(0.16,1,0.3,1)",
         "vimdy-slide-down": "vimdy-slide-down 200ms cubic-bezier(0.16,1,0.3,1)",
         "vimdy-scale-in": "vimdy-scale-in 150ms ease-out",
         "vimdy-pulse": "vimdy-pulse 1.6s ease-in-out infinite",

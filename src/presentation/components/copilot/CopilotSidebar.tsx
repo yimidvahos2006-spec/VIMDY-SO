@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Check, MessageSquarePlus, Trash2, X } from "lucide-react";
+import { Check, MessageSquarePlus, Trash2, X } from "lucide-react";
 
 import type { CopilotConversationSummary } from "../../../core/store/copilotStore";
 import { AiAvatar } from "./AiAvatar";
@@ -9,13 +9,18 @@ interface CopilotSidebarProps {
   activeConversationId: string;
   /** Bloquea cambiar/borrar el chat activo mientras hay una respuesta en camino. */
   busy: boolean;
-  /** Abierto/cerrado (en móvil es un cajón superpuesto; en escritorio, una columna). */
+  /** Abierto/cerrado. */
   open: boolean;
+  /**
+   * "column": en escritorio es una columna fija (layout de pantalla completa).
+   * "drawer": SIEMPRE un cajón superpuesto dentro de su contenedor (panel flotante),
+   * nunca ocupa espacio en el layout.
+   */
+  variant?: "column" | "drawer";
   onClose: () => void;
   onNewChat: () => void;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
-  onExit: () => void;
 }
 
 interface Group {
@@ -56,14 +61,15 @@ export function CopilotSidebar({
   activeConversationId,
   busy,
   open,
+  variant = "column",
   onClose,
   onNewChat,
   onSelect,
-  onDelete,
-  onExit
+  onDelete
 }: CopilotSidebarProps) {
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const groups = useMemo(() => groupByDate(conversations), [conversations]);
+  const drawer = variant === "drawer";
 
   // Si el chat en confirmación desaparece (o se cierra el cajón), se cancela.
   useEffect(() => {
@@ -79,27 +85,35 @@ export function CopilotSidebar({
       <div
         onClick={onClose}
         aria-hidden="true"
-        className={`fixed inset-0 z-30 bg-black/70 backdrop-blur-sm transition-opacity duration-200 md:hidden ${
-          open ? "opacity-100" : "pointer-events-none opacity-0"
-        }`}
+        className={`absolute inset-0 z-30 bg-black/70 backdrop-blur-sm transition-opacity duration-200 ${
+          drawer ? "" : "md:hidden"
+        } ${open ? "opacity-100" : "pointer-events-none opacity-0"}`}
       />
 
       <aside
         aria-label="Historial de chats"
-        className={`fixed inset-y-0 left-0 z-40 flex w-[85vw] max-w-[300px] flex-col overflow-hidden border-r border-zinc-800 bg-black transition-transform duration-200 ease-out md:static md:z-auto md:w-[280px] md:max-w-none md:shrink-0 md:transition-[margin] ${
-          open ? "translate-x-0 md:ml-0" : "-translate-x-full md:ml-[-280px] md:translate-x-0"
+        className={`absolute inset-y-0 left-0 z-40 flex w-[85%] max-w-[300px] flex-col overflow-hidden border-r border-zinc-800 bg-black transition-transform duration-200 ease-out ${
+          drawer
+            ? ""
+            : "md:static md:z-auto md:w-[280px] md:max-w-none md:shrink-0 md:transition-[margin]"
+        } ${
+          open
+            ? `translate-x-0 ${drawer ? "" : "md:ml-0"}`
+            : `-translate-x-full ${drawer ? "" : "md:ml-[-280px] md:translate-x-0"}`
         }`}
         // Cerrado: fuera del orden de tabulación y de lectores de pantalla.
         {...(!open ? { inert: true } : {})}
       >
-        <div className="flex items-center gap-3 px-4 pb-3 pt-[max(1rem,env(safe-area-inset-top))]">
+        <div className="flex items-center gap-3 px-4 pb-3 pt-4">
           <AiAvatar size={32} />
           <span className="flex-1 truncate text-sm font-semibold tracking-tight text-zinc-100">VIMDY IA</span>
           <button
             type="button"
             onClick={onClose}
             aria-label="Cerrar historial"
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-400 transition hover:bg-zinc-900 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-600 md:hidden"
+            className={`flex h-9 w-9 items-center justify-center rounded-lg text-zinc-400 transition hover:bg-zinc-900 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-600 ${
+              drawer ? "" : "md:hidden"
+            }`}
           >
             <X size={18} aria-hidden="true" />
           </button>
@@ -198,16 +212,6 @@ export function CopilotSidebar({
           )}
         </nav>
 
-        <div className="border-t border-zinc-800 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-          <button
-            type="button"
-            onClick={onExit}
-            className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm text-zinc-400 transition hover:bg-zinc-900 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-600"
-          >
-            <ArrowLeft size={16} aria-hidden="true" />
-            Volver a VIMDY
-          </button>
-        </div>
       </aside>
     </>
   );
