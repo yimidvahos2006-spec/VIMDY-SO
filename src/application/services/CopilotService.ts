@@ -1,20 +1,7 @@
-import { CopilotEngine } from "../../core/engines/CopilotEngine";
-import { CopilotApiClient } from "../../infrastructure/di/CopilotApiClient";
-import { CopilotContextSnapshot, CopilotMessage } from "../../core/types/CopilotTypes";
+import type { CopilotContextSnapshot, CopilotMessage } from "../../core/types/CopilotTypes";
 import { formatMoney } from "../../core/utils/formatMoney";
 import { maskedStatusText } from "../../core/utils/stockMask";
-
-/**
- * Cuántos mensajes previos de la conversación se reenvían a Claude junto
- * con la pregunta nueva. El contexto del negocio (ventas, inventario,
- * caja, alertas) ya se reconstruye completo y al minuto en cada pregunta
- * vía CopilotEngine.buildContextSnapshot — no depende del historial. Este
- * límite solo preserva el hilo conversacional reciente (ej. una pregunta
- * de seguimiento como "¿y la semana pasada?"), evitando que una sesión
- * larga (muchas preguntas seguidas) haga crecer el costo y la latencia de
- * cada llamada sin ningún beneficio real.
- */
-const MAX_HISTORY_MESSAGES = 16;
+import { AiProvider } from "../../core/ia/aiProvider";
 
 /**
  * Convierte el snapshot de contexto en texto plano legible, que es lo que
@@ -237,68 +224,26 @@ export function snapshotToPrompt(snapshot: CopilotContextSnapshot): string {
   return lines.join("\n");
 }
 
-const SYSTEM_INSTRUCTIONS = `
-Eres el Copiloto VIMDY: el gerente virtual del negocio dentro del sistema VIMDY OS.
-No eres un chatbot genérico — eres un asesor de negocio que solo habla con datos reales.
-
-Reglas:
-- Responde SIEMPRE en español, de forma directa, breve y accionable (como un gerente hablándole al dueño).
-- Usa SOLO los datos del "CONTEXTO DEL NEGOCIO" que se te entrega abajo. Nunca inventes cifras.
-- Si te preguntan algo que no está en el contexto (ej. datos de hace 6 meses si no aparecen), dilo con honestidad
-  y sugiere dónde podría revisarlo dentro de VIMDY (ej. "revísalo en Reportes > Histórico").
-- Cuando detectes un problema (inventario bajo, ventas cayendo, alertas críticas), sé propositivo:
-  sugiere una acción concreta, no solo describas el problema.
-- La proyección semanal es un ESTIMADO basado en patrones históricos, no una garantía. Si el negocio
-  tiene poco historial, dilo abiertamente en vez de sonar más seguro de lo que los datos permiten.
-- Usa cifras formateadas con la moneda del negocio.
-- Mantén las respuestas cortas (máximo 4-5 líneas) salvo que te pidan un análisis detallado.
-- Si te preguntan "¿Cómo voy?" o algo equivalente (resumen general, cómo está el negocio), responde con un
-  resumen ejecutivo corto: ventas (y si suben o bajan), utilidad si hay datos de margen, clientes nuevos,
-  ticket promedio, productos por agotarse, y 1-2 recomendaciones concretas — todo con las cifras reales del
-  contexto, nunca inventadas.
-- Si te piden ejecutar una acción dentro de VIMDY (crear producto, abrir caja, buscar un cliente, cerrar
-  turno, etc.), tú todavía no puedes ejecutarla directamente: indícale con precisión en qué módulo de VIMDY
-  hacerlo (ej. "Ve a Inventario → Nuevo producto" o "Ve a Caja → Abrir turno"), y si el contexto ya tiene la
-  información que buscaba (ej. buscar un cliente que aparece en el top de clientes), dásela de una vez.
-`.trim();
-
 /**
  * CopilotService
  * ---------------------------------------------------------------------------
- * Capa de "Use Case": arma el contexto real del negocio (vía CopilotEngine),
- * construye el system prompt, y delega el envío a Claude en CopilotApiClient.
- * Es lo que la UI (CopilotPanel.tsx) llama directamente.
+ * Capa de aplicación que conserva la firma usada por CopilotPanel y CopilotPage.
+ * AiProvider se encarga de reconstruir el contexto actualizado, crear el
+ * System Prompt e invocar CopilotApiClient a través del transporte seguro.
+ *
+ * businessName y currency se mantienen en la firma pública por compatibilidad
+ * con la interfaz existente; el contexto financiero nuevo obtiene la moneda y
+ * la zona horaria desde la configuración empresarial del propio agregador.
  */
 export class CopilotService {
-  constructor(
-    private readonly engine: CopilotEngine,
-    private readonly apiClient: CopilotApiClient
-  ) {}
+  constructor(private readonly aiProvider: AiProvider) {}
 
   public async ask(
     question: string,
     history: CopilotMessage[],
-    businessName: string,
-    currency: string
+    _businessName: string,
+    _currency: string
   ): Promise<string> {
-    const snapshot = await this.engine.buildContextSnapshot(businessName, currency);
-    const contextBlock = snapshotToPrompt(snapshot);
-
-    const system = `${SYSTEM_INSTRUCTIONS}\n\n=== CONTEXTO DEL NEGOCIO (datos reales, actualizados ahora) ===\n${contextBlock}`;
-
-    const recentHistory =
-      history.length > MAX_HISTORY_MESSAGES ? history.slice(-MAX_HISTORY_MESSAGES) : history;
-
-    const fullHistory: CopilotMessage[] = [
-      ...recentHistory,
-      {
-        id: `local-${Date.now()}`,
-        role: "user",
-        content: question,
-        createdAt: new Date()
-      }
-    ];
-
-    return this.apiClient.sendMessage(system, fullHistory);
+    return this.aiProvider.ask(question, history);
   }
 }

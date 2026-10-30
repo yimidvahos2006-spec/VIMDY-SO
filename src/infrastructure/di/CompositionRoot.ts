@@ -63,12 +63,12 @@ import { InventoryService } from '../../application/services/InventoryService';
 import { CustomerService } from '../../application/services/CustomerService';
 import { KitchenService } from '../../application/services/KitchenService';
 import { CopilotService } from '../../application/services/CopilotService';
-import { CopilotEngine } from '../../core/engines/CopilotEngine';
 import { BusinessAnalyzer } from '../../core/engines/BusinessAnalyzer';
 import { QuestionRouter } from '../../core/engines/QuestionRouter';
 import { PatternLearningEngine } from '../../core/engines/PatternLearningEngine';
 import { CommandEngine } from '../../core/engines/CommandEngine';
 import { CopilotApiClient } from './CopilotApiClient';
+import { AiProvider } from '../../core/ia/aiProvider';
 import { logError } from "../logging/opsLogger";
 import { PendingKitchenOrderRepository } from "./repositories/PendingKitchenOrderRepository";
 import type { IInvoiceProvider } from "../../core/invoicing/interfaces/IInvoiceProvider";
@@ -160,7 +160,6 @@ let tableEngine: TableEngine | null = null;
 
 let businessAnalyzer: BusinessAnalyzer | null = null;
 let patternLearningEngine: PatternLearningEngine | null = null;
-let copilotEngine: CopilotEngine | null = null;
 let commandEngine: CommandEngine | null = null;
 let questionRouter: QuestionRouter | null = null;
 
@@ -419,11 +418,6 @@ function ensurePatternLearningEngine(): PatternLearningEngine {
   return patternLearningEngine;
 }
 
-function ensureCopilotEngine(): CopilotEngine {
-  if (!copilotEngine) copilotEngine = new CopilotEngine(ensureBusinessAnalyzer(), ensurePatternLearningEngine());
-  return copilotEngine;
-}
-
 function ensureCommandEngine(): CommandEngine {
   if (!commandEngine) commandEngine = new CommandEngine(ensureCustomerEngine());
   return commandEngine;
@@ -435,7 +429,12 @@ function ensureQuestionRouter(): QuestionRouter {
 }
 
 function ensureCopilotService(): CopilotService {
-  if (!copilotService) copilotService = new CopilotService(ensureCopilotEngine(), new CopilotApiClient());
+  if (!copilotService) {
+    const apiClient = new CopilotApiClient();
+    const aiProvider = new AiProvider(apiClient);
+    copilotService = new CopilotService(aiProvider);
+  }
+
   return copilotService;
 }
 
