@@ -1,11 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Bell, User, Sparkles, Settings, ChevronDown, X, CheckCheck } from "lucide-react";
 
 import { useAuth } from "../../context/AuthContext";
 import { useNotifications } from "../../../core/store/useNotifications";
 import { useCopilot } from "../../../core/store/useCopilot";
-import { copilotStore } from "../../../core/store/copilotStore";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { getCurrentBranchId, setCurrentBranchId, getBranches } from "../../../infrastructure/supabase/supabaseClient";
 import { useCashierShiftStatus } from "../../../hooks/useCashierShiftStatus";
@@ -36,7 +35,8 @@ const TYPE_COLOR: Record<string, string> = {
 export function VimdyCenter() {
   const { user, role, logout, businessId } = useAuth();
   const { notifications, unreadCount, markAsRead, markAllAsRead, remove } = useNotifications();
-  const { isOpen: copilotOpen, isLoading: copilotLoading } = useCopilot();
+  const { isLoading: copilotLoading } = useCopilot();
+  const onIaPage = useLocation().pathname === "/ia";
   const shiftOpen = useCashierShiftStatus();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -182,17 +182,17 @@ export function VimdyCenter() {
       <button
         onClick={() => {
           setOpen(false);
-          copilotStore.toggle();
+          navigate("/ia");
         }}
         className={`p-2.5 rounded-xl transition shadow-lg ${
-          copilotOpen
+          onIaPage
             ? "bg-slate-800 border border-slate-600 text-white"
             : "bg-gradient-to-br from-cyan-500 to-cyan-600 hover:scale-105 text-white"
         }`}
         aria-label="Copiloto VIMDY"
       >
-        {copilotOpen ? <X size={18} /> : <Sparkles size={18} />}
-        {copilotLoading && !copilotOpen && (
+        <Sparkles size={18} />
+        {copilotLoading && !onIaPage && (
           <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
         )}
       </button>

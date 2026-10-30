@@ -8,11 +8,7 @@ import { useSidebar } from "../../core/store/useSidebar";
 import { useMobileSidebar } from "../../core/store/useMobileSidebar";
 import { useAutoAlerts } from "../../hooks/useAutoAlerts";
 import { useDashboardSync } from "../../hooks/useDashboardSync";
-import { companyConfigStore } from "../../core/store/companyConfigStore";
 
-const CopilotPanel = lazy(() =>
-  import("../components/copilot/CopilotPanel").then((m) => ({ default: m.CopilotPanel }))
-);
 const SubscriptionWarningBanner = lazy(() =>
   import("../components/subscription/SubscriptionWarningBanner").then((m) => ({ default: m.SubscriptionWarningBanner }))
 );
@@ -53,12 +49,6 @@ export function VimdyAppLayout({ children }: Props) {
     <div className="min-h-screen relative">
       <VimdyAmbientBackground className="opacity-40" />
       <div className="relative z-10">
-
-        {companyConfigStore.get().enableAI && (
-          <LazySection>
-            <CopilotPanel />
-          </LazySection>
-        )}
 
         <VimdySidebar />
 
