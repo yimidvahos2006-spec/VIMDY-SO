@@ -77,8 +77,21 @@ describe("ajustes del negocio en la base de datos", () => {
     const back = readBusinessSettings(row.settings);
     expect(back.business.nit).toBe("900.123");
     expect(back.business.city).toBe("La Unión");
+    expect(back.business.owner).toBe("Yimid");
     expect(back.config).not.toHaveProperty("allowNegativeStock");
     expect(back.config.dailySalesGoal).toBe(500000);
+  });
+
+  it("el propietario se guarda en settings y se recupera al leer", () => {
+    const row = buildBusinessSettingsUpdate({ ...business, owner: "  Ana Pérez  " }, config);
+    expect(row.settings.owner).toBe("Ana Pérez");
+    expect(readBusinessSettings(row.settings).business.owner).toBe("Ana Pérez");
+  });
+
+  it("un propietario vacío guardado no pisa el que llegó con la sesión", () => {
+    const row = buildBusinessSettingsUpdate({ ...business, owner: "" }, config);
+    expect(row.settings.owner).toBe("");
+    expect(readBusinessSettings(row.settings).business).not.toHaveProperty("owner");
   });
 
   it("leer algo vacío o dañado no pisa los valores actuales", () => {

@@ -45,9 +45,9 @@ import {
   getCurrencyName
 } from "../../../core/config/globalization";
 import { SubscriptionSettingsSection } from "../subscription/SubscriptionSettingsSection";
-import { SubscriptionCountdownBadge } from "../subscription/SubscriptionCountdownBadge";
 import { VimdyButton } from "../ui/VimdyButton";
 import { DailyReportSettingsCard } from "./DailyReportSettingsCard";
+import { BusinessProfileTab, type BusinessSaveResult } from "./BusinessProfileTab";
 import { OperationSettings } from "./OperationSettings";
 import { useOperationConfig } from "../../../core/store/useOperationConfig";
 
@@ -192,7 +192,6 @@ export function SettingsDashboard() {
       editable: Boolean(saved)
     };
   });
-  const [businessSaved, setBusinessSaved] = useState(false);
   const [configDraft, setConfigDraft] = useState<CompanyConfig>(config);
   const [configSaved, setConfigSaved] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -222,11 +221,14 @@ export function SettingsDashboard() {
 
   // Todos los botones "Guardar" guardan TODO junto en la base de datos
   // (negocio + preferencias), para que no queden mitades guardadas.
-  async function handleSaveAll() {
-    if (saving) return;
+  async function handleSaveAll(): Promise<BusinessSaveResult> {
+    if (saving) return { ok: false, message: "Ya se están guardando los cambios." };
     if (whatsappMissing) {
       setTab("negocio");
-      return;
+      return {
+        ok: false,
+        message: "Falta el WhatsApp de pedidos: es obligatorio porque vendes por domicilio."
+      };
     }
     setSaveError(null);
     // El país vive en dos lugares (datos del negocio y globalización): el que
@@ -241,14 +243,13 @@ export function SettingsDashboard() {
     setSaving(true);
     try {
       await persistAll(nextBusiness, nextConfig);
-      setBusinessSaved(true);
       setConfigSaved(true);
-      setTimeout(() => {
-        setBusinessSaved(false);
-        setConfigSaved(false);
-      }, 2000);
+      setTimeout(() => setConfigSaved(false), 2000);
+      return { ok: true };
     } catch (e: any) {
-      setSaveError(translateBusinessError(e, "No se pudieron guardar los cambios."));
+      const message = translateBusinessError(e, "No se pudieron guardar los cambios.");
+      setSaveError(message);
+      return { ok: false, message };
     } finally {
       setSaving(false);
     }
@@ -260,7 +261,6 @@ export function SettingsDashboard() {
     setConfigDraft(config);
   }
 
-  const handleSaveBusiness = handleSaveAll;
   const handleSaveConfig = handleSaveAll;
 
   /**
@@ -352,120 +352,15 @@ export function SettingsDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className={tab === "negocio" ? "contents" : "hidden"}>
         {/* Datos del negocio */}
-        <SectionCard
-          icon={<Building2 size={18} className="text-cyan-400" />}
-          title={t("settings.business.title")}
-          description={t("settings.business.description")}
-        >
-          {/* VIMDY — FASE 7, PASO 3: contador de días restantes, también visible en Perfil del negocio. */}
-          <div className="mb-4">
-            <SubscriptionCountdownBadge compact />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2">
-              <Field label="Nombre del negocio">
-                <input
-                  className={inputClass}
-                  value={businessDraft.name}
-                  onChange={(e) => setBusinessDraft({ ...businessDraft, name: e.target.value })}
-                />
-              </Field>
-            </div>
-            <Field label="NIT">
-              <input
-                className={inputClass}
-                value={businessDraft.nit}
-                onChange={(e) => setBusinessDraft({ ...businessDraft, nit: e.target.value })}
-              />
-            </Field>
-            <Field label="Propietario">
-              <input
-                className={inputClass}
-                value={businessDraft.owner}
-                onChange={(e) => setBusinessDraft({ ...businessDraft, owner: e.target.value })}
-              />
-            </Field>
-            <Field label="Teléfono">
-              <input
-                className={inputClass}
-                value={businessDraft.phone}
-                onChange={(e) => setBusinessDraft({ ...businessDraft, phone: e.target.value })}
-              />
-            </Field>
-            <Field label="Correo">
-              <input
-                className={inputClass}
-                value={businessDraft.email}
-                onChange={(e) => setBusinessDraft({ ...businessDraft, email: e.target.value })}
-              />
-            </Field>
-            <div className="col-span-2">
-              <Field label="Dirección">
-                <input
-                  className={inputClass}
-                  value={businessDraft.address}
-                  onChange={(e) => setBusinessDraft({ ...businessDraft, address: e.target.value })}
-                />
-              </Field>
-            </div>
-            <Field label="Ciudad">
-              <input
-                className={inputClass}
-                value={businessDraft.city}
-                onChange={(e) => setBusinessDraft({ ...businessDraft, city: e.target.value })}
-              />
-            </Field>
-            <Field label="País">
-              <select
-                className={inputClass}
-                value={businessDraft.country}
-                onChange={(e) => handleCountryChange(e.target.value)}
-              >
-                <option value="">Selecciona un país</option>
-                {AVAILABLE_COUNTRIES.map((c) => (
-                  <option key={c.code} value={c.code}>
-                    {getCountryName(c.code, language)}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <div className="col-span-2">
-              <Field
-                label={
-                  whatsappRequired
-                    ? "WhatsApp de pedidos (obligatorio — vendes por domicilio)"
-                    : "WhatsApp de pedidos (opcional)"
-                }
-              >
-                <input
-                  className={`${inputClass} ${whatsappMissing ? "border-red-500 focus:border-red-500" : ""}`}
-                  placeholder="Ej: +57 300 1234567"
-                  value={businessDraft.whatsappOrders ?? ""}
-                  onChange={(e) => setBusinessDraft({ ...businessDraft, whatsappOrders: e.target.value })}
-                />
-              </Field>
-              <p className={`text-xs mt-1 ${whatsappMissing ? "text-red-400" : "text-slate-500"}`}>
-                {whatsappMissing
-                  ? "Falta el número — es donde te van a escribir los domicilios que escaneen el QR del ticket."
-                  : "Número donde te llegan los pedidos por WhatsApp. Sale como QR en el ticket si tu plantilla lo incluye."}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between mt-4">
-            <SavedToast show={businessSaved} label={t("settings.saved")} />
-            <VimdyButton
-              onClick={handleSaveBusiness}
-              disabled={whatsappMissing}
-              variant="primary"
-              size="sm"
-              className="ml-auto"
-            >
-              {t("settings.save.business")}
-            </VimdyButton>
-          </div>
-        </SectionCard>
+        <BusinessProfileTab
+          draft={businessDraft}
+          onDraftChange={setBusinessDraft}
+          onCountryChange={handleCountryChange}
+          whatsappRequired={whatsappRequired}
+          hasUnsavedChanges={hasUnsaved}
+          saving={saving}
+          onSave={handleSaveAll}
+        />
 
         {/* Suscripción — VIMDY FASE 7, PASO 8 */}
         <SubscriptionSettingsSection />

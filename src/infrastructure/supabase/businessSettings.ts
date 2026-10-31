@@ -8,6 +8,7 @@ import type { CompanyConfig } from "../../core/store/companyConfigStore";
  */
 export interface BusinessSettingsBlob {
   nit?: string;
+  owner?: string;
   phone?: string;
   email?: string;
   address?: string;
@@ -60,6 +61,7 @@ export function buildBusinessSettingsUpdate(
     tax_rate: tax,
     settings: {
       nit: text(business.nit, 40) ?? "",
+      owner: text(business.owner, 120) ?? "",
       phone: text(business.phone, 40) ?? "",
       email: text(business.email, 120) ?? "",
       address: text(business.address, 200) ?? "",
@@ -92,6 +94,9 @@ export function readBusinessSettings(blob: unknown): {
 
   const nit = text(s.nit, 40);
   if (nit !== undefined) business.nit = nit;
+  // El propietario solo pisa al que llegó con la sesión cuando hay un valor guardado.
+  const owner = text(s.owner, 120);
+  if (owner) business.owner = owner;
   const phone = text(s.phone, 40);
   if (phone !== undefined) business.phone = phone;
   const email = text(s.email, 120);
