@@ -141,7 +141,7 @@ export function NotificationCenter() {
 
   return (
     <div className="min-h-full w-full bg-black">
-      <div className="mx-auto w-full max-w-6xl px-6 py-8 lg:px-8 lg:py-10">
+      <div className="mx-auto w-full max-w-[1800px] px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
         {/* Cabecera: título a la izquierda, acciones a la derecha */}
         <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-4">
@@ -207,7 +207,7 @@ export function NotificationCenter() {
         <div
           role="tablist"
           aria-label="Filtrar por categoría"
-          className="-mx-6 mb-5 flex gap-2 overflow-x-auto px-6 pb-1 [scrollbar-width:none] lg:mx-0 lg:flex-wrap lg:overflow-visible lg:px-0 [&::-webkit-scrollbar]:hidden"
+          className="-mx-4 mb-5 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:-mx-6 sm:px-6 lg:mx-0 lg:flex-wrap lg:overflow-visible lg:px-0 [&::-webkit-scrollbar]:hidden"
         >
           <TabButton
             active={tab === "TODAS"}
