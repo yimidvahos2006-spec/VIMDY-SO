@@ -140,17 +140,19 @@ export function NotificationCenter() {
   }
 
   return (
-    <div className="min-h-screen px-6 py-8">
-      <div className="max-w-4xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-vimdy-surface border border-slate-800 flex items-center justify-center">
-              <Bell className="text-cyan-400" size={20} />
+    <div className="min-h-full w-full bg-black">
+      <div className="mx-auto w-full max-w-6xl px-6 py-8 lg:px-8 lg:py-10">
+        {/* Cabecera: título a la izquierda, acciones a la derecha */}
+        <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-vimdy-border bg-vimdy-surface">
+              <Bell className="text-cyan-400" size={22} />
             </div>
-            <div>
-              <h1 className="text-slate-100 text-xl font-bold">Centro de notificaciones</h1>
-              <p className="text-slate-500 text-sm">
+            <div className="min-w-0">
+              <h1 className="truncate text-2xl font-bold leading-tight tracking-tight text-zinc-50">
+                Centro de notificaciones
+              </h1>
+              <p className="text-sm text-zinc-500">
                 {unreadCount > 0 ? `${unreadCount} sin leer` : "Todo al día"}
               </p>
             </div>
@@ -160,55 +162,60 @@ export function NotificationCenter() {
             {unreadCount > 0 && (
               <button
                 onClick={markAllAsRead}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-800 bg-vimdy-surface text-slate-300 hover:text-cyan-400 hover:border-cyan-500/40 text-sm font-medium transition"
+                className="flex h-10 items-center gap-2 rounded-xl border border-vimdy-border bg-vimdy-surface px-4 text-sm font-medium text-zinc-300 transition hover:border-cyan-500/40 hover:text-cyan-400"
               >
-                <CheckCheck size={15} />
+                <CheckCheck size={16} />
                 Marcar todas
               </button>
             )}
             {notifications.length > 0 && (
               <button
                 onClick={clear}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-800 bg-vimdy-surface text-slate-400 hover:text-red-400 hover:border-red-500/40 text-sm font-medium transition"
+                className="flex h-10 items-center gap-2 rounded-xl border border-vimdy-border bg-vimdy-surface px-4 text-sm font-medium text-zinc-400 transition hover:border-red-500/40 hover:text-red-400"
               >
-                <Trash2 size={15} />
+                <Trash2 size={16} />
                 Vaciar
               </button>
             )}
           </div>
-        </div>
+        </header>
 
-        {/* Nuevo recordatorio */}
+        {/* Nuevo recordatorio: misma altura que los botones de arriba */}
         <form
           onSubmit={handleAddReminder}
-          className="mb-6 flex items-center gap-2 bg-slate-900/70 border border-slate-800 rounded-2xl p-2 pl-4"
+          className="mb-6 flex items-center gap-3 rounded-2xl border border-vimdy-border bg-vimdy-surface p-2 pl-4 transition focus-within:border-zinc-600"
         >
-          <StickyNote size={16} className="text-yellow-400 shrink-0" />
+          <StickyNote size={17} className="shrink-0 text-yellow-400" />
           <input
             value={reminderText}
             onChange={(e) => setReminderText(e.target.value)}
             placeholder="Agregar un recordatorio (ej. Llamar al proveedor de gaseosas)"
-            className="flex-1 bg-transparent text-sm text-slate-200 placeholder:text-slate-500 outline-none"
+            aria-label="Nuevo recordatorio"
+            className="h-10 min-w-0 flex-1 bg-transparent text-sm text-zinc-100 outline-none placeholder:text-zinc-600"
           />
           <button
             type="submit"
             disabled={!reminderText.trim()}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 hover:bg-cyan-500/25 text-sm font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex h-10 shrink-0 items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 text-sm font-semibold text-cyan-300 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            <Plus size={15} />
+            <Plus size={16} />
             Agregar
           </button>
         </form>
 
-        {/* Tabs por categoría */}
-        <div className="flex flex-wrap gap-2 mb-5">
+        {/* Filtros por categoría: una fila con scroll en móvil, envuelve en escritorio */}
+        <div
+          role="tablist"
+          aria-label="Filtrar por categoría"
+          className="-mx-6 mb-5 flex gap-2 overflow-x-auto px-6 pb-1 [scrollbar-width:none] lg:mx-0 lg:flex-wrap lg:overflow-visible lg:px-0 [&::-webkit-scrollbar]:hidden"
+        >
           <TabButton
             active={tab === "TODAS"}
             label="Todas"
             count={notifications.length}
             unread={unreadCount}
             icon={Inbox}
-            accent="text-slate-200"
+            accent="text-zinc-200"
             onClick={() => setTab("TODAS")}
           />
           {categoriesToShow.map((cat) => {
@@ -228,13 +235,13 @@ export function NotificationCenter() {
           })}
         </div>
 
-        {/* Lista */}
-        <div className="bg-slate-900/60 border border-slate-800 rounded-2xl overflow-hidden">
+        {/* Lista de alertas */}
+        <section className="overflow-hidden rounded-2xl border border-vimdy-border bg-vimdy-surface">
           {visible.length === 0 ? (
-            <div className="px-6 py-16 text-center">
-              <Inbox className="mx-auto mb-3 text-slate-700" size={32} />
-              <p className="text-slate-400 text-sm font-medium">Sin notificaciones aquí</p>
-              <p className="text-slate-600 text-xs mt-1">
+            <div className="px-6 py-20 text-center">
+              <Inbox className="mx-auto mb-3 text-zinc-700" size={34} />
+              <p className="text-sm font-medium text-zinc-300">Sin notificaciones aquí</p>
+              <p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-zinc-600">
                 {tab === "TODAS"
                   ? "Cuando haya stock bajo, pedidos retrasados, metas cumplidas o recomendaciones de la IA, aparecerán aquí."
                   : "Esta categoría está vacía por ahora."}
@@ -248,28 +255,28 @@ export function NotificationCenter() {
                 <div
                   key={n.id}
                   onClick={() => markAsRead(n.id)}
-                  className={`group flex items-start gap-3 px-5 py-4 border-b border-slate-800/70 last:border-b-0 cursor-pointer hover:bg-slate-800/40 transition ${
+                  className={`group flex cursor-pointer items-start gap-4 border-b border-vimdy-border px-5 py-4 transition last:border-b-0 hover:bg-white/[0.03] sm:px-6 ${
                     n.read ? "opacity-55" : ""
                   }`}
                 >
                   <div
-                    className={`w-9 h-9 rounded-xl border flex items-center justify-center shrink-0 ${meta.badge}`}
+                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${meta.badge}`}
                   >
-                    <Icon size={16} className={meta.accent} />
+                    <Icon size={17} className={meta.accent} />
                   </div>
 
-                  <div className="flex-1 min-w-0">
+                  <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span
-                        className={`text-xs font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border ${meta.badge}`}
+                        className={`rounded border px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wide ${meta.badge}`}
                       >
                         {meta.label}
                       </span>
-                      {!n.read && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0" />}
+                      {!n.read && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-400" />}
+                      <span className="ml-auto shrink-0 text-xs text-zinc-600">{timeAgo(n.date)}</span>
                     </div>
-                    <p className="text-slate-100 text-sm font-semibold mt-1">{n.title}</p>
-                    <p className="text-slate-300 text-sm">{n.message}</p>
-                    <p className="text-slate-500 text-xs mt-1">{timeAgo(n.date)}</p>
+                    <p className="mt-1.5 text-sm font-semibold text-zinc-100">{n.title}</p>
+                    <p className="text-sm leading-relaxed text-zinc-400">{n.message}</p>
                   </div>
 
                   <button
@@ -277,16 +284,16 @@ export function NotificationCenter() {
                       e.stopPropagation();
                       remove(n.id);
                     }}
-                    className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-slate-300 transition shrink-0"
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-600 transition hover:bg-zinc-800 hover:text-zinc-200 focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
                     aria-label="Descartar"
                   >
-                    <X size={15} />
+                    <X size={16} />
                   </button>
                 </div>
               );
             })
           )}
-        </div>
+        </section>
       </div>
     </div>
   );
@@ -304,16 +311,18 @@ function TabButton(props: {
   const { active, label, count, unread, icon: Icon, accent, onClick } = props;
   return (
     <button
+      role="tab"
+      aria-selected={active}
       onClick={onClick}
-      className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-sm font-medium transition ${
+      className={`flex h-10 shrink-0 items-center gap-2 whitespace-nowrap rounded-xl border px-3.5 text-sm font-medium transition ${
         active
-          ? "bg-slate-800 border-slate-700 text-slate-100"
-          : "bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700"
+          ? "border-zinc-600 bg-zinc-900 text-zinc-50"
+          : "border-vimdy-border bg-vimdy-surface text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
       }`}
     >
-      <Icon size={15} className={active ? accent : "text-slate-500"} />
+      <Icon size={15} className={active ? accent : "text-zinc-500"} />
       {label}
-      <span className="text-xs text-slate-500">{count}</span>
+      <span className="text-xs text-zinc-500">{count}</span>
       {unread > 0 && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />}
     </button>
   );
