@@ -180,25 +180,26 @@ export function NotificationCenter() {
           </div>
         </header>
 
-        {/* Nuevo recordatorio: misma altura que los botones de arriba */}
+        {/* Nuevo recordatorio: una sola pieza (caja + botón) con bordes y fondo del sistema */}
         <form
           onSubmit={handleAddReminder}
-          className="mb-6 flex items-center gap-3 rounded-2xl border border-vimdy-border bg-vimdy-surface p-2 pl-4 transition focus-within:border-zinc-600"
+          className="mb-5 flex h-14 items-center gap-2 rounded-2xl border border-vimdy-border bg-vimdy-surface p-1.5 pl-4 transition focus-within:border-zinc-600"
         >
-          <StickyNote size={17} className="shrink-0 text-yellow-400" />
+          <StickyNote size={17} className="shrink-0 text-zinc-500" aria-hidden="true" />
+          {/* Los `!` anulan el borde/fondo global que el CSS base le pone a todo <input> */}
           <input
             value={reminderText}
             onChange={(e) => setReminderText(e.target.value)}
             placeholder="Agregar un recordatorio (ej. Llamar al proveedor de gaseosas)"
             aria-label="Nuevo recordatorio"
-            className="h-10 min-w-0 flex-1 bg-transparent text-sm text-zinc-100 outline-none placeholder:text-zinc-600"
+            className="h-full min-w-0 flex-1 !rounded-none !border-0 !bg-transparent px-1 text-sm !text-zinc-100 shadow-none placeholder:text-zinc-600 focus-visible:!outline-none"
           />
           <button
             type="submit"
             disabled={!reminderText.trim()}
-            className="flex h-10 shrink-0 items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 text-sm font-semibold text-cyan-300 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex h-full shrink-0 items-center gap-2 rounded-xl bg-white px-5 text-sm font-semibold text-black transition hover:bg-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 disabled:cursor-not-allowed disabled:bg-zinc-900 disabled:text-zinc-600 disabled:hover:bg-zinc-900"
           >
-            <Plus size={16} />
+            <Plus size={16} strokeWidth={2.4} aria-hidden="true" />
             Agregar
           </button>
         </form>
@@ -207,7 +208,7 @@ export function NotificationCenter() {
         <div
           role="tablist"
           aria-label="Filtrar por categoría"
-          className="-mx-4 mb-5 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:-mx-6 sm:px-6 lg:mx-0 lg:flex-wrap lg:overflow-visible lg:px-0 [&::-webkit-scrollbar]:hidden"
+          className="-mx-4 mb-6 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none] sm:-mx-6 sm:px-6 lg:mx-0 lg:flex-wrap lg:overflow-visible lg:px-0 [&::-webkit-scrollbar]:hidden"
         >
           <TabButton
             active={tab === "TODAS"}
@@ -314,16 +315,16 @@ function TabButton(props: {
       role="tab"
       aria-selected={active}
       onClick={onClick}
-      className={`flex h-10 shrink-0 items-center gap-2 whitespace-nowrap rounded-xl border px-3.5 text-sm font-medium transition ${
+      className={`flex h-10 shrink-0 items-center gap-2 whitespace-nowrap rounded-full border px-4 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-600 ${
         active
           ? "border-zinc-600 bg-zinc-900 text-zinc-50"
-          : "border-vimdy-border bg-vimdy-surface text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+          : "border-vimdy-border bg-vimdy-surface text-zinc-400 hover:border-zinc-700 hover:bg-zinc-950 hover:text-zinc-200"
       }`}
     >
-      <Icon size={15} className={active ? accent : "text-zinc-500"} />
+      <Icon size={15} className={active ? accent : "text-zinc-500"} aria-hidden="true" />
       {label}
-      <span className="text-xs text-zinc-500">{count}</span>
-      {unread > 0 && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />}
+      <span className={`text-xs tabular-nums ${active ? "text-zinc-400" : "text-zinc-600"}`}>{count}</span>
+      {unread > 0 && <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" aria-label="Sin leer" />}
     </button>
   );
 }
