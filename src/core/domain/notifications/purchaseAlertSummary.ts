@@ -1,4 +1,5 @@
 import type { PurchaseRecommendation } from "../../ia/InventoryAI";
+import { countItemTypes, describeItemCounts } from "../../utils/stockItemWording";
 
 /**
  * Consolidación de alertas de stock
@@ -74,9 +75,11 @@ export function buildPurchaseSummary(
   if (urgent.length === 1) {
     const [only] = urgent;
     const status = only.priority === "CRITICAL" ? "🔴 Agotado" : "🟡 Stock bajo";
+    // Un insumo se nombra como tal; un producto conserva el texto de siempre.
+    const subject = only.isIngredient === true ? "del insumo" : "de";
     return {
       key: PURCHASE_SUMMARY_KEY,
-      message: `Reponer stock de "${only.productName}" (${status}).`
+      message: `Reponer stock ${subject} "${only.productName}" (${status}).`
     };
   }
 
@@ -88,7 +91,8 @@ export function buildPurchaseSummary(
   return {
     key: PURCHASE_SUMMARY_KEY,
     message:
-      `Reponer stock de ${urgent.length} productos: ${joinNames(visible, urgent.length)} ` +
+      `Reponer stock de ${describeItemCounts(countItemTypes(urgent.map((rec) => ({ isIngredient: rec.isIngredient }))), "plain")}: ` +
+      `${joinNames(visible, urgent.length)} ` +
       `(${parts.join(", ")}).`
   };
 }

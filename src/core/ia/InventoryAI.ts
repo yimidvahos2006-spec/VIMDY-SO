@@ -15,6 +15,8 @@ export interface PurchaseRecommendation {
   currentStock: number;
   recommendedPurchase: number;
   priority: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  /** true si el ítem es un insumo (materia prima), no un producto vendible: permite nombrarlo con precisión en los avisos. */
+  isIngredient?: boolean;
   /** true con stock enmascarado (conteo a ciegas): `currentStock` y `recommendedPurchase` vienen en 0 y no son reales. */
   stockMasked?: boolean;
 }
@@ -158,6 +160,7 @@ export class InventoryAI {
           currentStock: masked ? 0 : product.stock,
           recommendedPurchase: masked ? 0 : this.calculatePurchaseQuantity(product),
           priority: this.calculatePriority(product),
+          ...(product.isIngredient === true ? { isIngredient: true } : {}),
           ...(masked ? { stockMasked: true } : {})
         };
       })

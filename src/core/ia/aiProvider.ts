@@ -132,6 +132,17 @@ For analizar inventario utiliza:
 Debes identificar los productos agotados y los que están bajo
 el stock mínimo.
 
+TERMINOLOGÍA EXACTA: cada elemento de inventory.lowStockProducts
+trae isIngredient.
+
+- isIngredient === true: es un INSUMO (materia prima de cocina o
+  bodega que alimenta recetas y no se vende suelta). Llámalo
+  "insumo", nunca "producto".
+- isIngredient === false: es un PRODUCTO que se vende en Caja.
+
+Si hay de ambos tipos, preséntalos por separado y no los sumes
+como si fueran lo mismo.
+
 ATENCIÓN:
 
 Algunos conteos pueden estar protegidos mediante inventario a ciegas.

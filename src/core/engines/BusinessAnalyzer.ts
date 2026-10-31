@@ -12,6 +12,7 @@ import { computeShiftCashTotals } from "../caja/cashExpectedRule";
 import { CustomerEngine } from "./CustomerEngine";
 import { AuditEngine } from "./AuditEngine";
 import { BusinessSnapshot, SmartAlert } from "../types/CopilotTypes";
+import { countItemTypes, describeItemCounts, type ItemTypeCounts } from "../utils/stockItemWording";
 import { AIInsightsSnapshot } from "../types/AIInsightsTypes";
 import { SalesAI } from "../ia/SalesAI";
 import { InventoryAI } from "../ia/InventoryAI";
@@ -851,6 +852,8 @@ export class BusinessAnalyzer {
     const baseAlerts = this.generateSmartAlerts({
       outOfStockCount,
       lowStockCount: lowStock.length,
+      outOfStockByType: countItemTypes(outOfStockProductsList),
+      lowStockByType: countItemTypes(lowStock),
       salesGrowthPercent,
       todaySalesCount: todaySalesList.length,
       delayedOrdersCount: delayedOrders.length,
@@ -886,15 +889,19 @@ export class BusinessAnalyzer {
               name: product.name,
               stock: 0,
               minStock: 0,
+              ...(product.isIngredient === true ? { isIngredient: true } : {}),
               stockMasked: true,
               stockStatus: maskedStockStatus(product)
             }
           : {
               name: product.name,
               stock: product.stock,
-              minStock: product.minStock
+              minStock: product.minStock,
+              ...(product.isIngredient === true ? { isIngredient: true } : {})
             }
       ),
+      lowStockByType: countItemTypes(lowStock),
+      outOfStockByType: countItemTypes(outOfStockProductsList),
       stockMasked: catalogSnapshot.some((product) => isStockMasked(product)),
       productionAlerts,
       topProfitProducts,
@@ -1768,6 +1775,9 @@ export class BusinessAnalyzer {
   private generateSmartAlerts(input: {
     outOfStockCount: number;
     lowStockCount: number;
+    /** Mismo total que arriba, separado en productos vendibles e insumos. */
+    outOfStockByType: ItemTypeCounts;
+    lowStockByType: ItemTypeCounts;
     salesGrowthPercent: number;
     todaySalesCount: number;
     delayedOrdersCount: number;
@@ -1783,7 +1793,7 @@ export class BusinessAnalyzer {
         level: "RED",
         icon: "🔴",
         message:
-          `Tienes ${input.outOfStockCount} producto(s) agotado(s). Repón cuanto antes para no perder ventas.`
+          `Tienes ${describeItemCounts(input.outOfStockByType)} agotado(s). Repón cuanto antes para no perder ventas.`
       });
     }
 
@@ -1792,7 +1802,7 @@ export class BusinessAnalyzer {
         level: "RED",
         icon: "🔴",
         message:
-          `Tienes ${input.lowStockCount} producto(s) con stock bajo. Revísalos antes de que se agoten.`
+          `Tienes ${describeItemCounts(input.lowStockByType)} con stock bajo. Revísalos antes de que se agoten.`
       });
     }
 

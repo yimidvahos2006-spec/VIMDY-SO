@@ -1,5 +1,7 @@
 import { Product } from "../entities/Entities";
 import { isStockMasked, maskedStatusText, maskedStockStatus } from "../utils/stockMask";
+import { isInsumoItem } from "../utils/stockItemWording";
+import { formatInsumoAmount } from "../utils/insumoDisplay";
 
 export class AIEngine {
 
@@ -21,14 +23,28 @@ export class AIEngine {
     const recommendations = lowStockProducts.flatMap((product): string[] => {
 
       // Conteo a ciegas: `stock` es un valor de banda, no la cantidad real. Solo el estado.
+      const insumo = isInsumoItem(product);
+
       if (isStockMasked(product)) {
-        return [`Reponer "${product.name}" (${maskedStatusText(maskedStockStatus(product))}).`];
+        const subject = insumo ? `el insumo "${product.name}"` : `"${product.name}"`;
+        return [`Reponer ${subject} (${maskedStatusText(maskedStockStatus(product))}).`];
       }
 
       // Sin stock mínimo definido y sin stock negativo no hay nada que
       // comprar: se omite en vez de mostrar "Comprar 0 unidades".
       if (!(product.minStock > 0) && !(product.stock < 0)) {
         return [];
+      }
+
+      // Insumo (materia prima): se compra en su propia unidad (kg, litros...) y
+      // con su cantidad exacta, no redondeada a unidades enteras.
+      if (insumo) {
+        const diff = Math.round((product.minStock - product.stock) * 1000) / 1000;
+        const faltanteInsumo = diff > 0 ? diff : 1;
+        return [
+          `Comprar ${formatInsumoAmount(faltanteInsumo, product.unit)} del insumo "${product.name}". ` +
+          `Stock actual: ${formatInsumoAmount(product.stock, product.unit)}.`
+        ];
       }
 
       const faltantes = Math.max(

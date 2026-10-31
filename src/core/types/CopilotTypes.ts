@@ -100,6 +100,8 @@ export interface CopilotLowStockProduct {
   readonly name: string;
   readonly stock: number;
   readonly minStock: number;
+  /** true si es un insumo (materia prima de cocina/bodega), no un producto vendible: el Copiloto lo nombra como "insumo". */
+  readonly isIngredient?: boolean;
   /** true con stock enmascarado: `stock` y `minStock` vienen en 0 y solo vale `stockStatus`. */
   readonly stockMasked?: boolean;
   readonly stockStatus?: "AVAILABLE" | "LOW" | "OUT";
@@ -256,6 +258,10 @@ export interface CopilotContextSnapshot {
   readonly criticalAlertsCount: number;
   readonly kitchenPendingCount: number;
   readonly outOfStockCount: number;
+  /** Mismo total de agotados, separado en productos vendibles e insumos (para hablar con la terminología exacta). */
+  readonly outOfStockByType?: { readonly products: number; readonly insumos: number };
+  /** Total real de productos/insumos con stock bajo (lowStockProducts solo trae los 10 primeros). */
+  readonly lowStockByType?: { readonly products: number; readonly insumos: number };
   /** true si el servidor entrega el stock enmascarado a esta persona (conteo a ciegas abierto). */
   readonly stockMasked?: boolean;
   readonly smartAlerts: SmartAlert[];

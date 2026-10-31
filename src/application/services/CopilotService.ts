@@ -1,6 +1,7 @@
 import type { CopilotContextSnapshot, CopilotMessage } from "../../core/types/CopilotTypes";
 import { formatMoney } from "../../core/utils/formatMoney";
 import { maskedStatusText } from "../../core/utils/stockMask";
+import { describeItemCounts, splitByItemType } from "../../core/utils/stockItemWording";
 import { AiProvider } from "../../core/ia/aiProvider";
 
 /**
@@ -53,15 +54,28 @@ export function snapshotToPrompt(snapshot: CopilotContextSnapshot): string {
     );
   }
   if (snapshot.lowStockProducts.length === 0) {
-    lines.push("No hay productos con inventario bajo en este momento.");
+    lines.push("No hay productos ni insumos con inventario bajo en este momento.");
   } else {
-    snapshot.lowStockProducts.forEach((product) => {
+    const { products, insumos } = splitByItemType(snapshot.lowStockProducts);
+    const lineOf = (product: (typeof snapshot.lowStockProducts)[number]) =>
+      product.stockMasked
+        ? `- ${product.name}: ${maskedStatusText(product.stockStatus ?? "LOW")}`
+        : `- ${product.name}: stock actual ${product.stock}, mínimo ${product.minStock}`;
+
+    if (insumos.length === 0) {
+      products.forEach((product) => lines.push(lineOf(product)));
+    } else {
+      // Terminología exacta: productos = lo que se vende en Caja; insumos = materia prima.
       lines.push(
-        product.stockMasked
-          ? `- ${product.name}: ${maskedStatusText(product.stockStatus ?? "LOW")}`
-          : `- ${product.name}: stock actual ${product.stock}, mínimo ${product.minStock}`
+        "TERMINOLOGÍA: llama \"productos\" a lo que se vende en Caja e \"insumos\" a la materia prima de cocina/bodega (no se vende suelta). No los mezcles en tus respuestas."
       );
-    });
+      if (products.length > 0) {
+        lines.push("Productos (se venden en Caja):");
+        products.forEach((product) => lines.push(lineOf(product)));
+      }
+      lines.push("Insumos (materia prima de cocina/bodega):");
+      insumos.forEach((product) => lines.push(lineOf(product)));
+    }
   }
 
   lines.push("");
@@ -204,7 +218,11 @@ export function snapshotToPrompt(snapshot: CopilotContextSnapshot): string {
   lines.push("");
   lines.push("=== OPERACIÓN ===");
   lines.push(`Alertas críticas activas: ${snapshot.criticalAlertsCount}`);
-  lines.push(`Productos agotados: ${snapshot.outOfStockCount}`);
+  lines.push(
+    snapshot.outOfStockByType && snapshot.outOfStockByType.insumos > 0
+      ? `Agotados: ${describeItemCounts(snapshot.outOfStockByType, "plain")}`
+      : `Productos agotados: ${snapshot.outOfStockCount}`
+  );
   lines.push(`Comandas de cocina pendientes: ${snapshot.kitchenPendingCount}`);
   lines.push(`Ticket promedio de hoy: ${formatMoney(snapshot.averageTicketToday, snapshot.currency)}`);
   lines.push(`Salud del negocio: ${snapshot.healthScore}/100 — ${snapshot.healthMessage}`);

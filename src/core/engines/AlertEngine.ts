@@ -1,4 +1,5 @@
 import { Product, Alert } from '../entities/Entities';
+import { isInsumoItem } from '../utils/stockItemWording';
 
 export class AlertEngine {
   public checkStockAlerts(products: Product[]): Alert[] {
@@ -15,17 +16,20 @@ export class AlertEngine {
         continue;
       }
 
+      // Un insumo (materia prima) se nombra como tal; un producto conserva su título.
+      const label = isInsumoItem(product) ? `Insumo ${product.name}` : product.name;
+
       if (product.stock <= 0) {
         alerts.push({
           id: crypto.randomUUID(),
           priority: 'CRITICAL',
-          title: `${product.name} agotado`
+          title: `${label} agotado`
         });
       } else if (product.stock <= product.minStock) {
         alerts.push({
           id: crypto.randomUUID(),
           priority: 'HIGH',
-          title: `${product.name} con stock bajo`
+          title: `${label} con stock bajo`
         });
       }
     }

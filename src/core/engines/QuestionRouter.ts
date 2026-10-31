@@ -2,6 +2,7 @@ import { BusinessAnalyzer } from "./BusinessAnalyzer";
 import { BusinessSnapshot } from "../types/CopilotTypes";
 import { formatMoney } from "../utils/formatMoney";
 import { maskedStatusText } from "../utils/stockMask";
+import { countItemTypes, describeItemCounts, splitByItemType } from "../utils/stockItemWording";
 
 /**
  * QuestionRouter
@@ -84,17 +85,25 @@ const HANDLERS: QuestionHandler[] = [
   // ¿Qué productos se están agotando / stock bajo?
   {
     name: "STOCK_BAJO",
-    test: (t) => /productos? (se estan |estan )?agotando|inventario bajo|stock bajo|poco stock/.test(t),
+    test: (t) => /(productos?|insumos?) (se estan |estan )?(agotando|acabando)|inventario bajo|stock bajo|poco stock/.test(t),
     build: (s) => {
-      if (s.lowStockProducts.length === 0) return "No hay productos con inventario bajo en este momento.";
-      const lines = s.lowStockProducts
-        .slice(0, 8)
-        .map((p) =>
-          p.stockMasked
-            ? `- ${p.name}: ${maskedStatusText(p.stockStatus ?? "LOW")}`
-            : `- ${p.name}: stock ${p.stock} (mínimo ${p.minStock})`
-        );
-      return `Productos con inventario bajo:\n${lines.join("\n")}`;
+      if (s.lowStockProducts.length === 0) return "No hay productos ni insumos con inventario bajo en este momento.";
+      const { products, insumos } = splitByItemType(s.lowStockProducts.slice(0, 8));
+      const lineOf = (p: (typeof s.lowStockProducts)[number]) =>
+        p.stockMasked
+          ? `- ${p.name}: ${maskedStatusText(p.stockStatus ?? "LOW")}`
+          : `- ${p.name}: stock ${p.stock} (mínimo ${p.minStock})`;
+
+      // Terminología exacta: lo que se vende son "productos"; la materia prima es "insumos".
+      if (insumos.length === 0) return `Productos con inventario bajo:\n${products.map(lineOf).join("\n")}`;
+      if (products.length === 0) return `Insumos con inventario bajo:\n${insumos.map(lineOf).join("\n")}`;
+      return [
+        "Inventario bajo:",
+        "Productos:",
+        ...products.map(lineOf),
+        "Insumos:",
+        ...insumos.map(lineOf)
+      ].join("\n");
     }
   },
 
@@ -255,7 +264,12 @@ const HANDLERS: QuestionHandler[] = [
       lines.push(
         `Clientes: ${s.customerStats.totalCustomers} registrados (${s.customerStats.newCustomersToday} nuevo(s) hoy)`
       );
-      lines.push(`Productos por agotarse: ${s.lowStockProducts.length}`);
+      const lowByType = s.lowStockByType ?? countItemTypes(s.lowStockProducts);
+      lines.push(
+        lowByType.insumos === 0
+          ? `Productos por agotarse: ${lowByType.products}`
+          : `Por agotarse: ${describeItemCounts(lowByType, "plain")}`
+      );
       const criticalProduction = s.productionAlerts.filter((p) => p.level === "CRITICO")[0];
       if (criticalProduction) {
         const limiting = criticalProduction.limitingIngredientName

@@ -118,6 +118,8 @@ export interface AiBusinessFinancialPeriod {
 export interface AiLowStockProduct {
   readonly productId: string;
   readonly name: string;
+  /** true si es un insumo (materia prima de cocina/bodega); false si es un producto que se vende. */
+  readonly isIngredient: boolean;
   readonly unit: string | null;
   readonly minStock: number;
 
@@ -520,6 +522,7 @@ function buildLowStockProducts(
     result.push({
       productId: product.id,
       name: product.name,
+      isIngredient: product.isIngredient === true,
       unit: product.unit ?? null,
       minStock: product.minStock,
       status,
