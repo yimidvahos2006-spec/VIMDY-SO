@@ -66,6 +66,24 @@ describe("ajustes del negocio en la base de datos", () => {
     expect(() => buildBusinessSettingsUpdate(business, { ...config, tax: NaN })).toThrow(/IVA/);
   });
 
+  it("rechaza idioma, moneda o zona horaria que la app no conoce", () => {
+    expect(() => buildBusinessSettingsUpdate(business, { ...config, language: "fr" })).toThrow(/idioma/i);
+    expect(() => buildBusinessSettingsUpdate(business, { ...config, currency: "XXX" })).toThrow(/moneda/i);
+    expect(() => buildBusinessSettingsUpdate(business, { ...config, timezone: "Mundo/Inexistente" })).toThrow(/zona horaria/i);
+    expect(() => buildBusinessSettingsUpdate(business, { ...config, timezone: "" })).toThrow(/zona horaria/i);
+  });
+
+  it("acepta un ajuste manual válido distinto al sugerido por el país", () => {
+    const row = buildBusinessSettingsUpdate(business, { ...config, currency: "USD", language: "en", timezone: "America/Lima" });
+    expect(row.currency).toBe("USD");
+    expect(row.language).toBe("en");
+    expect(row.timezone).toBe("America/Lima");
+  });
+
+  it("guarda un IVA con decimales tal cual", () => {
+    expect(buildBusinessSettingsUpdate(business, { ...config, tax: 8.5 }).tax_rate).toBe(8.5);
+  });
+
   it("limita IVA y meta a rangos válidos", () => {
     const row = buildBusinessSettingsUpdate(business, { ...config, tax: 500, dailySalesGoal: -5 });
     expect(row.tax_rate).toBe(100);

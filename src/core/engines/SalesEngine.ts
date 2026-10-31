@@ -776,7 +776,12 @@ export class SalesEngine {
 
   public calculateTax(
     subtotal: number,
-    taxRate: number = this.config.defaultTaxRate
+    // La tasa por defecto se lee en vivo de companyConfigStore (lo que edita
+    // Configuración > Impuestos y moneda). Antes salía de this.config, que
+    // quedaba congelada con el IVA del momento en que arrancó el motor: el
+    // carrito del POS mostraba el IVA viejo mientras la venta se registraba
+    // con el nuevo.
+    taxRate: number = companyConfigStore.get().tax / 100
   ): number {
     return roundMoney(
       Math.max(subtotal, 0) * taxRate,

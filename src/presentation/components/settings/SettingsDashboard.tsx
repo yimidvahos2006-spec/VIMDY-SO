@@ -3,11 +3,9 @@ import { roleHelp, roleSummary, userStatusLabel } from "../../../core/services/r
 import { ROLE_PERMISSIONS } from "../../../core/config/permissions";
 import {
   Building2,
-  Percent,
   Sliders,
   Users,
   UserCircle2,
-  Check,
   UserPlus,
   X,
   ShieldCheck,
@@ -15,7 +13,6 @@ import {
   RotateCcw,
   DownloadCloud,
   AlertTriangle,
-  Globe2,
   Eye,
   EyeOff,
   FileText
@@ -34,21 +31,17 @@ import { UserStatus } from "../../../core/entities/Entities";
 import { downloadBackup } from "../../../infrastructure/supabase/backupService";
 import { useTranslation } from "../../../core/i18n/useTranslation";
 import { translateBusinessError } from "../../../core/errors/translateBusinessError";
-import {
-  AVAILABLE_COUNTRIES,
-  AVAILABLE_COUNTRY_CODES,
-  CURRENCIES,
-  LANGUAGES,
-  TIMEZONES,
-  getCountryDefaults,
-  getCountryName,
-  getCurrencyName
-} from "../../../core/config/globalization";
+import { AVAILABLE_COUNTRY_CODES } from "../../../core/config/globalization";
+import { buildCountryChangePatch } from "../../../core/settings/regionalSettings";
+import { toast } from "../../../core/store/toastStore";
 import { SubscriptionSettingsSection } from "../subscription/SubscriptionSettingsSection";
 import { VimdyButton } from "../ui/VimdyButton";
 import { DailyReportSettingsCard } from "./DailyReportSettingsCard";
 import { BusinessProfileTab, type BusinessSaveResult } from "./BusinessProfileTab";
 import { OperationSettings } from "./OperationSettings";
+import { RegionalSettingsCard } from "./RegionalSettingsCard";
+import { TaxCurrencySettingsCard } from "./TaxCurrencySettingsCard";
+import { SavedToast, SectionCard, Field, inputClass } from "./settingsPrimitives";
 import { useOperationConfig } from "../../../core/store/useOperationConfig";
 
 type SettingsTab = "negocio" | "operacion" | "equipo" | "impresion" | "facturacion" | "datos";
@@ -61,45 +54,6 @@ const SETTINGS_TABS: { id: SettingsTab; label: string; hint: string }[] = [
   { id: "facturacion", label: "Facturación", hint: "Factura electrónica DIAN (solo Colombia)." },
   { id: "datos", label: "Mis datos", hint: "Descarga una copia de seguridad de tu información." }
 ];
-
-function SectionCard({
-  icon,
-  title,
-  description,
-  children
-}: {
-  icon: React.ReactNode;
-  title: string;
-  description?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-2xl border border-slate-700 bg-slate-800 p-5">
-      <div className="flex items-center gap-3 mb-1">
-        <div className="w-10 h-10 rounded-xl bg-vimdy-surface flex items-center justify-center flex-shrink-0">
-          {icon}
-        </div>
-        <div>
-          <h3 className="text-white font-bold">{title}</h3>
-          {description && <p className="text-slate-400 text-xs">{description}</p>}
-        </div>
-      </div>
-      <div className="mt-4">{children}</div>
-    </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <label className="text-xs text-slate-400">{label}</label>
-      <div className="mt-1">{children}</div>
-    </div>
-  );
-}
-
-const inputClass =
-  "w-full h-10 rounded-xl bg-vimdy-surface border border-slate-700 px-3 text-white text-sm outline-none focus:border-cyan-500";
 
 function Toggle({
   label,
@@ -139,16 +93,6 @@ function Toggle({
   );
 }
 
-function SavedToast({ show, label = "Guardado" }: { show: boolean; label?: string }) {
-  if (!show) return null;
-  return (
-    <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-400">
-      <Check size={13} />
-      {label}
-    </span>
-  );
-}
-
 // Roles que VIMDY acepta de verdad al crear una persona (el servidor y el motor de
 // usuarios solo aceptan estos 4). Se muestran siempre, aunque la tabla `roles`
 // de la base de datos esté vacía.
@@ -160,7 +104,7 @@ const STAFF_ROLES: { id: string; name: string }[] = [
 ];
 
 export function SettingsDashboard() {
-  const { t, language } = useTranslation();
+  const { t } = useTranslation();
   const { user, can } = useAuth();
   const {
     business,
@@ -193,7 +137,6 @@ export function SettingsDashboard() {
     };
   });
   const [configDraft, setConfigDraft] = useState<CompanyConfig>(config);
-  const [configSaved, setConfigSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [tab, setTab] = useState<SettingsTab>("negocio");
@@ -203,9 +146,27 @@ export function SettingsDashboard() {
   const [backupError, setBackupError] = useState<string | null>(null);
   const [editingRole, setEditingRole] = useState<{ id: string; name: string } | null>(null);
 
-  // Sincroniza los borradores cuando los datos reales terminan de cargar.
-  React.useEffect(() => setBusinessDraft(business), [business]);
-  React.useEffect(() => setConfigDraft(config), [config]);
+  // Sincroniza los borradores cuando los datos reales cambian (carga inicial,
+  // otro dispositivo, guardado). Solo sigue al dato real si el borrador no
+  // tenía cambios propios: así un guardado que falla (y se deshace) o una
+  // carga tardía NUNCA borran lo que el dueño acababa de escribir.
+  const previousBusinessRef = React.useRef(business);
+  React.useEffect(() => {
+    const previous = previousBusinessRef.current;
+    previousBusinessRef.current = business;
+    setBusinessDraft((draft) =>
+      JSON.stringify(draft) === JSON.stringify(previous) ? business : draft
+    );
+  }, [business]);
+
+  const previousConfigRef = React.useRef(config);
+  React.useEffect(() => {
+    const previous = previousConfigRef.current;
+    previousConfigRef.current = config;
+    setConfigDraft((draft) =>
+      JSON.stringify(draft) === JSON.stringify(previous) ? config : draft
+    );
+  }, [config]);
 
   // El WhatsApp de pedidos solo es obligatorio si el negocio vende por
   // Domicilio. Eso se decide en la pestaña Operación ("Cómo trabaja tu
@@ -243,8 +204,8 @@ export function SettingsDashboard() {
     setSaving(true);
     try {
       await persistAll(nextBusiness, nextConfig);
-      setConfigSaved(true);
-      setTimeout(() => setConfigSaved(false), 2000);
+      setBusinessDraft(nextBusiness);
+      setConfigDraft(nextConfig);
       return { ok: true };
     } catch (e: any) {
       const message = translateBusinessError(e, "No se pudieron guardar los cambios.");
@@ -261,35 +222,31 @@ export function SettingsDashboard() {
     setConfigDraft(config);
   }
 
-  const handleSaveConfig = handleSaveAll;
+  /**
+   * Guarda todo (igual que "Guardar todo") y avisa con un toast: verde si
+   * quedó guardado en Supabase, rojo con el motivo si no. Si falla, el
+   * borrador se conserva para que el dueño no tenga que volver a escribir.
+   */
+  async function handleSaveSection(successMessage: string): Promise<void> {
+    const result = await handleSaveAll();
+    if (result.ok) {
+      toast.success(successMessage);
+      return;
+    }
+    toast.error(result.message);
+  }
 
   /**
    * Al elegir un país se autocompletan moneda + idioma + zona horaria con
-   * los valores por defecto de ese país (ver src/core/config/globalization.ts).
+   * los valores por defecto de ese país (ver src/core/settings/regionalSettings.ts).
    * El negocio puede sobreescribir cualquiera de los tres campos después,
    * por si su caso es una excepción (ej. cobrar en USD estando en Colombia).
    */
   function handleCountryChange(countryCode: string) {
-    const defaults = getCountryDefaults(countryCode);
-    setConfigDraft({
-      ...configDraft,
-      country: countryCode as CompanyConfig["country"],
-      ...(defaults
-        ? {
-            currency: defaults.currency,
-            language: defaults.language,
-            timezone: defaults.timezone,
-            tax: defaults.taxRate
-          }
-        : {}),
-      ...(countryCode !== "CO"
-        ? { electronicInvoicing: { enabled: false, provider: "none" as const } }
-        : {})
-    });
-    setBusinessDraft({
-      ...businessDraft,
-      country: countryCode as Business["country"]
-    });
+    const patch = buildCountryChangePatch(countryCode);
+    if (!patch) return;
+    setConfigDraft((previous) => ({ ...previous, ...patch }));
+    setBusinessDraft((previous) => ({ ...previous, country: patch.country as Business["country"] }));
   }
 
   async function handleDownloadBackup() {
@@ -368,133 +325,30 @@ export function SettingsDashboard() {
 
         <div className={tab === "negocio" ? "contents" : "hidden"}>
         {/* Globalización: país, idioma, moneda, zona horaria */}
-        <SectionCard
-          icon={<Globe2 size={18} className="text-cyan-400" />}
-          title={t("settings.globalization.title")}
-          description={t("settings.globalization.description")}
-        >
-          <div className="grid grid-cols-2 gap-3">
-            <Field label={t("settings.field.country")}>
-              <select
-                className={inputClass}
-                value={configDraft.country}
-                onChange={(e) => handleCountryChange(e.target.value)}
-              >
-                {AVAILABLE_COUNTRIES.map((c) => (
-                  <option key={c.code} value={c.code}>
-                    {getCountryName(c.code, language)}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label={t("settings.field.language")}>
-              <select
-                className={inputClass}
-                value={configDraft.language}
-                onChange={(e) =>
-                  setConfigDraft({ ...configDraft, language: e.target.value as CompanyConfig["language"] })
-                }
-              >
-                {LANGUAGES.map((l) => (
-                  <option key={l.code} value={l.code}>
-                    {l.nativeName}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label={t("settings.field.currency")}>
-              <select
-                className={inputClass}
-                value={configDraft.currency}
-                onChange={(e) =>
-                  setConfigDraft({ ...configDraft, currency: e.target.value as CompanyConfig["currency"] })
-                }
-              >
-                {CURRENCIES.map((c) => (
-                  <option key={c.code} value={c.code}>
-                    {c.code} — {getCurrencyName(c.code, language)}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label={t("settings.field.timezone")}>
-              <select
-                className={inputClass}
-                value={configDraft.timezone}
-                onChange={(e) => setConfigDraft({ ...configDraft, timezone: e.target.value })}
-              >
-                {TIMEZONES.map((tz) => (
-                  <option key={tz} value={tz}>
-                    {tz}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          </div>
-          <p className="text-slate-500 text-xs mt-3">
-            Al cambiar el país se autocompletan moneda, idioma y zona horaria — puedes ajustarlos
-            después a mano si tu negocio es una excepción.
-          </p>
-
-          <div className="flex items-center justify-between mt-4">
-            <SavedToast show={configSaved} label={t("settings.saved")} />
-            <VimdyButton
-              onClick={handleSaveConfig}
-              variant="primary"
-              size="sm"
-              className="ml-auto"
-            >
-              {t("settings.save.globalization")}
-            </VimdyButton>
-          </div>
-        </SectionCard>
+        <RegionalSettingsCard
+          draft={{
+            country: configDraft.country,
+            currency: configDraft.currency,
+            language: configDraft.language,
+            timezone: configDraft.timezone
+          }}
+          saving={saving}
+          onCountryChange={handleCountryChange}
+          onFieldChange={(patch) => setConfigDraft((previous) => ({ ...previous, ...patch }))}
+          onSave={() => handleSaveSection("País, idioma y hora guardados.")}
+        />
         </div>
 
         <div className={tab === "negocio" ? "contents" : "hidden"}>
-        {/* Impuestos */}
-        <SectionCard
-          icon={<Percent size={18} className="text-yellow-400" />}
-          title={t("settings.taxCurrency.title")}
-          description={t("settings.taxCurrency.description")}
-        >
-          <div className="grid grid-cols-2 gap-3">
-            <Field label={t("settings.field.tax")}>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                className={inputClass}
-                value={configDraft.tax}
-                onChange={(e) => setConfigDraft({ ...configDraft, tax: Number(e.target.value) })}
-              />
-            </Field>
-            <div className="col-span-2">
-              <Field label={t("settings.field.dailyGoal")}>
-                <input
-                  type="number"
-                  min={0}
-                  step={10000}
-                  className={inputClass}
-                  placeholder="0 = sin meta"
-                  value={configDraft.dailySalesGoal}
-                  onChange={(e) => setConfigDraft({ ...configDraft, dailySalesGoal: Number(e.target.value) })}
-                />
-              </Field>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between mt-4">
-            <SavedToast show={configSaved} label={t("settings.saved")} />
-            <VimdyButton
-              onClick={handleSaveConfig}
-              variant="primary"
-              size="sm"
-              className="ml-auto"
-            >
-              {t("settings.save.taxes")}
-            </VimdyButton>
-          </div>
-        </SectionCard>
+        {/* Impuestos y meta diaria */}
+        <TaxCurrencySettingsCard
+          tax={configDraft.tax}
+          dailySalesGoal={configDraft.dailySalesGoal}
+          currency={configDraft.currency}
+          saving={saving}
+          onChange={(patch) => setConfigDraft((previous) => ({ ...previous, ...patch }))}
+          onSave={() => handleSaveSection("Impuestos guardados. Se aplican desde la próxima venta.")}
+        />
         </div>
 
         <div className={tab === "operacion" ? "contents" : "hidden"}>
@@ -524,13 +378,12 @@ export function SettingsDashboard() {
             />
           </div>
 
-          <div className="flex items-center justify-between mt-4">
-            <SavedToast show={configSaved} label={t("settings.saved")} />
+          <div className="flex items-center justify-end mt-4">
             <VimdyButton
-              onClick={handleSaveConfig}
+              onClick={() => handleSaveSection("Reglas de venta guardadas.")}
+              loading={saving}
               variant="primary"
               size="sm"
-              className="ml-auto"
             >
               Guardar reglas
             </VimdyButton>
@@ -590,13 +443,12 @@ export function SettingsDashboard() {
                 )}
               </div>
             </div>
-            <div className="flex items-center justify-between mt-4">
-              <SavedToast show={configSaved} label={t("settings.saved")} />
+            <div className="flex items-center justify-end mt-4">
               <VimdyButton
-                onClick={handleSaveConfig}
+                onClick={() => handleSaveSection("Facturación guardada.")}
+                loading={saving}
                 variant="primary"
                 size="sm"
-                className="ml-auto"
               >
                 Guardar facturación
               </VimdyButton>
@@ -790,7 +642,7 @@ export function SettingsDashboard() {
             <VimdyButton onClick={handleDiscardAll} variant="secondary" size="sm">
               Descartar
             </VimdyButton>
-            <VimdyButton onClick={handleSaveAll} variant="primary" size="sm">
+            <VimdyButton onClick={() => handleSaveSection("Cambios guardados.")} variant="primary" size="sm">
               {saving ? "Guardando..." : whatsappMissing ? "Ir a completarlo" : "Guardar todo"}
             </VimdyButton>
           </div>

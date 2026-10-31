@@ -1,6 +1,8 @@
 import { supabase } from "./supabaseClient";
 import type { Business } from "../../core/store/businessStore";
 import type { CompanyConfig } from "../../core/store/companyConfigStore";
+import { getCurrency, getLanguage } from "../../core/config/globalization";
+import { isValidTimeZone } from "../../core/settings/regionalSettings";
 
 /**
  * Ajustes del negocio que se guardan en `businesses.settings` (jsonb).
@@ -51,6 +53,12 @@ export function buildBusinessSettingsUpdate(
 
   const tax = clampNumber(config.tax, 0, 100);
   if (tax === undefined) throw new Error("El IVA debe ser un número entre 0 y 100.");
+
+  // País, idioma y hora: se valida antes de escribir para no dejar en la base
+  // una moneda, un idioma o una zona horaria que la app no sabe interpretar.
+  if (!getLanguage(config.language)) throw new Error("El idioma elegido no es válido.");
+  if (!getCurrency(config.currency)) throw new Error("La moneda elegida no es válida.");
+  if (!isValidTimeZone(config.timezone)) throw new Error("La zona horaria elegida no es válida.");
 
   return {
     name: name.slice(0, 120),

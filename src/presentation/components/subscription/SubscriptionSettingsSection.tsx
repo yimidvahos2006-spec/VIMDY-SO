@@ -1,21 +1,28 @@
 import React, { useEffect, useState } from "react";
-import { CreditCard, CalendarClock, Receipt, ArrowUpCircle, Loader2 } from "lucide-react";
+import { CreditCard, CalendarClock, Receipt, ArrowUpCircle, Loader2, AlertTriangle } from "lucide-react";
 
 import { useAuth } from "../../context/AuthContext";
 import { useSubscription } from "../../../core/store/useSubscription";
 import { subscriptionStore } from "../../../core/store/subscriptionStore";
+import { companyConfigStore } from "../../../core/store/companyConfigStore";
 import { VimdyButton } from "../ui/VimdyButton";
 import { fetchSubscription, fetchSubscriptionPayments } from "../../../infrastructure/supabase/subscriptionContext";
 import { formatMoney } from "../../../core/utils/formatMoney";
 import { toast } from "../../../core/store/toastStore";
+import {
+  SUBSCRIPTION_STATUS_PRESENTATION,
+  buildSubscriptionCardModel,
+  formatSubscriptionDate
+} from "../../../core/settings/subscriptionCardModel";
+import type { SubscriptionPlan } from "../../../core/entities/SubscriptionTypes";
 import { SubscriptionCountdownBadge } from "./SubscriptionCountdownBadge";
 import { UpgradeModal } from "./UpgradeModal";
 
-const PLAN_LABEL: Record<string, string> = {
-  trial: "🟢 Prueba Gratuita",
-  monthly: "🔵 Plan Mensual",
-  yearly: "🟣 Plan Anual",
-  suspended: "🔴 Suspendido"
+/** Etiqueta del plan de un pago del historial (los pagos solo pueden ser de estos tres planes). */
+const PAYMENT_PLAN_LABEL: Record<SubscriptionPlan, string> = {
+  trial: SUBSCRIPTION_STATUS_PRESENTATION.trial.planLabel,
+  monthly: SUBSCRIPTION_STATUS_PRESENTATION.monthly.planLabel,
+  yearly: SUBSCRIPTION_STATUS_PRESENTATION.yearly.planLabel
 };
 
 /** Cada cuánto se vuelve a consultar mientras se confirma un pago recién hecho en Wompi. */
@@ -33,11 +40,6 @@ const PAYMENT_METHOD_LABEL: Record<string, string> = {
   paypal: "PayPal"
 };
 
-function formatDate(date: Date | null): string {
-  if (!date) return "—";
-  return date.toLocaleDateString("es-CO", { day: "numeric", month: "long", year: "numeric" });
-}
-
 /**
  * SubscriptionSettingsSection
  * ---------------------------------------------------------------------------
@@ -45,6 +47,12 @@ function formatDate(date: Date | null): string {
  * plan actual, días restantes, fecha de vencimiento, historial de pagos y
  * el botón "Actualizar plan". Pensada para insertarse como una tarjeta más
  * dentro de la grilla de SettingsDashboard.tsx (mismo patrón de SectionCard).
+ *
+ * Los textos y colores de cada estado (prueba, mensual, anual, prueba
+ * finalizada, suspendido) salen de core/settings/subscriptionCardModel.ts,
+ * la misma fuente que usa el contador (SubscriptionCountdownBadge), así que
+ * los dos siempre dicen lo mismo. Las fechas se muestran en la zona horaria
+ * configurada del negocio.
  *
  * MISIÓN 3 — Wompi real: cuando el usuario vuelve del Web Checkout de
  * Wompi, wompi-create-checkout lo trae de regreso acá con
@@ -57,18 +65,31 @@ function formatDate(date: Date | null): string {
  */
 export function SubscriptionSettingsSection() {
   const { businessId } = useAuth();
-  const { plan, daysRemaining, trialEndsAt, renewalDate, nextChargeAt, paymentMethod, payments, isTrial } =
+  const { plan, daysRemaining, trialEndsAt, renewalDate, nextChargeAt, paymentMethod, payments } =
     useSubscription();
   const [upgrading, setUpgrading] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [historyFailed, setHistoryFailed] = useState(false);
   const [confirmingPayment, setConfirmingPayment] = useState(false);
 
   useEffect(() => {
     if (!businessId) return;
+    let cancelled = false;
     setLoadingHistory(true);
+    setHistoryFailed(false);
     fetchSubscriptionPayments(businessId)
-      .then((history) => subscriptionStore.setPayments(history))
-      .finally(() => setLoadingHistory(false));
+      .then((history) => {
+        if (!cancelled) subscriptionStore.setPayments(history);
+      })
+      .catch(() => {
+        if (!cancelled) setHistoryFailed(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingHistory(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [businessId]);
 
   // Confirmar el regreso real del proveedor de pago (Wompi, MercadoPago o
@@ -107,60 +128,79 @@ export function SubscriptionSettingsSection() {
     if (!reference) return;
 
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     setConfirmingPayment(true);
 
-    async function pollOnce(attempt: number) {
-      const [subscription, history] = await Promise.all([
-        fetchSubscription(businessId as string),
-        fetchSubscriptionPayments(businessId as string)
-      ]);
-
-      if (cancelled) return;
-
-      subscriptionStore.setPayments(history);
-      if (subscription) {
-        subscriptionStore.updateSubscription(subscription);
-      }
-
-      const matchingPayment = history.find(
-        (payment) =>
-          payment.wompiReference === reference ||
-          payment.mercadopagoReference === reference ||
-          payment.paypalOrderId === reference
-      );
-
-      if (matchingPayment && matchingPayment.status !== "pending") {
-        setConfirmingPayment(false);
-        if (matchingPayment.status === "approved") {
-          toast.success("¡Tu pago fue aprobado! Tu plan ya está activo.");
-        } else if (matchingPayment.status === "error") {
-          toast.error(
-            "Tu pago se cobró, pero hubo un problema al activar el plan. Ya lo estamos revisando — escríbenos por soporte para agilizarlo."
-          );
-        } else {
-          toast.error("El pago fue rechazado. Puedes intentar de nuevo cuando quieras.");
-        }
-        return;
-      }
-
+    function scheduleNext(attempt: number) {
       if (attempt >= CONFIRMATION_MAX_ATTEMPTS) {
         setConfirmingPayment(false);
         toast.info("Seguimos confirmando tu pago. Si tarda más de unos minutos, actualiza esta página.");
         return;
       }
-
-      setTimeout(() => pollOnce(attempt + 1), CONFIRMATION_POLL_INTERVAL_MS);
+      timer = setTimeout(() => {
+        void pollOnce(attempt + 1);
+      }, CONFIRMATION_POLL_INTERVAL_MS);
     }
 
-    pollOnce(1);
+    async function pollOnce(attempt: number) {
+      try {
+        const [subscription, history] = await Promise.all([
+          fetchSubscription(businessId as string),
+          fetchSubscriptionPayments(businessId as string)
+        ]);
+
+        if (cancelled) return;
+
+        subscriptionStore.setPayments(history);
+        if (subscription) {
+          subscriptionStore.updateSubscription(subscription);
+        }
+
+        const matchingPayment = history.find(
+          (payment) =>
+            payment.wompiReference === reference ||
+            payment.mercadopagoReference === reference ||
+            payment.paypalOrderId === reference
+        );
+
+        if (matchingPayment && matchingPayment.status !== "pending") {
+          setConfirmingPayment(false);
+          if (matchingPayment.status === "approved") {
+            toast.success("¡Tu pago fue aprobado! Tu plan ya está activo.");
+          } else if (matchingPayment.status === "error") {
+            toast.error(
+              "Tu pago se cobró, pero hubo un problema al activar el plan. Ya lo estamos revisando — escríbenos por soporte para agilizarlo."
+            );
+          } else {
+            toast.error("El pago fue rechazado. Puedes intentar de nuevo cuando quieras.");
+          }
+          return;
+        }
+      } catch {
+        // Un fallo de red al consultar no debe dejar la pantalla "confirmando"
+        // para siempre: se reintenta hasta el tope de intentos.
+        if (cancelled) return;
+      }
+
+      scheduleNext(attempt);
+    }
+
+    void pollOnce(1);
 
     return () => {
       cancelled = true;
+      if (timer !== null) clearTimeout(timer);
     };
   }, [businessId]);
 
-  const expirationLabel = isTrial ? "Vence" : "Próxima renovación";
-  const expirationDate = isTrial ? trialEndsAt : renewalDate ?? nextChargeAt;
+  const model = buildSubscriptionCardModel({
+    status: plan,
+    daysRemaining,
+    trialEndsAt,
+    renewalDate,
+    nextChargeAt
+  });
+  const timeZone = companyConfigStore.get().timezone;
 
   return (
     <div className="rounded-2xl border border-vimdy-border bg-vimdy-surface p-5">
@@ -181,11 +221,18 @@ export function SubscriptionSettingsSection() {
         </div>
       )}
 
+      {model.notice && (
+        <div className="mt-4 flex items-start gap-2 rounded-xl border border-vimdy-danger/30 bg-vimdy-danger-bg text-vimdy-danger text-sm px-4 py-3">
+          <AlertTriangle size={16} className="flex-shrink-0 mt-0.5" />
+          {model.notice}
+        </div>
+      )}
+
       <div className="mt-4 space-y-3">
         <div className="flex items-center justify-between rounded-xl border border-vimdy-border bg-vimdy-background/60 px-4 py-3">
           <div>
             <p className="text-vimdy-text-secondary text-xs">Plan actual</p>
-            <p className="text-vimdy-text font-semibold text-sm mt-0.5">{plan ? PLAN_LABEL[plan] : "—"}</p>
+            <p className="text-vimdy-text font-semibold text-sm mt-0.5">{model.planLabel}</p>
           </div>
           <SubscriptionCountdownBadge compact />
         </div>
@@ -193,15 +240,15 @@ export function SubscriptionSettingsSection() {
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-xl border border-vimdy-border bg-vimdy-background/60 px-4 py-3">
             <p className="text-vimdy-text-secondary text-xs flex items-center gap-1.5">
-              <CalendarClock size={13} /> {expirationLabel}
+              <CalendarClock size={13} /> {model.expirationLabel}
             </p>
-            <p className="text-vimdy-text font-semibold text-sm mt-0.5">{formatDate(expirationDate)}</p>
+            <p className="text-vimdy-text font-semibold text-sm mt-0.5">
+              {formatSubscriptionDate(model.expirationDate, timeZone)}
+            </p>
           </div>
           <div className="rounded-xl border border-vimdy-border bg-vimdy-background/60 px-4 py-3">
             <p className="text-vimdy-text-secondary text-xs">Días restantes</p>
-            <p className="text-vimdy-text font-semibold text-sm mt-0.5">
-              {isTrial ? `${Math.max(daysRemaining, 0)} días` : "Plan activo"}
-            </p>
+            <p className="text-vimdy-text font-semibold text-sm mt-0.5">{model.daysLabel}</p>
           </div>
         </div>
 
@@ -221,6 +268,10 @@ export function SubscriptionSettingsSection() {
 
           {loadingHistory ? (
             <p className="text-vimdy-text-tertiary text-xs px-1">Cargando historial...</p>
+          ) : historyFailed ? (
+            <p className="text-vimdy-danger text-xs px-1">
+              No pudimos cargar el historial de pagos. Revisa tu conexión y vuelve a abrir esta pantalla.
+            </p>
           ) : payments.length === 0 ? (
             <p className="text-vimdy-text-tertiary text-xs px-1">
               Todavía no hay pagos registrados. Cuando actives un plan, cada cobro aparecerá aquí.
@@ -233,8 +284,8 @@ export function SubscriptionSettingsSection() {
                   className="flex items-center justify-between rounded-lg border border-vimdy-border bg-vimdy-background/60 px-3 py-2 text-xs"
                 >
                   <div>
-                    <p className="text-vimdy-text font-medium">{PLAN_LABEL[p.plan] ?? p.plan}</p>
-                    <p className="text-vimdy-text-tertiary">{formatDate(p.paidAt)}</p>
+                    <p className="text-vimdy-text font-medium">{PAYMENT_PLAN_LABEL[p.plan] ?? p.plan}</p>
+                    <p className="text-vimdy-text-tertiary">{formatSubscriptionDate(p.paidAt, timeZone)}</p>
                   </div>
                   <div className="text-right">
                     <p className="text-vimdy-text font-semibold">{formatMoney(p.amount, p.currency)}</p>
@@ -255,6 +306,8 @@ export function SubscriptionSettingsSection() {
                         ? "Rechazado"
                         : p.status === "error"
                         ? "En revisión"
+                        : p.status === "refunded"
+                        ? "Reembolsado"
                         : "Pendiente"}
                     </p>
                   </div>
