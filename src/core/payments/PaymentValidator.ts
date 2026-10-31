@@ -6,6 +6,7 @@
  */
 
 import type { PaymentRoutingInput } from "./models/PaymentModels";
+import { isBusinessTier } from "../entities/SubscriptionTypes";
 
 const ALLOWED_COUNTRIES = new Set(["CO", "MX", "PE", "CL", "AR", "ES", "EC", "PA", "US", "VE"]);
 
@@ -25,6 +26,9 @@ export class PaymentValidator {
     }
     if (!input.plan || (input.plan !== "monthly" && input.plan !== "yearly")) {
       throw new Error("PaymentValidator: el plan debe ser 'monthly' o 'yearly'.");
+    }
+    if (input.tier !== undefined && !isBusinessTier(input.tier)) {
+      throw new Error("PaymentValidator: el nivel del negocio debe ser 'single' o 'multi'.");
     }
     if (input.amount !== undefined && (typeof input.amount !== "number" || Number.isNaN(input.amount) || input.amount <= 0)) {
       throw new Error("PaymentValidator: si se envía un monto, debe ser un número mayor a 0.");

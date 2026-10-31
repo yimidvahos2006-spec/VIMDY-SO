@@ -1,7 +1,14 @@
 import React, { useState } from "react";
-import { Check, Loader2, ShieldCheck } from "lucide-react";
+import { Check, Loader2, ShieldCheck, Sparkles } from "lucide-react";
 
-import { SUBSCRIPTION_PLANS, PlanDefinition, getPlanPrice, getPlanCurrency } from "../../../core/entities/SubscriptionTypes";
+import {
+  DEFAULT_BUSINESS_TIER,
+  SUBSCRIPTION_PLANS_BY_TIER,
+  PlanDefinition,
+  getPlanPrice,
+  getPlanCurrency,
+  type BusinessTier
+} from "../../../core/entities/SubscriptionTypes";
 import { formatMoney } from "../../../core/utils/formatMoney";
 import { companyConfigStore } from "../../../core/store/companyConfigStore";
 
@@ -9,18 +16,22 @@ interface PlansShowcaseProps {
   onSelectPlan: (plan: PlanDefinition) => Promise<void> | void;
   currentPlan?: string | null;
   countryCode?: string;
+  /** Nivel de negocio cuyos planes se muestran. Por defecto, negocio de 1 sede. */
+  tier?: BusinessTier;
 }
 
 export function PlansShowcase({
   onSelectPlan,
   currentPlan,
-  countryCode
+  countryCode,
+  tier = DEFAULT_BUSINESS_TIER
 }: PlansShowcaseProps) {
   const effectiveCountry = countryCode ?? companyConfigStore.get().country ?? "CO";
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
+  const plans = SUBSCRIPTION_PLANS_BY_TIER[tier];
 
   async function handleSelect(plan: PlanDefinition) {
-    setLoadingPlan(plan.id);
+    setLoadingPlan(`${plan.tier}:${plan.id}`);
     try {
       await onSelectPlan(plan);
     } finally {
@@ -30,15 +41,16 @@ export function PlansShowcase({
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-      {SUBSCRIPTION_PLANS.map((plan) => {
+      {plans.map((plan) => {
+        const planKey = `${plan.tier}:${plan.id}`;
         const isCurrent = currentPlan === plan.id;
         const isYearly = plan.id === "yearly";
-        const displayPrice = getPlanPrice(plan.id, effectiveCountry);
+        const displayPrice = getPlanPrice(plan.id, effectiveCountry, plan.tier);
         const displayCurrency = getPlanCurrency(plan.id, effectiveCountry);
 
         return (
           <div
-            key={plan.id}
+            key={planKey}
             className={`relative rounded-2xl border p-5 flex flex-col ${
               isYearly
                 ? "border-vimdy-accent/40 bg-gradient-to-b from-vimdy-accent/10 to-vimdy-surface"
@@ -57,7 +69,17 @@ export function PlansShowcase({
             <p className="text-vimdy-text text-3xl font-extrabold mt-3">
               {formatMoney(displayPrice, displayCurrency)}
               <span className="text-vimdy-text-secondary text-sm font-normal"> {displayCurrency}</span>
+              <span className="text-vimdy-text-secondary text-sm font-normal">
+                {isYearly ? " / año" : " / mes"}
+              </span>
             </p>
+
+            {plan.savingsLabel && (
+              <p className="mt-2 inline-flex w-fit items-center gap-1.5 rounded-full bg-vimdy-success/10 px-2.5 py-1 text-xs font-semibold text-vimdy-success">
+                <Sparkles size={13} aria-hidden="true" />
+                {plan.savingsLabel}
+              </p>
+            )}
 
             <ul className="mt-4 space-y-2 flex-1">
               {plan.features.map((feature) => (
@@ -79,7 +101,7 @@ export function PlansShowcase({
                   : "border border-vimdy-accent text-vimdy-accent hover:bg-vimdy-accent/10"
               } disabled:opacity-70`}
             >
-              {loadingPlan === plan.id ? (
+              {loadingPlan === planKey ? (
                 <Loader2 size={16} className="animate-spin" />
               ) : isCurrent ? (
                 <>

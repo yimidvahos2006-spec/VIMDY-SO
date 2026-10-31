@@ -31,7 +31,7 @@ import { PaymentMethodResolver } from "./PaymentMethodResolver";
 import { PaymentFactory } from "./PaymentFactory";
 import { PaymentValidator } from "./PaymentValidator";
 import { generatePaymentId } from "./utils/paymentUtils";
-import { getPlanPrice } from "../entities/SubscriptionTypes";
+import { DEFAULT_BUSINESS_TIER, getPlanPrice } from "../entities/SubscriptionTypes";
 
 export interface RoutingDecision {
   readonly provider: PaymentProviderName;
@@ -63,11 +63,12 @@ export class GlobalPaymentRouter {
     }
 
     const plan = input.plan as "monthly" | "yearly";
-    const canonicalAmount = getPlanPrice(plan, input.country);
+    const tier = input.tier ?? DEFAULT_BUSINESS_TIER;
+    const canonicalAmount = getPlanPrice(plan, input.country, tier);
 
     if (!Number.isFinite(canonicalAmount) || canonicalAmount <= 0) {
       throw new Error(
-        `PaymentRouter: no existe un precio canónico válido para ${plan}/${input.country}.`
+        `PaymentRouter: no existe un precio canónico válido para ${plan}/${tier}/${input.country}.`
       );
     }
 
@@ -89,7 +90,8 @@ export class GlobalPaymentRouter {
       amount: canonicalAmount,
       method: input.method,
       businessType: input.businessType,
-      plan
+      plan,
+      tier
     };
 
     return {

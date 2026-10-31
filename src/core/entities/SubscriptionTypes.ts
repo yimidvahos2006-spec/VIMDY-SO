@@ -78,70 +78,192 @@ export interface SubscriptionAuditDetails {
   cancelledAt?: string;
 }
 
+/** Periodo de facturación de un plan. Es lo que se guarda en `businesses.plan`. */
+export type BillingPeriod = Extract<SubscriptionPlan, "monthly" | "yearly">;
+
+/**
+ * Nivel comercial del negocio:
+ * - `single`: negocio de 1 sede.
+ * - `multi`: multi-sucursal (2 o más sedes).
+ *
+ * El nivel cambia el precio, NO la duración: un plan anual multi-sucursal
+ * dura lo mismo que uno anual de 1 sede.
+ */
+export type BusinessTier = "single" | "multi";
+
+export const BUSINESS_TIERS: readonly BusinessTier[] = ["single", "multi"];
+
+export const DEFAULT_BUSINESS_TIER: BusinessTier = "single";
+
+export function isBusinessTier(value: unknown): value is BusinessTier {
+  return value === "single" || value === "multi";
+}
+
 /** PASO 6 — lo que se muestra en las tarjetas de planes. */
 export interface PlanDefinition {
-  id: Extract<SubscriptionPlan, "monthly" | "yearly">;
+  id: BillingPeriod;
+  tier: BusinessTier;
   name: string;
   price: number;
   currency: string;
   billingLabel: string;
   highlight?: string;
+  /** Texto corto del ahorro (solo planes anuales). */
+  savingsLabel?: string;
   features: string[];
 }
 
-export const SUBSCRIPTION_PLANS: PlanDefinition[] = [
-  {
-    id: "monthly",
-    name: "Plan Mensual",
-    price: 59900,
-    currency: "COP",
-    billingLabel: "Facturación mensual",
-    features: [
-      "Todas las funciones de VIMDY incluidas",
-      "Soporte prioritario por WhatsApp",
-      "Actualizaciones automáticas",
-      "Acceso completo a POS, inventario, reportes y más"
-    ]
-  },
-  {
-    id: "yearly",
-    name: "Plan Anual",
-    price: 599000,
-    currency: "COP",
-    billingLabel: "Facturación anual",
-    features: [
-      "Todas las funciones de VIMDY incluidas",
-      "Soporte prioritario por WhatsApp",
-      "Actualizaciones automáticas",
-      "Acceso completo a POS, inventario, reportes y más",
-      "Ahorras 2 meses: pagas 10 y usas 12"
-    ]
-  }
-];
+/** Textos comerciales de cada nivel (selector del modal de planes). */
+export interface TierDefinition {
+  id: BusinessTier;
+  label: string;
+  sublabel: string;
+  tagline: string;
+}
 
-const COUNTRY_PRICE_MAP: Record<string, Record<"monthly" | "yearly", number>> = {
-  CO: { monthly: 59900, yearly: 599000 },
-  US: { monthly: 89, yearly: 1068 },
-  MX: { monthly: 1499, yearly: 17988 },
-  PE: { monthly: 149, yearly: 1788 },
-  CL: { monthly: 14990, yearly: 179880 },
-  AR: { monthly: 89999, yearly: 1079988 },
-  EC: { monthly: 59, yearly: 708 },
-  PA: { monthly: 69, yearly: 828 },
-  VE: { monthly: 49, yearly: 588 },
-  ES: { monthly: 69, yearly: 828 }
+export const TIER_DEFINITIONS: Record<BusinessTier, TierDefinition> = {
+  single: {
+    id: "single",
+    label: "Negocio de 1 sede",
+    sublabel: "Un local, todo bajo control",
+    tagline: "Vende más rápido y sabe exactamente qué tienes en inventario, todos los días."
+  },
+  multi: {
+    id: "multi",
+    label: "Multi-Sucursal",
+    sublabel: "2 o más sedes",
+    tagline: "Haz crecer tu marca sin perder el control: todas tus sedes sincronizadas y un solo panel para decidir."
+  }
 };
 
-export function getPlanPrice(planId: "monthly" | "yearly", countryCode: string): number {
+/**
+ * Dónde se administran las sucursales dentro de VIMDY. Se reutiliza en el
+ * modal de planes y en la tarjeta de Suscripción para que siempre digan lo mismo.
+ */
+export const BRANCH_MANAGEMENT_PATH = "Configuración › Operación › Sucursales";
+
+export const BRANCH_MANAGEMENT_HINT =
+  `Crea, edita y activa o desactiva tus sucursales cuando quieras desde ${BRANCH_MANAGEMENT_PATH}.`;
+
+const SINGLE_TIER_FEATURES: readonly string[] = [
+  "POS ilimitado: registra todas las ventas que necesites, sin topes",
+  "Control de inventario: insumos, recetas y stock siempre al día",
+  "Reportes de ventas, caja y utilidades para decidir con datos",
+  "Soporte prioritario por WhatsApp",
+  "Actualizaciones automáticas incluidas"
+];
+
+const MULTI_TIER_FEATURES: readonly string[] = [
+  "Todo lo del plan de 1 sede, para 2 o más sedes",
+  "Sedes sincronizadas: ventas e inventario al día en cada sucursal",
+  "Reportes centralizados de todas tus sucursales en un solo lugar",
+  "POS ilimitado y control de inventario en cada sede",
+  "Soporte prioritario por WhatsApp",
+  `Administra tus sucursales desde ${BRANCH_MANAGEMENT_PATH}`
+];
+
+const YEARLY_SAVINGS_FEATURE = "Ahorras 2 meses: pagas 10 y usas 12";
+const YEARLY_SAVINGS_LABEL = "Ahorras 2 meses";
+
+export const SUBSCRIPTION_PLANS_BY_TIER: Record<BusinessTier, PlanDefinition[]> = {
+  single: [
+    {
+      id: "monthly",
+      tier: "single",
+      name: "Plan Mensual",
+      price: 59900,
+      currency: "COP",
+      billingLabel: "Facturación mensual",
+      features: [...SINGLE_TIER_FEATURES]
+    },
+    {
+      id: "yearly",
+      tier: "single",
+      name: "Plan Anual",
+      price: 599000,
+      currency: "COP",
+      billingLabel: "Facturación anual",
+      highlight: "Mejor valor",
+      savingsLabel: YEARLY_SAVINGS_LABEL,
+      features: [...SINGLE_TIER_FEATURES, YEARLY_SAVINGS_FEATURE]
+    }
+  ],
+  multi: [
+    {
+      id: "monthly",
+      tier: "multi",
+      name: "Plan Mensual Multi-Sucursal",
+      price: 110900,
+      currency: "COP",
+      billingLabel: "Facturación mensual",
+      features: [...MULTI_TIER_FEATURES]
+    },
+    {
+      id: "yearly",
+      tier: "multi",
+      name: "Plan Anual Multi-Sucursal",
+      price: 1109000,
+      currency: "COP",
+      billingLabel: "Facturación anual",
+      highlight: "Mejor valor",
+      savingsLabel: YEARLY_SAVINGS_LABEL,
+      features: [...MULTI_TIER_FEATURES, YEARLY_SAVINGS_FEATURE]
+    }
+  ]
+};
+
+/** Planes de 1 sede. Se conserva el nombre original para no romper a los consumidores existentes. */
+export const SUBSCRIPTION_PLANS: PlanDefinition[] = SUBSCRIPTION_PLANS_BY_TIER.single;
+
+/**
+ * Precios por país y nivel. Espejo de PLAN_PRICE_BY_COUNTRY en
+ * supabase/functions/wompi-create-checkout/index.ts (el servidor es quien
+ * decide el cobro real). Solo Colombia tiene precio multi-sucursal
+ * verificado: en los demás países `multi` no existe y NO se inventa.
+ */
+const COUNTRY_PRICE_MAP: Record<string, Partial<Record<BusinessTier, Record<BillingPeriod, number>>>> = {
+  CO: {
+    single: { monthly: 59900, yearly: 599000 },
+    multi: { monthly: 110900, yearly: 1109000 }
+  },
+  US: { single: { monthly: 89, yearly: 1068 } },
+  MX: { single: { monthly: 1499, yearly: 17988 } },
+  PE: { single: { monthly: 149, yearly: 1788 } },
+  CL: { single: { monthly: 14990, yearly: 179880 } },
+  AR: { single: { monthly: 89999, yearly: 1079988 } },
+  EC: { single: { monthly: 59, yearly: 708 } },
+  PA: { single: { monthly: 69, yearly: 828 } },
+  VE: { single: { monthly: 49, yearly: 588 } },
+  ES: { single: { monthly: 69, yearly: 828 } }
+};
+
+/** ¿Hay un precio verificado para este nivel en este país? */
+export function isTierAvailable(tier: BusinessTier, countryCode: string): boolean {
+  return COUNTRY_PRICE_MAP[countryCode]?.[tier] !== undefined;
+}
+
+/**
+ * Precio canónico del plan. Devuelve 0 cuando no existe un precio verificado
+ * (p. ej. `multi` fuera de Colombia): GlobalPaymentRouter rechaza cualquier
+ * precio <= 0, así que un nivel sin precio nunca llega a cobrarse.
+ */
+export function getPlanPrice(
+  planId: BillingPeriod,
+  countryCode: string,
+  tier: BusinessTier = DEFAULT_BUSINESS_TIER
+): number {
   const countryPricing = COUNTRY_PRICE_MAP[countryCode];
   if (countryPricing) {
-    return countryPricing[planId];
+    return countryPricing[tier]?.[planId] ?? 0;
+  }
+  if (tier !== DEFAULT_BUSINESS_TIER) {
+    return 0;
   }
   const plan = SUBSCRIPTION_PLANS.find((p) => p.id === planId);
   return plan ? plan.price : 0;
 }
 
-export function getPlanCurrency(planId: "monthly" | "yearly", countryCode: string): CurrencyCode {
+export function getPlanCurrency(planId: BillingPeriod, countryCode: string): CurrencyCode {
   const currencyMap: Record<string, CurrencyCode> = {
     CO: "COP",
     US: "USD",

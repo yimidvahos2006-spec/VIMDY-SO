@@ -14,8 +14,11 @@ const activationMigration = readFileSync(
 describe("subscription payment concurrency hardening", () => {
   it("uses a deterministic checkout key for the same business, plan, and window", () => {
     expect(checkoutFunction).toContain("const checkoutWindow = Math.floor(Date.now() / (5 * 60 * 1000));");
-    expect(checkoutFunction).toContain("const reference = `wompi_${businessId}_${plan}_${checkoutWindow}`;");
-    expect(checkoutFunction).toContain("const idempotencyKey = `${businessId}:${plan}:${checkoutWindow}`;");
+    expect(checkoutFunction).toContain("const reference = `wompi_${businessId}_${plan}${tierRefSegment}_${checkoutWindow}`;");
+    expect(checkoutFunction).toContain("const idempotencyKey = `${businessId}:${plan}${tierKeySegment}:${checkoutWindow}`;");
+    // "single" conserva el formato anterior: los checkouts pendientes ya creados siguen válidos.
+    expect(checkoutFunction).toContain('const tierRefSegment = tier === "multi" ? "_multi" : "";');
+    expect(checkoutFunction).toContain('const tierKeySegment = tier === "multi" ? ":multi" : "";');
     expect(checkoutFunction).toContain("if (insertError) {");
     expect(checkoutFunction).toContain("existingPayment.wompi_reference");
   });

@@ -39,12 +39,18 @@ function json(body: unknown, status = 200) {
 }
 
 type Plan = "monthly" | "yearly";
+// Nivel comercial: "single" = negocio de 1 sede, "multi" = multi-sucursal (2+ sedes).
+// Cambia el precio, no la duración del plan.
+type Tier = "single" | "multi";
 
-// Espejo server-side de SUBSCRIPTION_PLANS (src/core/entities/SubscriptionTypes.ts)
+// Espejo server-side de SUBSCRIPTION_PLANS_BY_TIER (src/core/entities/SubscriptionTypes.ts)
 // y de COUNTRY_PRICE_MAP en mercadopago-checkout — misma fuente de verdad,
 // una copia por Edge Function porque cada una corre aislada.
-const PLAN_PRICE_BY_COUNTRY: Record<string, Record<Plan, number>> = {
-  CO: { monthly: 59900, yearly: 599000 }
+const PLAN_PRICE_BY_COUNTRY: Record<string, Record<Tier, Record<Plan, number>>> = {
+  CO: {
+    single: { monthly: 59900, yearly: 599000 },
+    multi: { monthly: 110900, yearly: 1109000 }
+  }
 };
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
@@ -61,6 +67,8 @@ function resolveWompiCheckoutBase(): string {
 interface RequestBody {
   businessId?: string;
   plan?: Plan;
+  /** Opcional por compatibilidad con clientes anteriores: si falta se asume "single". */
+  tier?: Tier;
 }
 
 /**
@@ -120,9 +128,14 @@ Deno.serve(async (req: Request) => {
 
   const businessId = payload.businessId;
   const plan = payload.plan;
+  const tier = payload.tier === undefined ? "single" : payload.tier;
 
   if (!businessId || (plan !== "monthly" && plan !== "yearly")) {
     return json({ error: "Faltan campos: businessId y plan ('monthly' | 'yearly') son obligatorios." }, 400);
+  }
+
+  if (tier !== "single" && tier !== "multi") {
+    return json({ error: "INVALID_TIER: tier debe ser 'single' o 'multi'." }, 400);
   }
 
   // 🔒 VERIFICACIÓN DE SEGURIDAD: Verificar JWT y membresía
@@ -194,12 +207,29 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    const tierPricing = pricing[tier];
+    if (!tierPricing) {
+      return json(
+        {
+          error: "PRICING_NOT_CONFIGURED",
+          detail: `No hay un precio de VIMDY verificado para el nivel ${tier} en ${country}.`
+        },
+        409
+      );
+    }
+
     const currency = (business.currency as string) ?? "COP";
-    const amount = pricing[plan];
+    const amount = tierPricing[plan];
     const amountInCents = Math.round(amount * 100);
     const checkoutWindow = Math.floor(Date.now() / (5 * 60 * 1000));
-    const reference = `wompi_${businessId}_${plan}_${checkoutWindow}`;
-    const idempotencyKey = `${businessId}:${plan}:${checkoutWindow}`;
+    // El nivel viaja en la referencia y en la clave de idempotencia para que un
+    // checkout pendiente de 1 sede jamás se reutilice (con otro monto) para
+    // multi-sucursal en la misma ventana de 5 min. "single" conserva el formato
+    // anterior, así los intentos pendientes ya creados siguen siendo válidos.
+    const tierRefSegment = tier === "multi" ? "_multi" : "";
+    const tierKeySegment = tier === "multi" ? ":multi" : "";
+    const reference = `wompi_${businessId}_${plan}${tierRefSegment}_${checkoutWindow}`;
+    const idempotencyKey = `${businessId}:${plan}${tierKeySegment}:${checkoutWindow}`;
 
     // 3) Firma de integridad calculada antes de reutilizar un checkout pendiente
     //    para garantizar que la URL devuelta sea válida incluso al reintentar en

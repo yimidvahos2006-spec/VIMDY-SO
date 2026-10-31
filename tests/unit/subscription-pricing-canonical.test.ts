@@ -11,6 +11,11 @@ describe("subscription price canonical source", () => {
     expect(getPlanCurrency("monthly", "CO")).toBe("COP");
   });
 
+  it("el precio por defecto es el de 1 sede (compatibilidad con llamadas anteriores)", () => {
+    expect(getPlanPrice("monthly", "CO")).toBe(getPlanPrice("monthly", "CO", "single"));
+    expect(getPlanPrice("yearly", "CO")).toBe(getPlanPrice("yearly", "CO", "single"));
+  });
+
   it("calcula la firma Wompi antes de reutilizar el checkout pendiente", () => {
     const file = readFileSync(
       join(process.cwd(), "supabase", "functions", "wompi-create-checkout", "index.ts"),

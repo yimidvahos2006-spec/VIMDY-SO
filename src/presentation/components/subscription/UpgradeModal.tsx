@@ -1,8 +1,17 @@
 import React, { useState } from "react";
-import { X, Rocket } from "lucide-react";
+import { X, Rocket, Building2 } from "lucide-react";
 
 import { PlansShowcase } from "./PlansShowcase";
-import { PlanDefinition, getPlanPrice, getPlanCurrency } from "../../../core/entities/SubscriptionTypes";
+import { BusinessTierSelector } from "./BusinessTierSelector";
+import {
+  BRANCH_MANAGEMENT_HINT,
+  DEFAULT_BUSINESS_TIER,
+  TIER_DEFINITIONS,
+  isTierAvailable,
+  getPlanCurrency,
+  type BusinessTier,
+  type PlanDefinition
+} from "../../../core/entities/SubscriptionTypes";
 import { useAuth } from "../../context/AuthContext";
 import { toast } from "../../../core/store/toastStore";
 import { companyConfigStore } from "../../../core/store/companyConfigStore";
@@ -33,7 +42,7 @@ const PROVIDER_LABELS: Record<PaymentProviderName, string> = {
  * UpgradeModal
  * ---------------------------------------------------------------------------
  * VIMDY — FASE 7, PASO 6/7 + FASE 8.2 (VIMDY Payments — el cerebro decide) +
- * MISIÓN 3 (Wompi real).
+ * MISIÓN 3 (Wompi real) + selector de tipo de negocio (1 sede / multi-sucursal).
  * Es lo que abre cualquier botón "Ver planes" / "Actualizar ahora" /
  * "Actualizar plan" de toda la app (aviso de PASO 4, pantalla de
  * vencimiento de PASO 5, Configuración > Suscripción de PASO 8).
@@ -57,11 +66,21 @@ const PROVIDER_LABELS: Record<PaymentProviderName, string> = {
 export function UpgradeModal({ onClose }: Props) {
   const { businessId } = useAuth();
   const [notice, setNotice] = useState<string | null>(null);
+  const [selectedTier, setSelectedTier] = useState<BusinessTier>(DEFAULT_BUSINESS_TIER);
 
   const { country } = companyConfigStore.get();
+  // Multi-sucursal solo se ofrece donde hay un precio verificado (hoy, Colombia).
+  const multiAvailable = isTierAvailable("multi", country);
+  const activeTier: BusinessTier = multiAvailable ? selectedTier : DEFAULT_BUSINESS_TIER;
+  const availableTiers: readonly BusinessTier[] = multiAvailable ? ["single", "multi"] : ["single"];
   const providerForCountry = PaymentCountryResolver.resolve(country);
   const providerLabel = PROVIDER_LABELS[providerForCountry];
   const currencyForCountry = PaymentCurrencyResolver.resolve(country);
+
+  function handleTierChange(tier: BusinessTier) {
+    setSelectedTier(tier);
+    setNotice(null);
+  }
 
   async function handleSelectPlan(plan: PlanDefinition) {
     if (!businessId) return;
@@ -74,6 +93,7 @@ export function UpgradeModal({ onClose }: Props) {
         country,
         businessType: "suscripcion_vimdy",
         plan: plan.id,
+        tier: plan.tier,
         currency: displayCurrency
       });
 
@@ -119,13 +139,32 @@ export function UpgradeModal({ onClose }: Props) {
           administrándolo sin interrupciones.
         </p>
 
+        {multiAvailable && (
+          <div className="mb-5">
+            <BusinessTierSelector value={activeTier} onChange={handleTierChange} availableTiers={availableTiers} />
+            <p className="text-vimdy-text-secondary text-sm mt-3 text-center">
+              {TIER_DEFINITIONS[activeTier].tagline}
+            </p>
+          </div>
+        )}
+
         {notice && (
           <div className="mb-4 rounded-xl border border-vimdy-accent/30 bg-vimdy-accent/10 text-vimdy-accent-hover text-sm px-4 py-3">
             {notice}
           </div>
         )}
 
-        <PlansShowcase onSelectPlan={handleSelectPlan} countryCode={country} />
+        <PlansShowcase onSelectPlan={handleSelectPlan} countryCode={country} tier={activeTier} />
+
+        {activeTier === "multi" && (
+          <div className="mt-4 flex items-start gap-3 rounded-xl border border-vimdy-accent/30 bg-vimdy-accent/10 px-4 py-3">
+            <Building2 size={18} className="text-vimdy-accent mt-0.5 flex-shrink-0" aria-hidden="true" />
+            <p className="text-vimdy-text-secondary text-sm">
+              <span className="text-vimdy-text font-semibold">Tus sedes, siempre a tu alcance. </span>
+              {BRANCH_MANAGEMENT_HINT}
+            </p>
+          </div>
+        )}
 
         <p className="text-vimdy-text-tertiary text-xs mt-5 text-center">
           Pagos procesados de forma segura por {providerLabel}. Puedes cambiar de plan cuando quieras.

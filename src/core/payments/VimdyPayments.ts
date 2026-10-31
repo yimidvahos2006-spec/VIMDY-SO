@@ -42,7 +42,7 @@ export class VimdyPayments {
       currency: request.currency,
       amount: request.amount,
       businessId: request.businessId,
-      metadata: { origin: "vimdy_payments", plan: request.plan, businessType: request.businessType }
+      metadata: { origin: "vimdy_payments", plan: request.plan, tier: request.tier ?? "single", businessType: request.businessType }
     });
 
     return providerInstance.createPayment(request);

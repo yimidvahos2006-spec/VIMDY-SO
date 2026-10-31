@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { CreditCard, CalendarClock, Receipt, ArrowUpCircle, Loader2, AlertTriangle } from "lucide-react";
+import { CreditCard, CalendarClock, Receipt, ArrowUpCircle, Loader2, AlertTriangle, Building2 } from "lucide-react";
 
 import { useAuth } from "../../context/AuthContext";
 import { useSubscription } from "../../../core/store/useSubscription";
@@ -14,7 +14,11 @@ import {
   buildSubscriptionCardModel,
   formatSubscriptionDate
 } from "../../../core/settings/subscriptionCardModel";
-import type { SubscriptionPlan } from "../../../core/entities/SubscriptionTypes";
+import {
+  BRANCH_MANAGEMENT_HINT,
+  isTierAvailable,
+  type SubscriptionPlan
+} from "../../../core/entities/SubscriptionTypes";
 import { SubscriptionCountdownBadge } from "./SubscriptionCountdownBadge";
 import { UpgradeModal } from "./UpgradeModal";
 
@@ -200,7 +204,8 @@ export function SubscriptionSettingsSection() {
     renewalDate,
     nextChargeAt
   });
-  const timeZone = companyConfigStore.get().timezone;
+  const { timezone: timeZone, country } = companyConfigStore.get();
+  const multiBranchOffered = isTierAvailable("multi", country);
 
   return (
     <div className="rounded-2xl border border-vimdy-border bg-vimdy-surface p-5">
@@ -315,6 +320,19 @@ export function SubscriptionSettingsSection() {
               ))}
             </div>
           )}
+        </div>
+
+        <div className="flex items-start gap-3 rounded-xl border border-vimdy-border bg-vimdy-background/60 px-4 py-3">
+          <Building2 size={16} className="text-vimdy-accent mt-0.5 flex-shrink-0" aria-hidden="true" />
+          <div>
+            <p className="text-vimdy-text font-semibold text-sm">Sedes y sucursales</p>
+            <p className="text-vimdy-text-secondary text-xs mt-0.5">
+              {multiBranchOffered
+                ? "VIMDY funciona con 1 sede o con varias. El plan Multi-Sucursal (2 o más sedes) las mantiene sincronizadas y centraliza tus reportes. "
+                : "Administra las sedes de tu negocio desde VIMDY. "}
+              {BRANCH_MANAGEMENT_HINT}
+            </p>
+          </div>
         </div>
 
         <VimdyButton

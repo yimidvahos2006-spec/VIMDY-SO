@@ -169,7 +169,8 @@ export class WompiProvider implements IPaymentProvider {
       {
         body: {
           businessId: request.businessId,
-          plan: request.plan
+          plan: request.plan,
+          tier: request.tier ?? "single"
         }
       }
     );
