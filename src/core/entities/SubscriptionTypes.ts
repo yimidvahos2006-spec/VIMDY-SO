@@ -126,13 +126,13 @@ export const TIER_DEFINITIONS: Record<BusinessTier, TierDefinition> = {
     id: "single",
     label: "Negocio de 1 sede",
     sublabel: "Un local, todo bajo control",
-    tagline: "Vende más rápido y sabe exactamente qué tienes en inventario, todos los días."
+    tagline: "Todo el músculo operativo de VIMDY para tu restaurante. Sin candados y con control total directo a tu correo."
   },
   multi: {
     id: "multi",
     label: "Multi-Sucursal",
     sublabel: "2 o más sedes",
-    tagline: "Haz crecer tu marca sin perder el control: todas tus sedes sincronizadas y un solo panel para decidir."
+    tagline: "Para dueños que mandan en grande. Centraliza, administra y haz crecer múltiples sedes desde un solo panel."
   }
 };
 
@@ -146,20 +146,19 @@ export const BRANCH_MANAGEMENT_HINT =
   `Crea, edita y activa o desactiva tus sucursales cuando quieras desde ${BRANCH_MANAGEMENT_PATH}.`;
 
 const SINGLE_TIER_FEATURES: readonly string[] = [
-  "POS ilimitado: registra todas las ventas que necesites, sin topes",
-  "Control de inventario: insumos, recetas y stock siempre al día",
-  "Reportes de ventas, caja y utilidades para decidir con datos",
-  "Soporte prioritario por WhatsApp",
-  "Actualizaciones automáticas incluidas"
+  "POS y Mesas Ilimitadas",
+  "Control de Insumos en Vivo",
+  "Reporte Diario Automático al Correo (al cerrar caja)",
+  "Comandas y Cocina Conectadas",
+  "Soporte Prioritario por WhatsApp"
 ];
 
 const MULTI_TIER_FEATURES: readonly string[] = [
-  "Todo lo del plan de 1 sede, para 2 o más sedes",
-  "Sedes sincronizadas: ventas e inventario al día en cada sucursal",
-  "Reportes centralizados de todas tus sucursales en un solo lugar",
-  "POS ilimitado y control de inventario en cada sede",
-  "Soporte prioritario por WhatsApp",
-  `Administra tus sucursales desde ${BRANCH_MANAGEMENT_PATH}`
+  "Múltiples Sucursales Conectadas",
+  "Reportes Consolidados y por Sede",
+  "Reporte Diario por Correo para Cada Sede",
+  "Todo el Poder Pro Sin Límites",
+  "Soporte VIP Prioritario"
 ];
 
 const YEARLY_SAVINGS_FEATURE = "Ahorras 2 meses: pagas 10 y usas 12";

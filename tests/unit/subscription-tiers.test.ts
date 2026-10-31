@@ -83,19 +83,33 @@ describe("precios por nivel de negocio", () => {
 });
 
 describe("copy de los planes", () => {
-  it("1 sede resalta POS ilimitado y control de inventario", () => {
+  it("1 sede: subtítulo y beneficios definitivos", () => {
+    expect(TIER_DEFINITIONS.single.tagline).toBe(
+      "Todo el músculo operativo de VIMDY para tu restaurante. Sin candados y con control total directo a tu correo."
+    );
     for (const plan of SUBSCRIPTION_PLANS_BY_TIER.single) {
-      const text = plan.features.join(" ");
-      expect(text).toContain("POS ilimitado");
-      expect(text).toContain("inventario");
+      expect(plan.features.slice(0, 5)).toEqual([
+        "POS y Mesas Ilimitadas",
+        "Control de Insumos en Vivo",
+        "Reporte Diario Automático al Correo (al cerrar caja)",
+        "Comandas y Cocina Conectadas",
+        "Soporte Prioritario por WhatsApp"
+      ]);
     }
   });
 
-  it("multi-sucursal resalta reportes centralizados y sedes sincronizadas", () => {
+  it("multi-sucursal: subtítulo y beneficios definitivos", () => {
+    expect(TIER_DEFINITIONS.multi.tagline).toBe(
+      "Para dueños que mandan en grande. Centraliza, administra y haz crecer múltiples sedes desde un solo panel."
+    );
     for (const plan of SUBSCRIPTION_PLANS_BY_TIER.multi) {
-      const text = plan.features.join(" ");
-      expect(text).toContain("Reportes centralizados");
-      expect(text).toContain("sincronizadas");
+      expect(plan.features.slice(0, 5)).toEqual([
+        "Múltiples Sucursales Conectadas",
+        "Reportes Consolidados y por Sede",
+        "Reporte Diario por Correo para Cada Sede",
+        "Todo el Poder Pro Sin Límites",
+        "Soporte VIP Prioritario"
+      ]);
     }
   });
 
@@ -106,20 +120,18 @@ describe("copy de los planes", () => {
       expect(yearly.id).toBe("yearly");
       expect(monthly.savingsLabel).toBeUndefined();
       expect(yearly.savingsLabel).toBe("Ahorras 2 meses");
+      expect(yearly.features).toHaveLength(6);
       expect(yearly.features.join(" ")).toContain("pagas 10 y usas 12");
-      expect(monthly.features.join(" ")).not.toContain("pagas 10 y usas 12");
+      expect(monthly.features).toHaveLength(5);
     }
   });
 
   it("indica que las sucursales se administran desde Configuración", () => {
     expect(BRANCH_MANAGEMENT_PATH).toContain("Configuración");
     expect(BRANCH_MANAGEMENT_HINT).toContain(BRANCH_MANAGEMENT_PATH);
-    for (const plan of SUBSCRIPTION_PLANS_BY_TIER.multi) {
-      expect(plan.features.join(" ")).toContain("Configuración");
-    }
   });
 
-  it("cada nivel tiene etiqueta y mensaje comercial", () => {
+  it("cada nivel tiene etiqueta", () => {
     expect(TIER_DEFINITIONS.single.label).toBe("Negocio de 1 sede");
     expect(TIER_DEFINITIONS.multi.label).toBe("Multi-Sucursal");
     expect(TIER_DEFINITIONS.multi.sublabel).toContain("2 o más sedes");

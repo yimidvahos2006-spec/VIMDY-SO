@@ -24,7 +24,8 @@ describe("PlansShowcase — render", () => {
     expect(text).toContain("$599.000");
     expect(text).not.toContain("$110.900");
     expect(text).not.toContain("$1.109.000");
-    expect(text).toContain("POS ilimitado");
+    expect(text).toContain("POS y Mesas Ilimitadas");
+    expect(text).toContain("Reporte Diario Automático al Correo (al cerrar caja)");
     expect(text).toContain("Ahorras 2 meses");
   });
 
@@ -33,9 +34,10 @@ describe("PlansShowcase — render", () => {
     expect(text).toContain("$110.900");
     expect(text).toContain("$1.109.000");
     expect(text).not.toContain("$59.900");
-    expect(text).toContain("Reportes centralizados");
+    expect(text).toContain("Reportes Consolidados y por Sede");
+    expect(text).toContain("Reporte Diario por Correo para Cada Sede");
+    expect(text).toContain("Soporte VIP Prioritario");
     expect(text).toContain("Ahorras 2 meses");
-    expect(text).toContain("Configuración › Operación › Sucursales");
   });
 
   it("muestra dos tarjetas por nivel con su botón de compra", () => {
