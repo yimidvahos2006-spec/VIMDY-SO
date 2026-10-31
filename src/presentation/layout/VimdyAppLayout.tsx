@@ -1,7 +1,6 @@
 import React, { lazy, Suspense } from "react";
 import { Menu } from "lucide-react";
 
-import { VimdyAmbientBackground } from "../../marketing/animations/VimdyAmbientBackground";
 import { VimdySidebar } from "../components/ui/VimdySidebar";
 import { VimdyLogo } from "../components/ui/VimdyLogo";
 import { useSidebar } from "../../core/store/useSidebar";
@@ -46,8 +45,7 @@ export function VimdyAppLayout({ children }: Props) {
   useDashboardSync();
 
   return (
-    <div className="min-h-screen relative">
-      <VimdyAmbientBackground className="opacity-40" />
+    <div className="min-h-screen relative bg-black">
       <div className="relative z-10">
 
         <VimdySidebar />

@@ -45,18 +45,18 @@ html {
 
 :root {
   /* --- Fondos --- */
-  --vimdy-background: #0A0A0C;
-  --vimdy-background-secondary: #111114;
+  --vimdy-background: #000000;
+  --vimdy-background-secondary: #050505;
 
   /* --- Superficie --- */
-  --vimdy-surface: #18181B;
-  --vimdy-surface-hover: #1F1F23;
-  --vimdy-surface-active: #232327;
-  --vimdy-surface-elevated: #1E1E22;
+  --vimdy-surface: #09090B;
+  --vimdy-surface-hover: #111113;
+  --vimdy-surface-active: #18181B;
+  --vimdy-surface-elevated: #0F0F11;
 
   /* --- Bordes --- */
-  --vimdy-border: #27272F;
-  --vimdy-border-subtle: #1C1C21;
+  --vimdy-border: #27272A;
+  --vimdy-border-subtle: #18181B;
 
   /* --- Texto --- */
   --vimdy-text: #F5F5F4;

@@ -29,19 +29,26 @@ export default {
     },
     extend: {
       colors: {
+        // La app usa mucho `slate-*` (gris azulado). Se redefine como gris
+        // neutro para que todos los módulos sean negro/gris puro, como VIMDY IA.
+        slate: {
+          50: "#fafafa", 100: "#f4f4f5", 200: "#e4e4e7", 300: "#d4d4d8",
+          400: "#a1a1aa", 500: "#71717a", 600: "#52525b", 700: "#3f3f46",
+          800: "#27272a", 900: "#0f0f11", 950: "#050505"
+        },
         vimdy: {
           // --- Fondos ---
-          background: "#0A0A0C",           // Fondo principal de la app
-          "background-secondary": "#111114", // Sidebar / paneles secundarios
+          background: "#000000",           // Fondo principal de la app (negro absoluto, igual que VIMDY IA)
+          "background-secondary": "#050505", // Sidebar / paneles secundarios
 
           // --- Superficie ---
-          surface: "#18181B",              // Tarjetas
-          "surface-hover": "#1F1F23",      // Hover de tarjetas / filas
-          "surface-active": "#232327",     // Item activo (nav, selects)
+          surface: "#09090B",              // Tarjetas (zinc-950)
+          "surface-hover": "#111113",      // Hover de tarjetas / filas
+          "surface-active": "#18181B",     // Item activo (nav, selects)
 
           // --- Bordes ---
-          border: "#27272F",               // Borde estándar
-          "border-subtle": "#1C1C21",      // Borde casi invisible (separadores)
+          border: "#27272A",               // Borde estándar (zinc-800)
+          "border-subtle": "#18181B",      // Borde casi invisible (separadores)
 
           // --- Texto ---
           text: "#F5F5F4",                 // Texto principal
