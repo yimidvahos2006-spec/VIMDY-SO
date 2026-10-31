@@ -18,21 +18,36 @@ export class AIEngine {
 
     }
 
-    return lowStockProducts.map(product => {
+    const recommendations = lowStockProducts.flatMap((product): string[] => {
 
       // Conteo a ciegas: `stock` es un valor de banda, no la cantidad real. Solo el estado.
       if (isStockMasked(product)) {
-        return `Reponer "${product.name}" (${maskedStatusText(maskedStockStatus(product))}).`;
+        return [`Reponer "${product.name}" (${maskedStatusText(maskedStockStatus(product))}).`];
+      }
+
+      // Sin stock mínimo definido y sin stock negativo no hay nada que
+      // comprar: se omite en vez de mostrar "Comprar 0 unidades".
+      if (!(product.minStock > 0) && !(product.stock < 0)) {
+        return [];
       }
 
       const faltantes = Math.max(
-        product.minStock - product.stock,
+        Math.ceil(product.minStock - product.stock),
         1
       );
 
-      return `Comprar ${faltantes} unidades de "${product.name}". Stock actual: ${product.stock}.`;
+      const unidades = faltantes === 1 ? "unidad" : "unidades";
+      return [`Comprar ${faltantes} ${unidades} de "${product.name}". Stock actual: ${product.stock}.`];
 
     });
+
+    if (recommendations.length === 0) {
+      return [
+        "El inventario está en buen estado. No se requieren compras urgentes."
+      ];
+    }
+
+    return recommendations;
 
   }
 

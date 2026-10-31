@@ -100,11 +100,17 @@ export class InventoryAI {
    * Calcula cuánto comprar.
    */
   calculatePurchaseQuantity(product: Product): number {
-    if (product.stock >= product.minStock) {
+    const stock = Number.isFinite(product.stock) ? product.stock : 0;
+    const minStock = Number.isFinite(product.minStock) ? product.minStock : 0;
+
+    // Stock ya cubierto (incluye stock 0 con mínimo 0): no hay nada que
+    // reponer, así que no se inventa una cantidad. Un stock negativo (venta
+    // sin existencias) sí es una necesidad real y sigue calculándose.
+    if (stock >= minStock) {
       return 0;
     }
     return Math.max(
-      (product.minStock * 2) - product.stock,
+      Math.ceil((minStock * 2) - stock),
       1
     );
   }
@@ -129,20 +135,35 @@ export class InventoryAI {
 
   /**
    * Genera recomendaciones de compra.
+   *
+   * Solo se recomienda comprar cuando hay una necesidad real:
+   *   · Con cifras reales: la cantidad a comprar debe ser mayor que 0. Un
+   *     producto con stock 0 y stock mínimo 0 (o sin mínimo definido) cuenta
+   *     como "crítico" por getCriticalProducts (0 <= 0), pero no tiene punto
+   *     de reorden, así que NO genera sugerencias del tipo "Comprar 0 u.".
+   *   · Con stock enmascarado (conteo a ciegas): no hay cifras, así que se
+   *     conserva la recomendación solo si el estado indica que hace falta
+   *     reponer (agotado o bajo), nunca con cantidades inventadas.
    */
   generatePurchaseRecommendations(
     products: Product[]
   ): PurchaseRecommendation[] {
     return this.getCriticalProducts(products)
-      .map(product => ({
-        productId: product.id,
-        productName: product.name,
-        // Con stock enmascarado no se puede calcular cuánto comprar: solo la prioridad (sale del estado).
-        currentStock: isStockMasked(product) ? 0 : product.stock,
-        recommendedPurchase: isStockMasked(product) ? 0 : this.calculatePurchaseQuantity(product),
-        priority: this.calculatePriority(product),
-        ...(isStockMasked(product) ? { stockMasked: true } : {})
-      }))
+      .map((product): PurchaseRecommendation => {
+        const masked = isStockMasked(product);
+        return {
+          productId: product.id,
+          productName: product.name,
+          // Con stock enmascarado no se puede calcular cuánto comprar: solo la prioridad (sale del estado).
+          currentStock: masked ? 0 : product.stock,
+          recommendedPurchase: masked ? 0 : this.calculatePurchaseQuantity(product),
+          priority: this.calculatePriority(product),
+          ...(masked ? { stockMasked: true } : {})
+        };
+      })
+      .filter(
+        (rec) => rec.stockMasked === true || rec.recommendedPurchase > 0
+      )
       .sort((a, b) => {
         const priority = {
           CRITICAL: 4,

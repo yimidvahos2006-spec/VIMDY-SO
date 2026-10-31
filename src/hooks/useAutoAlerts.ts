@@ -7,7 +7,10 @@ import { notificationStore, type NotificationCategory } from "../core/store/noti
 import { productCatalogStore } from "../core/store/productCatalogStore";
 import { InventoryAI } from "../core/ia/InventoryAI";
 import type { SmartAlert } from "../core/types/CopilotTypes";
-import { maskedStatusText } from "../core/utils/stockMask";
+import {
+  buildPurchaseSummary,
+  stableStockAlertKey
+} from "../core/domain/notifications/purchaseAlertSummary";
 
 /** Cada cuánto se revisa el negocio para detectar alertas que dependen del tiempo (ej. un pedido que se retrasa) aunque no haya entrado ninguna venta nueva. */
 const REFRESH_INTERVAL_MS = 60_000;
@@ -53,6 +56,13 @@ const inventoryAI = new InventoryAI();
  * preguntarle nada al Copiloto para enterarse. notificationStore ya evita
  * duplicados mientras la alerta siga activa (misma `key`).
  *
+ * Alertas de stock CONSOLIDADAS: la bandeja nunca recibe un aviso por
+ * producto. Hay como máximo una notificación de "agotados", una de "stock
+ * bajo" y una de "IA recomienda comprar" (que resume todos los productos a
+ * reponer). Cada una se actualiza cuando cambia su contenido y se retira
+ * sola cuando el stock ya se repuso. Si no hay una necesidad real de
+ * compra, no se lanza ninguna sugerencia.
+ *
  * Se recalcula cada vez que cambian los pedidos (venta real, vía
  * dashboardStore) y también cada minuto, porque alertas como "pedido
  * retrasado" dependen del tiempo transcurrido, no solo de nuevas ventas.
@@ -72,25 +82,50 @@ export function useAutoAlerts() {
       const snapshot = await loadBusinessSnapshot();
       if (cancelled) return;
 
+      // Claves de las alertas de stock vigentes en este ciclo: todo lo que
+      // esté guardado como stock/compra y NO figure aquí ya no aplica.
+      const activeStockKeys = new Set<string>();
+
       snapshot.smartAlerts
         .filter((alert) => alert.message !== NO_ALERTS_MESSAGE)
         .forEach((alert) => {
           const meta = ALERT_META[alert.level];
           const category = inferCategory(alert);
-          notificationStore.add(meta.title, `${alert.icon} ${alert.message}`, meta.type, alert.message, category);
+          const message = `${alert.icon} ${alert.message}`;
+
+          if (category === "STOCK_BAJO") {
+            // Clave estable (sin el conteo del mensaje): una sola notificación
+            // que se actualiza, en vez de una nueva cada vez que cambia el número.
+            const key = stableStockAlertKey(alert.message) ?? alert.message;
+            activeStockKeys.add(key);
+            notificationStore.upsertByKey(meta.title, message, meta.type, key, category);
+            return;
+          }
+
+          notificationStore.add(meta.title, message, meta.type, alert.message, category);
         });
 
       // 🟣 IA recomienda comprar: se apoya en InventoryAI sobre el catálogo
       // real (productCatalogStore), igual que hace Inventario para mostrar
-      // sus propias recomendaciones de compra.
+      // sus propias recomendaciones de compra. Todas las recomendaciones
+      // urgentes se resumen en UNA sola notificación, y solo si de verdad
+      // hay algo que reponer.
       const products = productCatalogStore.getSnapshot();
-      inventoryAI.generatePurchaseRecommendations(products).forEach((rec) => {
-        if (rec.priority !== "CRITICAL" && rec.priority !== "HIGH") return;
-        const message = rec.stockMasked
-          ? `Reponer "${rec.productName}" (${maskedStatusText(rec.priority === "CRITICAL" ? "OUT" : "LOW")})`
-          : `Comprar ${rec.recommendedPurchase} u. de "${rec.productName}" (quedan ${rec.currentStock})`;
-        notificationStore.addPurchaseRecommendation(message, `IA_COMPRA:${rec.productId}`);
-      });
+      const purchaseSummary = buildPurchaseSummary(
+        inventoryAI.generatePurchaseRecommendations(products)
+      );
+      if (purchaseSummary) {
+        activeStockKeys.add(purchaseSummary.key);
+        notificationStore.addPurchaseRecommendation(purchaseSummary.message, purchaseSummary.key);
+      }
+
+      // Limpieza: retira avisos de stock/compra que ya no aplican (stock ya
+      // repuesto) y los avisos individuales por producto de versiones anteriores.
+      notificationStore.removeWhere(
+        (notification) =>
+          (notification.category === "STOCK_BAJO" || notification.category === "IA_COMPRA") &&
+          !activeStockKeys.has(notification.key)
+      );
     }
 
     const safeCheck = () => {

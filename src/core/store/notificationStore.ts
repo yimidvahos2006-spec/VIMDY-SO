@@ -178,6 +178,71 @@ class NotificationStore extends ObservableStore<Notification[]> {
     this.persist(notification);
   }
 
+  /**
+   * Crea la notificación si no existe, o la ACTUALIZA si ya existe una con la
+   * misma `key` y su contenido cambió (ej. "3 productos" pasa a "5 productos").
+   *
+   * Es lo que permite consolidar: una sola notificación por tipo de alerta
+   * que se mantiene al día, en vez de una notificación nueva cada vez que
+   * cambia el conteo. Si el contenido es idéntico no hace nada, así una
+   * alerta que la persona ya leyó no vuelve a marcarse como no leída en
+   * cada recálculo; solo se reactiva cuando el mensaje realmente cambia.
+   */
+  upsertByKey(
+    title: string,
+    message: string,
+    type: Notification["type"],
+    key: string,
+    category: NotificationCategory
+  ) {
+    const existing = this.notifications.find((n) => n.key === key);
+    if (!existing) {
+      this.add(title, message, type, key, category);
+      return;
+    }
+
+    if (
+      existing.title === title &&
+      existing.message === message &&
+      existing.type === type &&
+      existing.category === category
+    ) {
+      return;
+    }
+
+    const updated: Notification = {
+      ...existing,
+      title,
+      message,
+      type,
+      category,
+      read: false,
+      date: new Date()
+    };
+    this.notifications = [updated, ...this.notifications.filter((n) => n.id !== existing.id)];
+    this.sync();
+    this.persist(updated);
+  }
+
+  /**
+   * Elimina todas las notificaciones que cumplan la condición (en memoria y
+   * en Supabase). Sirve para retirar alertas que ya no aplican, por ejemplo
+   * una alerta de reposición cuando el stock ya se repuso. Devuelve cuántas
+   * quitó.
+   */
+  removeWhere(predicate: (notification: Notification) => boolean): number {
+    const doomed = this.notifications.filter(predicate);
+    if (doomed.length === 0) return 0;
+
+    const ids = new Set(doomed.map((n) => n.id));
+    this.notifications = this.notifications.filter((n) => !ids.has(n.id));
+    this.sync();
+    container.notificationRepo.deleteMany([...ids]).catch((err) => {
+      logError("[notificationStore] No se pudo borrar notificaciones obsoletas en Supabase", { category: "sync", context: { error: String(err) } });
+    });
+    return doomed.length;
+  }
+
   /** 🔴 Stock bajo o agotado de un producto. */
   addStockAlert(message: string, key?: string) {
     this.add("Stock bajo", message, "warning", key ?? `STOCK_BAJO:${message}`, "STOCK_BAJO");
@@ -198,9 +263,13 @@ class NotificationStore extends ObservableStore<Notification[]> {
     this.add("Meta cumplida", message, "success", key ?? `META_CUMPLIDA:${message}`, "META_CUMPLIDA");
   }
 
-  /** 🟣 Recomendación de compra generada por la IA de inventario. */
-  addPurchaseRecommendation(message: string, key?: string) {
-    this.add("IA recomienda comprar", message, "info", key, "IA_COMPRA");
+  /**
+   * 🟣 Recomendación de compra generada por la IA de inventario.
+   * Usa `upsertByKey`: con la misma `key` actualiza la notificación existente
+   * en vez de crear otra, para que la bandeja muestre un solo resumen.
+   */
+  addPurchaseRecommendation(message: string, key: string) {
+    this.upsertByKey("IA recomienda comprar", message, "info", key, "IA_COMPRA");
   }
 
   /** 🔔 Recordatorio manual creado por el usuario. */
