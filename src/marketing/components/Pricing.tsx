@@ -1,25 +1,20 @@
-import { ArrowRight, Check, ShieldCheck } from "lucide-react";
+import { useState } from "react";
+import { ArrowRight, Building2, Check, ShieldCheck, Store } from "lucide-react";
+import {
+  BUSINESS_TIERS,
+  MARKETING_PLAN_TEXT,
+  TIER_DEFINITIONS,
+  marketingFeatures,
+  priceLabel,
+  type BusinessTier,
+} from "../pricingCopy";
 
-const plans = [
-  {
-    id: "monthly",
-    name: "Mensual",
-    price: "$59.900",
-    period: "/ mes",
-    cta: "Probar 14 días gratis",
-    highlighted: false,
-    description: "Flexibilidad para empezar y operar mes a mes.",
-  },
-  {
-    id: "yearly",
-    name: "Anual",
-    price: "$599.000",
-    period: "/ año",
-    cta: "Probar 14 días gratis",
-    highlighted: true,
-    description: "Ahorras 2 meses: pagas 10 y usas 12.",
-  },
-];
+const PERIODS = ["monthly", "yearly"] as const;
+
+const TIER_ICONS: Record<BusinessTier, typeof Store> = {
+  single: Store,
+  multi: Building2,
+};
 
 const included = [
   "14 días de prueba gratis, sin tarjeta de crédito",
@@ -28,7 +23,24 @@ const included = [
   "Tú decides cuándo renovar: no hay cobros automáticos",
 ];
 
-export function Pricing() {
+interface PricingProps {
+  /** Nivel que se muestra al cargar. Por defecto, negocio de 1 sede. */
+  initialTier?: BusinessTier;
+}
+
+export function Pricing({ initialTier = "single" }: PricingProps) {
+  const [tier, setTier] = useState<BusinessTier>(initialTier);
+  const plans = PERIODS.map((period) => ({
+    id: period,
+    name: MARKETING_PLAN_TEXT[period].name,
+    price: priceLabel(tier, period),
+    period: period === "yearly" ? "/ año" : "/ mes",
+    cta: "Probar 14 días gratis",
+    highlighted: period === "yearly",
+    description: MARKETING_PLAN_TEXT[period].description,
+  }));
+  const features = marketingFeatures(tier);
+
   return (
     <section
       id="precios"
@@ -50,9 +62,9 @@ export function Pricing() {
             id="pricing-title"
             className="mt-7 text-balance text-4xl font-semibold tracking-[-0.04em] text-white sm:text-5xl lg:text-6xl"
           >
-            Elige cómo empezar.
+            Elige el plan de tu negocio.
             <span className="block bg-gradient-to-r from-white via-zinc-200 to-cyan-200 bg-clip-text text-transparent">
-              La operación es la misma.
+              Una sede o muchas.
             </span>
           </h2>
 
@@ -62,10 +74,57 @@ export function Pricing() {
           </p>
         </div>
 
-        <div className="mx-auto mt-14 grid max-w-5xl gap-4 lg:mt-20 lg:grid-cols-[1fr_1.08fr]">
+        <div className="mx-auto mt-12 max-w-2xl lg:mt-16">
+          <div
+            role="radiogroup"
+            aria-label="Tipo de negocio"
+            className="grid gap-2 rounded-[22px] border border-white/[0.07] bg-white/[0.02] p-1.5 sm:grid-cols-2"
+          >
+            {BUSINESS_TIERS.map((option) => {
+              const Icon = TIER_ICONS[option];
+              const selected = option === tier;
+              return (
+                <button
+                  key={option}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => setTier(option)}
+                  className={[
+                    "flex items-center gap-3 rounded-2xl px-4 py-3 text-left transition-[background-color,color] duration-300",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/50",
+                    selected
+                      ? "bg-white text-black"
+                      : "text-zinc-400 hover:bg-white/[0.04] hover:text-white",
+                  ].join(" ")}
+                >
+                  <Icon size={18} aria-hidden="true" />
+                  <span>
+                    <span className="block text-sm font-semibold leading-tight">
+                      {TIER_DEFINITIONS[option].label}
+                    </span>
+                    <span
+                      className={[
+                        "block text-xs",
+                        selected ? "text-black/60" : "text-zinc-600",
+                      ].join(" ")}
+                    >
+                      {TIER_DEFINITIONS[option].sublabel}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-4 text-center text-sm leading-6 text-zinc-400">
+            {TIER_DEFINITIONS[tier].tagline}
+          </p>
+        </div>
+
+        <div className="mx-auto mt-10 grid max-w-5xl gap-4 lg:grid-cols-[1fr_1.08fr]">
           {plans.map((plan) => (
             <article
-              key={plan.id}
+              key={`${tier}-${plan.id}`}
               className={[
                 "relative overflow-hidden rounded-[30px] border p-7 sm:p-8 lg:p-9",
                 "transition-[transform,border-color,background-color,box-shadow] duration-500 hover:-translate-y-1",
@@ -105,6 +164,22 @@ export function Pricing() {
                   {plan.description}
                 </p>
 
+                <ul className="mt-6 space-y-2.5">
+                  {features.map((feature) => (
+                    <li
+                      key={feature}
+                      className="flex items-start gap-2.5 text-sm text-zinc-400"
+                    >
+                      <Check
+                        size={15}
+                        aria-hidden="true"
+                        className="mt-0.5 shrink-0 text-cyan-200/80"
+                      />
+                      {feature}
+                    </li>
+                  ))}
+                </ul>
+
                 {plan.highlighted && (
                   <div className="mt-5 inline-flex items-center rounded-full border border-cyan-300/10 bg-cyan-300/[0.05] px-3 py-1.5 text-xs font-medium text-cyan-200/85">
                     Cobro anual estable
@@ -113,7 +188,7 @@ export function Pricing() {
 
                 <a
                   href="/registro"
-                  aria-label={`Probar 14 días gratis con el plan ${plan.name.toLowerCase()}`}
+                  aria-label={`Probar 14 días gratis con el plan ${plan.name.toLowerCase()} ${TIER_DEFINITIONS[tier].label}`}
                   className={[
                     "group mt-8 inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-sm font-semibold",
                     "transition-[transform,background-color,border-color,color] duration-300",

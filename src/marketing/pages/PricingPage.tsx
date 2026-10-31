@@ -34,8 +34,9 @@ export function PricingPage() {
             </h1>
 
             <p className="mx-auto mt-6 max-w-2xl text-base leading-7 text-zinc-400 sm:text-lg">
-              Empieza con 14 días gratis, sin tarjeta. Después elige el plan
-              mensual o anual. No hay contratos ni permanencia.
+              Empieza con 14 días gratis, sin tarjeta. Después elige el plan de
+              tu negocio: 1 sede o multi-sucursal, mensual o anual. No hay
+              contratos ni permanencia.
             </p>
 
             <a

@@ -1,5 +1,6 @@
 import { useId, useState } from "react";
 import { ChevronDown, HelpCircle } from "lucide-react";
+import { MULTI_BRANCH_ANSWER, PRICING_SUMMARY } from "../pricingCopy";
 
 const faqs = [
   {
@@ -34,8 +35,11 @@ const faqs = [
   },
   {
     question: "¿Cuánto cuesta?",
-    answer:
-      "Plan mensual: $59.900 COP/mes. Plan anual: $599.000 COP/año (2 meses gratis).",
+    answer: PRICING_SUMMARY,
+  },
+  {
+    question: "¿Puedo manejar varias sedes?",
+    answer: MULTI_BRANCH_ANSWER,
   },
   {
     question: "¿Qué métodos de pago acepta?",

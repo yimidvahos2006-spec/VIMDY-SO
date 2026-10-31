@@ -1,4 +1,5 @@
 import { ArrowRight, Sparkles } from "lucide-react";
+import { CTA_PRICE_LINE } from "../pricingCopy";
 
 const ctaHighlights = [
   "Una sola plataforma para la operación",
@@ -74,7 +75,7 @@ export function FinalCTA() {
           </a>
 
           <p className="mt-5 text-xs font-medium tracking-wide text-zinc-600">
-            $59.900 COP / mes
+            {CTA_PRICE_LINE}
           </p>
         </div>
 

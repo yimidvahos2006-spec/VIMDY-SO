@@ -1,14 +1,15 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { ChevronRight, MessageCircle, X } from "lucide-react";
 import { VIMDY_CONTACT } from "../../core/config/contact";
+import { MULTI_BRANCH_ANSWER, PRICING_SUMMARY } from "../pricingCopy";
 
 const responses: Record<string, string> = {
   default:
     "No quiero darte información incorrecta. Puedes hablar con nuestro equipo de VIMDY por WhatsApp.",
   que_es_vimdy:
     "VIMDY es una plataforma todo en uno para negocios de alimentos y bebidas. Integra ventas, caja, inventario, cocina y reportes.",
-  cuanto_cuesta:
-    "Plan mensual: $59.900 COP/mes. Plan anual: $599.000 COP/año (2 meses gratis).",
+  cuanto_cuesta: PRICING_SUMMARY,
+  varias_sedes: MULTI_BRANCH_ANSWER,
   para_que_negocios:
     "Restaurantes, cafeterías, bares, panaderías, pizzerías, food trucks y cualquier negocio de alimentos y bebidas.",
   como_funciona:
@@ -21,6 +22,7 @@ const responses: Record<string, string> = {
 const quickActions = [
   { id: "que_es_vimdy", label: "¿Qué es VIMDY?" },
   { id: "cuanto_cuesta", label: "¿Cuánto cuesta?" },
+  { id: "varias_sedes", label: "¿Tengo varias sedes?" },
   { id: "para_que_negocios", label: "¿Para qué negocios sirve?" },
   { id: "como_funciona", label: "¿Cómo funciona?" },
   { id: "tiene_inventario", label: "¿Tiene inventario?" },

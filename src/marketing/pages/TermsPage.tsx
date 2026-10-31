@@ -1,4 +1,5 @@
 import { LEGAL_INFO } from "../legal/legalInfo";
+import { TERMS_PRICING_BODY } from "../pricingCopy";
 
 const sections = [
   {
@@ -19,7 +20,7 @@ const sections = [
   },
   {
     title: "Planes y precios",
-    body: "Plan mensual: $59.900 COP por mes. Plan anual: $599.000 COP por año (12 meses de acceso, equivalente a pagar 10). Los precios están en pesos colombianos. Si en algún momento debemos cobrar IVA, te lo informaremos antes de aplicarlo. Si cambiamos los precios, te avisaremos con al menos 30 días y el cambio no afectará el período que ya pagaste.",
+    body: TERMS_PRICING_BODY,
   },
   {
     title: "Pagos y renovación",
