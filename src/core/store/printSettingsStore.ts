@@ -22,6 +22,10 @@ export interface PrintSettings {
   showCustomer: boolean;
   showTax: boolean;
   showDiscount: boolean;
+  /** Mesa del pedido (solo aplica cuando la venta viene de una mesa). */
+  showTable: boolean;
+  /** Interruptor del pie de página; el texto vive en `footerMessage`. */
+  showFooter: boolean;
   footerMessage: string;
 }
 
@@ -40,7 +44,7 @@ export const ACCENT_COLORS: { id: AccentColor; name: string; hex: string }[] = [
   { id: "slate", name: "Negro", hex: "#0f172a" }
 ];
 
-const DEFAULT_PRINT_SETTINGS: PrintSettings = {
+export const DEFAULT_PRINT_SETTINGS: PrintSettings = {
   template: "moderno",
   paperWidth: "80mm",
   accentColor: "cyan",
@@ -53,6 +57,8 @@ const DEFAULT_PRINT_SETTINGS: PrintSettings = {
   showCustomer: true,
   showTax: true,
   showDiscount: true,
+  showTable: true,
+  showFooter: true,
   footerMessage: "Gracias por su compra\n¡Los esperamos nuevamente!"
 };
 

@@ -3,6 +3,7 @@ import { container, identityReady } from "../../infrastructure/di/CompositionRoo
 import { businessStore, Business } from "./businessStore";
 import { companyConfigStore, CompanyConfig } from "./companyConfigStore";
 import { Role, User, UserStatus } from "../entities/Entities";
+import type { StaffRole } from "../config/staffRoles";
 import { AVAILABLE_COUNTRY_CODES } from "../config/globalization";
 import {
   buildBusinessSettingsUpdate,
@@ -142,6 +143,11 @@ export function useSettings() {
     };
   }, [refreshTeam]);
 
+  // Si otra pantalla (ej. Operación > Reglas de venta) cambia la configuración del
+  // negocio, esta copia se actualiza sola. Sin esto, el siguiente "Guardar" de otra
+  // tarjeta volvería a escribir en la base los valores viejos y deshacería ese cambio.
+  useEffect(() => companyConfigStore.subscribe(() => setConfig(companyConfigStore.get())), []);
+
   function saveBusiness(data: Partial<Business>) {
     businessStore.update(data);
     setBusiness(businessStore.get());
@@ -206,7 +212,7 @@ export function useSettings() {
    */
   async function createUser(
     actorId: string,
-    data: { name: string; email: string; password: string; roleId: string }
+    data: { name: string; email: string; password: string; roleId: StaffRole }
   ) {
     setError(null);
     try {

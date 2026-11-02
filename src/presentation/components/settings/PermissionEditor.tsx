@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useId, useState } from "react";
+import { useEscapeToClose } from "../../../hooks/useEscapeToClose";
 import { X, ShieldCheck, Check } from "lucide-react";
 
 import { container } from "../../../infrastructure/di/CompositionRoot";
@@ -25,6 +26,8 @@ export function PermissionEditor({ roleId, roleName, onClose, onSaved }: Permiss
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [locked, setLocked] = useState(false);
+  const titleId = useId();
+  useEscapeToClose(onClose, !saving);
 
   useEffect(() => {
     async function load() {
@@ -98,11 +101,14 @@ export function PermissionEditor({ roleId, roleName, onClose, onSaved }: Permiss
       onClick={onClose}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
         className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl bg-vimdy-surface border border-slate-700 p-4"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-white font-bold flex items-center gap-2">
+          <h3 id={titleId} className="text-white font-bold flex items-center gap-2">
             <ShieldCheck size={18} className="text-cyan-400" />
             Qué puede hacer &ldquo;{roleName}&rdquo;
           </h3>

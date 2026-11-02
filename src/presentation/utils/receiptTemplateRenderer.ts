@@ -16,6 +16,22 @@ export interface PrintableReceiptItem {
   taxRate?: number;
 }
 
+/**
+ * Datos de la venta que no viven en `Receipt` pero el ticket puede mostrar.
+ * Opcionales: sin ellos el bloque correspondiente simplemente no se dibuja.
+ */
+export interface ReceiptRenderExtras {
+  /** Nombre/número de la mesa de la que viene la venta (ej. "Mesa 7"). */
+  tableName?: string;
+}
+
+/** Plantillas en las que el color principal se ve (el resto imprime en negro). */
+export const ACCENT_AWARE_TEMPLATES: readonly PrintSettings["template"][] = [
+  "moderno",
+  "restaurante",
+  "cafeteria"
+];
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -131,6 +147,7 @@ function renderTotalsRows(
 }
 
 function renderFooter(settings: PrintSettings): string {
+  if (!settings.showFooter) return "";
   const lines = settings.footerMessage
     .split("\n")
     .map((line) => escapeHtml(line.trim()))
@@ -156,11 +173,13 @@ function renderHeader(business: Business, settings: PrintSettings, accent: strin
   `;
 }
 
-function renderMeta(receipt: Receipt, settings: PrintSettings): string {
+function renderMeta(receipt: Receipt, settings: PrintSettings, extras: ReceiptRenderExtras): string {
+  const table = settings.showTable ? (extras.tableName ?? "").trim() : "";
   return `
     <div class="meta">
       ${metaLine("Factura:", receipt.code)}
       ${metaLine("Fecha:", receipt.createdAt.toLocaleString("es-CO"))}
+      ${metaLine("Mesa:", table)}
       ${settings.showCustomer ? metaLine("Cliente:", receipt.customerName) : ""}
       ${settings.showCashier ? metaLine("Cajero:", receipt.cashier) : ""}
       ${metaLine("Pago:", receipt.paymentMethod)}
@@ -196,7 +215,8 @@ export function renderReceiptDocument(
   business: Business,
   settings: PrintSettings,
   currency: string,
-  autoPrint: boolean
+  autoPrint: boolean,
+  extras: ReceiptRenderExtras = {}
 ): string {
   const money = (value: number) => formatMoney(Math.max(value, 0), currency);
   const accent = accentHex(settings);
@@ -206,7 +226,7 @@ export function renderReceiptDocument(
   const rows = renderItemRows(items, money);
   const totals = renderTotalsRows(receipt, settings, money);
   const header = renderHeader(business, settings, accent);
-  const meta = renderMeta(receipt, settings);
+  const meta = renderMeta(receipt, settings, extras);
   const qr = renderQr(business, settings);
   const footer = renderFooter(settings);
 
@@ -258,7 +278,7 @@ export function renderReceiptDocument(
       body { background:#f4f4f5; }
     `,
     restaurante: `
-      h1 { text-transform: uppercase; }
+      h1 { text-transform: uppercase; color:${accent}; }
       .meta { border: 1px dashed #999; border-radius:8px; padding:6px 8px; }
       .item-name { font-size: 1.05em; }
     `,
@@ -269,6 +289,7 @@ export function renderReceiptDocument(
     `,
     cafeteria: `
       body { padding-top: 8px; }
+      .grand-total { color:${accent}; }
       .subtitle { margin-bottom: 4px; }
       .footer { margin-top: 8px; }
     `
@@ -291,7 +312,7 @@ export function renderReceiptDocument(
     <div class="divider"></div>
     <table class="totals">${totals}</table>
     ${qr}
-    <div class="footer">${footer}</div>
+    ${footer ? `<div class="footer">${footer}</div>` : ""}
     <div class="powered">Generado por VIMDY OS</div>
   </div>
   ${

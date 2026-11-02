@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { BellRing, Check, Mail, Send } from "lucide-react";
 import { supabase } from "../../../infrastructure/supabase/supabaseClient";
 import { dailyReportDeliveryService } from "../../../infrastructure/supabase/dailyReportDeliveryService";
+import { sendReportCloseTestEmail } from "../../../infrastructure/supabase/reportCloseTestEmailService";
 import { useAuth } from "../../context/AuthContext";
 import { VimdyButton } from "../ui/VimdyButton";
 
@@ -80,11 +81,8 @@ export function DailyReportSettingsCard() {
     setTestingEmail(true);
     setError(null);
     try {
-      const { data, error: invokeError } = await supabase.functions.invoke("process-daily-report", {
-        body: { businessId, action: "TEST_EMAIL", recipient: recipients[0] },
-      });
-      if (invokeError) throw new Error(invokeError.message);
-      if (!data?.ok) throw new Error(data?.error ?? "No se pudo enviar el correo de prueba.");
+      // Lanza con el mensaje claro en español que devuelve el servidor.
+      await sendReportCloseTestEmail({ businessId, recipient: recipients[0] });
       setSaved(true);
       window.setTimeout(() => setSaved(false), 2500);
     } catch (err) {

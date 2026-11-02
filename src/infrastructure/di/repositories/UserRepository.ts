@@ -3,6 +3,7 @@ import { SupabaseRepository } from "./SupabaseRepository";
 import { supabase } from "../../supabase/supabaseClient";
 import { CachedList, indexedDbPersistence } from "../../cache/CachedList";
 import { vimdyCore } from "../../../core/VimdyCore";
+import { assertStaffRole, type StaffRole } from "../../../core/config/staffRoles";
 
 /**
  * UserRepository
@@ -97,7 +98,7 @@ export class UserRepository extends SupabaseRepository<User> {
     name: string;
     email: string;
     password: string;
-    roleId: string;
+    roleId: StaffRole;
   }): Promise<User> {
     const { data: fnData, error: fnError } = await supabase.functions.invoke("create-staff-user", {
       body: data
@@ -129,7 +130,7 @@ export class UserRepository extends SupabaseRepository<User> {
       id: created.id,
       name: created.name,
       email: created.email,
-      roleId: created.roleId,
+      roleId: assertStaffRole(created.roleId),
       status: created.status as User["status"],
       createdAt: now,
       updatedAt: now

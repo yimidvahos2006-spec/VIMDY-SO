@@ -5,13 +5,7 @@ import { RoleEngine } from "./RoleEngine";
 import { AuditEngine } from "./AuditEngine";
 import { vimdyCore } from "../VimdyCore";
 
-const VALID_STAFF_ROLE_IDS = new Set(["ADMIN", "CAJERO", "MESERO", "COCINA"]);
-
-function assertValidRoleId(roleId: string): void {
-  if (!VALID_STAFF_ROLE_IDS.has(roleId.trim().toUpperCase())) {
-    throw new Error(`ROLE_NOT_FOUND: el rol "${roleId}" no es válido. Usa ADMIN, CAJERO, MESERO o COCINA.`);
-  }
-}
+import { assertStaffRole, type StaffRole } from "../config/staffRoles";
 
 /* ===========================================================================
    UserEngine
@@ -45,11 +39,13 @@ export class UserEngine {
    */
   public async createUser(
     actorId: string,
-    data: { name: string; email: string; password: string; roleId: string }
+    data: { name: string; email: string; password: string; roleId: StaffRole }
   ): Promise<User> {
-    assertValidRoleId(data.roleId);
+    // Aunque el tipo ya exige uno de los 4 roles, la UI/IA puede mandar texto
+    // suelto en runtime: se revalida y se manda el valor normalizado.
+    const roleId = assertStaffRole(data.roleId);
 
-    const user = await this.repository.createStaffAccount(data);
+    const user = await this.repository.createStaffAccount({ ...data, roleId });
 
     await this.audit.log(actorId, "USER_CREATED", "users", `Usuario "${user.name}" creado.`, user.id);
     vimdyCore.emit("user", { action: "CREATED", user });
@@ -92,12 +88,12 @@ export class UserEngine {
   public async updateUser(
     actorId: string,
     userId: string,
-    changes: Partial<Pick<User, "name" | "email" | "roleId" | "avatar" | "settings">>
+    changes: Partial<Pick<User, "name" | "email" | "avatar" | "settings">> & { roleId?: StaffRole }
   ): Promise<User> {
     const user = await this.getUser(userId);
 
     if (changes.roleId) {
-      assertValidRoleId(changes.roleId);
+      changes = { ...changes, roleId: assertStaffRole(changes.roleId) };
     }
 
     if (changes.email && changes.email !== user.email) {

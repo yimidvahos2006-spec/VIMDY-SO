@@ -199,6 +199,23 @@ const CODE_MESSAGES: Record<string, (detail: string) => string> = {
   ROLE_ALREADY_EXISTS: (detail) => detail || "Ya existe un rol con ese identificador.",
   ROLE_IS_SYSTEM: (detail) => detail || "Este rol es del sistema y no se puede eliminar.",
   PERMISSION_NOT_FOUND: () => "Uno de los permisos seleccionados no existe.",
+  ROLE_NOT_FOUND: () => "Ese rol no es válido. Elige Administrador, Cajero, Mesero o Cocina.",
+  LAST_ADMIN_PROTECTED: () =>
+    "El negocio debe tener al menos un administrador activo. Asigna el rol de Administrador a otra persona antes de quitar o cambiar a este.",
+
+  // Tarjetas de meseros
+  WAITER_NAME_REQUIRED: () => "Escribe el nombre del mesero.",
+  WAITER_NAME_TOO_LONG: () => "El nombre del mesero es muy largo (máximo 40 letras).",
+  WAITER_NAME_DUPLICATE: (detail) => {
+    const name = extractQuoted(detail);
+    return name
+      ? `Ya hay un mesero llamado "${name}". Usa un nombre distinto (por ejemplo, agrega la inicial del apellido).`
+      : "Ya hay un mesero con ese nombre. Usa un nombre distinto.";
+  },
+  WAITER_NOT_FOUND: () => "Ese mesero ya no existe (puede que otra persona lo haya quitado).",
+  WAITER_PHOTO_INVALID: (detail) => detail || "La foto no es válida. Usa una imagen PNG, JPG o WEBP.",
+  WAITERS_FORBIDDEN: () => "Solo el administrador puede cambiar los meseros y sus fotos.",
+  WAITER_PHOTOS_SAVE_FAILED: () => "No se pudo guardar el ajuste de fotos. Intenta de nuevo.",
 
   // Crear empleados (Edge Function create-staff-user)
   WEAK_PASSWORD: () => "La contraseña es muy corta. Usa al menos 8 caracteres.",
@@ -268,6 +285,14 @@ export function translateBusinessError(
   if (!(err instanceof Error) || !err.message) return fallback;
 
   const raw = err.message.trim();
+
+  // Errores que llegan de Postgres envueltos por los repositorios
+  // ("SUPABASE_UPDATE_FAILED (app_users): LAST_ADMIN_PROTECTED: ..."): el código
+  // no está al inicio del texto, así que se detecta por contenido.
+  if (raw.includes("LAST_ADMIN_PROTECTED")) return CODE_MESSAGES.LAST_ADMIN_PROTECTED("");
+  if (/row-level security|violates row-level|permission denied for table (waiters|app_users|business_members)/i.test(raw)) {
+    return CODE_MESSAGES.ACCESS_DENIED("");
+  }
 
   const withDetail = raw.match(CODE_WITH_DETAIL_PATTERN);
   if (withDetail) {

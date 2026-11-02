@@ -1,4 +1,17 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { createResendClient } from "../_shared/reportCloseEmail.ts";
+import {
+  handleTestEmail,
+  isMissingSchemaError,
+  loadCloseSettings,
+  pickFallbackEmails,
+  resolveEmailRecipients,
+  type CloseSettings,
+  type CloseSettingsStore,
+  type LegacyDailyReportSettingsRow,
+  type MemberCandidate,
+  type ReportCloseSettingsRow,
+} from "../_shared/reportCloseDelivery.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -45,15 +58,9 @@ type JobRow = {
   snapshot: Record<string, unknown> | null;
 };
 
-type SettingsRow = {
-  enabled: boolean;
-  send_on_shift_close: boolean;
-  whatsapp_enabled: boolean;
-  whatsapp_recipients: string[];
-  email_enabled: boolean;
-  email_recipients: string[];
-  email_fallback_enabled: boolean;
-};
+// Configuración efectiva del cierre (tabla nueva report_close_settings con
+// respaldo al sistema anterior daily_report_settings). Ver _shared/reportCloseDelivery.ts.
+type SettingsRow = CloseSettings;
 
 type DeliveryRow = {
   id: string;
@@ -73,6 +80,11 @@ function json(body: unknown, status = 200) {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+}
+
+// Respuesta de error con código estable (`error`) y mensaje en español (`message`).
+function deny(status: number, code: string, message: string): Response {
+  return json({ ok: false, error: code, code, message }, status);
 }
 
 function num(value: unknown): number {
@@ -303,35 +315,77 @@ async function readConfirmedRefunds(
   }
 }
 
-async function getSettings(businessId: string): Promise<SettingsRow> {
-  const { data, error } = await admin
-    .from("daily_report_settings")
-    .select("enabled,send_on_shift_close,whatsapp_enabled,whatsapp_recipients,email_enabled,email_recipients,email_fallback_enabled")
-    .eq("business_id", businessId)
-    .maybeSingle();
-  if (error) throw new Error(`REPORT_SETTINGS_READ_FAILED: ${error.message}`);
-  return {
-    enabled: true,
-    send_on_shift_close: true,
-    whatsapp_enabled: false,
-    whatsapp_recipients: [],
-    email_enabled: true,
-    email_recipients: [],
-    email_fallback_enabled: true,
-    ...(data ?? {}),
-  } as SettingsRow;
+// Acceso a la configuración con el cliente de servicio. Si la tabla nueva aún
+// no existe (migración sin aplicar) se devuelve null y se usa el sistema anterior.
+const closeSettingsStore: CloseSettingsStore = {
+  async fetchResolvedCloseSettings(businessId, branchId) {
+    const { data, error } = await admin.rpc("resolve_report_close_settings", {
+      p_business_id: businessId,
+      p_branch_id: branchId,
+    });
+    if (error) {
+      if (isMissingSchemaError(error)) return null;
+      throw new Error(`REPORT_SETTINGS_READ_FAILED: ${error.message}`);
+    }
+    const rows = Array.isArray(data) ? data : data ? [data] : [];
+    return (rows[0] ?? null) as ReportCloseSettingsRow | null;
+  },
+  async fetchLegacySettings(businessId) {
+    const { data, error } = await admin
+      .from("daily_report_settings")
+      .select("enabled,send_on_shift_close,whatsapp_enabled,whatsapp_recipients,email_enabled,email_recipients,email_fallback_enabled")
+      .eq("business_id", businessId)
+      .maybeSingle();
+    if (error) throw new Error(`REPORT_SETTINGS_READ_FAILED: ${error.message}`);
+    return (data ?? null) as LegacyDailyReportSettingsRow | null;
+  },
+};
+
+function getSettings(businessId: string, branchId: string | null): Promise<SettingsRow> {
+  return loadCloseSettings(closeSettingsStore, businessId, branchId);
 }
 
+// Respaldo: correos de los ADMIN/GERENTE ACTIVOS del negocio (perfil no
+// suspendido/eliminado y cuenta de acceso no bloqueada). Ver pickFallbackEmails.
 async function getAdminEmails(businessId: string): Promise<string[]> {
-  const { data, error } = await admin.from("business_members").select("user_id,role").eq("business_id", businessId).in("role", ["ADMIN", "GERENTE"]);
+  const { data: members, error } = await admin
+    .from("business_members")
+    .select("user_id,role")
+    .eq("business_id", businessId)
+    .in("role", ["ADMIN", "GERENTE"]);
   if (error) throw new Error(`MEMBERS_READ_FAILED: ${error.message}`);
-  const emails = new Set<string>();
-  for (const member of data ?? []) {
-    const user = await admin.auth.admin.getUserById(String(member.user_id));
-    const email = user.data.user?.email?.trim().toLowerCase();
-    if (email) emails.add(email);
+  if (!members?.length) return [];
+
+  const userIds = members.map((member) => String(member.user_id));
+  const { data: profiles, error: profilesError } = await admin
+    .from("app_users")
+    .select("id,data")
+    .eq("business_id", businessId)
+    .in("id", userIds);
+  if (profilesError) throw new Error(`MEMBER_PROFILES_READ_FAILED: ${profilesError.message}`);
+  const statusById = new Map<string, string | null>();
+  for (const profile of profiles ?? []) {
+    const status = (profile as { data?: { status?: unknown } }).data?.status;
+    statusById.set(String((profile as { id: unknown }).id), typeof status === "string" ? status : null);
   }
-  return [...emails];
+
+  const candidates: MemberCandidate[] = await Promise.all(
+    members.map(async (member): Promise<MemberCandidate> => {
+      const userId = String(member.user_id);
+      const { data: userData, error: userError } = await admin.auth.admin.getUserById(userId);
+      const user = userData?.user;
+      const bannedUntil = (user as { banned_until?: string | null } | null | undefined)?.banned_until;
+      const banned = Boolean(bannedUntil && new Date(bannedUntil).getTime() > Date.now());
+      return {
+        userId,
+        role: String(member.role ?? ""),
+        email: user?.email ?? null,
+        profileStatus: statusById.get(userId) ?? null,
+        authDisabled: Boolean(userError) || !user || banned,
+      };
+    }),
+  );
+  return pickFallbackEmails(candidates);
 }
 
 function netItems(
@@ -833,14 +887,15 @@ ${tile("Transacciones del día", String(num(snapshot.transactionCountToday)))}
   return emailShell(header + tiles + shift + cash + products + summary + ai, preheader);
 }
 
-async function ensureDeliveries(job: JobRow, settings: SettingsRow): Promise<void> {
+// Devuelve el motivo (en español) cuando el correo está activo pero no hay a quién enviar.
+async function ensureDeliveries(job: JobRow, settings: SettingsRow): Promise<string | null> {
   const { data: existing, error } = await admin.from("daily_report_deliveries").select("id,channel,recipient,status").eq("job_id", job.id);
   if (error) throw new Error(`DELIVERIES_READ_FAILED: ${error.message}`);
   const existingKeys = new Set((existing ?? []).map((row) => `${row.channel}:${row.recipient}`));
   const inserts: Record<string, unknown>[] = [];
 
-  if (settings.whatsapp_enabled) {
-    for (const raw of settings.whatsapp_recipients ?? []) {
+  if (settings.whatsappEnabled) {
+    for (const raw of settings.whatsappRecipients ?? []) {
       const recipient = raw.replace(/\D/g, "");
       if (/^\d{10,15}$/.test(recipient) && !existingKeys.has(`WHATSAPP:${recipient}`)) {
         inserts.push({ job_id: job.id, business_id: job.business_id, channel: "WHATSAPP", recipient, status: "PENDING" });
@@ -848,21 +903,23 @@ async function ensureDeliveries(job: JobRow, settings: SettingsRow): Promise<voi
     }
   }
 
-  if (settings.email_enabled) {
-    const recipients = settings.email_recipients?.length ? settings.email_recipients : await getAdminEmails(job.business_id);
-    for (const raw of recipients) {
-      const recipient = raw.trim().toLowerCase();
-      if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient) && !existingKeys.has(`EMAIL:${recipient}`)) {
+  let noRecipientsReason: string | null = null;
+  if (settings.emailEnabled) {
+    // Correo configurado; si está vacío, el de un ADMIN/GERENTE activo (respaldo).
+    const resolution = await resolveEmailRecipients(settings, () => getAdminEmails(job.business_id));
+    for (const recipient of resolution.recipients) {
+      if (!existingKeys.has(`EMAIL:${recipient}`)) {
         inserts.push({ job_id: job.id, business_id: job.business_id, channel: "EMAIL", recipient, status: "PENDING" });
       }
     }
+    if (resolution.recipients.length === 0) noRecipientsReason = resolution.reason;
   }
 
   // Si un canal estaba esperando configuración y ahora sí existe, se reactiva.
-  if (settings.whatsapp_enabled && WHATSAPP_ACCESS_TOKEN && WHATSAPP_PHONE_NUMBER_ID && WHATSAPP_GRAPH_VERSION && WHATSAPP_TEMPLATE_NAME) {
+  if (settings.whatsappEnabled && WHATSAPP_ACCESS_TOKEN && WHATSAPP_PHONE_NUMBER_ID && WHATSAPP_GRAPH_VERSION && WHATSAPP_TEMPLATE_NAME) {
     await admin.from("daily_report_deliveries").update({ status: "PENDING", last_error: null, next_attempt_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("job_id", job.id).eq("channel", "WHATSAPP").eq("status", "WAITING_CONFIGURATION");
   }
-  if (settings.email_enabled && RESEND_API_KEY && RESEND_FROM) {
+  if (settings.emailEnabled && RESEND_API_KEY && RESEND_FROM) {
     await admin.from("daily_report_deliveries").update({ status: "PENDING", last_error: null, next_attempt_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("job_id", job.id).eq("channel", "EMAIL").eq("status", "WAITING_CONFIGURATION");
   }
 
@@ -870,22 +927,16 @@ async function ensureDeliveries(job: JobRow, settings: SettingsRow): Promise<voi
     const { error: insertError } = await admin.from("daily_report_deliveries").insert(inserts);
     if (insertError && !insertError.message.toLowerCase().includes("duplicate")) throw new Error(`DELIVERIES_CREATE_FAILED: ${insertError.message}`);
   }
+  return noRecipientsReason;
 }
 
-async function sendEmail(recipient: string, subject: string, text: string, html?: string): Promise<string | null> {
-  if (!RESEND_API_KEY || !RESEND_FROM) {
-    throw Object.assign(new Error("RESEND_NOT_CONFIGURED"), { code: "CONFIG" });
-  }
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from: RESEND_FROM, to: [recipient], subject, text, ...(html ? { html } : {}) }),
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw Object.assign(new Error(`RESEND_HTTP_${response.status}: ${String((body as Record<string, unknown>).message ?? "send failed")}`), { code: response.status === 429 || response.status >= 500 ? "RETRY" : "FAILED" });
-  }
-  return String((body as Record<string, unknown>).id ?? "") || null;
+// Envío por la API de Resend (ver _shared/reportCloseEmail.ts): errores
+// clasificados CONFIG / RETRY / FAILED y Idempotency-Key opcional para que un
+// reintento no duplique el correo.
+const resend = createResendClient({ apiKey: RESEND_API_KEY, from: RESEND_FROM });
+
+function sendEmail(recipient: string, subject: string, text: string, html?: string, idempotencyKey?: string): Promise<string | null> {
+  return resend.send({ to: recipient, subject, text, html, idempotencyKey });
 }
 
 async function sendWhatsApp(recipient: string, snapshot: Record<string, unknown>, reportTextValue: string): Promise<string> {
@@ -930,11 +981,9 @@ async function sendWhatsApp(recipient: string, snapshot: Record<string, unknown>
 }
 
 async function ensureEmailFallback(jobId: string, businessId: string, settings: SettingsRow): Promise<void> {
-  if (!settings.email_fallback_enabled || !settings.email_enabled) return;
-  const emails = settings.email_recipients?.length ? settings.email_recipients : await getAdminEmails(businessId);
-  for (const raw of emails) {
-    const recipient = raw.trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) continue;
+  if (!settings.emailFallbackEnabled || !settings.emailEnabled) return;
+  const { recipients } = await resolveEmailRecipients({ ...settings, useAdminWhenEmpty: true }, () => getAdminEmails(businessId));
+  for (const recipient of recipients) {
     const { error } = await admin.from("daily_report_deliveries").upsert(
       { job_id: jobId, business_id: businessId, channel: "EMAIL", recipient, status: "PENDING", next_attempt_at: new Date().toISOString() },
       { onConflict: "job_id,channel,recipient", ignoreDuplicates: true },
@@ -946,7 +995,7 @@ async function ensureEmailFallback(jobId: string, businessId: string, settings: 
 async function processDelivery(delivery: DeliveryRow, snapshot: Record<string, unknown>, subject: string, text: string, settings: SettingsRow) {
   try {
     const providerId = delivery.channel === "EMAIL"
-      ? await sendEmail(delivery.recipient, subject, text, reportHtml(snapshot))
+      ? await sendEmail(delivery.recipient, subject, text, reportHtml(snapshot), `daily-report-delivery/${delivery.id}`)
       : await sendWhatsApp(delivery.recipient, snapshot, text);
     await admin.from("daily_report_deliveries").update({ status: "SENT", provider_message_id: providerId, sent_at: new Date().toISOString(), locked_until: null, last_error: null, updated_at: new Date().toISOString() }).eq("id", delivery.id);
   } catch (error) {
@@ -963,12 +1012,12 @@ async function processDelivery(delivery: DeliveryRow, snapshot: Record<string, u
   }
 }
 
-async function finalizeJob(jobId: string) {
+async function finalizeJob(jobId: string, noRecipientsReason: string | null = null) {
   const { data, error } = await admin.from("daily_report_deliveries").select("status").eq("job_id", jobId);
   if (error) throw new Error(`DELIVERY_STATUS_READ_FAILED: ${error.message}`);
   const statuses = (data ?? []).map((row) => String(row.status));
   if (!statuses.length) {
-    await admin.from("daily_report_jobs").update({ status: "WAITING_CONFIGURATION", locked_until: null, last_error: "No hay canales de entrega configurados.", updated_at: new Date().toISOString() }).eq("id", jobId);
+    await admin.from("daily_report_jobs").update({ status: "WAITING_CONFIGURATION", locked_until: null, last_error: noRecipientsReason ?? "No hay canales de entrega configurados.", updated_at: new Date().toISOString() }).eq("id", jobId);
     return;
   }
   const completed = statuses.every((status) => ["SENT", "DELIVERED", "READ"].includes(status));
@@ -991,14 +1040,14 @@ async function finalizeJob(jobId: string) {
 }
 
 async function authorize(req: Request, body: Record<string, unknown>, shiftId: string | null) {
-  if (WORKER_SECRET && req.headers.get("x-daily-report-secret") === WORKER_SECRET) return { worker: true, userId: null };
+  if (WORKER_SECRET && req.headers.get("x-daily-report-secret") === WORKER_SECRET) return { worker: true, userId: null, role: null as string | null };
   const businessId = body.businessId ? String(body.businessId) : null;
-  if (!businessId) throw new Response(JSON.stringify({ error: "BUSINESS_ID_REQUIRED" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  if (!businessId) throw deny(400, "BUSINESS_ID_REQUIRED", "Falta indicar el negocio.");
   const authorization = req.headers.get("Authorization");
   const token = authorization?.startsWith("Bearer ") ? authorization.slice(7) : null;
-  if (!token) throw new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  if (!token) throw deny(401, "UNAUTHORIZED", "Tu sesión venció. Vuelve a iniciar sesión.");
   const { data: userData, error } = await admin.auth.getUser(token);
-  if (error || !userData.user) throw new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  if (error || !userData.user) throw deny(401, "UNAUTHORIZED", "Tu sesión venció. Vuelve a iniciar sesión.");
   const { data: membership, error: membershipError } = await admin
     .from("business_members")
     .select("user_id,role")
@@ -1006,7 +1055,7 @@ async function authorize(req: Request, body: Record<string, unknown>, shiftId: s
     .eq("user_id", userData.user.id)
     .maybeSingle();
   if (membershipError || !membership) {
-    throw new Response(JSON.stringify({ error: "FORBIDDEN" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    throw deny(403, "FORBIDDEN", "No tienes permiso para realizar esta acción en este negocio.");
   }
 
   const role = String((membership as { role?: unknown }).role ?? "");
@@ -1018,20 +1067,20 @@ async function authorize(req: Request, body: Record<string, unknown>, shiftId: s
       .eq("business_id", businessId)
       .maybeSingle();
     if (shiftError || !shift) {
-      throw new Response(JSON.stringify({ error: "SHIFT_NOT_FOUND" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      throw deny(404, "SHIFT_NOT_FOUND", "No se encontró el turno indicado.");
     }
     const shiftData = (shift as { data?: Record<string, unknown> }).data ?? {};
     const shiftStatus = String(shiftData.status ?? "");
     const closedBy = String(shiftData.closedBy ?? "");
     const allowedForShift = role === "ADMIN" || role === "GERENTE" || (role === "CAJERO" && closedBy === userData.user.id);
     if (shiftStatus !== "CLOSED" || !allowedForShift) {
-      throw new Response(JSON.stringify({ error: "FORBIDDEN" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      throw deny(403, "FORBIDDEN", "No tienes permiso para realizar esta acción en este negocio.");
     }
   } else if (!["ADMIN", "GERENTE"].includes(role)) {
-    throw new Response(JSON.stringify({ error: "FORBIDDEN" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    throw deny(403, "FORBIDDEN", "No tienes permiso para realizar esta acción en este negocio.");
   }
 
-  return { worker: false, userId: userData.user.id };
+  return { worker: false, userId: userData.user.id, role: role as string | null };
 }
 
 Deno.serve(async (req) => {
@@ -1043,11 +1092,6 @@ Deno.serve(async (req) => {
     const businessId = body.businessId ? String(body.businessId) : null;
 
     if (String(body.action ?? "").toUpperCase() === "TEST_EMAIL") {
-      if (auth.worker) throw new Response(JSON.stringify({ error: "FORBIDDEN" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      const recipient = String(body.recipient ?? "").trim().toLowerCase();
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
-        return json({ error: "INVALID_EMAIL" }, 400);
-      }
       const subject = "VIMDY prueba ✅ Tu correo está listo";
       const text = [
         "Hola,",
@@ -1080,8 +1124,19 @@ Deno.serve(async (req) => {
         EMAIL_TEST_LOGO_URL,
         "VIMDY prueba",
       );
-      const providerId = await sendEmail(recipient, subject, text, testHtml);
-      return json({ ok: true, recipient, providerId });
+      // Validaciones, permisos (solo ADMIN), respaldo y mensajes en español:
+      // ver handleTestEmail en _shared/reportCloseDelivery.ts.
+      const testBranchId = body.branchId ? String(body.branchId) : null;
+      const result = await handleTestEmail(
+        {
+          sendEmail: (to, content) => sendEmail(to, content.subject, content.text, content.html),
+          loadSettings: () => getSettings(String(businessId), testBranchId),
+          loadFallbackEmails: () => getAdminEmails(String(businessId)),
+          buildContent: () => ({ subject, text, html: testHtml }),
+        },
+        { isWorker: auth.worker, role: auth.role, recipient: body.recipient },
+      );
+      return json(result.body, result.status);
     }
 
     const branchId = body.branchId ? String(body.branchId) : null;
@@ -1098,8 +1153,8 @@ Deno.serve(async (req) => {
     const results: Array<Record<string, unknown>> = [];
     for (const job of (jobs ?? []) as JobRow[]) {
       try {
-        const settings = await getSettings(job.business_id);
-        if (!settings.enabled || !settings.send_on_shift_close) {
+        const settings = await getSettings(job.business_id, job.branch_id);
+        if (!settings.enabled || !settings.sendOnShiftClose) {
           await admin.from("daily_report_jobs").update({ status: "SKIPPED", locked_until: null, last_error: null, updated_at: new Date().toISOString() }).eq("id", job.id);
           results.push({ jobId: job.id, status: "SKIPPED" });
           continue;
@@ -1107,12 +1162,12 @@ Deno.serve(async (req) => {
         const snapshot = job.snapshot ?? await buildSnapshot(job);
         const text = job.report_text ?? reportText(snapshot);
         await admin.from("daily_report_jobs").update({ snapshot, report_text: text, last_error: null, updated_at: new Date().toISOString() }).eq("id", job.id);
-        await ensureDeliveries(job, settings);
+        const noRecipientsReason = await ensureDeliveries(job, settings);
         const { data: deliveries, error: deliveryClaimError } = await admin.rpc("claim_daily_report_deliveries", { p_job_id: job.id, p_limit: 20 });
         if (deliveryClaimError) throw new Error(`DELIVERY_CLAIM_FAILED: ${deliveryClaimError.message}`);
         const subject = `VIMDY — Cierre del día ${String(snapshot.businessName)} · ${String(snapshot.businessDate)}`;
         for (const delivery of (deliveries ?? []) as DeliveryRow[]) await processDelivery(delivery, snapshot, subject, text, settings);
-        await finalizeJob(job.id);
+        await finalizeJob(job.id, noRecipientsReason);
         results.push({ jobId: job.id, status: "PROCESSED" });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

@@ -1,9 +1,9 @@
-import React, { useState } from "react";
+import React, { useId, useState } from "react";
+import { useEscapeToClose } from "../../../hooks/useEscapeToClose";
 import { roleHelp, roleSummary, userStatusLabel } from "../../../core/services/roleLabels";
 import { ROLE_PERMISSIONS } from "../../../core/config/permissions";
+import { STAFF_ROLE_OPTIONS, parseStaffRole, type StaffRole } from "../../../core/config/staffRoles";
 import {
-  Building2,
-  Sliders,
   Users,
   UserCircle2,
   UserPlus,
@@ -21,7 +21,6 @@ import {
 import { WaitersSettingsSection } from "./WaitersSettingsSection";
 import { PrintSettingsSection } from "./PrintSettingsSection";
 import { PermissionEditor } from "./PermissionEditor";
-import { BranchManager } from "./BranchManager";
 
 import { useSettings } from "../../../core/store/useSettings";
 import { useAuth } from "../../context/AuthContext";
@@ -95,13 +94,8 @@ function Toggle({
 
 // Roles que VIMDY acepta de verdad al crear una persona (el servidor y el motor de
 // usuarios solo aceptan estos 4). Se muestran siempre, aunque la tabla `roles`
-// de la base de datos esté vacía.
-const STAFF_ROLES: { id: string; name: string }[] = [
-  { id: "ADMIN", name: "Administrador" },
-  { id: "CAJERO", name: "Cajero" },
-  { id: "MESERO", name: "Mesero" },
-  { id: "COCINA", name: "Cocina" }
-];
+// de la base de datos esté vacía. Vienen de core/config/staffRoles (fuente única).
+const STAFF_ROLES = STAFF_ROLE_OPTIONS;
 
 export function SettingsDashboard() {
   const { t } = useTranslation();
@@ -352,43 +346,10 @@ export function SettingsDashboard() {
         </div>
 
         <div className={tab === "operacion" ? "contents" : "hidden"}>
-        {/* Operación: la pantalla real de "Cómo trabaja tu negocio" (mesas, meseros, cocina, canales, inventario) */}
+        {/* Operación: "Cómo trabaja tu negocio" (canales, mesas, meseros, cocina, inventario, reglas de venta y sucursales) */}
         <div className="lg:col-span-2">
           <OperationSettings />
         </div>
-
-        {/* Preferencias de venta que sí usa el sistema (Caja, Inventario, IA) */}
-        <SectionCard
-          icon={<Sliders size={18} className="text-purple-400" />}
-          title="Reglas de venta"
-          description="Cómo se comporta Caja al vender y al imprimir."
-        >
-          <div className="divide-y divide-slate-700/60">
-            <Toggle
-              label="Imprimir el recibo automáticamente"
-              description="Al cobrar una venta se abre solo la ventana para imprimir el ticket."
-              checked={configDraft.autoPrintReceipt}
-              onChange={(v) => setConfigDraft({ ...configDraft, autoPrintReceipt: v })}
-            />
-            <Toggle
-              label="Recomendaciones con IA"
-              description="Muestra sugerencias en el Dashboard y en Inventario."
-              checked={configDraft.enableAI}
-              onChange={(v) => setConfigDraft({ ...configDraft, enableAI: v })}
-            />
-          </div>
-
-          <div className="flex items-center justify-end mt-4">
-            <VimdyButton
-              onClick={() => handleSaveSection("Reglas de venta guardadas.")}
-              loading={saving}
-              variant="primary"
-              size="sm"
-            >
-              Guardar reglas
-            </VimdyButton>
-          </div>
-        </SectionCard>
         </div>
 
         <div className={tab === "impresion" ? "contents" : "hidden"}>
@@ -502,17 +463,6 @@ export function SettingsDashboard() {
               Descargar backup
             </VimdyButton>
           </div>
-        </SectionCard>
-        </div>
-
-        <div className={tab === "operacion" ? "contents" : "hidden"}>
-        {/* Sucursales */}
-        <SectionCard
-          icon={<Building2 size={18} className="text-cyan-400" />}
-          title="Sucursales"
-          description="Administra las sucursales de tu negocio."
-        >
-          <BranchManager />
         </SectionCard>
         </div>
 
@@ -679,16 +629,20 @@ function CreateUserModal({
   onClose,
   onSubmit
 }: {
-  roles: { id: string; name: string }[];
+  roles: { id: StaffRole; name: string }[];
   onClose: () => void;
-  onSubmit: (data: { name: string; email: string; password: string; roleId: string }) => Promise<void>;
+  onSubmit: (data: { name: string; email: string; password: string; roleId: StaffRole }) => Promise<void>;
 }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [roleId, setRoleId] = useState(roles.find((r) => r.id === "CAJERO")?.id ?? roles[0]?.id ?? "");
+  const [roleId, setRoleId] = useState<StaffRole>(
+    roles.find((r) => r.id === "CAJERO")?.id ?? roles[0]?.id ?? "CAJERO"
+  );
   const [saving, setSaving] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const titleId = useId();
+  useEscapeToClose(onClose, !saving);
 
   async function handleSubmit() {
     if (!name.trim() || !email.trim() || password.length < 6 || !roleId) return;
@@ -706,11 +660,14 @@ function CreateUserModal({
       onClick={onClose}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
         className="w-full max-w-sm rounded-2xl bg-vimdy-surface border border-slate-700 p-4"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-white font-bold flex items-center gap-2">
+          <h3 id={titleId} className="text-white font-bold flex items-center gap-2">
             <ShieldCheck size={16} className="text-cyan-400" />
             Agregar persona
           </h3>
@@ -746,7 +703,11 @@ function CreateUserModal({
             </div>
           </Field>
           <Field label="¿Qué va a hacer en el negocio?">
-            <select className={inputClass} value={roleId} onChange={(e) => setRoleId(e.target.value)}>
+            <select
+              className={inputClass}
+              value={roleId}
+              onChange={(e) => setRoleId(parseStaffRole(e.target.value) ?? roleId)}
+            >
               {roles.map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.name}

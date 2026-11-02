@@ -3,6 +3,8 @@
    VIMDY CORE ENTITIES
 =========================================== */
 
+import type { KnownRole } from "../config/staffRoles";
+
 /**
  * PASO 9 (rediseño formulario de producto — Opciones): una variante de
  * tamaño que el cliente puede elegir para este producto (ej. "Pequeño",
@@ -544,8 +546,12 @@ export interface User {
   readonly version?: number;
   readonly name: string;
   readonly email: string;
-  /** Referencia a Role.id. El rol define qué puede hacer el usuario. */
-  readonly roleId: string;
+  /**
+   * Referencia a Role.id. El rol define qué puede hacer el usuario.
+   * Solo ADMIN | CAJERO | MESERO | COCINA se pueden asignar hoy; los roles
+   * antiguos (GERENTE, ...) aparecen únicamente en cuentas ya existentes.
+   */
+  readonly roleId: KnownRole;
   readonly status: UserStatus;
   readonly avatar?: string;
   /** Preferencias personales del usuario (tema, idioma, atajos, etc). */
