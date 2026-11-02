@@ -46,7 +46,7 @@ export const VISIBILITY_GROUPS: readonly VisibilityGroupDef[] = [
     id: "encabezado",
     title: "Encabezado",
     toggles: [
-      { key: "showLogo", label: "Logo", hint: "Muestra el logo del negocio arriba del ticket." },
+      { key: "showLogo", label: "Logo", hint: "Muestra el logo arriba del ticket. Sin logo, se crea un membrete con el nombre del negocio." },
       { key: "showAddress", label: "Dirección", hint: "Imprime la dirección del negocio." },
       { key: "showPhone", label: "Teléfono", hint: "Imprime el teléfono del negocio." },
       { key: "showEmail", label: "Correo", hint: "Imprime el correo del negocio." }

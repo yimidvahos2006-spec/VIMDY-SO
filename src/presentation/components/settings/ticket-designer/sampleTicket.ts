@@ -85,7 +85,8 @@ export type ToggleNotes = Partial<
  */
 export function toggleAvailabilityNotes(business: Business): ToggleNotes {
   const notes: ToggleNotes = {};
-  if (!business.logo?.trim()) notes.showLogo = "El negocio aún no tiene logo. Súbelo en Datos del negocio.";
+  // Sin logo ya NO es un problema: el ticket genera un membrete tipográfico con
+  // el nombre del negocio (ver typographicLogo.ts), así que no se avisa nada.
   if (!business.address?.trim()) notes.showAddress = "Falta la dirección en Datos del negocio.";
   if (!business.phone?.trim()) notes.showPhone = "Falta el teléfono en Datos del negocio.";
   if (!business.email?.trim()) notes.showEmail = "Falta el correo en Datos del negocio.";

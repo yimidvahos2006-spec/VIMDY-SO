@@ -3,6 +3,12 @@ import type { Business } from "../../core/store/businessStore";
 import type { PrintSettings } from "../../core/store/printSettingsStore";
 import { ACCENT_COLORS } from "../../core/store/printSettingsStore";
 import { formatMoney } from "../../core/utils/formatMoney";
+import {
+  hasLogoImage,
+  renderTypographicBadge,
+  typographicBadgeCss,
+  typographicLogoName
+} from "./typographicLogo";
 
 export interface PrintableReceiptItem {
   name: string;
@@ -156,13 +162,23 @@ function renderFooter(settings: PrintSettings): string {
 }
 
 function renderHeader(business: Business, settings: PrintSettings, accent: string): string {
-  const logo =
-    settings.showLogo && business.logo
-      ? `<img src="${escapeHtml(business.logo)}" alt="" class="logo" />`
+  // Con logo (imagen): se dibuja el logo y debajo el nombre, como siempre.
+  // Sin logo: la insignia tipográfica YA es el nombre del negocio, así que
+  // reemplaza al <h1> (no se repite el nombre dos veces).
+  // Con "Logo" apagado: solo el nombre en texto, como antes.
+  const withImage = settings.showLogo && hasLogoImage(business.logo);
+  const withBadge = settings.showLogo && !withImage;
+
+  const logo = withImage
+    ? `<img src="${escapeHtml(business.logo as string)}" alt="" class="logo" />`
+    : withBadge
+      ? renderTypographicBadge(typographicLogoName(business.name))
       : "";
+  const title = withBadge ? "" : `<h1>${escapeHtml(business.name || "VIMDY")}</h1>`;
+
   return `
     ${logo}
-    <h1>${escapeHtml(business.name || "VIMDY")}</h1>
+    ${title}
     <p class="subtitle">
       ${business.nit ? `NIT ${escapeHtml(business.nit)}<br/>` : ""}
       ${settings.showAddress && business.address ? `${escapeHtml(business.address)}<br/>` : ""}
@@ -244,6 +260,7 @@ export function renderReceiptDocument(
     }
     .ticket { ${settings.template === "moderno" ? `background:#fff; border-radius:14px; padding:16px; box-shadow:0 1px 3px rgba(0,0,0,.08);` : ""} }
     .logo { display:block; margin:0 auto 6px; max-width:64px; max-height:64px; object-fit:contain; }
+    ${typographicBadgeCss(accent, ACCENT_AWARE_TEMPLATES.includes(settings.template))}
     h1 { font-size: ${isA4 ? "22px" : "16px"}; text-align: center; margin: 0 0 2px; letter-spacing: .5px; }
     .subtitle { text-align: center; font-size: 10px; color:#555; margin-bottom: 8px; }
     .divider { border-top: 1px dashed #999; margin: 8px 0; }
