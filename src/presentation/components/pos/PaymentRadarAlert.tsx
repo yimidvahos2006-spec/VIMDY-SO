@@ -1,10 +1,43 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { BadgeCheck, X, Link2 } from "lucide-react";
 
 import type { IncomingPayment } from "../../../hooks/usePaymentRadar";
 import { formatMoney } from "../../../core/utils/formatMoney";
 import { companyConfigStore } from "../../../core/store/companyConfigStore";
 import { useTranslation } from "../../../core/i18n/useTranslation";
+
+// Timbre de notificación generado con Web Audio API (sin archivos MP3).
+// Se reutiliza un solo AudioContext: crear uno por alerta termina bloqueado
+// por el navegador. Dos notas rápidas (D5 -> A5) con caída suave, tipo caja.
+let audioCtx: AudioContext | null = null;
+
+function playNotificationChime(): void {
+  try {
+    const Ctor: typeof AudioContext | undefined =
+      window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctor) return;
+    audioCtx = audioCtx ?? new Ctor();
+    const ctx = audioCtx;
+    // Si el navegador lo dejó "suspended" (política de autoplay), se reanuda.
+    if (ctx.state === "suspended") void ctx.resume();
+
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(587.33, now); // D5
+    osc.frequency.setValueAtTime(880, now + 0.1); // A5
+    gain.gain.setValueAtTime(0.2, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.5);
+  } catch (error) {
+    // Sin sonido no pasa nada: la alerta visual igual aparece.
+    console.warn("[PaymentRadarAlert] Audio no disponible:", error);
+  }
+}
 
 interface PaymentRadarAlertProps {
   /** Transferencia detectada; si es null no se dibuja nada. */
@@ -35,6 +68,12 @@ export function PaymentRadarAlert({
   onIgnore
 }: PaymentRadarAlertProps) {
   const { language } = useTranslation();
+
+  // Suena una vez por cada transferencia nueva (por id, no por re-render).
+  const paymentId = payment?.id ?? null;
+  useEffect(() => {
+    if (paymentId) playNotificationChime();
+  }, [paymentId]);
 
   if (!payment) return null;
 
