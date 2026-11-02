@@ -38,6 +38,7 @@ import { VimdyButton } from "../ui/VimdyButton";
 import { DailyReportSettingsCard } from "./DailyReportSettingsCard";
 import { BusinessProfileTab, type BusinessSaveResult } from "./BusinessProfileTab";
 import { OperationSettings } from "./OperationSettings";
+import { PaymentAccountsSettings } from "./PaymentAccountsSettings";
 import { BusinessFiscalForm } from "./BusinessFiscalForm";
 import { getCurrentBusinessId } from "../../../infrastructure/supabase/supabaseClient";
 import { RegionalSettingsCard } from "./RegionalSettingsCard";
@@ -45,12 +46,13 @@ import { TaxCurrencySettingsCard } from "./TaxCurrencySettingsCard";
 import { SavedToast, SectionCard, Field, inputClass } from "./settingsPrimitives";
 import { useOperationConfig } from "../../../core/store/useOperationConfig";
 
-type SettingsTab = "negocio" | "operacion" | "equipo" | "impresion" | "facturacion" | "datos";
+type SettingsTab = "negocio" | "operacion" | "equipo" | "cuentas" | "impresion" | "facturacion" | "datos";
 
 const SETTINGS_TABS: { id: SettingsTab; label: string; hint: string }[] = [
   { id: "negocio", label: "Mi negocio", hint: "Nombre, país, moneda, impuestos y tu plan." },
   { id: "operacion", label: "Operación", hint: "Qué módulos usas (mesas, cocina, domicilios) y tus sucursales." },
   { id: "equipo", label: "Equipo", hint: "Quién entra al sistema, qué puede hacer y los meseros." },
+  { id: "cuentas", label: "Cuentas y Pagos / QR", hint: "Cuentas Nequi, Bancolombia, Daviplata y Bre-B donde recibes transferencias." },
   { id: "impresion", label: "Tickets y reportes", hint: "Cómo se imprime el ticket y el reporte de cierre por correo." },
   { id: "facturacion", label: "Facturación", hint: "Factura electrónica DIAN (solo Colombia)." },
   { id: "datos", label: "Mis datos", hint: "Descarga una copia de seguridad de tu información." }
@@ -441,6 +443,13 @@ export function SettingsDashboard() {
           </div>
         )}
         </div>
+
+        {/* Cuentas y Pagos / QR — solo se monta (y consulta Supabase) al abrir la pestaña */}
+        {tab === "cuentas" && (
+          <div className="lg:col-span-2">
+            <PaymentAccountsSettings />
+          </div>
+        )}
 
         <div className={tab === "impresion" ? "contents" : "hidden"}>
         {/* Impresión — plantillas de ticket, toggles y vista previa en vivo */}
