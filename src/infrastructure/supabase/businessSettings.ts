@@ -3,10 +3,14 @@ import type { Business } from "../../core/store/businessStore";
 import type { CompanyConfig } from "../../core/store/companyConfigStore";
 import { getCurrency, getLanguage } from "../../core/config/globalization";
 import { isValidTimeZone } from "../../core/settings/regionalSettings";
+import type { InvoiceProviderName } from "../../core/invoicing/types/invoice.types";
 
 /**
  * Ajustes del negocio que se guardan en `businesses.settings` (jsonb).
- * Nombre, país, moneda, idioma, zona horaria e IVA van en columnas propias.
+ * Nombre, país, moneda, idioma, zona horaria, IVA y la facturación
+ * electrónica (`electronic_invoicing_enabled` / `electronic_invoicing_provider`)
+ * van en columnas propias. La facturación ya NO se guarda aquí: las Edge
+ * Functions solo leen las columnas, así que el JSON nunca fue la verdad.
  */
 export interface BusinessSettingsBlob {
   nit?: string;
@@ -19,7 +23,6 @@ export interface BusinessSettingsBlob {
   autoPrintReceipt?: boolean;
   enableAI?: boolean;
   dailySalesGoal?: number;
-  electronicInvoicing?: { enabled: boolean; provider: string };
 }
 
 export interface BusinessSettingsRow {
@@ -29,7 +32,18 @@ export interface BusinessSettingsRow {
   language: string;
   timezone: string;
   tax_rate: number;
+  /** CHECK en BD: se escribe siempre junto con el proveedor. */
+  electronic_invoicing_enabled: boolean;
+  /** CHECK en BD: 'dian' | 'factus' | 'none'. "none" cuando la facturación está apagada. */
+  electronic_invoicing_provider: InvoiceProviderName;
   settings: BusinessSettingsBlob;
+}
+
+/** Proveedores reales que el negocio puede elegir (el RPC/Edge Functions exigen uno de estos). */
+const REAL_PROVIDERS: readonly InvoiceProviderName[] = ["factus", "dian"];
+
+function isRealProvider(v: unknown): v is InvoiceProviderName {
+  return REAL_PROVIDERS.includes(v as InvoiceProviderName);
 }
 
 const text = (v: unknown, max = 200): string | undefined =>
@@ -60,6 +74,13 @@ export function buildBusinessSettingsUpdate(
   if (!getCurrency(config.currency)) throw new Error("La moneda elegida no es válida.");
   if (!isValidTimeZone(config.timezone)) throw new Error("La zona horaria elegida no es válida.");
 
+  // Facturación electrónica: encendida exige un proveedor real; apagada => "none".
+  const invoicingEnabled = !!config.electronicInvoicing?.enabled;
+  const invoicingProvider = config.electronicInvoicing?.provider;
+  if (invoicingEnabled && !isRealProvider(invoicingProvider)) {
+    throw new Error("Elige un proveedor de facturación electrónica (por ejemplo Factus) antes de activarla.");
+  }
+
   return {
     name: name.slice(0, 120),
     country: config.country,
@@ -67,6 +88,8 @@ export function buildBusinessSettingsUpdate(
     language: config.language,
     timezone: config.timezone,
     tax_rate: tax,
+    electronic_invoicing_enabled: invoicingEnabled,
+    electronic_invoicing_provider: invoicingEnabled ? (invoicingProvider as InvoiceProviderName) : "none",
     settings: {
       nit: text(business.nit, 40) ?? "",
       owner: text(business.owner, 120) ?? "",
@@ -77,22 +100,29 @@ export function buildBusinessSettingsUpdate(
       whatsappOrders: text(business.whatsappOrders, 40) ?? "",
       autoPrintReceipt: !!config.autoPrintReceipt,
       enableAI: !!config.enableAI,
-      dailySalesGoal: clampNumber(config.dailySalesGoal, 0, 100_000_000_000) ?? 0,
-      electronicInvoicing: {
-        enabled: !!config.electronicInvoicing?.enabled,
-        provider: config.electronicInvoicing?.enabled
-          ? String(config.electronicInvoicing.provider)
-          : "none"
-      }
+      dailySalesGoal: clampNumber(config.dailySalesGoal, 0, 100_000_000_000) ?? 0
     }
   };
+}
+
+/** Columnas `electronic_invoicing_*` tal como llegan de `businesses`. */
+export interface InvoicingColumns {
+  enabled?: unknown;
+  provider?: unknown;
 }
 
 /**
  * Lo contrario: de la fila de la base a lo que se aplica en las stores.
  * Un campo que no está guardado se omite (no pisa el valor actual).
+ *
+ * `invoicing` son las COLUMNAS de facturación (la verdad en la BD). Si no se
+ * pasan (p. ej. al leer el caché local), la facturación no se toca. Lo que
+ * hubiera en `blob.electronicInvoicing` (versiones anteriores) se ignora a
+ * propósito: nunca fue lo que leían las Edge Functions.
+ * "Encendido" solo si la columna es true Y el proveedor es real (factus/dian),
+ * igual que exigen las Edge Functions.
  */
-export function readBusinessSettings(blob: unknown): {
+export function readBusinessSettings(blob: unknown, invoicing?: InvoicingColumns): {
   business: Partial<Business>;
   config: Partial<CompanyConfig>;
 } {
@@ -123,13 +153,11 @@ export function readBusinessSettings(blob: unknown): {
   const goal = clampNumber(s.dailySalesGoal, 0, 100_000_000_000);
   if (goal !== undefined) config.dailySalesGoal = goal;
 
-  const inv = s.electronicInvoicing as { enabled?: unknown; provider?: unknown } | undefined;
-  if (inv && typeof inv === "object" && typeof inv.enabled === "boolean") {
+  if (invoicing && typeof invoicing.enabled === "boolean") {
+    const active = invoicing.enabled && isRealProvider(invoicing.provider);
     config.electronicInvoicing = {
-      enabled: inv.enabled,
-      provider: (inv.enabled && typeof inv.provider === "string"
-        ? inv.provider
-        : "none") as CompanyConfig["electronicInvoicing"]["provider"]
+      enabled: active,
+      provider: active ? (invoicing.provider as InvoiceProviderName) : "none"
     };
   }
   return { business, config };
@@ -214,15 +242,23 @@ export async function fetchBusinessSettings(
   try {
     const { data, error } = await supabase
       .from("businesses")
-      .select("settings")
+      .select("settings, electronic_invoicing_enabled, electronic_invoicing_provider")
       .eq("id", businessId)
       .maybeSingle();
     if (error || !data) return null;
-    const settings = (data as { settings?: unknown }).settings;
-    if (settings && typeof settings === "object") {
-      writeCachedBusinessSettings(businessId, settings as BusinessSettingsBlob);
+    const row = data as {
+      settings?: unknown;
+      electronic_invoicing_enabled?: unknown;
+      electronic_invoicing_provider?: unknown;
+    };
+    if (row.settings && typeof row.settings === "object") {
+      // El caché guarda solo `settings`: la facturación SIEMPRE se lee de la BD.
+      writeCachedBusinessSettings(businessId, row.settings as BusinessSettingsBlob);
     }
-    return readBusinessSettings(settings);
+    return readBusinessSettings(row.settings, {
+      enabled: row.electronic_invoicing_enabled,
+      provider: row.electronic_invoicing_provider
+    });
   } catch {
     return null;
   }

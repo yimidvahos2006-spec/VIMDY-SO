@@ -38,6 +38,8 @@ import { VimdyButton } from "../ui/VimdyButton";
 import { DailyReportSettingsCard } from "./DailyReportSettingsCard";
 import { BusinessProfileTab, type BusinessSaveResult } from "./BusinessProfileTab";
 import { OperationSettings } from "./OperationSettings";
+import { BusinessFiscalForm } from "./BusinessFiscalForm";
+import { getCurrentBusinessId } from "../../../infrastructure/supabase/supabaseClient";
 import { RegionalSettingsCard } from "./RegionalSettingsCard";
 import { TaxCurrencySettingsCard } from "./TaxCurrencySettingsCard";
 import { SavedToast, SectionCard, Field, inputClass } from "./settingsPrimitives";
@@ -358,6 +360,7 @@ export function SettingsDashboard() {
 
         <div className={tab === "facturacion" ? "contents" : "hidden"}>
         {config.country === "CO" && (
+          <div className="space-y-4">
           <SectionCard
             icon={<FileText size={18} className="text-orange-400" />}
             title="Facturación electrónica DIAN"
@@ -371,7 +374,16 @@ export function SettingsDashboard() {
                 onChange={(v) =>
                   setConfigDraft({
                     ...configDraft,
-                    electronicInvoicing: { ...configDraft.electronicInvoicing, enabled: v }
+                    // Encendida siempre con un proveedor real (Factus por defecto);
+                    // apagada vuelve a "none". Así nunca se guarda "activa sin proveedor".
+                    electronicInvoicing: {
+                      enabled: v,
+                      provider: v
+                        ? configDraft.electronicInvoicing.provider === "none"
+                          ? "factus"
+                          : configDraft.electronicInvoicing.provider
+                        : "none"
+                    }
                   })
                 }
               />
@@ -415,6 +427,18 @@ export function SettingsDashboard() {
               </VimdyButton>
             </div>
           </SectionCard>
+          <BusinessFiscalForm
+            businessId={getCurrentBusinessId() ?? null}
+            active={tab === "facturacion"}
+            prefill={{
+              nit: business.nit,
+              address: business.address,
+              city: business.city,
+              phone: business.phone,
+              email: business.email
+            }}
+          />
+          </div>
         )}
         </div>
 

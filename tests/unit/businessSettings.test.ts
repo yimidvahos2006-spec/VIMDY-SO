@@ -57,8 +57,23 @@ describe("ajustes del negocio en la base de datos", () => {
     expect(row.settings).not.toHaveProperty("allowNegativeStock");
     expect(row.settings.autoPrintReceipt).toBe(false);
     expect(row.settings.dailySalesGoal).toBe(500000);
-    // si la facturación está apagada, el proveedor se guarda como "none"
-    expect(row.settings.electronicInvoicing).toEqual({ enabled: false, provider: "none" });
+    // la facturación vive en COLUMNAS, no en el JSON; apagada => proveedor "none"
+    expect(row.electronic_invoicing_enabled).toBe(false);
+    expect(row.electronic_invoicing_provider).toBe("none");
+    expect(row.settings).not.toHaveProperty("electronicInvoicing");
+  });
+
+  it("facturación encendida con proveedor real se escribe en las columnas", () => {
+    const row = buildBusinessSettingsUpdate(business, { ...config, electronicInvoicing: { enabled: true, provider: "factus" } });
+    expect(row.electronic_invoicing_enabled).toBe(true);
+    expect(row.electronic_invoicing_provider).toBe("factus");
+    expect(row.settings).not.toHaveProperty("electronicInvoicing");
+  });
+
+  it("no deja activar la facturación sin proveedor real", () => {
+    expect(() =>
+      buildBusinessSettingsUpdate(business, { ...config, electronicInvoicing: { enabled: true, provider: "none" } })
+    ).toThrow(/proveedor/i);
   });
 
   it("rechaza nombre vacío e IVA inválido", () => {
@@ -125,6 +140,33 @@ describe("ajustes del negocio en la base de datos", () => {
     expect(calls[0].row.tax_rate).toBe(8);
   });
 
+  it("el update incluye las columnas de facturación (el interruptor se guarda de verdad)", async () => {
+    await saveBusinessSettings("b1", business, { ...config, electronicInvoicing: { enabled: true, provider: "factus" } });
+    expect(calls[0].row.electronic_invoicing_enabled).toBe(true);
+    expect(calls[0].row.electronic_invoicing_provider).toBe("factus");
+    expect(calls[0].row.settings).not.toHaveProperty("electronicInvoicing");
+  });
+
+  it("lee el interruptor desde las columnas, no desde el JSON", () => {
+    const legacyBlob = { electronicInvoicing: { enabled: true, provider: "factus" } };
+    // sin columnas (p. ej. caché local) la facturación no se toca
+    expect(readBusinessSettings(legacyBlob).config).not.toHaveProperty("electronicInvoicing");
+    // con columnas manda la BD, aunque el JSON diga otra cosa
+    expect(readBusinessSettings(legacyBlob, { enabled: false, provider: "none" }).config.electronicInvoicing)
+      .toEqual({ enabled: false, provider: "none" });
+    expect(readBusinessSettings({}, { enabled: true, provider: "factus" }).config.electronicInvoicing)
+      .toEqual({ enabled: true, provider: "factus" });
+    expect(readBusinessSettings({}, { enabled: true, provider: "dian" }).config.electronicInvoicing)
+      .toEqual({ enabled: true, provider: "dian" });
+  });
+
+  it("columna en true con proveedor inválido se muestra apagada (las Edge Functions la rechazarían)", () => {
+    expect(readBusinessSettings({}, { enabled: true, provider: "none" }).config.electronicInvoicing)
+      .toEqual({ enabled: false, provider: "none" });
+    expect(readBusinessSettings({}, { enabled: true, provider: "otro" }).config.electronicInvoicing)
+      .toEqual({ enabled: false, provider: "none" });
+  });
+
   it("0 filas actualizadas (no es admin / plan vencido) es un error, no 'guardado'", async () => {
     state.result = { data: [], error: null };
     await expect(saveBusinessSettings("b1", business, config)).rejects.toThrow(/administrador/i);
@@ -140,5 +182,18 @@ describe("ajustes del negocio en la base de datos", () => {
     expect(await fetchBusinessSettings("b1")).toBeNull();
     state.result = { data: { settings: { nit: "1" } }, error: null };
     expect((await fetchBusinessSettings("b1"))?.business.nit).toBe("1");
+  });
+
+  it("fetch refleja el estado real de las columnas de facturación", async () => {
+    state.result = {
+      data: { settings: { nit: "1" }, electronic_invoicing_enabled: true, electronic_invoicing_provider: "factus" },
+      error: null
+    };
+    expect((await fetchBusinessSettings("b1"))?.config.electronicInvoicing).toEqual({ enabled: true, provider: "factus" });
+    state.result = {
+      data: { settings: { electronicInvoicing: { enabled: true, provider: "factus" } }, electronic_invoicing_enabled: false, electronic_invoicing_provider: "none" },
+      error: null
+    };
+    expect((await fetchBusinessSettings("b1"))?.config.electronicInvoicing).toEqual({ enabled: false, provider: "none" });
   });
 });
