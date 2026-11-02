@@ -158,7 +158,9 @@ export function buildOfflineSaleInput(
         price: item.price,
         note: item.note,
         requiresKitchen:
-          item.requiresKitchen
+          item.requiresKitchen,
+        selectedSize: item.selectedSize,
+        selectedExtras: item.selectedExtras
       })
     ),
 

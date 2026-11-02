@@ -63,7 +63,9 @@ export function PosVariantSelectorModal() {
       name: product.name,
       price: finalPrice,
       requiresKitchen: product.requiresKitchen ?? false,
-      ...(note ? { note } : {})
+      ...(note ? { note } : {}),
+      ...(selectedSize ? { selectedSize } : {}),
+      ...(selectedExtras.length > 0 ? { selectedExtras } : {})
     });
 
     close();

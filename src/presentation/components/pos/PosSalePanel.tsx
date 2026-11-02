@@ -11,12 +11,15 @@ import { toast } from "../../../core/store/toastStore";
 import { PosCart } from "./PosCart";
 import { PosCheckoutPanel } from "./PosCheckoutPanel";
 import { PosNegativeStockNotice } from "./PosNegativeStockNotice";
+import { PaymentReferenceModal } from "./PaymentReferenceModal";
 import { useTranslation } from "../../../core/i18n/useTranslation";
 import { formatMoney } from "../../../core/utils/formatMoney";
 import { companyConfigStore } from "../../../core/store/companyConfigStore";
 import { VimdyButton } from "../ui/VimdyButton";
 import { useSearch } from "../../../core/store/useSearch";
 import { classifyShortcutTarget, isModalOpen, resolvePosShortcut } from "./posShortcuts";
+import { usePaymentRadar, type IncomingPayment } from "../../../hooks/usePaymentRadar";
+import { PaymentRadarAlert } from "./PaymentRadarAlert";
 
 /**
  * Panel único de "Venta actual": Carrito y Pago (antes dos columnas, luego
@@ -49,10 +52,14 @@ export function PosSalePanel() {
 
   const { items, clear: clearCart } = useCart();
   const { value: searchValue } = useSearch();
-  const { total, method, received, mixedReceived, change, requiresInvoice, reference, mixedCard, mixedTransfer, customerName } = usePayment();
+  const { total, method, received, mixedReceived, change, requiresInvoice, reference, mixedCard, mixedTransfer, customerName, useWompiCheckout } = usePayment();
   const { user } = useAuth();
 
   const [processing, setProcessing] = useState(false);
+  // Radar Antifraude: transferencias reales detectadas en vivo (Nequi, Bancolombia, Daviplata, Bre-B).
+  const radar = usePaymentRadar();
+  const [radarLinking, setRadarLinking] = useState(false);
+  const [referenceModalOpen, setReferenceModalOpen] = useState(false);
   const [saleConfirmation, setSaleConfirmation] = useState<{ total: number; method: string; change: number; customerName: string; saleId: string } | null>(null);
 
   // IDEMPOTENCIA (checklist crítico #4): id del intento de cobro actual,
@@ -117,24 +124,40 @@ export function PosSalePanel() {
     shiftOpen &&
     items.length > 0 &&
     (method !== "cash" || received >= total) &&
-    (method !== "mixed" || mixedReceived >= total) &&
-    (!needsReference || reference.trim().length > 0);
+    (method !== "mixed" || mixedReceived >= total);
 
-  async function handleCharge() {
+  // Tarjeta/transferencia: antes de cobrar se pide confirmar la referencia
+  // en un modal (salvo Wompi, que no usa referencia manual).
+  function requestCharge() {
+    if (needsReference && !useWompiCheckout) {
+      setReferenceModalOpen(true);
+      return;
+    }
+    void handleCharge();
+  }
+
+  function confirmReference(ref: string) {
+    paymentStore.setReference(ref);
+    setReferenceModalOpen(false);
+    void handleCharge();
+  }
+
+  /** Devuelve el id de la venta si se cobró con éxito, o null si no. */
+  async function handleCharge(): Promise<string | null> {
 
     if (!shiftOpen) {
       toast.error(t("pos.sale.shiftClosedToast"));
-      return;
+      return null;
     }
 
     if (items.length === 0) {
       toast.warning(t("pos.sale.addProductsBeforeChargeToast"));
-      return;
+      return null;
     }
 
     if (!user) {
       toast.error(t("pos.sale.noCashierToast"));
-      return;
+      return null;
     }
 
     const attemptId = saleAttemptId ?? crypto.randomUUID();
@@ -164,6 +187,7 @@ export function PosSalePanel() {
         if (result.invoiceError) {
           toast.warning(result.invoiceError);
         }
+        return attemptId;
       } else if (!result.pendingPayment) {
         // Si el pago quedó pendiente, processSale ya mostró su propio aviso
         // y el carrito se conserva para poder cobrar de nuevo.
@@ -176,6 +200,47 @@ export function PosSalePanel() {
       setProcessing(false);
     }
 
+    return null;
+
+  }
+
+  // RADAR ANTIFRAUDE — "Vincular y cerrar": el cajero confirma que la
+  // transferencia que sonó en pantalla es de ESTA venta. Se exige que haya
+  // carrito, turno abierto y que el monto cubra el total (si no, la alerta
+  // se queda abierta). Luego se fija el método en "transferencia", se usa
+  // la huella del pago como referencia (queda trazable en la venta) y se
+  // cobra por el mismo camino de siempre (handleCharge -> processSale), con
+  // la misma idempotencia. Solo si el cobro sale bien el pago se marca como
+  // vinculado en la base; así una transferencia no sirve para dos ventas.
+  async function handleLinkRadarPayment(payment: IncomingPayment) {
+    if (radarLinking || processing) return;
+
+    if (items.length === 0) {
+      toast.warning(t("pos.sale.addProductsBeforeChargeToast"));
+      return;
+    }
+
+    if (payment.amount < total - 0.005) {
+      toast.error("El monto recibido es menor al total de la venta. No se vinculó.");
+      return;
+    }
+
+    if (payment.amount > total + 0.005) {
+      toast.warning("La transferencia es mayor al total de la venta. Revisa el excedente con el cliente.");
+    }
+
+    setRadarLinking(true);
+    try {
+      paymentStore.setMethod("transfer");
+      paymentStore.setReference(`${payment.bankName}-${payment.id.slice(0, 8)}`);
+
+      const saleId = await handleCharge();
+      if (saleId) {
+        await radar.markLinked(payment.id, saleId);
+      }
+    } finally {
+      setRadarLinking(false);
+    }
   }
 
   // ATAJOS DEL POS (modo rápido): Enter = cobrar, Esc = limpiar la venta.
@@ -185,8 +250,8 @@ export function PosSalePanel() {
   // false — así no hay doble cobro ni cobros con recibido insuficiente.
   // Se guarda la última versión de handleCharge en un ref para no volver a
   // registrar el listener en cada render.
-  const handleChargeRef = useRef(handleCharge);
-  handleChargeRef.current = handleCharge;
+  const handleChargeRef = useRef(requestCharge);
+  handleChargeRef.current = requestCharge;
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -214,7 +279,7 @@ export function PosSalePanel() {
       if (action === "charge") {
         // preventDefault evita que Enter además "haga clic" en el botón enfocado.
         event.preventDefault();
-        void handleChargeRef.current();
+        handleChargeRef.current();
       } else if (action === "clear-sale") {
         event.preventDefault();
         clearCart();
@@ -309,7 +374,7 @@ export function PosSalePanel() {
           intencional.
         */}
         <VimdyButton
-          onClick={handleCharge}
+          onClick={requestCharge}
           disabled={!canCharge}
           loading={processing}
           variant="primary"
@@ -322,6 +387,25 @@ export function PosSalePanel() {
         </VimdyButton>
 
       </div>
+
+      <PaymentRadarAlert
+        payment={radar.current}
+        queued={radar.queued}
+        saleTotal={items.length > 0 ? total : 0}
+        busy={radarLinking || processing}
+        onLink={(payment) => void handleLinkRadarPayment(payment)}
+        onIgnore={(payment) => void radar.markIgnored(payment.id)}
+      />
+
+      <PaymentReferenceModal
+        open={referenceModalOpen}
+        method={method}
+        total={total}
+        initialReference={reference}
+        loading={processing}
+        onClose={() => setReferenceModalOpen(false)}
+        onConfirm={confirmReference}
+      />
 
       {saleConfirmation && (
         <div

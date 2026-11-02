@@ -1,5 +1,6 @@
 import { ObservableStore } from "./ObservableStore";
 import { roundWeight, WEIGHT_STEP } from "../utils/weightUnits";
+import type { ProductSizeOption, ProductExtraOption } from "../entities/Entities";
 
 export interface CartItem {
   id: string;
@@ -33,7 +34,13 @@ export interface CartItem {
    * decimal con 3 cifras en vez de entero.
    */
   soldByWeight?: boolean;
+  /** Variante elegida en PosVariantSelectorModal; viaja hasta SalesEngine. */
+  selectedSize?: ProductSizeOption;
+  selectedExtras?: readonly ProductExtraOption[];
 }
+
+const variantKey = (i: Pick<CartItem, "selectedSize" | "selectedExtras">) =>
+  `${i.selectedSize?.id ?? ""}|${(i.selectedExtras ?? []).map((e) => e.id).sort().join(",")}`;
 
 class CartStore extends ObservableStore<CartItem[]> {
   private items: CartItem[] = [];
@@ -78,7 +85,8 @@ class CartStore extends ObservableStore<CartItem[]> {
         i.id === rest.id &&
         i.note === rest.note &&
         i.discount === rest.discount &&
-        i.soldByWeight === rest.soldByWeight
+        i.soldByWeight === rest.soldByWeight &&
+        variantKey(i) === variantKey(rest)
     );
 
     if (existing) {

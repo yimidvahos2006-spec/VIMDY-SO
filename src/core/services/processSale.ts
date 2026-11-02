@@ -186,7 +186,9 @@ export async function sendOrderToKitchen(
         quantity: item.quantity,
         price: item.price,
         note: item.note,
-        requiresKitchen: item.requiresKitchen
+        requiresKitchen: item.requiresKitchen,
+        selectedSize: item.selectedSize,
+        selectedExtras: item.selectedExtras
       })),
       customerId: payment.customerId ?? undefined,
       cashierId: params.cashierId,
