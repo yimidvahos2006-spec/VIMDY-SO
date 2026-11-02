@@ -239,7 +239,9 @@ describe("avisos de datos faltantes", () => {
   it("avisa cuando un interruptor no tendría efecto por falta de datos del negocio", () => {
     expect(toggleAvailabilityNotes(BUSINESS)).toEqual({});
     const empty = toggleAvailabilityNotes({ ...BUSINESS, logo: "", phone: "", email: "", address: " ", whatsappOrders: "" });
-    expect(Object.keys(empty).sort()).toEqual(["showAddress", "showEmail", "showLogo", "showPhone", "showQr"]);
+    // Sin logo ya no se avisa: el ticket genera un membrete tipográfico con el nombre del negocio.
+    expect(empty.showLogo).toBeUndefined();
+    expect(Object.keys(empty).sort()).toEqual(["showAddress", "showEmail", "showPhone", "showQr"]);
   });
 
   it("el QR no se avisa si hay WhatsApp aunque falte el teléfono", () => {

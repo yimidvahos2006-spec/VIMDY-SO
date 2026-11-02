@@ -132,10 +132,15 @@ describe("editor: controles", () => {
   });
 
   it("avisa cuando un interruptor activo no tiene datos del negocio", () => {
+    mount({ business: { ...BUSINESS, address: "" } });
+    expect(screen.getByText(/Falta la dirección/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("switch", { name: "Dirección" }));
+    expect(screen.queryByText(/Falta la dirección/i)).toBeNull();
+  });
+
+  it("sin logo no se muestra aviso (el ticket usa un membrete con el nombre del negocio)", () => {
     mount({ business: { ...BUSINESS, logo: "" } });
-    expect(screen.getByText(/aún no tiene logo/i)).toBeTruthy();
-    fireEvent.click(screen.getByRole("switch", { name: "Logo" }));
-    expect(screen.queryByText(/aún no tiene logo/i)).toBeNull();
+    expect(screen.queryByText(/logo/i, { selector: "p" })).toBeNull();
   });
 });
 

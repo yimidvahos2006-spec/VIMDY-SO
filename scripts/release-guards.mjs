@@ -14,6 +14,26 @@ function fail(message) {
   failures.push(message);
 }
 
+/**
+ * Renombres de migraciones históricas aprobados A MANO. Normalmente el guardia
+ * prohíbe renombrar o editar una migración que ya está en la base. Esta lista
+ * es la única excepción y es mínima: solo vale si el archivo nuevo es idéntico
+ * (byte a byte, ignorando CRLF/LF) al de la base. Se desactiva sola cuando el
+ * renombrado ya llegó a la base (ahí `from` deja de existir).
+ *
+ * 20261114000000: dos migraciones compartían versión (direct_purchase_atomic y
+ * operation_settings_branch_plan). supabase_migrations.schema_migrations se
+ * indexa solo por versión, así que la segunda nunca se aplicaba. Como
+ * 20261115/16 redefinen record_direct_purchase_atomic, la que se mueve es
+ * operation_settings_branch_plan.
+ */
+const APPROVED_MIGRATION_RENAMES = [
+  {
+    from: "supabase/migrations/20261114000000_operation_settings_branch_plan.sql",
+    to: "supabase/migrations/20261120000000_operation_settings_branch_plan.sql"
+  }
+];
+
 function walk(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);
@@ -154,8 +174,21 @@ if (!releaseBaseRef) {
       .map(Number);
     const latestBaselineVersion = Math.max(0, ...baselineVersions);
 
+    const validRenames = new Map();
+    for (const rename of APPROVED_MIGRATION_RENAMES) {
+      if (!baselineFiles.includes(rename.from)) continue;
+      if (!currentMigrationNames.has(rename.to)) continue;
+      const before = execFileSync("git", ["show", `${baseCommit}:${rename.from}`], { encoding: "utf8" });
+      const after = read(rename.to);
+      if (before.replace(/\r\n/g, "\n") === after.replace(/\r\n/g, "\n")) {
+        validRenames.set(rename.from, rename);
+      } else {
+        fail(`Approved migration rename must not change the SQL: ${rename.from} -> ${rename.to}`);
+      }
+    }
+
     for (const file of baselineFiles) {
-      if (!currentMigrationNames.has(file)) {
+      if (!currentMigrationNames.has(file) && !validRenames.has(file)) {
         fail(`Historical migration removed from working tree: ${file}`);
       }
     }
@@ -167,6 +200,8 @@ if (!releaseBaseRef) {
     );
     for (const line of changedMigrations.split(/\r?\n/).filter(Boolean)) {
       const [status, ...paths] = line.split(/\s+/);
+      if (status === "D" && validRenames.has(paths[0])) continue;
+      if (/^R\d+$/.test(status) && validRenames.get(paths[0])?.to === paths[1]) continue;
       if (status !== "A") {
         fail(`Existing migration changed or removed; add a new migration instead: ${paths.join(" ")}`);
       }

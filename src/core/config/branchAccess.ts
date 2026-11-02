@@ -6,7 +6,7 @@
  *
  * Importante: esto decide qué muestra y permite la PANTALLA. No reemplaza una
  * restricción en la base de datos (ver la nota en la migración
- * 20261114000000_operation_settings_branch_plan.sql).
+ * 20261120000000_operation_settings_branch_plan.sql).
  */
 
 import type { BusinessTier } from "../entities/SubscriptionTypes";
