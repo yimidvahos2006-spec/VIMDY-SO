@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { paymentStore, PaymentMethod, DiscountType, TipType } from "./paymentStore";
 import { OrderPriority } from "../entities/Entities";
+import { MixedKind, summarizeMixed } from "../payments/mixedPayment";
 
 /**
  * Antes: sondeaba paymentStore cada 150ms con setInterval.
@@ -42,8 +43,20 @@ export function usePayment() {
     paymentStore.setReference(reference);
   };
 
-  const setMixedAmount = (kind: "cash" | "card" | "transfer", value: number) => {
+  const setPaymentAccount = (accountId: string, displayName: string) => {
+    paymentStore.setPaymentAccount(accountId, displayName);
+  };
+
+  const clearPaymentAccount = () => {
+    paymentStore.clearPaymentAccount();
+  };
+
+  const setMixedAmount = (kind: MixedKind, value: number) => {
     paymentStore.setMixedAmount(kind, value);
+  };
+
+  const fillMixedRemainder = (kind: MixedKind) => {
+    paymentStore.fillMixedRemainder(kind);
   };
 
   const setNotes = (notes: string) => {
@@ -72,12 +85,20 @@ export function usePayment() {
     setDiscount,
     setTip,
     setReference,
+    setPaymentAccount,
+    clearPaymentAccount,
     setMixedAmount,
+    fillMixedRemainder,
     setNotes,
     setPriority,
     setRequiresInvoice,
     setUseWompiCheckout,
     mixedReceived: paymentStore.getMixedReceived(),
+    mixedSummary: summarizeMixed(state.total, {
+      cash: state.mixedCash,
+      card: state.mixedCard,
+      transfer: state.mixedTransfer
+    }),
     isPaid: paymentStore.isPaid()
   };
 }

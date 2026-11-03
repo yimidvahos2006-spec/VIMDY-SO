@@ -5,17 +5,27 @@ import { VimdyButton } from "../ui/VimdyButton";
 import { useTranslation } from "../../../core/i18n/useTranslation";
 import { formatMoney } from "../../../core/utils/formatMoney";
 import { companyConfigStore } from "../../../core/store/companyConfigStore";
+import { getPaymentAccountDisplayName } from "../../../infrastructure/supabase/paymentAccountsRepository";
+import { TransferAccountSelect } from "./TransferAccountSelect";
 
 interface PaymentReferenceModalProps {
   open: boolean;
-  /** "card" | "transfer" | "mixed" — solo cambia el texto de la etiqueta. */
+  /** "card" | "transfer" | "mixed" — transfer usa el selector de cuentas; el resto, texto. */
   method: string;
   total: number;
   /** Referencia ya escrita (si el cajero la había puesto antes). */
   initialReference?: string;
+  /** Cuenta de cobro ya elegida (transferencia). Vacío = ninguna. */
+  initialAccountId?: string;
   loading?: boolean;
   onClose: () => void;
-  onConfirm: (reference: string) => void;
+  /** Para transferencia, `accountId` trae la cuenta registrada elegida. */
+  onConfirm: (reference: string, accountId?: string) => void;
+}
+
+interface SelectedAccount {
+  id: string;
+  name: string;
 }
 
 export function PaymentReferenceModal({
@@ -23,32 +33,39 @@ export function PaymentReferenceModal({
   method,
   total,
   initialReference = "",
+  initialAccountId = "",
   loading = false,
   onClose,
   onConfirm
 }: PaymentReferenceModalProps) {
   const { t, language } = useTranslation();
   const [reference, setReference] = useState(initialReference);
+  const [account, setAccount] = useState<SelectedAccount | null>(
+    initialAccountId ? { id: initialAccountId, name: initialReference } : null
+  );
+
+  const isTransfer = method === "transfer";
 
   useEffect(() => {
-    if (open) setReference(initialReference);
-  }, [open, initialReference]);
+    if (!open) return;
+    setReference(initialReference);
+    setAccount(initialAccountId ? { id: initialAccountId, name: initialReference } : null);
+  }, [open, initialReference, initialAccountId]);
 
-  const label =
-    method === "transfer"
-      ? t("pos.payment.transferReference")
-      : t("pos.payment.cardReference");
+  const label = t("pos.payment.cardReference");
+  const placeholder = t("pos.payment.cardRefPlaceholder");
 
-  const placeholder =
-    method === "transfer"
-      ? t("pos.payment.transferRefPlaceholder")
-      : t("pos.payment.cardRefPlaceholder");
-
-  const clean = reference.trim();
+  const clean = isTransfer ? (account?.name.trim() ?? "") : reference.trim();
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (!clean || loading) return;
+
+    if (isTransfer && account) {
+      onConfirm(clean, account.id);
+      return;
+    }
+
     onConfirm(clean);
   }
 
@@ -64,16 +81,28 @@ export function PaymentReferenceModal({
           </p>
         </div>
 
-        <div>
-          <label className="text-vimdy-micro text-vimdy-text-secondary">{label}</label>
-          <input
+        {isTransfer ? (
+          <TransferAccountSelect
             autoFocus
-            value={reference}
-            onChange={(e) => setReference(e.target.value)}
-            placeholder={placeholder}
-            className="mt-1 w-full h-12 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border px-4 text-vimdy-text outline-none focus:border-vimdy-accent"
+            value={account?.id ?? ""}
+            onChange={(selected) =>
+              setAccount(
+                selected ? { id: selected.id, name: getPaymentAccountDisplayName(selected) } : null
+              )
+            }
           />
-        </div>
+        ) : (
+          <div>
+            <label className="text-vimdy-micro text-vimdy-text-secondary">{label}</label>
+            <input
+              autoFocus
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+              placeholder={placeholder}
+              className="mt-1 w-full h-12 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border px-4 text-vimdy-text outline-none focus:border-vimdy-accent"
+            />
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-2">
           <VimdyButton type="button" variant="secondary" onClick={onClose} disabled={loading}>

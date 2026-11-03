@@ -24,6 +24,7 @@ import {
   reconstructCreateSaleInputFromSale
 } from "./offlineSale";
 import { logError } from "../../infrastructure/logging/opsLogger";
+import { summarizeMixed } from "../payments/mixedPayment";
 
 const PAYMENT_METHOD_MAP: Record<string, PaymentMethod> = {
   cash: "CASH",
@@ -45,6 +46,12 @@ const OFFLINE_ORDER_MESSAGE =
 const PENDING_PAYMENT_MESSAGE =
   "El pago NO quedó confirmado: la venta no se cobró y no entró dinero a la caja. La comanda ya pudo enviarse a Cocina. No entregues el pedido como pagado; confirma el pago o cobra en efectivo.";
 
+const RADAR_OFFLINE_MESSAGE =
+  "Sin conexión: no se puede vincular la transferencia. Cuando vuelva internet, pulsa de nuevo \"Vincular y Cerrar Venta\".";
+
+const RADAR_NETWORK_MESSAGE =
+  "Se perdió la conexión al cerrar la venta. Revisa tu internet y pulsa de nuevo \"Vincular y Cerrar Venta\": no se cobrará dos veces.";
+
 const OFFLINE_CHARGE_MESSAGE =
   "Sin conexión: el cobro quedó guardado en este dispositivo y se sincronizará solo cuando vuelva internet.";
 
@@ -63,6 +70,14 @@ export interface ProcessSaleParams {
    * Es opcional para no romper otros llamadores que todavía no lo necesitan.
    */
   saleId?: string;
+  /**
+   * Radar Antifraude: id del pago en `incoming_payments` (transferencia o
+   * Wompi ya verificada por el backend). Fuerza método TRANSFER, omite la
+   * referencia manual y delega la confirmación al servidor (RPC
+   * link_incoming_payment_and_close_sale). Nunca se encola offline: sin
+   * conexión no hay forma de verificar ni de reclamar el pago.
+   */
+  radarPaymentId?: string;
 }
 
 /**
@@ -118,6 +133,13 @@ export async function sendOrderToKitchen(
   const items = cartStore.getItems();
 
   if (items.length === 0) {
+    return null;
+  }
+
+  // Un pago del Radar no se puede verificar ni reclamar sin conexión: se
+  // corta antes de crear (o encolar) cualquier venta.
+  if (params.radarPaymentId && !connectionStore.isOnline()) {
+    toast.error(RADAR_OFFLINE_MESSAGE, 10000);
     return null;
   }
 
@@ -352,19 +374,34 @@ export async function chargeSale(
 
   const payment = paymentStore.get();
 
-  const method = PAYMENT_METHOD_MAP[payment.method] ?? "CASH";
+  const radarPaymentId = params.radarPaymentId;
 
-  if (payment.method === "mixed") {
-    const mixedTotal =
-      payment.mixedCash +
-      payment.mixedCard +
-      payment.mixedTransfer;
+  const method: PaymentMethod = radarPaymentId
+    ? "TRANSFER"
+    : PAYMENT_METHOD_MAP[payment.method] ?? "CASH";
 
-    if (mixedTotal < payment.total) {
+  if (payment.method === "mixed" && !radarPaymentId) {
+    const mixedSummary = summarizeMixed(payment.total, {
+      cash: payment.mixedCash,
+      card: payment.mixedCard,
+      transfer: payment.mixedTransfer
+    });
+
+    if (!mixedSummary.covered) {
       toast.warning(
-        `El pago mixto no cubre el total. Faltan $${(
-          payment.total - mixedTotal
-        ).toLocaleString("es-CO")}.`
+        `El pago mixto no cubre el total. Faltan $${mixedSummary.missing.toLocaleString("es-CO")}.`
+      );
+
+      return {
+        success: false
+      };
+    }
+
+    // Mismas reglas que el servidor (SalesEngine.normalizeMixedPayment):
+    // el vuelto solo puede salir del efectivo.
+    if (!mixedSummary.valid) {
+      toast.warning(
+        "Tarjeta y transferencia no pueden superar el total. El vuelto solo sale del efectivo."
       );
 
       return {
@@ -381,6 +418,7 @@ export async function chargeSale(
         payment.mixedTransfer > 0));
 
   if (
+    !radarPaymentId &&
     requiresPaymentReference &&
     !payment.reference.trim()
   ) {
@@ -415,6 +453,11 @@ export async function chargeSale(
     .list()
     .some((pending) => pending.id === sale.id);
 
+  if (radarPaymentId && (isQueuedOffline || !connectionStore.isOnline())) {
+    toast.error(RADAR_OFFLINE_MESSAGE, 10000);
+    return { success: false };
+  }
+
   if (
     isQueuedOffline ||
     !connectionStore.isOnline()
@@ -445,7 +488,8 @@ export async function chargeSale(
           reference:
             payment.reference || undefined,
           mixed,
-          cashierName: params.cashierName
+          cashierName: params.cashierName,
+          radarPaymentId
         }
       );
 
@@ -558,6 +602,13 @@ export async function chargeSale(
      * registerPayment()/CashEngine debe resolver la idempotencia del pago
      * cuando el registro vuelva a intentarse.
      */
+    if (radarPaymentId && isNetworkFailure(error)) {
+      // El servidor pudo haber confirmado antes de perderse la respuesta.
+      // Volver a pulsar es seguro: la venta y el pago son idempotentes.
+      toast.error(RADAR_NETWORK_MESSAGE, 10000);
+      return { success: false };
+    }
+
     if (isNetworkFailure(error)) {
       return chargeSaleOffline(
         sale,

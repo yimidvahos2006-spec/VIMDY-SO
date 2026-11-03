@@ -19,6 +19,9 @@ import { useAuth } from "../presentation/context/AuthContext";
 
 export type IncomingPaymentStatus = "pending" | "linked" | "ignored";
 
+/** Origen del pago verificado: transferencia bancaria detectada o Wompi. */
+export type IncomingPaymentSource = "transfer" | "wompi";
+
 export interface IncomingPayment {
   id: string;
   businessId: string;
@@ -28,6 +31,8 @@ export interface IncomingPayment {
   rawMessage: string;
   createdAt: string;
   status: IncomingPaymentStatus;
+  source: IncomingPaymentSource;
+  providerReference: string | null;
 }
 
 interface IncomingPaymentRow {
@@ -39,6 +44,8 @@ interface IncomingPaymentRow {
   raw_message: string | null;
   created_at: string;
   status?: IncomingPaymentStatus | null;
+  source?: IncomingPaymentSource | null;
+  provider_reference?: string | null;
 }
 
 /** Pagos pendientes más viejos que esto ya no se muestran como alerta de caja. */
@@ -53,7 +60,9 @@ function mapRow(row: IncomingPaymentRow): IncomingPayment {
     senderName: row.sender_name?.trim() || "Remitente desconocido",
     rawMessage: row.raw_message ?? "",
     createdAt: row.created_at,
-    status: row.status ?? "pending"
+    status: row.status ?? "pending",
+    source: row.source === "wompi" ? "wompi" : "transfer",
+    providerReference: row.provider_reference ?? null
   };
 }
 
@@ -64,8 +73,12 @@ export interface UsePaymentRadarResult {
   queued: number;
   /** true cuando el canal en vivo está conectado. */
   connected: boolean;
-  /** Marca el pago como vinculado a una venta y lo quita de la cola. */
-  markLinked: (paymentId: string, saleId: string) => Promise<void>;
+  /**
+   * Quita de la cola un pago que YA quedó vinculado en el servidor.
+   * La vinculación real la hace la RPC link_incoming_payment_and_close_sale
+   * (atómica con el cobro); desde el navegador ya no se puede marcar 'linked'.
+   */
+  dismissLinked: (paymentId: string) => void;
   /** Marca el pago como ignorado y lo quita de la cola. */
   markIgnored: (paymentId: string) => Promise<void>;
 }
@@ -103,7 +116,7 @@ export function usePaymentRadar(): UsePaymentRadarResult {
       const since = new Date(Date.now() - RECENT_WINDOW_MS).toISOString();
       const { data, error } = await supabase
         .from("incoming_payments")
-        .select("id, business_id, bank_name, amount, sender_name, raw_message, created_at, status")
+        .select("id, business_id, bank_name, amount, sender_name, raw_message, created_at, status, source, provider_reference")
         .eq("business_id", currentBusinessId)
         .eq("status", "pending")
         .gte("created_at", since)
@@ -149,8 +162,10 @@ export function usePaymentRadar(): UsePaymentRadarResult {
     };
   }, [businessId, enqueue]);
 
-  const resolve = useCallback(
-    async (paymentId: string, patch: { status: "linked" | "ignored"; linked_sale_id?: string }) => {
+  // Ignorar es lo único que el navegador puede escribir (la política RLS
+  // solo permite pending -> ignored). Vincular lo hace la RPC del cobro.
+  const markIgnored = useCallback(
+    async (paymentId: string) => {
       // Se quita de la pantalla de inmediato; si el servidor falla se avisa en consola
       // (el pago vuelve a aparecer en la próxima carga porque sigue 'pending').
       removeFromQueue(paymentId);
@@ -158,7 +173,7 @@ export function usePaymentRadar(): UsePaymentRadarResult {
       const { error } = await supabase
         .from("incoming_payments")
         .update({
-          ...patch,
+          status: "ignored",
           resolved_by: user?.id ?? null,
           resolved_at: new Date().toISOString()
         })
@@ -166,27 +181,22 @@ export function usePaymentRadar(): UsePaymentRadarResult {
         .eq("status", "pending");
 
       if (error) {
-        console.error("[usePaymentRadar] No se pudo actualizar el pago:", error.message);
+        console.error("[usePaymentRadar] No se pudo ignorar el pago:", error.message);
       }
     },
     [removeFromQueue, user?.id]
   );
 
-  const markLinked = useCallback(
-    (paymentId: string, saleId: string) => resolve(paymentId, { status: "linked", linked_sale_id: saleId }),
-    [resolve]
-  );
-
-  const markIgnored = useCallback(
-    (paymentId: string) => resolve(paymentId, { status: "ignored" }),
-    [resolve]
+  const dismissLinked = useCallback(
+    (paymentId: string) => removeFromQueue(paymentId),
+    [removeFromQueue]
   );
 
   return {
     current: queue[0] ?? null,
     queued: Math.max(queue.length - 1, 0),
     connected,
-    markLinked,
+    dismissLinked,
     markIgnored
   };
 }

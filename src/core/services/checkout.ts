@@ -8,6 +8,7 @@ import { printReceiptDocument } from "../../presentation/utils/printReceiptDocum
 import { toast } from "../store/toastStore";
 import { subscriptionStore } from "../store/subscriptionStore";
 import { subscriptionEngine } from "../engines/SubscriptionEngine";
+import { shiftOpenCache, shiftOpenKey } from "../caja/shiftOpenCache";
 
 /**
  * checkout.ts
@@ -32,7 +33,19 @@ import { subscriptionEngine } from "../engines/SubscriptionEngine";
  * un flujo que ya podría haber tocado datos (carrito, mesa, etc).
  */
 export async function assertShiftOpen(): Promise<boolean> {
+  // Camino rápido: si hace pocos segundos ya se confirmó turno abierto, se
+  // cobra sin esperar otra consulta a Supabase. El servidor igual vuelve a
+  // exigir turno abierto al registrar el pago (SHIFT_NOT_OPEN).
+  const key = shiftOpenKey();
+  if (shiftOpenCache.isFresh(key)) return true;
+
   const currentShift = await container.shiftEngine.get().getCurrentShift();
+
+  if (currentShift) {
+    shiftOpenCache.markOpen(key);
+  } else {
+    shiftOpenCache.invalidate();
+  }
 
   if (!currentShift) {
     toast.error('La caja está cerrada. Abre un turno en la pestaña "Turno de caja" antes de cobrar.');

@@ -20,6 +20,7 @@ import { useSearch } from "../../../core/store/useSearch";
 import { classifyShortcutTarget, isModalOpen, resolvePosShortcut } from "./posShortcuts";
 import { usePaymentRadar, type IncomingPayment } from "../../../hooks/usePaymentRadar";
 import { PaymentRadarAlert } from "./PaymentRadarAlert";
+import { shiftOpenCache, shiftOpenKey } from "../../../core/caja/shiftOpenCache";
 
 /**
  * Panel único de "Venta actual": Carrito y Pago (antes dos columnas, luego
@@ -52,7 +53,7 @@ export function PosSalePanel() {
 
   const { items, clear: clearCart } = useCart();
   const { value: searchValue } = useSearch();
-  const { total, method, received, mixedReceived, change, requiresInvoice, reference, mixedCard, mixedTransfer, customerName, useWompiCheckout } = usePayment();
+  const { total, method, received, mixedSummary, change, requiresInvoice, reference, paymentAccountId, mixedCard, mixedTransfer, customerName, useWompiCheckout } = usePayment();
   const { user } = useAuth();
 
   const [processing, setProcessing] = useState(false);
@@ -88,6 +89,10 @@ export function PosSalePanel() {
 
     async function checkShift() {
       const current = await container.shiftEngine.get().getCurrentShift();
+      // El resultado alimenta la memoria corta que usa el cobro, así que al
+      // tocar COBRAR normalmente ya no hace falta esperar otra consulta.
+      if (current !== null) shiftOpenCache.markOpen(shiftOpenKey());
+      else shiftOpenCache.invalidate();
       if (!cancelled) setShiftOpen(current !== null);
     }
 
@@ -124,7 +129,7 @@ export function PosSalePanel() {
     shiftOpen &&
     items.length > 0 &&
     (method !== "cash" || received >= total) &&
-    (method !== "mixed" || mixedReceived >= total);
+    (method !== "mixed" || mixedSummary.valid);
 
   // Tarjeta/transferencia: antes de cobrar se pide confirmar la referencia
   // en un modal (salvo Wompi, que no usa referencia manual).
@@ -136,14 +141,19 @@ export function PosSalePanel() {
     void handleCharge();
   }
 
-  function confirmReference(ref: string) {
-    paymentStore.setReference(ref);
+  function confirmReference(ref: string, accountId?: string) {
+    // Transferencia: la referencia es el nombre de la cuenta registrada elegida.
+    if (accountId) {
+      paymentStore.setPaymentAccount(accountId, ref);
+    } else {
+      paymentStore.setReference(ref);
+    }
     setReferenceModalOpen(false);
     void handleCharge();
   }
 
   /** Devuelve el id de la venta si se cobró con éxito, o null si no. */
-  async function handleCharge(): Promise<string | null> {
+  async function handleCharge(options?: { radarPaymentId?: string }): Promise<string | null> {
 
     if (!shiftOpen) {
       toast.error(t("pos.sale.shiftClosedToast"));
@@ -170,7 +180,8 @@ export function PosSalePanel() {
       const result = await processSale({
         cashierId: user.id,
         cashierName: user.name,
-        saleId: attemptId
+        saleId: attemptId,
+        radarPaymentId: options?.radarPaymentId
       });
 
       if (result.success) {
@@ -204,14 +215,19 @@ export function PosSalePanel() {
 
   }
 
-  // RADAR ANTIFRAUDE — "Vincular y cerrar": el cajero confirma que la
-  // transferencia que sonó en pantalla es de ESTA venta. Se exige que haya
-  // carrito, turno abierto y que el monto cubra el total (si no, la alerta
-  // se queda abierta). Luego se fija el método en "transferencia", se usa
-  // la huella del pago como referencia (queda trazable en la venta) y se
-  // cobra por el mismo camino de siempre (handleCharge -> processSale), con
-  // la misma idempotencia. Solo si el cobro sale bien el pago se marca como
-  // vinculado en la base; así una transferencia no sirve para dos ventas.
+  // RADAR ANTIFRAUDE — "Vincular y Cerrar Venta": un solo clic, cero tipeo.
+  // El cajero NO elige método, NO escribe referencia, NO confirma montos. Todo
+  // sale del pago verificado (transferencia o Wompi) que sonó en pantalla:
+  //   1. Se exige carrito y MONTO EXACTO (pago == total; ni menos ni más).
+  //   2. Se fija método "transferencia" solo para el recibo/ticket.
+  //   3. processSale({ radarPaymentId }) crea la venta (descuenta inventario y
+  //      manda la comanda a cocina de forma atómica en el servidor) y la cobra
+  //      con la RPC link_incoming_payment_and_close_sale, que en UNA
+  //      transacción revalida el monto exacto, crea la verificación, registra
+  //      el dinero en caja, pasa la venta a PAID y marca el pago 'linked'.
+  //   4. processSale imprime el ticket (según la config de impresión).
+  // Si algo falla, el pago sigue 'pending' y la alerta queda abierta; el mismo
+  // saleAttemptId se reutiliza al reintentar, así nunca hay doble venta.
   async function handleLinkRadarPayment(payment: IncomingPayment) {
     if (radarLinking || processing) return;
 
@@ -220,13 +236,9 @@ export function PosSalePanel() {
       return;
     }
 
-    if (payment.amount < total - 0.005) {
-      toast.error("El monto recibido es menor al total de la venta. No se vinculó.");
+    if (Math.abs(payment.amount - total) >= 0.005) {
+      toast.error("El monto de la transferencia no coincide exactamente con el total de la venta. No se vinculó.");
       return;
-    }
-
-    if (payment.amount > total + 0.005) {
-      toast.warning("La transferencia es mayor al total de la venta. Revisa el excedente con el cliente.");
     }
 
     setRadarLinking(true);
@@ -234,9 +246,10 @@ export function PosSalePanel() {
       paymentStore.setMethod("transfer");
       paymentStore.setReference(`${payment.bankName}-${payment.id.slice(0, 8)}`);
 
-      const saleId = await handleCharge();
+      const saleId = await handleCharge({ radarPaymentId: payment.id });
       if (saleId) {
-        await radar.markLinked(payment.id, saleId);
+        // El servidor ya dejó el pago 'linked'; solo se retira la tarjeta.
+        radar.dismissLinked(payment.id);
       }
     } finally {
       setRadarLinking(false);
@@ -402,6 +415,7 @@ export function PosSalePanel() {
         method={method}
         total={total}
         initialReference={reference}
+        initialAccountId={paymentAccountId}
         loading={processing}
         onClose={() => setReferenceModalOpen(false)}
         onConfirm={confirmReference}

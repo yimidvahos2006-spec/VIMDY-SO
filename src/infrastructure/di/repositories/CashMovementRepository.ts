@@ -56,6 +56,8 @@ export interface ICashMovementRepository extends IRepository<CashMovement> {
     change: number;
     reference?: string | null;
     verificationSource?: "CASH" | "EXTERNAL_TERMINAL" | "PROVIDER" | null;
+    /** Radar Antifraude: si viene, se usa link_incoming_payment_and_close_sale. */
+    radarPaymentId?: string | null;
   }): Promise<{ income: CashMovement; change: CashMovement | null }>;
 
   /**
@@ -109,6 +111,7 @@ export class CashMovementRepository
     change: number;
     reference?: string | null;
     verificationSource?: "CASH" | "EXTERNAL_TERMINAL" | "PROVIDER" | null;
+    radarPaymentId?: string | null;
   }): Promise<{ income: CashMovement; change: CashMovement | null }> {
     const {
       saleId,
@@ -125,9 +128,17 @@ export class CashMovementRepository
       change,
       reference,
       verificationSource,
+      radarPaymentId,
     } = params;
 
-    const { data, error } = await supabase.rpc("register_sale_payment_atomic", {
+    // Radar Antifraude: misma firma que register_sale_payment_atomic + el id del
+    // pago detectado. La RPC valida monto exacto, vincula y cobra en una transacción.
+    const rpcName = radarPaymentId
+      ? "link_incoming_payment_and_close_sale"
+      : "register_sale_payment_atomic";
+
+    const { data, error } = await supabase.rpc(rpcName, {
+      ...(radarPaymentId ? { p_incoming_payment_id: radarPaymentId } : {}),
       p_sale_id: saleId,
       p_business_id: businessId,
       p_branch_id: branchId,

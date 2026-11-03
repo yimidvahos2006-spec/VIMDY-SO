@@ -165,6 +165,12 @@ export interface PaymentOptions {
   readonly cashRegisterId?: string;
   /** Nombre de quien cobra; se imprime en el campo "Cajero" del recibo. */
   readonly cashierName?: string;
+  /**
+   * Radar Antifraude: id del pago en `incoming_payments` (transferencia o
+   * Wompi ya verificada por el backend). El cobro lo confirma el SERVIDOR
+   * (link_incoming_payment_and_close_sale), no una referencia tecleada.
+   */
+  readonly radarPaymentId?: string;
 }
 
 export interface ProductSalesRanking {
@@ -1671,11 +1677,31 @@ export class SalesEngine {
           }
         : options;
 
-    const paymentResult = this.processPayment(
-      current,
-      method,
-      normalizedOptions
-    );
+    const isRadarPayment = Boolean(options.radarPaymentId);
+    if (isRadarPayment && method !== "TRANSFER") {
+      throw new Error("RADAR_PAYMENT_METHOD_INVALID: un pago del radar solo cierra ventas por TRANSFER.");
+    }
+
+    // Con el radar el dinero YA fue verificado por el backend: no se pasa por
+    // payTransfer() (que siempre devuelve PENDING_VERIFICATION). El servidor
+    // vuelve a validar monto exacto y estado del pago dentro de la RPC.
+    const paymentResult: PaymentResult = isRadarPayment
+      ? {
+          success: true,
+          method: "TRANSFER",
+          total: current.total,
+          received: current.total,
+          change: 0,
+          reference: normalizedOptions.reference,
+          message: "Transferencia verificada por el Radar Antifraude.",
+          date: new Date(),
+          verificationStatus: "CONFIRMED"
+        }
+      : this.processPayment(
+          current,
+          method,
+          normalizedOptions
+        );
 
     if (
       !paymentResult.success &&
@@ -1738,11 +1764,14 @@ export class SalesEngine {
         shiftId: options.shiftId,
         cashRegisterId: options.cashRegisterId,
         verificationSource:
-          paymentResult.verificationStatus === "CONFIRMED"
-            ? "CASH"
-            : paymentResult.verificationStatus === "EXTERNAL_TERMINAL"
-              ? "EXTERNAL_TERMINAL"
-              : "PROVIDER",
+          isRadarPayment
+            ? "PROVIDER"
+            : paymentResult.verificationStatus === "CONFIRMED"
+              ? "CASH"
+              : paymentResult.verificationStatus === "EXTERNAL_TERMINAL"
+                ? "EXTERNAL_TERMINAL"
+                : "PROVIDER",
+        radarPaymentId: options.radarPaymentId,
       });
     } catch (err: unknown) {
       // Solo la reserva diferida (Caja de cobro inmediato) consumió

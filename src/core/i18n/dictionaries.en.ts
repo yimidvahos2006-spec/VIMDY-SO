@@ -227,6 +227,9 @@ const en: Record<TranslationKey, string> = {
   "pos.payment.mixedRefPlaceholder": "Referência cartão/transferência (opcional)",
   "pos.payment.referenceRequired": "Digite a referência de pagamento para cartão ou transferência.",
   "pos.payment.missingAmount": "Valor faltando",
+  "pos.payment.mixed.auto": "Auto",
+  "pos.payment.mixed.fillWith": "Fill with {method}",
+  "pos.payment.mixed.externalExceeds": "Card + transfer cannot exceed the total. Change can only come from cash.",
 
   "pos.customer.levelGold": "Gold",
   "pos.customer.levelSilver": "Silver",

@@ -39,6 +39,12 @@ export interface SalePaymentParams {
   readonly shiftId?: string;
   readonly cashRegisterId?: string;
   readonly verificationSource?: "CASH" | "EXTERNAL_TERMINAL" | "PROVIDER";
+  /**
+   * Radar Antifraude: id del pago en `incoming_payments`. Si viene, el cobro
+   * se hace por la RPC `link_incoming_payment_and_close_sale`, que vincula
+   * el pago, valida el monto exacto y cierra la venta en UNA transacción.
+   */
+  readonly radarPaymentId?: string;
 }
 
 export interface SalePaymentResult {
@@ -286,8 +292,12 @@ export class CashEngine {
   public async registerSalePaymentAtomic(
     params: SalePaymentParams
   ): Promise<SalePaymentResult> {
-    const { sale, paymentMethod, total, cashAmount, received, change, reference, shiftId, cashRegisterId, verificationSource } =
+    const { sale, paymentMethod, total, cashAmount, received, change, reference, shiftId, cashRegisterId, verificationSource, radarPaymentId } =
       params;
+
+    if (radarPaymentId && (paymentMethod !== "TRANSFER" || verificationSource !== "PROVIDER")) {
+      throw new Error("RADAR_PAYMENT_METHOD_INVALID: un pago del radar solo cierra ventas por TRANSFER verificada.");
+    }
 
     if (!["CASH", "CARD", "TRANSFER", "QR", "MIXED"].includes(paymentMethod)) {
       throw new Error("INVALID_PAYMENT_METHOD");
@@ -389,6 +399,7 @@ export class CashEngine {
         change,
         reference,
         verificationSource,
+        radarPaymentId,
       });
 
       income = result.income;

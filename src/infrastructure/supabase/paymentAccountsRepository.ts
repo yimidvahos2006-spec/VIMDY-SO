@@ -80,6 +80,39 @@ export async function listPaymentAccounts(businessId: string): Promise<PaymentAc
   return ((data ?? []) as PaymentAccountRow[]).map(mapRow);
 }
 
+/**
+ * Devuelve solo las cuentas ACTIVAS del negocio (is_active = true): las que el
+ * cajero puede elegir al cobrar por transferencia. El filtro por business_id va
+ * explícito además del RLS, para no depender solo de la política.
+ */
+export async function listActivePaymentAccounts(businessId: string): Promise<PaymentAccount[]> {
+  const { data, error } = await supabase
+    .from("business_payment_accounts")
+    .select(COLUMNS)
+    .eq("business_id", businessId)
+    .eq("is_active", true)
+    .order("created_at", { ascending: true });
+
+  if (error) throw friendlyError(error.message, "No se pudieron cargar las cuentas de cobro.");
+  return ((data ?? []) as PaymentAccountRow[]).map(mapRow);
+}
+
+/**
+ * Nombre que ve el cajero y que queda guardado como referencia de la venta.
+ * Ej.: "Nequi - Caja 1", "Wompi - Principal". Si la cuenta no tiene etiqueta,
+ * se distingue por los últimos 4 dígitos: "Nequi - ••3210".
+ */
+export function getPaymentAccountDisplayName(
+  account: Pick<PaymentAccount, "bankName" | "label" | "accountNumber">
+): string {
+  const label = account.label.trim();
+  if (label) return `${account.bankName} - ${label}`;
+
+  const number = account.accountNumber.trim();
+  const tail = number.length > 4 ? `••${number.slice(-4)}` : number;
+  return `${account.bankName} - ${tail}`;
+}
+
 export async function createPaymentAccount(
   businessId: string,
   input: NewPaymentAccountInput

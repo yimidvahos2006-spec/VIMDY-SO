@@ -83,16 +83,19 @@ export function PaymentRadarAlert({
   const short = hasSale && payment.amount < saleTotal - 0.005;
   const over = hasSale && payment.amount > saleTotal + 0.005;
 
+  const isWompi = payment.source === "wompi";
+  const title = isWompi ? "Pago Wompi verificado" : "Transferencia verificada";
+
   let hint = "Sin venta en curso: agrega productos para vincular este pago.";
   let hintClass = "text-vimdy-text-secondary";
   if (matches) {
-    hint = "El monto coincide exactamente con la venta actual.";
+    hint = "El monto coincide exactamente: se cerrará la venta, se descuenta el inventario y se imprime el ticket.";
     hintClass = "text-emerald-300";
   } else if (short) {
-    hint = `Faltan ${formatMoney(saleTotal - payment.amount, currency, language)} para cubrir la venta.`;
+    hint = `Faltan ${formatMoney(saleTotal - payment.amount, currency, language)}: el monto debe ser exacto para vincular.`;
     hintClass = "text-vimdy-warning";
   } else if (over) {
-    hint = `Excede la venta en ${formatMoney(payment.amount - saleTotal, currency, language)}.`;
+    hint = `Excede la venta en ${formatMoney(payment.amount - saleTotal, currency, language)}: el monto debe ser exacto para vincular.`;
     hintClass = "text-vimdy-warning";
   }
 
@@ -116,7 +119,7 @@ export function PaymentRadarAlert({
 
           <div className="min-w-0 flex-1">
             <p className="text-[11px] font-bold uppercase tracking-[0.25em] text-emerald-400">
-              Transferencia recibida
+              {title}
             </p>
             <p className="mt-1 text-3xl font-black leading-tight tabular-nums text-emerald-300 drop-shadow-[0_0_10px_rgba(52,211,153,0.55)]">
               {formatMoney(payment.amount, currency, language)}
@@ -132,7 +135,7 @@ export function PaymentRadarAlert({
 
         <dl className="relative mt-4 space-y-1.5 text-vimdy-small">
           <div className="flex items-baseline justify-between gap-3">
-            <dt className="text-vimdy-text-secondary">Banco</dt>
+            <dt className="text-vimdy-text-secondary">{isWompi ? "Medio" : "Banco"}</dt>
             <dd className="font-semibold text-vimdy-text">{payment.bankName}</dd>
           </div>
           <div className="flex items-baseline justify-between gap-3">
@@ -146,12 +149,12 @@ export function PaymentRadarAlert({
         <div className="relative mt-4 grid grid-cols-[1fr_auto] gap-2">
           <button
             type="button"
-            disabled={busy || !hasSale}
+            disabled={busy || !matches}
             onClick={() => onLink(payment)}
             className="flex h-11 items-center justify-center gap-2 rounded-xl border border-emerald-300/70 bg-emerald-500 px-4 text-sm font-black uppercase tracking-wide text-black shadow-[0_0_20px_rgba(16,185,129,0.55)] transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
           >
             <Link2 size={18} />
-            {busy ? "Procesando..." : "Vincular y cerrar"}
+            {busy ? "Cerrando venta..." : "Vincular y Cerrar Venta"}
           </button>
           <button
             type="button"

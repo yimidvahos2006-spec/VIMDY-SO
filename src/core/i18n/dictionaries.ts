@@ -239,6 +239,9 @@ const es = {
   "pos.payment.amountToCharge": "Monto a cobrar:",
   "pos.payment.mixedRefPlaceholder": "Referencia tarjeta/transferencia (opcional)",
   "pos.payment.missingAmount": "Falta por cubrir",
+  "pos.payment.mixed.auto": "Auto",
+  "pos.payment.mixed.fillWith": "Completar con {method}",
+  "pos.payment.mixed.externalExceeds": "Tarjeta + transferencia no pueden superar el total. El vuelto solo sale del efectivo.",
 
   "pos.customer.levelGold": "Oro",
   "pos.customer.levelSilver": "Plata",

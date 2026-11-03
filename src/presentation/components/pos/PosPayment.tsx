@@ -13,6 +13,8 @@ import { PaymentMethod } from "../../../core/store/paymentStore";
 import { useTranslation } from "../../../core/i18n/useTranslation";
 import { formatMoney } from "../../../core/utils/formatMoney";
 import { companyConfigStore } from "../../../core/store/companyConfigStore";
+import { getPaymentAccountDisplayName } from "../../../infrastructure/supabase/paymentAccountsRepository";
+import { TransferAccountSelect } from "./TransferAccountSelect";
 
 // Billetes reales en circulación en Colombia (COP). Antes las opciones
 // rápidas se calculaban redondeando a múltiplos de $10.000 a ciegas, lo
@@ -47,6 +49,49 @@ function suggestedCashAmounts(total: number): number[] {
     .slice(0, 3);
 }
 
+interface MixedAmountFieldProps {
+  id: string;
+  label: string;
+  icon: React.ElementType;
+  value: number;
+  auto: boolean;
+  autoLabel: string;
+  onChange: (amount: number) => void;
+}
+
+/** Campo de monto del pago mixto. Vive fuera de PosPayment para que no se
+ * vuelva a montar en cada tecla (si no, el cursor se pierde al escribir). */
+function MixedAmountField({ id, label, icon: Icon, value, auto, autoLabel, onChange }: MixedAmountFieldProps) {
+  return (
+    <div>
+      <label htmlFor={id} className="text-vimdy-micro text-vimdy-text-secondary flex items-center gap-1.5">
+        <Icon size={13} /> {label}
+        {auto && (
+          <span className="ml-auto rounded px-1.5 py-0.5 bg-vimdy-accent/15 text-vimdy-accent text-vimdy-micro font-semibold">
+            {autoLabel}
+          </span>
+        )}
+      </label>
+      <input
+        id={id}
+        data-pos-enter-charge
+        type="number"
+        inputMode="decimal"
+        min={0}
+        autoComplete="off"
+        value={value || ""}
+        onChange={(e) => onChange(Number(e.target.value))}
+        onFocus={(e) => e.currentTarget.select()}
+        onWheel={(e) => e.currentTarget.blur()}
+        placeholder="0"
+        className={`mt-1 w-full h-11 rounded-vimdy-md bg-vimdy-surface border px-4 text-vimdy-text outline-none transition-colors ${
+          auto ? "border-vimdy-accent/60 focus:border-vimdy-accent" : "border-vimdy-border focus:border-vimdy-accent"
+        }`}
+      />
+    </div>
+  );
+}
+
 export function PosPayment() {
   const { t, language } = useTranslation();
 
@@ -60,11 +105,17 @@ export function PosPayment() {
     calculateChange,
     reference,
     setReference,
+    paymentAccountId,
+    setPaymentAccount,
+    clearPaymentAccount,
     mixedCash,
     mixedCard,
     mixedTransfer,
+    mixedAutoEnabled,
+    mixedBalanceKind,
+    mixedSummary,
     setMixedAmount,
-    mixedReceived,
+    fillMixedRemainder,
     useWompiCheckout,
     setUseWompiCheckout
   } = usePayment();
@@ -81,8 +132,6 @@ export function PosPayment() {
     { id: "transfer", title: t("pos.payment.method.transfer"), icon: Smartphone },
     { id: "mixed", title: t("pos.payment.method.mixed"), icon: Landmark }
   ];
-
-  const mixedMissing = Math.max(0, total - mixedReceived);
 
   return (
     <div className="space-y-4">
@@ -203,9 +252,9 @@ export function PosPayment() {
       {(method === "card" || method === "transfer") && (
         <div>
           <div className="flex items-center justify-between mb-2">
-            <label className="text-vimdy-micro text-vimdy-text-secondary">
-              {method === "card" ? t("pos.payment.cardReference") : t("pos.payment.transferReference")}
-            </label>
+            <span className="text-vimdy-micro text-vimdy-text-secondary">
+              {method === "card" ? t("pos.payment.cardReference") : t("pos.payment.method.transfer")}
+            </span>
             <button
               type="button"
               onClick={() => setUseWompiCheckout(!useWompiCheckout)}
@@ -220,16 +269,27 @@ export function PosPayment() {
             </button>
           </div>
 
-          {!useWompiCheckout && (
+          {!useWompiCheckout && method === "card" && (
             <>
               <input
                 data-pos-enter-charge
                 value={reference}
                 onChange={(e) => setReference(e.target.value)}
-                placeholder={method === "card" ? t("pos.payment.cardRefPlaceholder") : t("pos.payment.transferRefPlaceholder")}
+                placeholder={t("pos.payment.cardRefPlaceholder")}
                 className="mt-1 w-full h-12 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border px-4 text-vimdy-text outline-none focus:border-vimdy-accent"
               />
             </>
+          )}
+
+          {!useWompiCheckout && method === "transfer" && (
+            <TransferAccountSelect
+              value={paymentAccountId}
+              onChange={(account) =>
+                account
+                  ? setPaymentAccount(account.id, getPaymentAccountDisplayName(account))
+                  : clearPaymentAccount()
+              }
+            />
           )}
 
           <p className="mt-2 text-vimdy-micro text-vimdy-text-tertiary">
@@ -240,56 +300,70 @@ export function PosPayment() {
 
       {method === "mixed" && (
         <div className="space-y-3">
-          <div>
-            <label className="text-vimdy-micro text-vimdy-text-secondary flex items-center gap-1.5">
-              <Banknote size={13} /> {t("pos.payment.method.cash")}
-            </label>
-            <input
-              type="number"
-              value={mixedCash || ""}
-              onChange={(e) => setMixedAmount("cash", Number(e.target.value))}
-              placeholder="0"
-              className="mt-1 w-full h-11 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border px-4 text-vimdy-text outline-none focus:border-vimdy-accent"
-            />
-          </div>
+          <MixedAmountField
+            id="pos-mixed-cash"
+            label={t("pos.payment.method.cash")}
+            icon={Banknote}
+            value={mixedCash}
+            auto={mixedAutoEnabled && mixedBalanceKind === "cash"}
+            autoLabel={t("pos.payment.mixed.auto")}
+            onChange={(amount) => setMixedAmount("cash", amount)}
+          />
 
-          <div>
-            <label className="text-vimdy-micro text-vimdy-text-secondary flex items-center gap-1.5">
-              <CreditCard size={13} /> {t("pos.payment.method.card")}
-            </label>
-            <input
-              type="number"
-              value={mixedCard || ""}
-              onChange={(e) => setMixedAmount("card", Number(e.target.value))}
-              placeholder="0"
-              className="mt-1 w-full h-11 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border px-4 text-vimdy-text outline-none focus:border-vimdy-accent"
-            />
-          </div>
+          <MixedAmountField
+            id="pos-mixed-transfer"
+            label={t("pos.payment.method.transfer")}
+            icon={Smartphone}
+            value={mixedTransfer}
+            auto={mixedAutoEnabled && mixedBalanceKind === "transfer"}
+            autoLabel={t("pos.payment.mixed.auto")}
+            onChange={(amount) => setMixedAmount("transfer", amount)}
+          />
 
-          <div>
-            <label className="text-vimdy-micro text-vimdy-text-secondary flex items-center gap-1.5">
-              <Smartphone size={13} /> {t("pos.payment.method.transfer")}
-            </label>
-            <input
-              type="number"
-              value={mixedTransfer || ""}
-              onChange={(e) => setMixedAmount("transfer", Number(e.target.value))}
-              placeholder="0"
-              className="mt-1 w-full h-11 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border px-4 text-vimdy-text outline-none focus:border-vimdy-accent"
-            />
-          </div>
+          <MixedAmountField
+            id="pos-mixed-card"
+            label={t("pos.payment.method.card")}
+            icon={CreditCard}
+            value={mixedCard}
+            auto={false}
+            autoLabel={t("pos.payment.mixed.auto")}
+            onChange={(amount) => setMixedAmount("card", amount)}
+          />
+
+          {mixedSummary.missing > 0 && (
+            <div className="grid grid-cols-3 gap-2">
+              {(
+                [
+                  ["cash", Banknote, t("pos.payment.method.cash")],
+                  ["transfer", Smartphone, t("pos.payment.method.transfer")],
+                  ["card", CreditCard, t("pos.payment.method.card")]
+                ] as const
+              ).map(([kind, Icon, label]) => (
+                <button
+                  key={kind}
+                  type="button"
+                  onClick={() => fillMixedRemainder(kind)}
+                  className="h-11 rounded-vimdy-sm border border-vimdy-border bg-vimdy-surface text-vimdy-text hover:border-vimdy-accent transition-all text-vimdy-micro font-semibold flex flex-col items-center justify-center leading-tight"
+                >
+                  <span className="flex items-center gap-1">
+                    <Icon size={12} />
+                    {t("pos.payment.mixed.fillWith", { method: label })}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
 
           {(mixedCard > 0 || mixedTransfer > 0) && (
             <>
               {!useWompiCheckout && (
-                <>
-                  <input
-                    value={reference}
-                    onChange={(e) => setReference(e.target.value)}
-                    placeholder={t("pos.payment.mixedRefPlaceholder")}
-                    className="w-full h-11 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border px-4 text-vimdy-text text-vimdy-small outline-none focus:border-vimdy-accent"
-                  />
-                </>
+                <input
+                  value={reference}
+                  onChange={(e) => setReference(e.target.value)}
+                  autoComplete="off"
+                  placeholder={t("pos.payment.mixedRefPlaceholder")}
+                  className="w-full h-11 rounded-vimdy-md bg-vimdy-surface border border-vimdy-border px-4 text-vimdy-text text-vimdy-small outline-none focus:border-vimdy-accent"
+                />
               )}
 
               <div className="flex items-center justify-between">
@@ -309,18 +383,26 @@ export function PosPayment() {
               </div>
             </>
           )}
+
+          {mixedSummary.externalExceeds && (
+            <p role="alert" className="text-vimdy-micro text-vimdy-danger">
+              {t("pos.payment.mixed.externalExceeds")}
+            </p>
+          )}
+
           <div
+            aria-live="polite"
             className={`rounded-vimdy-md border p-3 flex justify-between ${
-              mixedMissing > 0
-                ? "bg-vimdy-danger-bg border-vimdy-danger/40"
-                : "bg-vimdy-success-bg border-vimdy-success/40"
+              mixedSummary.valid
+                ? "bg-vimdy-success-bg border-vimdy-success/40"
+                : "bg-vimdy-danger-bg border-vimdy-danger/40"
             }`}
           >
             <span className="text-vimdy-text-secondary text-vimdy-small">
-              {mixedMissing > 0 ? t("pos.payment.missingAmount") : t("common.change")}
+              {mixedSummary.missing > 0 ? t("pos.payment.missingAmount") : t("common.change")}
             </span>
-            <span className={`font-bold ${mixedMissing > 0 ? "text-vimdy-danger" : "text-vimdy-success"}`}>
-              {money(mixedMissing > 0 ? mixedMissing : mixedReceived - total)}
+            <span className={`font-bold ${mixedSummary.valid ? "text-vimdy-success" : "text-vimdy-danger"}`}>
+              {money(mixedSummary.missing > 0 ? mixedSummary.missing : mixedSummary.change)}
             </span>
           </div>
         </div>
