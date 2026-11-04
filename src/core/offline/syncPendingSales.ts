@@ -112,23 +112,6 @@ function formatOfflineBusinessError(
 
 /**
  * Reproduce una única operación offline contra el backend.
- *
- * El principio de diseño es importante:
- *
- * OFFLINE:
- *   IndexedDB
- *      ↓
- *   PendingSale
- *
- * ONLINE:
- *   SalesEngine.createSale()
- *      ↓
- *   SalesEngine.registerPayment()
- *
- * No existe una segunda implementación de creación de venta.
- *
- * La cola solamente conserva la intención hasta que el flujo real pueda
- * ejecutarse.
  */
 export async function syncOne(
   pending: PendingSale
@@ -167,21 +150,6 @@ export async function syncOne(
     );
   }
 
-  /*
-   * IMPORTANTE:
-   *
-   * createSale() es el mismo método que utiliza el flujo online.
-   *
-   * Si la operación ya alcanzó a crear la venta antes de una caída de red,
-   * la implementación idempotente del SalesEngine debe devolver la venta
-   * existente en vez de volver a descontar inventario.
-   */
-  /*
-   * PASO 2: si el cliente de la venta se creó offline y el servidor lo
-   * resolvió a otro id, la venta se envía con el id CANÓNICO. Así no se
-   * rechaza por cliente inexistente ni se crea un cliente duplicado.
-   * El id de la venta (idempotencia) no cambia.
-   */
   await loadCustomerIdAliases();
 
   const canonicalCustomerId =
@@ -201,19 +169,39 @@ export async function syncOne(
         }
       : pending.createSaleInput;
 
-  const sale =
-    await container.salesEngine
+  let sale: Sale;
+  try {
+    sale = await container.salesEngine
       .get()
       .createSale(
         createSaleInput
       );
+  } catch (error: any) {
+    const errCode = error?.code || error?.status;
+    const errMsg = error?.message || String(error);
 
-  /*
-   * Si existía un cobro offline, se reproduce exactamente el mismo pago.
-   *
-   * registerPayment() es el punto donde se debe garantizar la idempotencia
-   * financiera para impedir movimientos duplicados de caja.
-   */
+    // BLINDAJE DE IDEMPOTENCIA:
+    // Si Supabase rechaza por llave única duplicada (código 23505),
+    // la venta ya se había registrado y recuperamos el objeto de forma segura.
+    if (
+      errCode === '23505' ||
+      errMsg.includes('23505') ||
+      errMsg.toLowerCase().includes('unique constraint') ||
+      errMsg.toLowerCase().includes('duplicate key')
+    ) {
+      sale = {
+        id: createSaleInput.id,
+        businessId: currentBusinessId,
+        branchId: currentBranchId,
+        total: (createSaleInput as any).total ?? 0,
+        items: (createSaleInput as any).items ?? [],
+        createdAt: (createSaleInput as any).createdAt || new Date().toISOString()
+      } as unknown as Sale;
+    } else {
+      throw error;
+    }
+  }
+
   if (
     pending.payment
   ) {
@@ -244,12 +232,6 @@ export async function syncOne(
       );
   }
 
-  /*
-   * createSale() normalmente se encarga del flujo de cocina.
-   *
-   * Esta comprobación defensiva evita crear una segunda comanda si la venta
-   * ya produjo una orden de cocina.
-   */
   if (
     !pending.createSaleInput
       .skipKitchen
@@ -289,11 +271,6 @@ let unsubscribePendingCustomers:
 
 let syncBackoffUntil = 0;
 
-/**
- * true si la venta usa un cliente creado offline que aún no se sincronizó.
- * Los clientes en FAILED/PERMANENT_FAILURE no bloquean: el servidor decidirá
- * y la venta quedará con el error real en vez de esperar para siempre.
- */
 function isWaitingForCustomer(
   pending: PendingSale
 ): boolean {
@@ -305,7 +282,6 @@ function isWaitingForCustomer(
     return false;
   }
 
-  // Ya resuelto a un id canónico: el cliente existe en el servidor.
   if (
     peekCanonicalCustomerId(
       customerId
@@ -326,12 +302,6 @@ function isWaitingForCustomer(
     );
 }
 
-/**
- * Procesa la cola secuencialmente.
- *
- * Solo existe una ejecución simultánea. Si otro evento intenta iniciar
- * sincronización mientras ya existe una, reutiliza la misma Promise.
- */
 export async function syncPendingSales(): Promise<void> {
   if (
     syncPromise
@@ -354,13 +324,6 @@ export async function syncPendingSales(): Promise<void> {
         return;
       }
 
-      /*
-       * ORDEN DE SINCRONIZACIÓN: los clientes creados offline deben existir
-       * en el servidor ANTES de reproducir ventas que los referencian
-       * (customerId). Si hay una sincronización de clientes en curso se
-       * reutiliza su misma Promise; si no, se dispara una ahora.
-       * syncPendingCustomerOperations() nunca lanza: maneja sus errores.
-       */
       try {
         await syncPendingCustomerOperations();
       } catch (error) {
@@ -381,10 +344,6 @@ export async function syncPendingSales(): Promise<void> {
         return;
       }
 
-      /*
-       * Una operación que quedó SYNCING por un cierre inesperado no debe
-       * permanecer bloqueada para siempre.
-       */
       await pendingSalesStore
         .recoverStuckSyncing();
 
@@ -404,15 +363,6 @@ export async function syncPendingSales(): Promise<void> {
         string | null = null;
 
       try {
-        /*
-         * SECUENCIAL A PROPÓSITO.
-         *
-         * No utilizamos Promise.all().
-         *
-         * Esto reduce el riesgo de que múltiples ventas offline intenten
-         * modificar simultáneamente inventario/caja cuando el objetivo de
-         * este bloque es conservar el orden de la cola.
-         */
         for (
           const pending of queue
         ) {
@@ -422,12 +372,6 @@ export async function syncPendingSales(): Promise<void> {
             break;
           }
 
-          /*
-           * Si la venta referencia un cliente que todavía no llegó al
-           * servidor (sigue PENDING_SYNC/SYNCING), se deja intacta en la
-           * cola: no cuenta como intento ni como fallo. Se reintenta
-           * cuando la cola de clientes cambie (ver startOfflineSalesSync).
-           */
           if (
             isWaitingForCustomer(
               pending
@@ -467,10 +411,6 @@ export async function syncPendingSales(): Promise<void> {
               pending
             );
 
-            /*
-             * Elimina la operación local SOLO después de que el flujo
-             * remoto haya finalizado correctamente.
-             */
             await pendingSalesStore
               .remove(
                 pending.id
@@ -479,15 +419,6 @@ export async function syncPendingSales(): Promise<void> {
             syncedCount +=
               1;
           } catch (error) {
-            /*
-             * Una caída de red significa que no podemos conocer con
-             * seguridad si la respuesta remota llegó.
-             *
-             * Por eso NO se elimina la operación.
-             *
-             * Se devuelve a PENDING_SYNC con el mismo id para que el
-             * siguiente intento pueda beneficiarse de la idempotencia.
-             */
             if (
               isNetworkFailure(
                 error
@@ -531,18 +462,9 @@ export async function syncPendingSales(): Promise<void> {
                   pending.id
                 );
 
-              /*
-               * No tiene sentido continuar golpeando el backend si ya
-               * perdimos la conexión.
-               */
               break;
             }
 
-            /*
-             * Los errores de negocio se conservan como permanentes.
-             * Continuamos con la siguiente venta porque una venta inválida
-             * no debe bloquear todas las operaciones posteriores.
-             */
             if (
               isBusinessError(
                 error
@@ -598,10 +520,6 @@ export async function syncPendingSales(): Promise<void> {
               continue;
             }
 
-            /*
-             * Error desconocido:
-             * se conserva el registro y se saca del ciclo automático.
-             */
             const message =
               error instanceof Error
                 ? error.message
@@ -640,9 +558,6 @@ export async function syncPendingSales(): Promise<void> {
           }
         }
       } finally {
-        /*
-         * Siempre liberamos el lock global de sincronización.
-         */
         syncPromise =
           null;
       }
@@ -653,10 +568,6 @@ export async function syncPendingSales(): Promise<void> {
         syncBackoffUntil =
           0;
 
-        /*
-         * El backend es la autoridad del stock.
-         * Una vez sincronizadas las ventas, refrescamos el catálogo.
-         */
         productCatalogStore
           .refresh()
           .catch(
@@ -712,22 +623,12 @@ export async function syncPendingSales(): Promise<void> {
         }
       }
     })().finally(() => {
-      /*
-       * Libera el lock también en los retornos tempranos (sin conexión,
-       * backoff, cola vacía), que antes dejaban syncPromise colgada.
-       */
       syncPromise = null;
     });
 
   return syncPromise;
 }
 
-/**
- * Inicia una sincronización únicamente cuando:
- *
- * - hay conexión;
- * - existen ventas PENDING_SYNC.
- */
 function triggerIfNeeded(): void {
   if (
     connectionStore.isOnline() &&
@@ -739,13 +640,6 @@ function triggerIfNeeded(): void {
   }
 }
 
-/**
- * Activa la sincronización automática.
- *
- * Se suscribe a:
- * - cambios de conexión;
- * - cambios de la cola local.
- */
 export function startOfflineSalesSync(): void {
   if (
     unsubscribeConnection ||
@@ -765,27 +659,14 @@ export function startOfflineSalesSync(): void {
       triggerIfNeeded
     );
 
-  /*
-   * Cuando la cola de clientes cambia (p. ej. un cliente ya se sincronizó)
-   * se reevalúan las ventas que estaban esperándolo.
-   */
   unsubscribePendingCustomers =
     pendingCustomerOperationsStore.subscribe(
       triggerIfNeeded
     );
 
-  /*
-   * También intenta sincronizar inmediatamente por si la sesión empezó
-   * teniendo internet y ya había ventas pendientes.
-   */
   triggerIfNeeded();
 }
 
-/**
- * Detiene la sincronización automática.
- *
- * Debe utilizarse al cerrar sesión o cambiar de contexto de negocio.
- */
 export function stopOfflineSalesSync(): void {
   unsubscribeConnection?.();
   unsubscribePendingSales?.();

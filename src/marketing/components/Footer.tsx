@@ -5,7 +5,6 @@ import { VIMDY_CONTACT } from "../../core/config/contact";
 import { openCookiePreferences } from "../cookieConsent";
 
 interface FooterLink {
-  /** Enlace de navegación. Si se omite, se renderiza un botón que ejecuta `onClick`. */
   href?: string;
   label: string;
   external?: boolean;
