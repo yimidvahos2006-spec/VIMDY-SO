@@ -70,8 +70,11 @@ describe("DianXmlBuilder — Consecutivo atómico y idempotencia", () => {
   it("id: misma venta produce mismo CUFE (determinista)", async () => {
     const request = makeBaseRequest();
 
-    const result1 = await builder.build(request, "uuid-test");
-    const result2 = await builder.build(request, "uuid-test");
+    // Fecha de emisión fija: el CUFE incluye la hora al segundo, así que con
+    // new Date() dos llamadas que cruzan un segundo darían CUFE distintos.
+    const issueDate = new Date(2026, 10, 4, 9, 39, 57);
+    const result1 = await builder.build(request, "uuid-test", issueDate);
+    const result2 = await builder.build(request, "uuid-test", issueDate);
 
     expect(result1.cufe).toBe(result2.cufe);
   });

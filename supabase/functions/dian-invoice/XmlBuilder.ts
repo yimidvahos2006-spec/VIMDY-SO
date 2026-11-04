@@ -213,20 +213,21 @@ export class DianCufeCalculator {
 }
 
 export class DianXmlBuilder {
-  async build(request: DianInvoiceRequest, uuid: string): Promise<DianInvoiceXmlResult> {
+  /** `issueDate` fija la fecha/hora de emisión (reintentos idempotentes y tests); por defecto, ahora. */
+  async build(request: DianInvoiceRequest, uuid: string, issueDate: Date = new Date()): Promise<DianInvoiceXmlResult> {
     const number = this.nextInvoiceNumber(request);
-    return this.buildWithNumber(request, number, uuid);
+    return this.buildWithNumber(request, number, uuid, issueDate);
   }
 
   async buildWithNumber(
     request: DianInvoiceRequest,
     number: string,
-    uuid: string
+    uuid: string,
+    issueDate: Date = new Date()
   ): Promise<DianInvoiceXmlResult> {
     const tipoAmb = DIAN_ENVIRONMENT_CODE[request.business.environment] ?? "2";
     const prefix = request.business.invoicePrefix ?? "FV";
 
-    const issueDate = new Date();
     const fecFac = formatDate(issueDate);
     const horFac = formatTime(issueDate);
 
