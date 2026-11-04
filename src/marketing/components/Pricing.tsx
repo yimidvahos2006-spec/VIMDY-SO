@@ -51,8 +51,11 @@ export function Pricing({ initialTier = "single" }: PricingProps) {
     description: MARKETING_PLAN_TEXT[period].description,
   }));
   const features = marketingFeatures(tier);
+  const operativoMonthly = priceLabel(tier, "monthly");
   const totalMonthly = editionPriceLabel("total", tier, "monthly");
   const totalYearly = editionPriceLabel("total", tier, "yearly");
+  const totalSingleMonthly = editionPriceLabel("total", "single", "monthly");
+  const totalMultiMonthly = editionPriceLabel("total", "multi", "monthly");
 
   return (
     <section
@@ -85,6 +88,16 @@ export function Pricing({ initialTier = "single" }: PricingProps) {
             Prueba VIMDY 14 días gratis, sin tarjeta. Si decides pagar y no te
             convence, te devolvemos tu dinero dentro de los primeros 7 días.
           </p>
+
+          <div className="mx-auto mt-8 max-w-2xl rounded-[22px] border border-cyan-300/20 bg-cyan-300/[0.045] px-5 py-4 text-left sm:px-6">
+            <p className="text-sm font-semibold text-white">
+              Lo único gratis son los 14 días de prueba.
+            </p>
+            <p className="mt-1 text-sm leading-6 text-zinc-400">
+              Después no hay cobros automáticos ni sorpresas en tu tarjeta: tú
+              pagas manualmente, solo cuando decides renovar.
+            </p>
+          </div>
         </div>
 
         <div className="mx-auto mt-12 max-w-2xl lg:mt-16">
@@ -151,6 +164,16 @@ export function Pricing({ initialTier = "single" }: PricingProps) {
                 {EDITION_COPY.operativo.tagline}
               </p>
 
+              <div className="mt-6 flex items-end gap-2">
+                <span className="text-4xl font-semibold tracking-[-0.04em] text-white sm:text-5xl">
+                  {operativoMonthly}
+                </span>
+                <span className="mb-1 text-sm text-zinc-500">COP / mes</span>
+              </div>
+              <p className="mt-2 text-sm text-zinc-500">
+                Precio para {TIER_DEFINITIONS[tier].label.toLowerCase()}.
+              </p>
+
               <ul className="mt-6 space-y-2.5">
                 {EDITION_COPY.operativo.features.map((feature) => (
                   <li
@@ -213,6 +236,10 @@ export function Pricing({ initialTier = "single" }: PricingProps) {
                 </div>
                 <p className="mt-2 text-sm text-zinc-400">
                   o {totalYearly} / año · ahorras 2 meses
+                </p>
+                <p className="mt-2 text-xs text-zinc-500">
+                  1 sede: {totalSingleMonthly} COP / mes · Multi-sucursal:{" "}
+                  {totalMultiMonthly} COP / mes
                 </p>
 
                 <div

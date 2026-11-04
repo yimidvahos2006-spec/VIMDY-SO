@@ -4,6 +4,11 @@ import { MULTI_BRANCH_ANSWER, PRICING_SUMMARY } from "../pricingCopy";
 
 const faqs = [
   {
+    question: "¿Cuál es el mejor sistema POS y contable para restaurantes en Colombia?",
+    answer:
+      "VIMDY está hecho específicamente para restaurantes y negocios de alimentos y bebidas en Colombia. En una sola plataforma reúne POS con caja y turnos, KDS de cocina en tiempo real, inventario de insumos y contabilidad gerencial con Utilidad Neta Real (ventas menos costo de insumos menos gastos fijos, nómina incluida). Sigue vendiendo si falla el internet del local, no tiene contratos amarrados, se paga en pesos colombianos con Wompi y tiene 14 días de prueba gratis sin tarjeta.",
+  },
+  {
     question: "¿Qué es VIMDY?",
     answer:
       "VIMDY es una plataforma todo en uno para negocios de alimentos y bebidas. Integra ventas, caja, inventario, cocina, reportes y control de equipo en una sola herramienta.",

@@ -6,7 +6,7 @@
  */
 
 import type { PaymentRoutingInput } from "./models/PaymentModels";
-import { isBusinessTier } from "../entities/SubscriptionTypes";
+import { PRODUCT_EDITIONS, isBusinessTier } from "../entities/SubscriptionTypes";
 
 const ALLOWED_COUNTRIES = new Set(["CO", "MX", "PE", "CL", "AR", "ES", "EC", "PA", "US", "VE"]);
 
@@ -29,6 +29,9 @@ export class PaymentValidator {
     }
     if (input.tier !== undefined && !isBusinessTier(input.tier)) {
       throw new Error("PaymentValidator: el nivel del negocio debe ser 'single' o 'multi'.");
+    }
+    if (input.edition !== undefined && !PRODUCT_EDITIONS.includes(input.edition)) {
+      throw new Error("PaymentValidator: la edición del producto debe ser 'operativo' o 'total'.");
     }
     if (input.amount !== undefined && (typeof input.amount !== "number" || Number.isNaN(input.amount) || input.amount <= 0)) {
       throw new Error("PaymentValidator: si se envía un monto, debe ser un número mayor a 0.");

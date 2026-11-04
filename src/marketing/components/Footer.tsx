@@ -2,11 +2,14 @@ import { LEGAL_INFO } from "../legal/legalInfo";
 import { ArrowUpRight, Mail, MessageCircle, Play, Youtube } from "lucide-react";
 import { VimdyLogo } from "../../presentation/components/ui/VimdyLogo";
 import { VIMDY_CONTACT } from "../../core/config/contact";
+import { openCookiePreferences } from "../cookieConsent";
 
 interface FooterLink {
-  href: string;
+  /** Enlace de navegación. Si se omite, se renderiza un botón que ejecuta `onClick`. */
+  href?: string;
   label: string;
   external?: boolean;
+  onClick?: () => void;
 }
 
 const footerLinks: Record<string, FooterLink[]> = {
@@ -23,9 +26,13 @@ const footerLinks: Record<string, FooterLink[]> = {
     { href: "/privacidad", label: "Privacidad" },
     { href: "/terminos", label: "Términos" },
     { href: "/cookies", label: "Cookies" },
+    { label: "Preferencias de cookies", onClick: openCookiePreferences },
     { href: "https://www.sic.gov.co", label: "Superintendencia de Industria y Comercio", external: true },
   ],
 };
+
+const footerLinkClass =
+  "inline-flex items-center gap-1 text-left text-sm text-zinc-500 transition-colors duration-200 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/50 focus-visible:ring-offset-4 focus-visible:ring-offset-[#030507]";
 
 export function Footer() {
   return (
@@ -127,17 +134,27 @@ export function Footer() {
                 <ul className="space-y-3">
                   {links.map((link) => (
                     <li key={link.label}>
-                      <a
-                        href={link.href}
-                        target={link.external ? "_blank" : undefined}
-                        rel={link.external ? "noopener noreferrer" : undefined}
-                        className="inline-flex items-center gap-1 text-sm text-zinc-500 transition-colors duration-200 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/50 focus-visible:ring-offset-4 focus-visible:ring-offset-[#030507]"
-                      >
-                        {link.label}
-                        {link.external && (
-                          <ArrowUpRight size={13} aria-hidden="true" />
-                        )}
-                      </a>
+                      {link.onClick ? (
+                        <button
+                          type="button"
+                          onClick={link.onClick}
+                          className={footerLinkClass}
+                        >
+                          {link.label}
+                        </button>
+                      ) : (
+                        <a
+                          href={link.href}
+                          target={link.external ? "_blank" : undefined}
+                          rel={link.external ? "noopener noreferrer" : undefined}
+                          className={footerLinkClass}
+                        >
+                          {link.label}
+                          {link.external && (
+                            <ArrowUpRight size={13} aria-hidden="true" />
+                          )}
+                        </a>
+                      )}
                     </li>
                   ))}
                 </ul>

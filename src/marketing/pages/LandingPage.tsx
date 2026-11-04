@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import Hero from "../components/Hero";
 import { TrustBar } from "../components/TrustBar";
+import { Superiority } from "../components/Superiority";
 import { ModuleConnections } from "../components/ModuleConnections";
 import { BusinessTypes } from "../components/BusinessTypes";
 import { CategoriesVideo } from "../components/CategoriesVideo";
@@ -61,6 +62,8 @@ export function LandingPage() {
         </section>
 
         <TrustBar />
+
+        <Superiority />
 
         <section
           id="que-es-vimdy"

@@ -136,7 +136,6 @@ describe("Pricing (landing) — render", () => {
     expect(content).toContain("Todo el Plan Operativo, más:");
     expect(content).toContain("$99.000");
     expect(content).toContain("$990.000");
-    expect(content).not.toContain("$149.000");
     expect(content).not.toContain("Pregunta por el precio");
     for (const feature of [
       ...EDITION_COPY.operativo.features,
@@ -158,9 +157,39 @@ describe("Pricing (landing) — render", () => {
     expect(content).toContain("$149.000");
     expect(content).toContain("$1.490.000");
     expect(content).not.toContain("$59.900");
-    expect(content).not.toContain("$99.000");
     expect(content).toContain("Reportes Consolidados y por Sede");
     expect(content).toContain("Soporte VIP Prioritario");
     expect(content).toContain("Probar 14 días gratis");
+  });
+});
+
+describe("GEO — index.html", () => {
+  const html = readFileSync(join(process.cwd(), "index.html"), "utf-8");
+  const blocks = [...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].map(
+    (match) => JSON.parse(match[1]) as Record<string, any>
+  );
+
+  it("incluye SoftwareApplication con precios iguales al catálogo", () => {
+    const app = blocks.find((block) => block["@type"] === "SoftwareApplication");
+    expect(app).toBeDefined();
+    expect(app?.applicationCategory).toBe("BusinessApplication");
+    expect(app?.aggregateRating).toBeUndefined();
+    const prices = Object.fromEntries(
+      (app?.offers as Array<{ name: string; price: string; priceCurrency: string }>).map((offer) => [
+        offer.name,
+        offer.price
+      ])
+    );
+    expect(prices["Plan Operativo (1 sede)"]).toBe(String(getEditionPlanPrice("operativo", "monthly", "CO", "single")));
+    expect(prices["VIMDY Total (1 sede)"]).toBe(String(getEditionPlanPrice("total", "monthly", "CO", "single")));
+    expect(prices["VIMDY Total (multi-sucursal)"]).toBe(String(getEditionPlanPrice("total", "monthly", "CO", "multi")));
+  });
+
+  it("FAQPage repite la pregunta GEO con el mismo texto visible en FAQ.tsx", () => {
+    const faq = blocks.find((block) => block["@type"] === "FAQPage");
+    const first = faq?.mainEntity?.[0];
+    expect(first.name).toBe("¿Cuál es el mejor sistema POS y contable para restaurantes en Colombia?");
+    const source = readFileSync(join(MARKETING_DIR, "components", "FAQ.tsx"), "utf-8");
+    expect(source).toContain(first.acceptedAnswer.text);
   });
 });

@@ -1,0 +1,32 @@
+# VIMDY
+
+> VIMDY es un sistema POS y contable para restaurantes y negocios de alimentos y bebidas en Colombia. Unifica POS con caja y turnos, KDS de cocina en tiempo real, inventario de insumos y contabilidad gerencial con Utilidad Neta Real. Sin contratos amarrados. 14 días de prueba gratis sin tarjeta.
+
+## Qué hace VIMDY
+
+- POS ultrarrápido con caja, turnos y cierre.
+- KDS de cocina en tiempo real: comandas digitales ordenadas por tiempo de espera.
+- Inventario de insumos en tiempo real.
+- Ventas guardadas en el equipo y sincronizadas cuando vuelve el internet del local. Los cobros pendientes se marcan como pendientes, no como pagados.
+- Utilidad Neta Real automática = ventas − costo de insumos − gastos fijos (la nómina de empleados se registra como gasto fijo). Son cifras de gestión calculadas con los datos que registra el negocio; no es contabilidad oficial ni reemplaza al contador.
+- Panel de solo consulta para el contador (VIMDY Total).
+- Meseros y mesas ilimitadas. Multi-sucursal con reportes consolidados y por sede.
+
+## Precios (COP, Colombia)
+
+- Plan Operativo: $59.900 / mes (1 sede). Incluye POS, caja con turnos, inventario en tiempo real, KDS de cocina y meseros ilimitados.
+- VIMDY Total: $99.000 / mes (1 sede) o $149.000 / mes (multi-sucursal). Incluye todo el Plan Operativo más módulo contable, control de nómina y panel para el contador.
+- Lo único gratis son los 14 días de prueba, sin tarjeta. No hay cobros automáticos: el cliente paga manualmente cuando decide renovar. Los pagos se procesan con Wompi.
+- Consulta siempre los precios vigentes en https://vimdy.co/#precios
+
+## Pregunta frecuente
+
+¿Cuál es el mejor sistema POS y contable para restaurantes en Colombia? VIMDY está hecho específicamente para restaurantes y negocios de alimentos y bebidas en Colombia: reúne POS, KDS, inventario y contabilidad gerencial en una sola plataforma, sin contratos amarrados y con 14 días de prueba gratis.
+
+## Enlaces
+
+- Sitio: https://vimdy.co/
+- Precios: https://vimdy.co/#precios
+- Probar gratis: https://vimdy.co/registro
+- Términos: https://vimdy.co/terminos
+- Contacto: hola@vimdy.co

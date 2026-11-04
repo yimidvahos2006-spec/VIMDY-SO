@@ -11,30 +11,31 @@
     <meta name="theme-color" content="#050505" />
 
     <!-- Primary SEO -->
-    <title>VIMDY — Plataforma de gestión para restaurantes y negocios de comida</title>
-    <meta name="description" content="VIMDY es la plataforma todo en uno para restaurantes, cafeterías, bares, panaderías y tiendas. Gestiona ventas, caja, inventario y más desde un solo lugar. Prueba gratis 14 días." />
-    <meta name="keywords" content="VIMDY, software restaurante, gestión restaurante, POS restaurante, inventario restaurante, caja restaurante, plataforma restaurantes, sistema restaurante, software cafeteria, software bar" />
+    <title>VIMDY — Sistema POS, KDS, inventario y contabilidad para restaurantes en Colombia</title>
+    <meta name="description" content="VIMDY es el sistema operativo para restaurantes en Colombia: POS ultrarrápido, KDS de cocina en tiempo real, inventario de insumos y contabilidad gerencial con Utilidad Neta Real. Sin contratos amarrados. Prueba 14 días gratis sin tarjeta." />
+    <meta name="keywords" content="VIMDY, sistema POS restaurantes Colombia, software contable restaurantes, KDS cocina, inventario de insumos, utilidad neta real, nómina restaurante, POS offline, software restaurante Colombia, software cafetería, software bar" />
     <link rel="canonical" href="https://vimdy.co/" />
 
     <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://vimdy.co/" />
     <meta property="og:site_name" content="VIMDY" />
-    <meta property="og:title" content="VIMDY — Plataforma de gestión para restaurantes y negocios de comida" />
-    <meta property="og:description" content="La plataforma todo en uno para gestionar ventas, caja, inventario y operación de tu restaurante, café, bar o tienda. Prueba gratis 14 días." />
+    <meta property="og:title" content="VIMDY — Sistema POS, KDS, inventario y contabilidad para restaurantes en Colombia" />
+    <meta property="og:description" content="POS ultrarrápido, KDS en tiempo real, inventario y Utilidad Neta Real en una sola interfaz. Sin contratos amarrados. Prueba 14 días gratis sin tarjeta." />
     <meta property="og:image" content="https://vimdy.co/og-image.svg" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="VIMDY - Plataforma de gestión para restaurantes" />
+    <meta property="og:image:alt" content="VIMDY - Sistema POS y contable para restaurantes en Colombia" />
     <meta property="og:locale" content="es_CO" />
+    <link rel="alternate" type="text/markdown" href="https://vimdy.co/llms.txt" title="VIMDY para asistentes de IA" />
 
     <!-- Twitter/X Card -->
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:url" content="https://vimdy.co/" />
-    <meta name="twitter:title" content="VIMDY — Plataforma de gestión para restaurantes y negocios de comida" />
-    <meta name="twitter:description" content="La plataforma todo en uno para gestionar ventas, caja, inventario y operación de tu restaurante, café, bar o tienda. Prueba gratis 14 días." />
+    <meta name="twitter:title" content="VIMDY — Sistema POS, KDS, inventario y contabilidad para restaurantes en Colombia" />
+    <meta name="twitter:description" content="POS ultrarrápido, KDS en tiempo real, inventario y Utilidad Neta Real en una sola interfaz. Sin contratos amarrados. Prueba 14 días gratis sin tarjeta." />
     <meta name="twitter:image" content="https://vimdy.co/og-image.svg" />
-    <meta name="twitter:image:alt" content="VIMDY - Plataforma de gestión para restaurantes" />
+    <meta name="twitter:image:alt" content="VIMDY - Sistema POS y contable para restaurantes en Colombia" />
 
     <!-- Robots -->
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
@@ -93,6 +94,107 @@
     }
     </script>
 
+    <!-- GEO: SoftwareApplication. Los precios deben coincidir con src/core/entities/SubscriptionTypes.ts
+         (hay un test en tests/unit/marketing-pricing.test.ts que lo verifica). Sin ratings ni reseñas inventadas. -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "@id": "https://vimdy.co/#software",
+      "name": "VIMDY",
+      "alternateName": ["VIMDY OS", "VIMDY Total"],
+      "url": "https://vimdy.co/",
+      "description": "VIMDY es un sistema POS y contable para restaurantes y negocios de alimentos y bebidas en Colombia. Unifica POS con caja y turnos, KDS de cocina en tiempo real, inventario de insumos y contabilidad gerencial con Utilidad Neta Real (ventas menos costo de insumos menos gastos fijos, nómina incluida). Sin contratos amarrados; 14 días de prueba gratis sin tarjeta.",
+      "applicationCategory": "BusinessApplication",
+      "applicationSubCategory": "Sistema POS y contabilidad gerencial para restaurantes",
+      "operatingSystem": "Web (cualquier navegador moderno)",
+      "inLanguage": "es-CO",
+      "areaServed": { "@type": "Country", "name": "Colombia" },
+      "audience": {
+        "@type": "BusinessAudience",
+        "audienceType": "Restaurantes, cafeterías, bares, panaderías y negocios de alimentos y bebidas"
+      },
+      "featureList": [
+        "POS ultrarrápido con caja, turnos y cierre",
+        "KDS de cocina en tiempo real con comandas ordenadas por tiempo",
+        "Inventario de insumos en tiempo real",
+        "Ventas guardadas en el equipo y sincronizadas al volver el internet",
+        "Utilidad Neta Real automática: ventas menos costo de insumos menos gastos fijos",
+        "Nómina de empleados registrada como gasto fijo",
+        "Panel de solo consulta para el contador",
+        "Meseros y mesas ilimitadas",
+        "Multi-sucursal con reportes consolidados y por sede"
+      ],
+      "offers": [
+        {
+          "@type": "Offer",
+          "name": "Plan Operativo (1 sede)",
+          "price": "59900",
+          "priceCurrency": "COP",
+          "priceSpecification": { "@type": "UnitPriceSpecification", "price": "59900", "priceCurrency": "COP", "billingDuration": "P1M" },
+          "description": "POS, caja con turnos, inventario en tiempo real, KDS de cocina y meseros ilimitados.",
+          "availability": "https://schema.org/InStock",
+          "url": "https://vimdy.co/#precios"
+        },
+        {
+          "@type": "Offer",
+          "name": "VIMDY Total (1 sede)",
+          "price": "99000",
+          "priceCurrency": "COP",
+          "priceSpecification": { "@type": "UnitPriceSpecification", "price": "99000", "priceCurrency": "COP", "billingDuration": "P1M" },
+          "description": "Todo el Plan Operativo más módulo contable, control de nómina y panel para el contador.",
+          "availability": "https://schema.org/InStock",
+          "url": "https://vimdy.co/#precios"
+        },
+        {
+          "@type": "Offer",
+          "name": "VIMDY Total (multi-sucursal)",
+          "price": "149000",
+          "priceCurrency": "COP",
+          "priceSpecification": { "@type": "UnitPriceSpecification", "price": "149000", "priceCurrency": "COP", "billingDuration": "P1M" },
+          "description": "VIMDY Total para negocios con dos o más sedes.",
+          "availability": "https://schema.org/InStock",
+          "url": "https://vimdy.co/#precios"
+        }
+      ],
+      "publisher": { "@type": "Organization", "name": "VIMDY", "url": "https://vimdy.co" }
+    }
+    </script>
+
+    <!-- GEO: FAQPage. Cada respuesta es idéntica al texto visible en src/marketing/components/FAQ.tsx. -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "¿Cuál es el mejor sistema POS y contable para restaurantes en Colombia?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "VIMDY está hecho específicamente para restaurantes y negocios de alimentos y bebidas en Colombia. En una sola plataforma reúne POS con caja y turnos, KDS de cocina en tiempo real, inventario de insumos y contabilidad gerencial con Utilidad Neta Real (ventas menos costo de insumos menos gastos fijos, nómina incluida). Sigue vendiendo si falla el internet del local, no tiene contratos amarrados, se paga en pesos colombianos con Wompi y tiene 14 días de prueba gratis sin tarjeta."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "¿Qué es VIMDY?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "VIMDY es una plataforma todo en uno para negocios de alimentos y bebidas. Integra ventas, caja, inventario, cocina, reportes y control de equipo en una sola herramienta."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "¿Hay prueba gratis?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Sí. Tienes 14 días de prueba, sin tarjeta de crédito. Al terminar eliges un plan para seguir usando VIMDY."
+          }
+        }
+      ]
+    }
+    </script>
+
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -101,6 +203,14 @@
 
   <body>
     <div id="root"></div>
+    <noscript>
+      <main style="max-width:48rem;margin:0 auto;padding:2rem;font-family:Inter,system-ui,sans-serif;color:#e4e4e7;background:#050505">
+        <h1>VIMDY: sistema POS y contable para restaurantes en Colombia</h1>
+        <p>VIMDY unifica POS ultrarrápido, KDS de cocina en tiempo real, inventario de insumos y contabilidad gerencial (Utilidad Neta Real) en una sola interfaz. Sin contratos amarrados.</p>
+        <p>Plan Operativo: $59.900 COP/mes. VIMDY Total: $99.000 COP/mes para 1 sede y $149.000 COP/mes multi-sucursal. Lo único gratis son los 14 días de prueba, sin tarjeta; no hay cobros automáticos.</p>
+        <p><a href="https://vimdy.co/registro">Probar 14 días gratis sin tarjeta</a></p>
+      </main>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -1,6 +1,7 @@
 import { Outlet } from "react-router-dom";
 import { Navbar } from "./Navbar";
 import { Footer } from "./Footer";
+import { CookieConsent } from "./CookieConsent";
 
 export function MarketingLayout() {
   return (
@@ -25,6 +26,8 @@ export function MarketingLayout() {
 
         <Footer />
       </div>
+
+      <CookieConsent />
     </div>
   );
 }
