@@ -16,12 +16,20 @@
 // Despliegue (JWT verificado — lo llama un usuario logueado):
 //   supabase functions deploy wompi-create-checkout
 //
-// LIMITACIÓN A PROPÓSITO: igual que mercadopago-checkout, VIMDY hoy solo
-// tiene un precio verificado en COP (ver SUBSCRIPTION_PLANS en
-// src/core/entities/SubscriptionTypes.ts). PLAN_PRICE_BY_CURRENCY abajo solo
-// trae COP poblado — si un negocio en otro país intentara pagar con Wompi
-// (poco probable, Wompi es Colombia), este endpoint responde
-// PRICING_NOT_CONFIGURED en vez de cobrar un monto adivinado.
+// EDICIONES (VIMDY Total): el cuerpo acepta `edition` = "operativo" | "total".
+// Si falta, se asume "operativo" (así los clientes anteriores siguen
+// funcionando igual). El precio SIEMPRE sale de las tablas de abajo, que son
+// el espejo server-side de SUBSCRIPTION_PLANS_BY_TIER y TOTAL_EDITION_PRICE_MAP
+// (src/core/entities/SubscriptionTypes.ts). La edición y el nivel quedan
+// guardados en `subscription_payments` (columnas `edition` y `tier`, migración
+// 20261124000000) y activate_subscription_server_side los copia al negocio
+// cuando Wompi confirma el pago. Aplica primero esa migración y luego despliega
+// esta función.
+//
+// LIMITACIÓN A PROPÓSITO: igual que mercadopago-checkout, VIMDY solo tiene
+// precios verificados en COP para Colombia. Si un negocio de otro país (o una
+// edición sin precio) llega aquí, este endpoint responde PRICING_NOT_CONFIGURED
+// o COUNTRY_NOT_SUPPORTED en vez de cobrar un monto adivinado.
 // ============================================================================
 
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -39,6 +47,9 @@ function json(body: unknown, status = 200) {
 }
 
 type Plan = "monthly" | "yearly";
+// Edición del producto: "operativo" = Plan Operativo, "total" = VIMDY Total
+// (Operativo + módulo contable). Cambia el precio, no la duración del plan.
+type Edition = "operativo" | "total";
 // Nivel comercial: "single" = negocio de 1 sede, "multi" = multi-sucursal (2+ sedes).
 // Cambia el precio, no la duración del plan.
 type Tier = "single" | "multi";
@@ -52,6 +63,24 @@ const PLAN_PRICE_BY_COUNTRY: Record<string, Record<Tier, Record<Plan, number>>> 
     multi: { monthly: 110900, yearly: 1109000 }
   }
 };
+
+// Precios de VIMDY Total (COP, definidos por el dueño del producto). Espejo de
+// TOTAL_EDITION_PRICE_MAP en src/core/entities/SubscriptionTypes.ts. El anual
+// sigue la regla de siempre: pagas 10 meses y usas 12.
+const TOTAL_PRICE_BY_COUNTRY: Record<string, Record<Tier, Record<Plan, number>>> = {
+  CO: {
+    single: { monthly: 99000, yearly: 990000 },
+    multi: { monthly: 149000, yearly: 1490000 }
+  }
+};
+
+const PRICE_TABLE_BY_EDITION: Record<Edition, Record<string, Record<Tier, Record<Plan, number>>>> = {
+  operativo: PLAN_PRICE_BY_COUNTRY,
+  total: TOTAL_PRICE_BY_COUNTRY
+};
+
+// Espejo de public.get_plan_period_days (mensual 30 días, anual 365).
+const PLAN_PERIOD_DAYS: Record<Plan, number> = { monthly: 30, yearly: 365 };
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -69,6 +98,8 @@ interface RequestBody {
   plan?: Plan;
   /** Opcional por compatibilidad con clientes anteriores: si falta se asume "single". */
   tier?: Tier;
+  /** Opcional por compatibilidad con clientes anteriores: si falta se asume "operativo". */
+  edition?: Edition;
 }
 
 /**
@@ -129,6 +160,7 @@ Deno.serve(async (req: Request) => {
   const businessId = payload.businessId;
   const plan = payload.plan;
   const tier = payload.tier === undefined ? "single" : payload.tier;
+  const edition = payload.edition === undefined ? "operativo" : payload.edition;
 
   if (!businessId || (plan !== "monthly" && plan !== "yearly")) {
     return json({ error: "Faltan campos: businessId y plan ('monthly' | 'yearly') son obligatorios." }, 400);
@@ -136,6 +168,10 @@ Deno.serve(async (req: Request) => {
 
   if (tier !== "single" && tier !== "multi") {
     return json({ error: "INVALID_TIER: tier debe ser 'single' o 'multi'." }, 400);
+  }
+
+  if (edition !== "operativo" && edition !== "total") {
+    return json({ error: "INVALID_EDITION: edition debe ser 'operativo' o 'total'." }, 400);
   }
 
   // 🔒 VERIFICACIÓN DE SEGURIDAD: Verificar JWT y membresía
@@ -177,7 +213,7 @@ Deno.serve(async (req: Request) => {
     //    ajena a la suya.
     const { data: business, error: businessError } = await admin
       .from("businesses")
-      .select("id, name, country, currency")
+      .select("id, name, country, currency, renewal_date, payment_status")
       .eq("id", businessId)
       .maybeSingle();
 
@@ -193,7 +229,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const country = business.country;
-    const pricing = PLAN_PRICE_BY_COUNTRY[country];
+    const pricing = PRICE_TABLE_BY_EDITION[edition][country];
 
     // 2) Sin precio real verificado para ese país, se rechaza en vez de
     //    convertir a ciegas.
@@ -201,7 +237,7 @@ Deno.serve(async (req: Request) => {
       return json(
         {
           error: "PRICING_NOT_CONFIGURED",
-          detail: `No hay un precio de VIMDY verificado para ${country} todavía. Wompi solo opera en Colombia (COP).`
+          detail: `No hay un precio de VIMDY (${edition}) verificado para ${country} todavía. Wompi solo opera en Colombia (COP).`
         },
         409
       );
@@ -212,7 +248,7 @@ Deno.serve(async (req: Request) => {
       return json(
         {
           error: "PRICING_NOT_CONFIGURED",
-          detail: `No hay un precio de VIMDY verificado para el nivel ${tier} en ${country}.`
+          detail: `No hay un precio de VIMDY (${edition}) verificado para el nivel ${tier} en ${country}.`
         },
         409
       );
@@ -220,16 +256,45 @@ Deno.serve(async (req: Request) => {
 
     const currency = (business.currency as string) ?? "COP";
     const amount = tierPricing[plan];
+
+    // Protección del cliente: si el negocio ya tiene pagado un período MÁS LARGO
+    // que el que intenta contratar (p. ej. anual vigente y pide un mensual de
+    // VIMDY Total), activate_subscription_server_side lo trataría como pago viejo
+    // (obsolete_payment) y no aplicaría nada. En vez de cobrar algo que no se va
+    // a aplicar, se rechaza antes de abrir el checkout.
+    const projectedEndMs = Date.now() + PLAN_PERIOD_DAYS[plan] * 24 * 60 * 60 * 1000;
+    const currentRenewalMs = business.renewal_date ? Date.parse(business.renewal_date as string) : Number.NaN;
+    if (
+      business.payment_status === "approved" &&
+      Number.isFinite(currentRenewalMs) &&
+      currentRenewalMs > projectedEndMs
+    ) {
+      return json(
+        {
+          error: "PLAN_PERIOD_ALREADY_COVERED",
+          detail:
+            "Tu plan actual ya está pagado por más tiempo que el período que intentas contratar. " +
+            "Elige un período igual o más largo, o escríbenos a hola@vimdy.co para ayudarte con el cambio."
+        },
+        409
+      );
+    }
     const amountInCents = Math.round(amount * 100);
     const checkoutWindow = Math.floor(Date.now() / (5 * 60 * 1000));
-    // El nivel viaja en la referencia y en la clave de idempotencia para que un
-    // checkout pendiente de 1 sede jamás se reutilice (con otro monto) para
-    // multi-sucursal en la misma ventana de 5 min. "single" conserva el formato
-    // anterior, así los intentos pendientes ya creados siguen siendo válidos.
+    // El nivel y la edición viajan en la referencia y en la clave de idempotencia
+    // para que un checkout pendiente de 1 sede jamás se reutilice (con otro monto)
+    // para multi-sucursal o para VIMDY Total en la misma ventana de 5 min. "single"
+    // y "operativo" conservan el formato anterior, así los intentos pendientes ya
+    // creados siguen siendo válidos.
     const tierRefSegment = tier === "multi" ? "_multi" : "";
     const tierKeySegment = tier === "multi" ? ":multi" : "";
-    const reference = `wompi_${businessId}_${plan}${tierRefSegment}_${checkoutWindow}`;
-    const idempotencyKey = `${businessId}:${plan}${tierKeySegment}:${checkoutWindow}`;
+    // Igual para la edición: "operativo" conserva el formato anterior y "total"
+    // agrega su propio segmento, para que un checkout pendiente de Plan Operativo
+    // jamás se reutilice (con otro monto) para VIMDY Total en la misma ventana.
+    const editionRefSegment = edition === "total" ? "_total" : "";
+    const editionKeySegment = edition === "total" ? ":total" : "";
+    const reference = `wompi_${businessId}_${plan}${tierRefSegment}${editionRefSegment}_${checkoutWindow}`;
+    const idempotencyKey = `${businessId}:${plan}${tierKeySegment}${editionKeySegment}:${checkoutWindow}`;
 
     // 3) Firma de integridad calculada antes de reutilizar un checkout pendiente
     //    para garantizar que la URL devuelta sea válida incluso al reintentar en
@@ -278,6 +343,8 @@ Deno.serve(async (req: Request) => {
           ok: true,
           checkoutUrl: buildCheckoutUrl(existingPayment.wompi_reference, amountInCents, currency, existingSignature),
           reference: existingPayment.wompi_reference,
+          edition,
+          tier,
           existing: true
         });
       }
@@ -291,6 +358,8 @@ Deno.serve(async (req: Request) => {
     const { error: insertError } = await admin.from("subscription_payments").insert({
       business_id: businessId,
       plan,
+      edition,
+      tier,
       amount,
       currency,
       status: "pending",
@@ -324,6 +393,8 @@ Deno.serve(async (req: Request) => {
         ok: true,
         checkoutUrl: buildCheckoutUrl(conflictedPayment.wompi_reference, amountInCents, currency, conflictedSignature),
         reference: conflictedPayment.wompi_reference,
+        edition,
+        tier,
         existing: true
       });
     }
@@ -335,7 +406,7 @@ Deno.serve(async (req: Request) => {
     //    acá.
     const checkoutUrl = buildCheckoutUrl(paymentReference, amountInCents, currency, paymentSignature);
 
-    return json({ ok: true, checkoutUrl, reference: paymentReference });
+    return json({ ok: true, checkoutUrl, reference: paymentReference, edition, tier });
   } catch (error) {
     return json({ error: "WOMPI_CHECKOUT_FAILED", detail: String(error) }, 500);
   }

@@ -47,6 +47,8 @@ interface WompiCheckoutFunctionResponse {
   ok: true;
   checkoutUrl: string;
   reference: string;
+  /** Eco de la edición que el servidor entendió. Falta en funciones desplegadas antes de VIMDY Total. */
+  edition?: string;
   existing?: boolean;
 }
 
@@ -170,7 +172,10 @@ export class WompiProvider implements IPaymentProvider {
         body: {
           businessId: request.businessId,
           plan: request.plan,
-          tier: request.tier ?? "single"
+          tier: request.tier ?? "single",
+          // Solo se envía cuando se compra VIMDY Total; el servidor asume
+          // "operativo" si falta, así el Plan Operativo viaja igual que siempre.
+          ...(request.edition === "total" ? { edition: "total" } : {})
         }
       }
     );
@@ -187,6 +192,15 @@ export class WompiProvider implements IPaymentProvider {
     if (!data?.checkoutUrl || !data.reference) {
       throw new Error(
         "WOMPI_INVALID_CHECKOUT_RESPONSE: la Edge Function no devolvió checkoutUrl y reference válidos."
+      );
+    }
+
+    // Falla cerrado: si se pidió VIMDY Total y el servidor no confirma "total"
+    // (p. ej. wompi-create-checkout viejo, que ignoraría la edición y cobraría el
+    // precio del Plan Operativo), no se le entrega al usuario la URL de pago.
+    if (request.edition === "total" && data.edition !== "total") {
+      throw new Error(
+        "WOMPI_EDITION_NOT_CONFIRMED: el servidor de pagos no confirmó VIMDY Total. No se abrió el cobro."
       );
     }
 

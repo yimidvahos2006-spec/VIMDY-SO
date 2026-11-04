@@ -1,5 +1,5 @@
 import { LEGAL_INFO } from "../legal/legalInfo";
-import { TERMS_PRICING_BODY } from "../pricingCopy";
+import { TERMS_EDITIONS_BODY, TERMS_PRICING_BODY } from "../pricingCopy";
 
 const sections = [
   {
@@ -8,7 +8,7 @@ const sections = [
   },
   {
     title: "Qué es VIMDY y qué no es",
-    body: "VIMDY es un software en línea para gestionar ventas, caja, inventario, cocina y reportes de tu negocio. No es asesoría contable, tributaria ni legal. Las cifras, alertas y respuestas de VIMDY IA son una ayuda y pueden contener errores: revísalas antes de tomar decisiones. Tú sigues siendo responsable de tus impuestos, de tu facturación y de lo que registras.",
+    body: "VIMDY es un software en línea para gestionar ventas, caja, inventario, cocina y reportes de tu negocio. No es asesoría contable, tributaria ni legal, ni siquiera cuando usas el módulo contable de VIMDY Total. Las cifras, alertas y respuestas de VIMDY IA son una ayuda y pueden contener errores: revísalas antes de tomar decisiones. Tú sigues siendo responsable de tus impuestos, de tu facturación y de lo que registras.",
   },
   {
     title: "Tu cuenta",
@@ -16,11 +16,15 @@ const sections = [
   },
   {
     title: "Prueba gratuita",
-    body: "Al crear tu cuenta tienes 14 días de prueba, sin tarjeta de crédito y sin cobro. Al terminar la prueba, para seguir usando VIMDY debes elegir un plan de pago. Si no lo haces, tu cuenta queda inactiva.",
+    body: "Al crear tu cuenta tienes 14 días de prueba, sin tarjeta de crédito y sin cobro, y no hacemos ningún cobro automático cuando termina. Al terminar la prueba, para seguir usando VIMDY debes elegir un plan de pago: Plan Operativo o VIMDY Total. Si pagas antes de que termine la prueba, el período pagado empieza el día del pago y la prueba se da por terminada. Si no eliges un plan, tu cuenta queda inactiva.",
   },
   {
     title: "Planes y precios",
     body: TERMS_PRICING_BODY,
+  },
+  {
+    title: "Ediciones: Plan Operativo y VIMDY Total",
+    body: TERMS_EDITIONS_BODY,
   },
   {
     title: "Pagos y renovación",
@@ -28,7 +32,7 @@ const sections = [
   },
   {
     title: "Cancelación y devoluciones",
-    body: "Como no hay cobro automático, puedes dejar de usar VIMDY cuando quieras simplemente no renovando; tu acceso continúa hasta el final del período pagado. Si pagaste un plan y en los primeros 7 días calendario sientes que VIMDY no te sirve, escríbenos a hola@vimdy.co y te devolvemos lo pagado, al mismo medio de pago, en un máximo de 15 días calendario. Pasados esos 7 días no devolvemos el tiempo no usado, salvo que el servicio haya fallado gravemente por causa nuestra. Esto no limita los derechos que la ley te reconozca como consumidor.",
+    body: "Como no hay cobro automático, puedes dejar de usar VIMDY cuando quieras simplemente no renovando; tu acceso continúa hasta el final del período pagado. Si pagaste un plan y en los primeros 7 días calendario sientes que VIMDY no te sirve, escríbenos a hola@vimdy.co y te devolvemos lo pagado, al mismo medio de pago, en un máximo de 15 días calendario. Pasados esos 7 días no devolvemos el tiempo no usado, salvo que el servicio haya fallado gravemente por causa nuestra. Esto aplica igual al Plan Operativo y a VIMDY Total, y no limita los derechos que la ley te reconozca como consumidor.",
   },
   {
     title: "Uso permitido",
@@ -132,7 +136,7 @@ export function TermsPage() {
             </div>
 
             <p className="mt-8 text-xs leading-6 text-zinc-500">
-              Última actualización: {LEGAL_INFO.ultimaActualizacion}.
+              Última actualización: {LEGAL_INFO.terminosUltimaActualizacion}.
             </p>
           </div>
         </div>

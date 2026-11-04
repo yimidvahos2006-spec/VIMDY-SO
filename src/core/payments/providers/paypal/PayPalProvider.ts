@@ -186,6 +186,12 @@ export class PayPalProvider implements IPaymentProvider {
       );
     }
 
+    if (request.edition === "total" || request.tier === "multi") {
+      throw new Error(
+        "PAYPAL_EDITION_NOT_SUPPORTED: PayPal solo cobra el Plan Operativo de 1 sede. VIMDY Total y Multi-Sucursal se pagan con Wompi (Colombia)."
+      );
+    }
+
     if (!request.businessId?.trim()) {
       throw new Error("PAYPAL_BUSINESS_ID_REQUIRED");
     }

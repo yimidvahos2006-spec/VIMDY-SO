@@ -15,7 +15,7 @@ import type {
   PaymentStatus,
   PlanCode
 } from "../types/payment.types";
-import type { BusinessTier } from "../../entities/SubscriptionTypes";
+import type { BusinessTier, ProductEdition } from "../../entities/SubscriptionTypes";
 
 /** Entrada que el resto de VIMDY le da al Router. Nada de proveedor aquí. */
 export interface PaymentRoutingInput {
@@ -34,6 +34,12 @@ export interface PaymentRoutingInput {
    * asume "single". El precio sale de aquí + plan + país, siempre en servidor.
    */
   tier?: BusinessTier;
+  /**
+   * Edición del producto: "operativo" (Plan Operativo) o "total" (VIMDY Total,
+   * con módulo contable). Si no se envía se asume "operativo". Como el nivel,
+   * cambia el precio y siempre se resuelve contra el catálogo en servidor.
+   */
+  edition?: ProductEdition;
   /**
    * El monto es canónico y se resuelve en servidor según negocio + plan + país.
    * El frontend nunca debe autorizar o manipular el importe que se cobra.
@@ -57,6 +63,8 @@ export interface PaymentRequest {
   plan: PlanCode;
   /** Nivel comercial ya resuelto por el Router. Ausente = "single". */
   tier?: BusinessTier;
+  /** Edición ya resuelta por el Router. Ausente = "operativo". */
+  edition?: ProductEdition;
   metadata?: Record<string, unknown>;
 }
 

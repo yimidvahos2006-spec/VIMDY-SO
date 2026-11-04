@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  Calculator,
   ChefHat,
   CircleDollarSign,
   Grid2X2,
@@ -52,6 +53,13 @@ const features = [
       "Revisa ventas, caja y ganancias en una vista clara, y recibe en tu correo el resumen del día al cerrar caja.",
     icon: BarChart3,
   },
+  {
+    title: "Contabilidad · VIMDY Total",
+    description:
+      "Registra arriendo, servicios y nómina como gastos fijos, mira tu Utilidad Neta Real y dale a tu contador un panel de consulta.",
+    icon: Calculator,
+    badge: "VIMDY Total",
+  },
 ] as const;
 
 export function FeaturesPage() {
@@ -95,11 +103,17 @@ export function FeaturesPage() {
             <div className="mx-auto mt-14 grid max-w-6xl gap-3 sm:grid-cols-2 lg:mt-20 lg:grid-cols-4">
               {features.map((feature, index) => {
                 const Icon = feature.icon;
+                const badge = "badge" in feature ? feature.badge : undefined;
 
                 return (
                   <article
                     key={feature.title}
-                    className="group relative overflow-hidden rounded-[26px] border border-white/[0.07] bg-white/[0.018] p-6 transition-[transform,border-color,background-color,box-shadow] duration-500 hover:-translate-y-1 hover:border-cyan-300/20 hover:bg-white/[0.035] hover:shadow-[0_24px_70px_rgba(0,0,0,0.28)]"
+                    className={[
+                      "group relative overflow-hidden rounded-[26px] border p-6 transition-[transform,border-color,background-color,box-shadow] duration-500 hover:-translate-y-1 hover:border-cyan-300/20 hover:bg-white/[0.035] hover:shadow-[0_24px_70px_rgba(0,0,0,0.28)]",
+                      badge
+                        ? "border-cyan-300/25 bg-white/[0.035] shadow-[0_24px_80px_rgba(56,189,248,0.08)]"
+                        : "border-white/[0.07] bg-white/[0.018]",
+                    ].join(" ")}
                   >
                     <div
                       aria-hidden="true"
@@ -111,12 +125,21 @@ export function FeaturesPage() {
                         <Icon size={20} strokeWidth={1.7} aria-hidden="true" />
                       </div>
 
-                      <span
-                        aria-hidden="true"
-                        className="text-[10px] font-semibold tracking-[0.2em] text-zinc-700"
-                      >
-                        0{index + 1}
-                      </span>
+                      {badge ? (
+                        <a
+                          href="/precios#precios"
+                          className="rounded-full border border-cyan-200/15 bg-cyan-200/[0.07] px-3 py-1 text-[9px] font-semibold uppercase tracking-[0.18em] text-cyan-200/90 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/45"
+                        >
+                          {badge}
+                        </a>
+                      ) : (
+                        <span
+                          aria-hidden="true"
+                          className="text-[10px] font-semibold tracking-[0.2em] text-zinc-700"
+                        >
+                          0{index + 1}
+                        </span>
+                      )}
                     </div>
 
                     <h2 className="relative mt-7 text-lg font-semibold tracking-[-0.02em] text-white">

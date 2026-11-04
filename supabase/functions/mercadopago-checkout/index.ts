@@ -68,6 +68,9 @@ function isSandboxToken(): boolean {
 interface RequestBody {
   businessId?: string;
   plan?: Plan;
+  /** Solo para rechazar lo que este proveedor no cobra ("total" / "multi"). */
+  edition?: string;
+  tier?: string;
 }
 
 interface MercadoPagoPreferenceResponse {
@@ -105,6 +108,19 @@ Deno.serve(async (req: Request) => {
 
   if (!businessId || (plan !== "monthly" && plan !== "yearly")) {
     return json({ error: "Faltan campos: businessId y plan ('monthly' | 'yearly') son obligatorios." }, 400);
+  }
+
+  // VIMDY Total y Multi-Sucursal solo tienen precio verificado en Wompi (Colombia).
+  // Este proveedor únicamente conoce el Plan Operativo de 1 sede: si alguien pide
+  // otra cosa se rechaza en vez de cobrar un monto equivocado.
+  if (payload.edition === "total" || payload.tier === "multi") {
+    return json(
+      {
+        error: "PRICING_NOT_CONFIGURED",
+        detail: "VIMDY Total y Multi-Sucursal solo se cobran con Wompi (Colombia). Este proveedor solo cobra el Plan Operativo de 1 sede."
+      },
+      409
+    );
   }
 
   // 🔒 VERIFICACIÓN DE SEGURIDAD: Verificar JWT y membresía

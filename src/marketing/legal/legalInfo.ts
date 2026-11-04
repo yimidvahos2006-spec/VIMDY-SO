@@ -9,4 +9,6 @@ export const LEGAL_INFO = {
   email: "hola@vimdy.co",
   whatsapp: "+57 310 638 1668",
   ultimaActualizacion: "13 de octubre de 2026",
+  /** Fecha de la última versión de los Términos y Condiciones (Privacidad y Cookies usan ultimaActualizacion). */
+  terminosUltimaActualizacion: "3 de noviembre de 2026",
 } as const;

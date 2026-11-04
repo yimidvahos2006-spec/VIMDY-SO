@@ -277,3 +277,57 @@ export function getPlanCurrency(planId: BillingPeriod, countryCode: string): Cur
   };
   return currencyMap[countryCode] ?? "USD";
 }
+
+/**
+ * Ediciones comerciales del producto.
+ * - `operativo`: la operación del día a día (los planes de arriba).
+ * - `total`: VIMDY Total = Operativo + módulo contable (gastos fijos, nómina
+ *   como gasto fijo, Utilidad Neta Real y panel de solo consulta para el contador).
+ */
+export type ProductEdition = "operativo" | "total";
+
+export const PRODUCT_EDITIONS: readonly ProductEdition[] = ["operativo", "total"];
+
+/**
+ * Precios de VIMDY Total (COP, definidos por el dueño del producto).
+ * Solo Colombia: en otros países `total` no tiene precio verificado y NO se inventa.
+ * El anual sigue la regla del resto del catálogo: pagas 10 meses y usas 12.
+ *
+ * OJO: este catálogo es la fuente de lo que se MUESTRA en el sitio. El cobro real
+ * lo decide el servidor (supabase/functions/wompi-create-checkout), que hoy solo
+ * conoce los precios del Plan Operativo.
+ */
+const TOTAL_EDITION_PRICE_MAP: Record<
+  string,
+  Partial<Record<BusinessTier, Record<BillingPeriod, number>>>
+> = {
+  CO: {
+    single: { monthly: 99000, yearly: 990000 },
+    multi: { monthly: 149000, yearly: 1490000 }
+  }
+};
+
+/** ¿Hay un precio verificado de esta edición, nivel y país? */
+export function isEditionAvailable(
+  edition: ProductEdition,
+  tier: BusinessTier,
+  countryCode: string
+): boolean {
+  return getEditionPlanPrice(edition, "monthly", countryCode, tier) > 0;
+}
+
+/**
+ * Precio canónico por edición. `operativo` delega en getPlanPrice (sin cambios).
+ * Devuelve 0 cuando no hay precio verificado, igual que getPlanPrice.
+ */
+export function getEditionPlanPrice(
+  edition: ProductEdition,
+  planId: BillingPeriod,
+  countryCode: string,
+  tier: BusinessTier = DEFAULT_BUSINESS_TIER
+): number {
+  if (edition === "operativo") {
+    return getPlanPrice(planId, countryCode, tier);
+  }
+  return TOTAL_EDITION_PRICE_MAP[countryCode]?.[tier]?.[planId] ?? 0;
+}

@@ -8,7 +8,8 @@
  * PaymentRequest canónico que consumen los proveedores.
  *
  * IMPORTANTE:
- * - El amount efectivo de una suscripción se obtiene de getPlanPrice().
+ * - El amount efectivo de una suscripción se obtiene de getEditionPlanPrice()
+ *   (edición + período + país + nivel). El Plan Operativo delega en getPlanPrice().
  * - Si el caller suministra amount, solo se acepta si coincide con el precio
  *   canónico; nunca se utiliza el monto del navegador como autoridad.
  * - Los métodos ofrecidos por PaymentMethodResolver se contrastan con los
@@ -31,7 +32,11 @@ import { PaymentMethodResolver } from "./PaymentMethodResolver";
 import { PaymentFactory } from "./PaymentFactory";
 import { PaymentValidator } from "./PaymentValidator";
 import { generatePaymentId } from "./utils/paymentUtils";
-import { DEFAULT_BUSINESS_TIER, getPlanPrice } from "../entities/SubscriptionTypes";
+import {
+  DEFAULT_BUSINESS_TIER,
+  getEditionPlanPrice,
+  type ProductEdition
+} from "../entities/SubscriptionTypes";
 
 export interface RoutingDecision {
   readonly provider: PaymentProviderName;
@@ -41,6 +46,7 @@ export interface RoutingDecision {
 }
 
 const MAX_MONEY_DELTA = 0.005;
+const DEFAULT_EDITION: ProductEdition = "operativo";
 
 export class GlobalPaymentRouter {
   static route(input: PaymentRoutingInput): RoutingDecision {
@@ -64,11 +70,12 @@ export class GlobalPaymentRouter {
 
     const plan = input.plan as "monthly" | "yearly";
     const tier = input.tier ?? DEFAULT_BUSINESS_TIER;
-    const canonicalAmount = getPlanPrice(plan, input.country, tier);
+    const edition = input.edition ?? DEFAULT_EDITION;
+    const canonicalAmount = getEditionPlanPrice(edition, plan, input.country, tier);
 
     if (!Number.isFinite(canonicalAmount) || canonicalAmount <= 0) {
       throw new Error(
-        `PaymentRouter: no existe un precio canónico válido para ${plan}/${tier}/${input.country}.`
+        `PaymentRouter: no existe un precio canónico válido para ${edition}/${plan}/${tier}/${input.country}.`
       );
     }
 
@@ -91,7 +98,8 @@ export class GlobalPaymentRouter {
       method: input.method,
       businessType: input.businessType,
       plan,
-      tier
+      tier,
+      edition
     };
 
     return {

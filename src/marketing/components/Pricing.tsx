@@ -1,9 +1,20 @@
 import { useState } from "react";
-import { ArrowRight, Building2, Check, ShieldCheck, Store } from "lucide-react";
+import {
+  ArrowRight,
+  Building2,
+  Calculator,
+  Check,
+  ShieldCheck,
+  Sparkles,
+  Store,
+} from "lucide-react";
 import {
   BUSINESS_TIERS,
+  EDITION_COPY,
   MARKETING_PLAN_TEXT,
+  NET_PROFIT_FORMULA,
   TIER_DEFINITIONS,
+  editionPriceLabel,
   marketingFeatures,
   priceLabel,
   type BusinessTier,
@@ -40,6 +51,8 @@ export function Pricing({ initialTier = "single" }: PricingProps) {
     description: MARKETING_PLAN_TEXT[period].description,
   }));
   const features = marketingFeatures(tier);
+  const totalMonthly = editionPriceLabel("total", tier, "monthly");
+  const totalYearly = editionPriceLabel("total", tier, "yearly");
 
   return (
     <section
@@ -121,7 +134,153 @@ export function Pricing({ initialTier = "single" }: PricingProps) {
           </p>
         </div>
 
-        <div className="mx-auto mt-10 grid max-w-5xl gap-4 lg:grid-cols-[1fr_1.08fr]">
+        <div className="mx-auto mt-12 max-w-5xl">
+          <p className="mb-4 text-center text-[10px] font-semibold uppercase tracking-[0.24em] text-zinc-600">
+            Elige qué tan lejos quieres llegar
+          </p>
+
+          <div className="grid gap-4 lg:grid-cols-[1fr_1.12fr]">
+            <article className="relative overflow-hidden rounded-[30px] border border-white/[0.07] bg-white/[0.018] p-7 sm:p-8">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-600">
+                {EDITION_COPY.operativo.name}
+              </span>
+              <h3 className="mt-5 text-2xl font-semibold tracking-[-0.03em] text-white">
+                Opera sin fricción
+              </h3>
+              <p className="mt-3 text-sm leading-6 text-zinc-500">
+                {EDITION_COPY.operativo.tagline}
+              </p>
+
+              <ul className="mt-6 space-y-2.5">
+                {EDITION_COPY.operativo.features.map((feature) => (
+                  <li
+                    key={feature}
+                    className="flex items-start gap-2.5 text-sm text-zinc-400"
+                  >
+                    <Check
+                      size={15}
+                      aria-hidden="true"
+                      className="mt-0.5 shrink-0 text-cyan-200/80"
+                    />
+                    {feature}
+                  </li>
+                ))}
+              </ul>
+
+              <a
+                href="/registro"
+                aria-label="Probar 14 días gratis el Plan Operativo"
+                className="group mt-8 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/[0.09] bg-white/[0.035] px-5 py-3.5 text-sm font-semibold text-white transition-[transform,background-color,border-color] duration-300 hover:border-white/[0.16] hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/50 focus-visible:ring-offset-4 focus-visible:ring-offset-[#05070a]"
+              >
+                Probar 14 días gratis
+                <ArrowRight
+                  size={16}
+                  aria-hidden="true"
+                  className="transition-transform duration-300 group-hover:translate-x-0.5"
+                />
+              </a>
+            </article>
+
+            <article className="relative overflow-hidden rounded-[30px] border border-cyan-300/25 bg-white/[0.04] p-7 shadow-[0_30px_110px_rgba(56,189,248,0.1)] sm:p-8">
+              <div
+                aria-hidden="true"
+                className="absolute -right-16 -top-16 h-52 w-52 rounded-full bg-cyan-300/[0.12] blur-3xl"
+              />
+              <div className="absolute right-6 top-6 inline-flex items-center gap-1.5 rounded-full border border-cyan-200/15 bg-cyan-200/[0.07] px-3 py-1 text-[9px] font-semibold uppercase tracking-[0.18em] text-cyan-200/90">
+                <Sparkles size={11} aria-hidden="true" />
+                Más completo
+              </div>
+
+              <div className="relative">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-cyan-200/70">
+                  {EDITION_COPY.total.name}
+                </span>
+                <h3 className="mt-5 text-2xl font-semibold tracking-[-0.03em] text-white">
+                  Conoce tu{" "}
+                  <span className="bg-gradient-to-r from-white to-cyan-200 bg-clip-text text-transparent">
+                    Utilidad Neta Real
+                  </span>
+                </h3>
+                <p className="mt-3 text-sm leading-6 text-zinc-400">
+                  {EDITION_COPY.total.tagline}
+                </p>
+
+                <div className="mt-6 flex items-end gap-2">
+                  <span className="text-4xl font-semibold tracking-[-0.04em] text-white sm:text-5xl">
+                    {totalMonthly}
+                  </span>
+                  <span className="mb-1 text-sm text-zinc-500">/ mes</span>
+                </div>
+                <p className="mt-2 text-sm text-zinc-400">
+                  o {totalYearly} / año · ahorras 2 meses
+                </p>
+
+                <div
+                  className="mt-6 flex flex-wrap items-center gap-x-2 gap-y-2 rounded-2xl border border-cyan-300/10 bg-black/30 px-4 py-3 text-xs font-medium text-zinc-300"
+                  aria-label="Utilidad Neta Real es igual a ventas menos costo de insumos menos gastos fijos"
+                >
+                  <Calculator
+                    size={15}
+                    aria-hidden="true"
+                    className="shrink-0 text-cyan-200/80"
+                  />
+                  <span className="text-cyan-200">Utilidad Neta Real</span>
+                  <span aria-hidden="true" className="text-zinc-600">=</span>
+                  {NET_PROFIT_FORMULA.map((term, index) => (
+                    <span key={term} className="inline-flex items-center gap-2">
+                      {index > 0 && (
+                        <span aria-hidden="true" className="text-zinc-600">−</span>
+                      )}
+                      <span>{term}</span>
+                    </span>
+                  ))}
+                </div>
+
+                <p className="mt-6 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                  {EDITION_COPY.total.inherits}
+                </p>
+                <ul className="mt-3 space-y-2.5">
+                  {EDITION_COPY.total.features.map((feature) => (
+                    <li
+                      key={feature}
+                      className="flex items-start gap-2.5 text-sm text-zinc-300"
+                    >
+                      <Check
+                        size={15}
+                        aria-hidden="true"
+                        className="mt-0.5 shrink-0 text-cyan-200"
+                      />
+                      {feature}
+                    </li>
+                  ))}
+                </ul>
+
+                <a
+                  href="/registro"
+                  aria-label="Probar 14 días gratis VIMDY Total"
+                  className="group mt-8 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3.5 text-sm font-semibold text-black transition-[transform,background-color] duration-300 hover:-translate-y-0.5 hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/50 focus-visible:ring-offset-4 focus-visible:ring-offset-[#05070a]"
+                >
+                  Probar 14 días gratis
+                  <ArrowRight
+                    size={16}
+                    aria-hidden="true"
+                    className="transition-transform duration-300 group-hover:translate-x-0.5"
+                  />
+                </a>
+
+                <p className="mt-3 text-center text-xs text-zinc-500">
+                  Precio para {TIER_DEFINITIONS[tier].label.toLowerCase()}, en pesos colombianos.
+                </p>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <p className="mx-auto mt-12 max-w-5xl text-center text-[10px] font-semibold uppercase tracking-[0.24em] text-zinc-600">
+          Precios del Plan Operativo
+        </p>
+
+        <div className="mx-auto mt-4 grid max-w-5xl gap-4 lg:grid-cols-[1fr_1.08fr]">
           {plans.map((plan) => (
             <article
               key={`${tier}-${plan.id}`}

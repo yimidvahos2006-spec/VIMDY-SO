@@ -6,14 +6,20 @@ import { join } from "node:path";
 
 import { Pricing } from "../../src/marketing/components/Pricing";
 import {
+  EDITION_COPY,
   CTA_PRICE_LINE,
   MULTI_BRANCH_ANSWER,
   PRICING_SUMMARY,
   TERMS_PRICING_BODY,
+  editionPriceLabel,
   formatCop,
   priceLabel
 } from "../../src/marketing/pricingCopy";
-import { getPlanPrice } from "../../src/core/entities/SubscriptionTypes";
+import {
+  getEditionPlanPrice,
+  getPlanPrice,
+  isEditionAvailable
+} from "../../src/core/entities/SubscriptionTypes";
 
 const MARKETING_DIR = join(process.cwd(), "src", "marketing");
 
@@ -45,6 +51,28 @@ describe("precios del sitio público", () => {
     }
   });
 
+  it("VIMDY Total: precios del catálogo (1 sede y multi, mensual y anual)", () => {
+    expect(editionPriceLabel("total", "single", "monthly")).toBe("$99.000");
+    expect(editionPriceLabel("total", "single", "yearly")).toBe("$990.000");
+    expect(editionPriceLabel("total", "multi", "monthly")).toBe("$149.000");
+    expect(editionPriceLabel("total", "multi", "yearly")).toBe("$1.490.000");
+    // El anual es siempre 10 meses (ahorras 2), igual que el Plan Operativo.
+    for (const tier of ["single", "multi"] as const) {
+      expect(getEditionPlanPrice("total", "yearly", "CO", tier)).toBe(
+        getEditionPlanPrice("total", "monthly", "CO", tier) * 10
+      );
+    }
+  });
+
+  it("VIMDY Total no tiene precio fuera de Colombia y Operativo no cambia", () => {
+    expect(getEditionPlanPrice("total", "monthly", "MX", "single")).toBe(0);
+    expect(isEditionAvailable("total", "single", "US")).toBe(false);
+    expect(isEditionAvailable("total", "multi", "CO")).toBe(true);
+    expect(getEditionPlanPrice("operativo", "monthly", "CO", "single")).toBe(59900);
+    expect(getEditionPlanPrice("operativo", "yearly", "CO", "multi")).toBe(1109000);
+    expect(() => editionPriceLabel("total", "single", "monthly")).not.toThrow();
+  });
+
   it("FAQ/Asistente, Términos y CTA mencionan ambos planes con sus precios", () => {
     for (const body of [PRICING_SUMMARY, TERMS_PRICING_BODY]) {
       for (const price of ["$59.900", "$599.000", "$110.900", "$1.109.000"]) {
@@ -53,6 +81,10 @@ describe("precios del sitio público", () => {
     }
     expect(PRICING_SUMMARY).toContain("Plan 1 Sede");
     expect(PRICING_SUMMARY).toContain("Plan Multi-Sucursal");
+    for (const price of ["$99.000", "$990.000", "$149.000", "$1.490.000"]) {
+      expect(PRICING_SUMMARY).toContain(price);
+    }
+    expect(PRICING_SUMMARY).toContain("VIMDY Total");
     expect(TERMS_PRICING_BODY).toContain("12 meses de acceso por el precio de 10");
     expect(MULTI_BRANCH_ANSWER).toContain("$110.900");
     expect(MULTI_BRANCH_ANSWER).toContain("Configuración");
@@ -63,7 +95,11 @@ describe("precios del sitio público", () => {
   it("ningún archivo de marketing escribe precios a mano (todo sale de pricingCopy)", () => {
     const offenders = listSources(MARKETING_DIR)
       .filter((file) => !file.endsWith("pricingCopy.ts"))
-      .filter((file) => /59\.900|599\.000|110\.900|1\.109\.000/.test(readFileSync(file, "utf-8")));
+      .filter((file) =>
+        /59\.900|599\.000|110\.900|1\.109\.000|(?<![\d.])99\.000|(?<![\d.])990\.000|(?<![\d.])149\.000|1\.490\.000/.test(
+          readFileSync(file, "utf-8")
+        )
+      );
     expect(offenders).toEqual([]);
   });
 
@@ -91,11 +127,38 @@ describe("Pricing (landing) — render", () => {
     expect(content).toContain("Reporte Diario Automático al Correo (al cerrar caja)");
   });
 
+  it("destaca Plan Operativo y VIMDY Total con el precio de Total del catálogo", () => {
+    const markup = renderToStaticMarkup(React.createElement(Pricing));
+    const content = text(markup);
+    expect(content).toContain("Plan Operativo");
+    expect(content).toContain("VIMDY Total");
+    expect(content).toContain("Utilidad Neta Real");
+    expect(content).toContain("Todo el Plan Operativo, más:");
+    expect(content).toContain("$99.000");
+    expect(content).toContain("$990.000");
+    expect(content).not.toContain("$149.000");
+    expect(content).not.toContain("Pregunta por el precio");
+    for (const feature of [
+      ...EDITION_COPY.operativo.features,
+      ...EDITION_COPY.total.features
+    ]) {
+      expect(content).toContain(feature);
+    }
+    // Los botones de prueba gratuita se mantienen: 2 ediciones + 2 periodos.
+    expect(markup.match(/Probar 14 días gratis/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(markup).toContain('href="/registro"');
+    // Los selectores de sede siguen siendo exactamente 2 radios.
+    expect(markup.match(/role="radio"/g)).toHaveLength(2);
+  });
+
   it("muestra los precios y beneficios multi-sucursal", () => {
     const content = text(renderToStaticMarkup(React.createElement(Pricing, { initialTier: "multi" })));
     expect(content).toContain("$110.900");
     expect(content).toContain("$1.109.000");
+    expect(content).toContain("$149.000");
+    expect(content).toContain("$1.490.000");
     expect(content).not.toContain("$59.900");
+    expect(content).not.toContain("$99.000");
     expect(content).toContain("Reportes Consolidados y por Sede");
     expect(content).toContain("Soporte VIP Prioritario");
     expect(content).toContain("Probar 14 días gratis");
