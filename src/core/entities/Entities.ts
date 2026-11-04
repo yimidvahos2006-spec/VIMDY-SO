@@ -1021,6 +1021,21 @@ export interface PurchaseOrder {
   readonly code?: string;
 }
 
+/** Forma con la que se dibuja la mesa en el plano del salón. */
+export type TableShape = "round" | "square" | "rect";
+
+/**
+ * Posición de la mesa en el plano del salón (Mapa de Mesas Visual).
+ * Coordenadas de diseño (px lógicos) de la esquina superior izquierda dentro
+ * del lienzo de SU zona. Vive dentro de `data` (jsonb) de la tabla `tables`,
+ * así que no necesita migración. Sin `layout` la mesa se acomoda sola.
+ */
+export interface TableLayout {
+  readonly x: number;
+  readonly y: number;
+  readonly shape?: TableShape;
+}
+
 /** Estado del ciclo de vida de una mesa. */
 export type TableStatus =
   | "FREE"
@@ -1060,6 +1075,8 @@ export interface Table {
   readonly total: number;
   readonly notes?: string;
   readonly zone?: string;
+  /** Posición en el plano del salón; si falta, el plano la acomoda automáticamente. */
+  readonly layout?: TableLayout;
   /** id de la mesa con la que fue unida, si aplica. */
   readonly mergedInto?: string;
   /** Fecha/hora en que esta mesa fue absorbida dentro de otra (merge). */

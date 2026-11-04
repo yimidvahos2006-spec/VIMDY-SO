@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   ShoppingCart,
   Package,
+  Calculator,
   Wallet,
   MoreHorizontal,
   ChefHat,
@@ -37,6 +38,7 @@ const MORE_ITEMS = [
   { icon: Users, label: "Clientes", path: "/clientes", capability: "customers" as const },
   { icon: BarChart3, label: "Reportes", path: "/reportes" },
   { icon: DollarSign, label: "Ganancias", path: "/ganancias", capability: "inventory" as const },
+  { icon: Calculator, label: "Gastos fijos", path: "/gastos-fijos", capability: "accounting" as const },
   { icon: ShieldAlert, label: "Pérdidas", path: "/perdidas", capability: "inventory" as const },
   { icon: Truck, label: "Compras", path: "/compras-inteligentes", capability: "inventory" as const },
   { icon: Sparkles, label: "VIMDY IA", path: "/ia", capability: "ai" as const },
@@ -63,6 +65,7 @@ export function MobileBottomNav() {
     kitchenPrinter: useCanUse("kitchenPrinter"),
     production: useCanUse("production"),
     ai: useCanUse("ai"),
+    accounting: useCanUse("accounting"),
   };
   // "Meseros" solo si el negocio usa meseros; si solo tiene mesas se llama "Mesas".
   const mesasLabel = availability.waiters ? "Meseros" : "Mesas";

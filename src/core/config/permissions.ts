@@ -30,6 +30,7 @@ export const STAFF_ROLE_PERMISSIONS: Readonly<Record<StaffRole, readonly string[
   // lo cubre el "*". Ningún otro rol lo lleva a propósito; para dárselo a otro
   // rol hay que agregarlo de forma explícita en su lista.
   // Lo mismo aplica a "waiters.manage" (administrar tarjetas de meseros): solo ADMIN.
+  // "accounting.view" y "accounting.manage" (VIMDY Contable) también las cubre el "*".
   ADMIN: ["*"],
 
   CAJERO: [
@@ -57,7 +58,9 @@ export const LEGACY_ROLE_PERMISSIONS: Readonly<Record<LegacyRole, readonly strin
     "cash.view", "cash.registerMovement", "cash.transfer",
     "shift.view", "shift.close",
     "reports.view", "reports.export",
-    "users.view"
+    "users.view",
+    // VIMDY Contable: el gerente ve y registra gastos fijos.
+    "accounting.view", "accounting.manage"
   ],
 
   INVENTARIO: [
@@ -67,7 +70,9 @@ export const LEGACY_ROLE_PERMISSIONS: Readonly<Record<LegacyRole, readonly strin
 
   CONTADOR: [
     "sales.view", "cash.view", "shift.view",
-    "reports.view", "reports.export"
+    "reports.view", "reports.export",
+    // VIMDY Contable: el contador solo consulta (no registra ni borra).
+    "accounting.view"
   ],
 
   SOPORTE: ["users.view", "reports.view"]

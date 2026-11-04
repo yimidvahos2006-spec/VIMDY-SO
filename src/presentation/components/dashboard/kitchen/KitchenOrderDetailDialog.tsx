@@ -91,7 +91,11 @@ export function KitchenOrderDetailDialog({ order, onClose }: Props) {
               <Clock3 size={22} className="text-vimdy-accent" />
               <div>
                 <p className="text-vimdy-text-secondary text-xs">{t("kitchen.detail.elapsedTime")}</p>
-                <KitchenOrderTimer createdAt={order.createdAt} tvMode />
+                <KitchenOrderTimer
+                  createdAt={order.createdAt}
+                  estimatedMinutes={order.estimatedPrepMinutes}
+                  tvMode
+                />
               </div>
             </div>
           </div>

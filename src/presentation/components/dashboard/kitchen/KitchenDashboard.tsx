@@ -5,7 +5,11 @@ import {
   ChefHat,
   CheckCircle2,
   Tv,
-  Minimize2
+  Minimize2,
+  MonitorCheck,
+  MonitorOff,
+  Volume2,
+  VolumeX
 } from "lucide-react";
 import {
   DndContext,
@@ -20,8 +24,13 @@ import {
 
 import { useTranslation } from "../../../../core/i18n/useTranslation";
 import { useKitchenOrders, KitchenOrderView } from "../../../../hooks/useKitchenOrders";
+import { useScreenWakeLock } from "../../../../hooks/useScreenWakeLock";
+import { useKitchenAudio } from "../../../../hooks/useKitchenAudio";
 import { OrderPriority } from "../../../../core/entities/Entities";
+import type { ScreenWakeLockStatus } from "../../../../core/services/screenWakeLock";
+import type { KitchenAudioStatus } from "../../../../core/services/kitchenAudio";
 import { KitchenCard } from "./KitchenCard";
+import { KitchenColumnList } from "./KitchenColumnList";
 import { CancelOrderDialog } from "./CancelOrderDialog";
 import { KitchenOrderDetailDialog } from "./KitchenOrderDetailDialog";
 
@@ -37,12 +46,15 @@ const PRIORITY_WEIGHT: Record<OrderPriority, number> = {
 
 /**
  * Ordena por prioridad (URGENTE nunca queda debajo de una NORMAL) y, dentro
- * de la misma prioridad, respeta el orden en que ya venían (más antiguo
- * primero), ya que Array.prototype.sort es estable.
+ * de la misma prioridad, el pedido MÁS ANTIGUO va primero (el que lleva más
+ * tiempo esperando). Así, en Modo TV, lo que queda oculto en "+N más" son
+ * siempre los pedidos más recientes y nunca uno que ya está demorado.
  */
 function sortByPriority(orders: KitchenOrderView[]): KitchenOrderView[] {
   return [...orders].sort(
-    (a, b) => PRIORITY_WEIGHT[a.priority ?? "NORMAL"] - PRIORITY_WEIGHT[b.priority ?? "NORMAL"]
+    (a, b) =>
+      PRIORITY_WEIGHT[a.priority ?? "NORMAL"] - PRIORITY_WEIGHT[b.priority ?? "NORMAL"] ||
+      new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
   );
 }
 
@@ -54,6 +66,11 @@ export function KitchenDashboard() {
   const [activeOrder, setActiveOrder] = useState<KitchenOrderView | null>(null);
   const [tvMode, setTvMode] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Pantalla siempre encendida mientras el tablero de cocina está abierto
+  // (en Modo TV y fuera de él): la tablet no se apaga en pleno turno.
+  const wakeLockStatus = useScreenWakeLock();
+  // Audio de avisos: tras recargar el navegador lo bloquea hasta un toque.
+  const { status: audioStatus, enable: enableAudio } = useKitchenAudio();
 
   // distance: 8 evita que un tap para "Ver detalle" o los botones de
   // acción disparen un drag por accidente; solo arrastra si el dedo/mouse
@@ -128,7 +145,14 @@ export function KitchenDashboard() {
   return (
     <div
       ref={containerRef}
-      className={tvMode ? "space-y-8 min-h-screen p-8" : "space-y-8"}
+      // Modo TV: la pantalla completa se divide en alto fijo (encabezado +
+      // columnas con alto propio). `fixed inset-0` también cubre el caso en
+      // que el navegador niega la pantalla completa real.
+      className={
+        tvMode
+          ? "fixed inset-0 z-[60] flex flex-col gap-8 p-8 overflow-hidden bg-vimdy-background"
+          : "space-y-8"
+      }
     >
 
       <div className="flex items-center justify-between gap-4">
@@ -177,6 +201,8 @@ export function KitchenDashboard() {
             {tvMode ? t("kitchen.dashboard.tvExit") : t("kitchen.dashboard.tvMode")}
           </button>
           {tvMode && <LiveClock />}
+          <SoundBadge status={audioStatus} onEnable={enableAudio} tvMode={tvMode} />
+          <WakeLockBadge status={wakeLockStatus} tvMode={tvMode} />
         </div>
       </div>
 
@@ -184,51 +210,63 @@ export function KitchenDashboard() {
         <p className="text-vimdy-text-tertiary text-center py-10">{t("kitchen.dashboard.loading")}</p>
       ) : (
         <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-          <div className={`grid xl:grid-cols-3 gap-6 ${tvMode ? "gap-8" : ""}`}>
+          <div
+            className={
+              tvMode
+                ? "grid grid-cols-3 gap-8 flex-1 min-h-0"
+                : "grid xl:grid-cols-3 gap-6"
+            }
+          >
             <Column title={t("kitchen.dashboard.column.pending")} color="border-vimdy-warning" tvMode={tvMode} dropId="PENDIENTE">
-              {pending.length === 0
-                ? <Empty tvMode={tvMode} />
-                : pending.map(order => (
-                    <KitchenCard
-                      key={order.id}
-                      order={order}
-                      isNew={newOrderIds.has(order.id)}
-                      onPreparing={() => updateStatus(order.id, "EN_PREPARACION")}
-                      onCancel={() => setOrderToCancel(order)}
-                      onViewDetail={() => setOrderToView(order)}
-                      tvMode={tvMode}
-                    />
-                  ))}
+              <KitchenColumnList
+                orders={pending}
+                fit={tvMode}
+                empty={<Empty tvMode={tvMode} />}
+                renderCard={order => (
+                  <KitchenCard
+                    order={order}
+                    isNew={newOrderIds.has(order.id)}
+                    onPreparing={() => updateStatus(order.id, "EN_PREPARACION")}
+                    onCancel={() => setOrderToCancel(order)}
+                    onViewDetail={() => setOrderToView(order)}
+                    tvMode={tvMode}
+                  />
+                )}
+              />
             </Column>
 
             <Column title={t("kitchen.dashboard.column.preparing")} color="border-vimdy-accent" tvMode={tvMode} dropId="EN_PREPARACION">
-              {preparing.length === 0
-                ? <Empty tvMode={tvMode} />
-                : preparing.map(order => (
-                    <KitchenCard
-                      key={order.id}
-                      order={order}
-                      onReady={() => updateStatus(order.id, "LISTO")}
-                      onCancel={() => setOrderToCancel(order)}
-                      onViewDetail={() => setOrderToView(order)}
-                      tvMode={tvMode}
-                    />
-                  ))}
+              <KitchenColumnList
+                orders={preparing}
+                fit={tvMode}
+                empty={<Empty tvMode={tvMode} />}
+                renderCard={order => (
+                  <KitchenCard
+                    order={order}
+                    onReady={() => updateStatus(order.id, "LISTO")}
+                    onCancel={() => setOrderToCancel(order)}
+                    onViewDetail={() => setOrderToView(order)}
+                    tvMode={tvMode}
+                  />
+                )}
+              />
             </Column>
 
             <Column title={t("kitchen.dashboard.column.ready")} color="border-vimdy-success" tvMode={tvMode} dropId="LISTO">
-              {ready.length === 0
-                ? <Empty tvMode={tvMode} />
-                : ready.map((order: KitchenOrderView) => (
-                    <KitchenCard
-                      key={order.id}
-                      order={order}
-                      onDeliver={() => updateStatus(order.id, "ENTREGADO")}
-                      onCancel={() => setOrderToCancel(order)}
-                      onViewDetail={() => setOrderToView(order)}
-                      tvMode={tvMode}
-                    />
-                  ))}
+              <KitchenColumnList
+                orders={ready}
+                fit={tvMode}
+                empty={<Empty tvMode={tvMode} />}
+                renderCard={order => (
+                  <KitchenCard
+                    order={order}
+                    onDeliver={() => updateStatus(order.id, "ENTREGADO")}
+                    onCancel={() => setOrderToCancel(order)}
+                    onViewDetail={() => setOrderToView(order)}
+                    tvMode={tvMode}
+                  />
+                )}
+              />
             </Column>
           </div>
 
@@ -280,6 +318,91 @@ function LiveClock() {
   );
 }
 
+/**
+ * Indicador discreto de "pantalla siempre encendida". Si el navegador no lo
+ * soporta o falló, avisa a la cocina para que desactive el apagado
+ * automático desde los ajustes del dispositivo.
+ */
+function SoundBadge({
+  status,
+  onEnable,
+  tvMode
+}: {
+  status: KitchenAudioStatus;
+  onEnable: () => Promise<void>;
+  tvMode: boolean;
+}) {
+  const { t } = useTranslation();
+
+  if (status === "enabled") {
+    return (
+      <span className={`flex items-center gap-1.5 text-vimdy-success ${tvMode ? "text-base" : "text-xs"}`}>
+        <Volume2 size={tvMode ? 20 : 14} />
+        {t("kitchen.dashboard.soundActive")}
+      </span>
+    );
+  }
+
+  if (status === "unsupported") {
+    return (
+      <span
+        role="status"
+        className={`flex items-start gap-1.5 text-vimdy-warning max-w-xs text-right ${tvMode ? "text-base" : "text-xs"}`}
+      >
+        <VolumeX size={tvMode ? 20 : 14} className="shrink-0 mt-0.5" />
+        {t("kitchen.dashboard.soundUnsupported")}
+      </span>
+    );
+  }
+
+  return (
+    <div role="alert" className="flex flex-col items-end gap-2 max-w-xs">
+      <span className={`text-right text-vimdy-warning ${tvMode ? "text-base" : "text-xs"}`}>
+        {t("kitchen.dashboard.soundBlocked")}
+      </span>
+      <button
+        type="button"
+        onClick={() => void onEnable()}
+        className={`flex items-center gap-2 rounded-2xl font-bold bg-vimdy-warning text-white animate-pulse ${
+          tvMode ? "px-6 py-4 text-lg" : "px-4 py-2 text-sm"
+        }`}
+      >
+        <VolumeX size={tvMode ? 22 : 16} />
+        {t("kitchen.dashboard.soundEnable")}
+      </button>
+    </div>
+  );
+}
+
+function WakeLockBadge({ status, tvMode }: { status: ScreenWakeLockStatus; tvMode: boolean }) {
+  const { t } = useTranslation();
+
+  if (status === "active") {
+    return (
+      <span
+        className={`flex items-center gap-1.5 text-vimdy-success ${tvMode ? "text-base" : "text-xs"}`}
+      >
+        <MonitorCheck size={tvMode ? 20 : 14} />
+        {t("kitchen.dashboard.wakeLockActive")}
+      </span>
+    );
+  }
+
+  if (status === "unsupported" || status === "failed") {
+    return (
+      <span
+        role="status"
+        className={`flex items-start gap-1.5 text-vimdy-warning max-w-xs text-right ${tvMode ? "text-base" : "text-xs"}`}
+      >
+        <MonitorOff size={tvMode ? 20 : 14} className="shrink-0 mt-0.5" />
+        {t("kitchen.dashboard.wakeLockUnavailable")}
+      </span>
+    );
+  }
+
+  return null;
+}
+
 interface StatCardProps {
   title: string;
   value: number;
@@ -314,11 +437,11 @@ function Column({ title, color, children, tvMode = false, dropId }: ColumnProps)
     <div
       ref={setNodeRef}
       className={`bg-vimdy-surface border-2 rounded-3xl transition-colors ${
-        tvMode ? "p-7" : "p-5"
+        tvMode ? "p-7 flex flex-col min-h-0" : "p-5"
       } ${isOver ? "border-vimdy-accent bg-vimdy-surface" : color}`}
     >
       <h2 className={`font-bold text-vimdy-text mb-5 ${tvMode ? "text-4xl" : "text-2xl"}`}>{title}</h2>
-      <div className={`space-y-5 ${tvMode ? "space-y-7" : ""}`}>{children}</div>
+      {children}
     </div>
   );
 }

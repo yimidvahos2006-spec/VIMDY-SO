@@ -24,6 +24,29 @@ function makeSource(overrides: Partial<BusinessOperatingProfileSource> = {}): Bu
   };
 }
 
+describe("BusinessOperatingProfile — VIMDY Contable (módulo opcional)", () => {
+  it("sin el módulo contable la capacidad accounting está apagada", () => {
+    const profile = buildBusinessOperatingProfile(makeSource());
+    expect(profile.capabilities.accounting).toBe(false);
+    expect(hasBusinessCapability(profile, "accounting")).toBe(false);
+  });
+
+  it("con el módulo contable en enabledModules, accounting se enciende", () => {
+    const profile = buildBusinessOperatingProfile(
+      makeSource({ enabledModules: ["caja", "pedidos", "contable"] })
+    );
+    expect(profile.capabilities.accounting).toBe(true);
+    expect(hasBusinessCapability(profile, "accounting")).toBe(true);
+  });
+
+  it("el tipo de negocio NO lo enciende por sí solo", () => {
+    const profile = buildBusinessOperatingProfile(
+      makeSource({ businessType: "cadena", enabledModules: ["caja", "pedidos"] })
+    );
+    expect(profile.capabilities.accounting).toBe(false);
+  });
+});
+
 describe("BusinessOperatingProfile", () => {
   it("usa módulos explícitos y configuración operativa, no businessType, para resolver capacidades", () => {
     const profile = buildBusinessOperatingProfile(

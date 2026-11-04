@@ -36,6 +36,7 @@ function fullDraft(): OperationDraft {
     inventoryType: "ambos",
     productionMode: "batch",
     useCustomers: true,
+    hasAccounting: true,
     salesRules: { autoPrintReceipt: false, enableAI: true },
   });
 }
@@ -94,7 +95,25 @@ describe("operationDraftReducer — reglas de consistencia", () => {
 describe("draftToModules", () => {
   it("siempre incluye caja y pedidos y solo los módulos activados", () => {
     expect(draftToModules(EMPTY, null)).toEqual(["caja", "pedidos"]);
-    expect(draftToModules(fullDraft(), null)).toEqual(["caja", "pedidos", "mesas", "cocina", "inventario", "clientes"]);
+    expect(draftToModules(fullDraft(), null)).toEqual(["caja", "pedidos", "mesas", "cocina", "inventario", "clientes", "contable"]);
+  });
+
+  it("VIMDY Contable es opcional: empieza apagado y solo se agrega si se activa", () => {
+    expect(EMPTY.hasAccounting).toBe(false);
+    expect(draftToModules(EMPTY, null)).not.toContain("contable");
+    const on = operationDraftReducer(EMPTY, { type: "setFlag", key: "hasAccounting", value: true });
+    expect(draftToModules(on, null)).toEqual(["caja", "pedidos", "contable"]);
+  });
+
+  it("apagar VIMDY Contable lo quita aunque ya estuviera guardado (no queda pegado)", () => {
+    const previous: ModuleId[] = ["caja", "pedidos", "contable", "ia"];
+    expect(draftToModules(EMPTY, previous)).toEqual(["caja", "pedidos", "ia"]);
+  });
+
+  it("guardar otros cambios no apaga VIMDY Contable si estaba activo", () => {
+    const loaded = draftFromSources(null, ["caja", "pedidos", "contable"], RULES);
+    expect(loaded.hasAccounting).toBe(true);
+    expect(draftToModules(loaded, ["caja", "pedidos", "contable"])).toContain("contable");
   });
 
   it("conserva módulos que esta pantalla no controla (ej. ia) y no los duplica", () => {

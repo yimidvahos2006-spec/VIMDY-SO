@@ -1,9 +1,10 @@
-import React, { useState } from "react";
-import { UserCircle2, Users, Plus, X } from "lucide-react";
+import React, { useRef, useState } from "react";
+import { Users, Plus, X } from "lucide-react";
 
 import { Waiter } from "../../../core/entities/Entities";
 import { container } from "../../../infrastructure/di/CompositionRoot";
 import { EmptyState } from "../ui/EmptyState";
+import { WaiterCard } from "./WaiterCard";
 import { useWaiterPhotoVisibility } from "../../../core/store/waiterSettingsStore";
 
 interface Props {
@@ -17,6 +18,14 @@ export function WaiterSelect({ waiters, onSelect }: Props) {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { showPhotos } = useWaiterPhotoVisibility();
+  const lastSelectAtRef = useRef(0);
+
+  function handleSelect(waiter: Waiter) {
+    const now = Date.now();
+    if (now - lastSelectAtRef.current < 600) return;
+    lastSelectAtRef.current = now;
+    onSelect(waiter);
+  }
 
   async function handleCreate(event: React.FormEvent) {
     event.preventDefault();
@@ -109,26 +118,14 @@ export function WaiterSelect({ waiters, onSelect }: Props) {
         </div>
       )}
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
         {waiters.map(waiter => (
-          <button
+          <WaiterCard
             key={waiter.id}
-            onClick={() => onSelect(waiter)}
-            className="flex flex-col items-center justify-center gap-3 bg-vimdy-surface rounded-2xl border border-slate-800 hover:border-cyan-500 hover:bg-slate-800/60 transition-all p-6"
-          >
-            {showPhotos && waiter.photoUrl ? (
-              <img
-                src={waiter.photoUrl}
-                alt={waiter.name}
-                className="w-20 h-20 rounded-full object-cover border-2 border-slate-700 shadow-lg"
-              />
-            ) : (
-              <UserCircle2 size={40} className="text-cyan-400" />
-            )}
-            <span className="text-white text-lg font-bold text-center">
-              {waiter.name}
-            </span>
-          </button>
+            waiter={waiter}
+            showPhoto={showPhotos}
+            onSelect={handleSelect}
+          />
         ))}
       </div>
     </div>

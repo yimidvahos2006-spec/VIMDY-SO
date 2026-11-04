@@ -17,6 +17,9 @@ const TrialEndedOverlay = lazy(() =>
 const MobileBottomNav = lazy(() =>
   import("../components/ui/MobileBottomNav").then((m) => ({ default: m.MobileBottomNav }))
 );
+const OnboardingTour = lazy(() =>
+  import("../components/onboarding/OnboardingTour").then((m) => ({ default: m.OnboardingTour }))
+);
 
 function LazySection({ children }: { children: React.ReactNode }) {
   return (
@@ -89,6 +92,12 @@ export function VimdyAppLayout({ children }: Props) {
           <SubscriptionWarningBanner />
           <TrialEndedOverlay />
         </LazySection>
+
+        {/* Bot Guía de 3 minutos. Fallback null: es opcional, no debe mostrar
+            spinner ni retrasar nada mientras descarga su paquete. */}
+        <Suspense fallback={null}>
+          <OnboardingTour />
+        </Suspense>
 
       </div>
     </div>

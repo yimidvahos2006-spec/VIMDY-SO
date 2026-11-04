@@ -21,7 +21,13 @@ import { useTranslation } from "../../../../core/i18n/useTranslation";
 import { KitchenOrderView } from "../../../../hooks/useKitchenOrders";
 import { OrderPriority } from "../../../../core/entities/Entities";
 import { KitchenOrderTimer } from "./KitchenOrderTimer";
+import { useKitchenDelayLevel } from "../../../../hooks/useKitchenClock";
 import { groupOrderItemsByStation } from "../../../../core/services/kitchenTicketGrouping";
+import {
+  classifyKitchenNote,
+  splitOrigin,
+  KitchenNoteSeverity
+} from "../../../../core/services/kitchenCardContent";
 import { printKitchenTicketDocument } from "../../../utils/printKitchenTicketDocument";
 import { VimdyButton } from "../../ui/VimdyButton";
 
@@ -43,6 +49,35 @@ interface Props {
    * no aplica (ej. Historial de entregados, que reusa otro componente).
    */
   draggable?: boolean;
+}
+
+/**
+ * Estilo del recuadro de una nota según lo que dice el texto (ver
+ * classifyKitchenNote): alergia = rojo sólido, restricción ("sin cebolla")
+ * = ámbar, cualquier otra nota = neutro con borde.
+ */
+const NOTE_STYLES: Record<KitchenNoteSeverity, string> = {
+  allergy: "bg-vimdy-danger text-white border-vimdy-danger",
+  restriction: "bg-vimdy-warning/20 text-vimdy-warning border-vimdy-warning",
+  info: "bg-vimdy-surface text-vimdy-text border-vimdy-border"
+};
+
+/** Recuadro resaltado para notas especiales, en mayúsculas para leerse a distancia. */
+function NoteBox({ text, tvMode }: { text: string; tvMode: boolean }) {
+  const severity = classifyKitchenNote(text);
+  const Icon = severity === "allergy" ? AlertTriangle : MessageSquareText;
+
+  return (
+    <div
+      role={severity === "allergy" ? "alert" : undefined}
+      className={`flex items-start gap-2 rounded-xl border-2 font-black uppercase tracking-wide break-words ${
+        NOTE_STYLES[severity]
+      } ${tvMode ? "px-4 py-3 text-2xl" : "px-3 py-2 text-sm"}`}
+    >
+      <Icon size={tvMode ? 28 : 18} className="mt-0.5 shrink-0" />
+      <span className="min-w-0">{text}</span>
+    </div>
+  );
 }
 
 /** Hora del pedido en formato local (ej. "7:42 PM"). */
@@ -95,6 +130,11 @@ export function KitchenCard({
   const { t, money } = useTranslation();
   const priority: OrderPriority = order.priority ?? "NORMAL";
   const priorityStyle = PRIORITY_STYLES[priority];
+  const origin = splitOrigin(order.origin, t("kitchen.card.defaultOrigin"));
+
+  // Nivel de demora según el tiempo estimado de ESTE pedido. Solo vuelve a
+  // dibujar la tarjeta cuando el nivel cambia, no cada segundo.
+  const delayLevel = useKitchenDelayLevel(order.createdAt, order.estimatedPrepMinutes);
 
   /**
    * Imprime UN ticket por cada estación real de la comanda ("Bebidas" a
@@ -136,9 +176,18 @@ export function KitchenCard({
   // El glow de "pedido nuevo" es temporal (unos segundos); la prioridad
   // URGENTE/ALTA es un estado que dura mientras el pedido está activo, así
   // que manda sobre el resaltado de "nuevo" en cuanto a color de borde.
+  // La demora también se ve en el borde de la tarjeta (no solo en el
+  // cronómetro): se distingue a distancia sin leer el número.
+  const delayBorder =
+    delayLevel === "DELAYED"
+      ? "border-vimdy-danger ring-2 ring-vimdy-danger/40"
+      : delayLevel === "WARNING" && priority === "NORMAL"
+      ? "border-vimdy-warning"
+      : "";
+
   const borderClass = isNew
     ? "border-vimdy-warning animate-kitchen-order-in animate-kitchen-order-glow"
-    : `${priorityStyle.border} ${priorityStyle.pulse ? "animate-pulse" : ""}`;
+    : `${delayBorder || priorityStyle.border} ${priorityStyle.pulse ? "animate-pulse" : ""}`;
 
   return (
     <div
@@ -155,11 +204,28 @@ export function KitchenCard({
     >
 
       <div className="flex justify-between items-center">
-        <div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <h2 className={`font-bold text-vimdy-text ${tvMode ? "text-4xl" : "text-2xl"}`}>
-               {order.origin ?? t("kitchen.card.defaultOrigin")}
+        <div className={`flex items-center min-w-0 ${tvMode ? "gap-5" : "gap-3"}`}>
+          {/* Mesa (o mostrador/domicilio) en grande a la izquierda. */}
+          <div
+            className={`shrink-0 flex flex-col items-center justify-center rounded-2xl border-2 border-vimdy-accent/40 bg-vimdy-accent/10 text-center ${
+              tvMode ? "min-w-[8rem] px-5 py-3" : "min-w-[5rem] px-3 py-2"
+            }`}
+          >
+            {origin.label && (
+              <span className={`font-bold tracking-widest text-vimdy-accent ${tvMode ? "text-base" : "text-[0.65rem]"}`}>
+                {origin.label}
+              </span>
+            )}
+            <h2
+              className={`font-black leading-none text-vimdy-text break-words ${
+                origin.label ? (tvMode ? "text-6xl" : "text-4xl") : tvMode ? "text-3xl" : "text-xl"
+              }`}
+            >
+              {origin.value}
             </h2>
+          </div>
+          <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
             {priority !== "NORMAL" && (
               <span
                 className={`flex items-center gap-1 rounded-lg border font-bold uppercase tracking-wide ${priorityStyle.badge} ${
@@ -178,6 +244,7 @@ export function KitchenCard({
            <p className={`text-vimdy-text-secondary ${tvMode ? "text-base" : "text-xs"}`}>
              {t("kitchen.card.orderNumber", { number: order.orderNumber ?? order.id.slice(0, 8) })}
            </p>
+          </div>
         </div>
 
         <div className="flex items-center gap-1">
@@ -250,45 +317,74 @@ export function KitchenCard({
       </div>
 
       {order.notes && (
-        <div className={`mt-3 flex items-start gap-2 bg-vimdy-warning/10 border border-vimdy-warning/30 rounded-xl ${tvMode ? "px-4 py-3" : "px-3 py-2"}`}>
-          <MessageSquareText size={tvMode ? 22 : 16} className="text-vimdy-warning mt-0.5 shrink-0" />
-          <span className={`text-vimdy-warning ${tvMode ? "text-lg" : "text-sm"}`}>
-            {order.notes}
-          </span>
+        <div className="mt-3">
+          <NoteBox text={order.notes} tvMode={tvMode} />
         </div>
       )}
 
       <div className="mt-6">
-        <KitchenOrderTimer createdAt={order.createdAt} tvMode={tvMode} />
+        <KitchenOrderTimer
+          createdAt={order.createdAt}
+          estimatedMinutes={order.estimatedPrepMinutes}
+          tvMode={tvMode}
+        />
       </div>
 
       <div className={`mt-6 space-y-3 ${tvMode ? "space-y-4" : ""}`}>
-        {order.items.map((item, index) => (
-          <div
-            key={`${item.productId}-${index}`}
-            className={`flex justify-between bg-vimdy-surface-hover rounded-xl ${tvMode ? "p-5" : "p-3"}`}
-          >
-            <div className="flex-1 min-w-0">
-              <p className={`text-vimdy-text font-semibold ${tvMode ? "text-2xl" : ""}`}>
-                 {item.productName}
-                 {!!item.estimatedPrepMinutes && (
-                   <span className={`ml-2 text-vimdy-accent font-normal ${tvMode ? "text-base" : "text-xs"}`}>
-                     {t("kitchen.card.estimatedTime", { minutes: item.estimatedPrepMinutes })}
-                   </span>
-                 )}
-               </p>
-              {item.note && (
-                <div className={`mt-2 flex items-start gap-2 ${tvMode ? "text-base" : "text-xs"}`}>
-                  <MessageSquareText size={tvMode ? 18 : 14} className="text-vimdy-warning mt-0.5 shrink-0" />
-                  <span className="text-vimdy-warning break-words">{item.note}</span>
-                </div>
-              )}
+        {order.items.map((item, index) => {
+          // Si la vista no trae baseName (comanda armada por otro camino) se
+          // cae al nombre completo, igual que antes de este rediseño.
+          const name = item.baseName ?? item.productName;
+          const extras = item.extraNames ?? [];
+          const chipClass = `rounded-lg border font-bold ${tvMode ? "px-3 py-1.5 text-xl" : "px-2 py-0.5 text-xs"}`;
+
+          return (
+            <div
+              key={`${item.productId}-${index}`}
+              className={`flex items-stretch bg-vimdy-surface-hover rounded-xl ${tvMode ? "gap-5 p-4" : "gap-3 p-3"}`}
+            >
+              {/* Cantidad en grande a la izquierda. */}
+              <div
+                className={`shrink-0 flex items-center justify-center rounded-xl border border-vimdy-accent/40 bg-vimdy-accent/15 font-black leading-none tabular-nums text-vimdy-accent ${
+                  tvMode ? "min-w-[6.5rem] px-3 text-7xl" : "min-w-[3.5rem] px-2 text-4xl"
+                }`}
+              >
+                {item.quantity}×
+              </div>
+
+              <div className="flex-1 min-w-0 space-y-2 py-0.5">
+                <p className={`text-vimdy-text font-bold leading-tight break-words ${tvMode ? "text-3xl" : "text-lg"}`}>
+                  {name}
+                  {!!item.estimatedPrepMinutes && (
+                    <span className={`ml-2 text-vimdy-accent font-normal ${tvMode ? "text-base" : "text-xs"}`}>
+                      {t("kitchen.card.estimatedTime", { minutes: item.estimatedPrepMinutes })}
+                    </span>
+                  )}
+                </p>
+
+                {(item.sizeName || extras.length > 0) && (
+                  <div className="flex flex-wrap gap-2">
+                    {item.sizeName && (
+                      <span className={`${chipClass} border-vimdy-border bg-vimdy-surface text-vimdy-text`}>
+                        {item.sizeName}
+                      </span>
+                    )}
+                    {extras.map((extra, extraIndex) => (
+                      <span
+                        key={`${extra}-${extraIndex}`}
+                        className={`${chipClass} border-vimdy-accent/50 bg-vimdy-accent/10 text-vimdy-accent`}
+                      >
+                        + {extra}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {item.note && <NoteBox text={item.note} tvMode={tvMode} />}
+              </div>
             </div>
-            <span className={`text-vimdy-accent font-bold ${tvMode ? "text-2xl" : ""} ml-4`}>
-              x{item.quantity}
-            </span>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className={`mt-6 flex justify-between ${tvMode ? "text-lg" : "text-sm"}`}>

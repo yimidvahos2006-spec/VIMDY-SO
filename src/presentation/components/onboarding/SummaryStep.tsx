@@ -16,7 +16,8 @@ export function SummaryStep({ answers, onEdit, onConfirm }: Props) {
   const modules = calculateModulesFromAnswers(answers);
   const config = calculateOperationConfigFromAnswers(answers);
 
-  const allModules = MODULE_CATALOG.filter(m => m.id !== "pedidos" && m.id !== "ia");
+  // "contable" es opcional y se activa después, en Configuración > Operación.
+  const allModules = MODULE_CATALOG.filter(m => m.id !== "pedidos" && m.id !== "ia" && m.id !== "contable");
 
   const activeModules = allModules.filter(m => modules.includes(m.id));
   const inactiveModules = allModules.filter(m => !modules.includes(m.id));

@@ -25,7 +25,8 @@ export type BusinessCapabilityId =
   | "kds"
   | "kitchenPrinter"
   | "production"
-  | "ai";
+  | "ai"
+  | "accounting";
 
 export type BusinessMetricId =
   | "netSales"
@@ -47,6 +48,7 @@ export const BUSINESS_MODULE_CAPABILITY: Readonly<Record<ModuleId, BusinessCapab
   inventario: "inventory",
   clientes: "customers",
   ia: "ai",
+  contable: "accounting",
 };
 
 export interface BusinessCapabilities {
@@ -62,6 +64,8 @@ export interface BusinessCapabilities {
   readonly kitchenPrinter: boolean;
   readonly production: boolean;
   readonly ai: boolean;
+  /** VIMDY Contable (módulo opcional): solo con el módulo "contable" activo. */
+  readonly accounting: boolean;
 }
 
 export interface BusinessMetricAvailability {
@@ -145,6 +149,7 @@ export function buildBusinessOperatingProfile(
     production:
       hasModule(modules, "inventario") && operationConfig.productionMode !== null,
     ai: hasModule(modules, "ia"),
+    accounting: hasModule(modules, "contable"),
   };
 
   const metrics: BusinessMetricAvailability = {

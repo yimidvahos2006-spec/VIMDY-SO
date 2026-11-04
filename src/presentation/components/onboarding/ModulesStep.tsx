@@ -5,6 +5,7 @@ import {
   CalendarCheck,
   ChefHat,
   BarChart3,
+  Calculator,
   Settings,
   UtensilsCrossed,
   UserRound,
@@ -90,6 +91,7 @@ const MODULE_ICONS: Record<ModuleId, React.ElementType> = {
   inventario: BarChart3,
   clientes: Users,
   ia: Settings,
+  contable: Calculator,
 };
 
 const KITCHEN_OPTIONS: ReadonlyArray<{

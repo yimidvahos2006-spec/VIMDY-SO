@@ -203,6 +203,20 @@ export function OperationSettings() {
         </section>
 
         <section className="rounded-2xl border border-slate-700 bg-slate-800/50 p-6">
+          <h2 className="text-xl font-semibold text-white">Módulos opcionales</h2>
+          <p className="mt-1 text-sm text-slate-400">Actívalos solo si los vas a usar.</p>
+          <div className="mt-5 space-y-3">
+            <ToggleRow
+              icon="📒"
+              label="VIMDY Contable"
+              description="Registra tus gastos fijos (arriendo, servicios, nómina…) y mira la utilidad neta real en Ganancias. Lo ven el administrador, el gerente y el contador."
+              checked={draft.hasAccounting}
+              onChange={(value) => dispatch({ type: "setFlag", key: "hasAccounting", value })}
+            />
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-700 bg-slate-800/50 p-6">
           <div className="flex items-center gap-3">
             <Sliders size={20} className="text-purple-400" aria-hidden="true" />
             <div>

@@ -56,6 +56,8 @@ export interface OperationDraft {
   readonly inventoryType: InventoryType | null;
   readonly productionMode: ProductionMode | null;
   readonly useCustomers: boolean;
+  /** VIMDY Contable (módulo opcional): gastos fijos y utilidad neta real. */
+  readonly hasAccounting: boolean;
   readonly salesRules: SalesRulesDraft;
 }
 
@@ -66,7 +68,8 @@ export type OperationFlagKey =
   | "kdsEnabled"
   | "printerEnabled"
   | "hasInventory"
-  | "useCustomers";
+  | "useCustomers"
+  | "hasAccounting";
 
 export type SalesRuleKey = keyof SalesRulesDraft;
 
@@ -145,12 +148,13 @@ export function draftFromSources(
     inventoryType: config?.inventoryType ?? null,
     productionMode: config?.productionMode ?? null,
     useCustomers: has("clientes"),
+    hasAccounting: has("contable"),
     salesRules,
   });
 }
 
 /** Módulos que ESTA pantalla controla. Los demás (ej. "ia") se conservan tal cual. */
-const MANAGED_MODULES: readonly ModuleId[] = ["caja", "pedidos", "mesas", "cocina", "inventario", "clientes"];
+const MANAGED_MODULES: readonly ModuleId[] = ["caja", "pedidos", "mesas", "cocina", "inventario", "clientes", "contable"];
 
 export function draftToModules(draft: OperationDraft, previousModules: readonly ModuleId[] | null): ModuleId[] {
   const modules: ModuleId[] = ["caja", "pedidos"];
@@ -158,6 +162,7 @@ export function draftToModules(draft: OperationDraft, previousModules: readonly 
   if (draft.hasKitchen) modules.push("cocina");
   if (draft.hasInventory) modules.push("inventario");
   if (draft.useCustomers) modules.push("clientes");
+  if (draft.hasAccounting) modules.push("contable");
   const preserved = (previousModules ?? []).filter((id) => !MANAGED_MODULES.includes(id));
   return [...modules, ...preserved.filter((id, index) => preserved.indexOf(id) === index)];
 }

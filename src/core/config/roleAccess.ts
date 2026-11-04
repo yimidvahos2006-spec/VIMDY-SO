@@ -42,6 +42,9 @@ export const ROUTE_PERMISSIONS: Readonly<Record<string, readonly string[]>> = {
   "/compras-inteligentes": ["reports.view"],
   "/pronostico": ["reports.view"],
   "/ia": ["reports.view"],
+  // VIMDY Contable. Además del permiso, la ruta exige el módulo "contable"
+  // activo en el negocio (ver RequireModule en routes/App.tsx).
+  "/gastos-fijos": ["accounting.view"],
   "/configuracion": ["company.settings"]
 };
 

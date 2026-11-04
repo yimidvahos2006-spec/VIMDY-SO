@@ -4,6 +4,7 @@ import {
   ShoppingCart,
   ChefHat,
   Boxes,
+  Calculator,
   Users,
   UserRound,
   BarChart3,
@@ -39,6 +40,7 @@ const menu = [
 
   { icon: Truck, title: "Compras", path: "/compras-inteligentes" },
   { icon: DollarSign, title: "Ganancias", path: "/ganancias" },
+  { icon: Calculator, title: "Gastos fijos", path: "/gastos-fijos" },
   { icon: ShieldAlert, title: "Pérdidas", path: "/perdidas" },
   { icon: BarChart3, title: "Reportes", path: "/reportes" },
 
@@ -77,6 +79,7 @@ export function VimdySidebar() {
     "/clientes": "customers",
     "/compras-inteligentes": "inventory",
     "/ganancias": "inventory",
+    "/gastos-fijos": "accounting",
     "/perdidas": "inventory",
     "/ia": "ai",
   };
@@ -88,6 +91,7 @@ export function VimdySidebar() {
     inventory: useCanUse("inventory"),
     customers: useCanUse("customers"),
     ai: useCanUse("ai"),
+    accounting: useCanUse("accounting"),
   };
   // La pantalla de /meseros se llama "Meseros" solo si el negocio usa meseros;
   // si solo tiene mesas, se llama "Mesas".

@@ -16,7 +16,9 @@ export type ModuleId =
   | "caja"
   | "inventario"
   | "clientes"
-  | "ia";
+  | "ia"
+  /** VIMDY Contable (opcional): gastos fijos y utilidad neta real. Nunca viene activo por defecto. */
+  | "contable";
 
 export interface ModuleDefinition {
   id: ModuleId;
@@ -39,7 +41,8 @@ export const MODULE_CATALOG: ModuleDefinition[] = [
   { id: "caja", label: "Caja", emoji: "💵", sidebarPath: "/caja" },
   { id: "inventario", label: "Inventario", emoji: "📦", sidebarPath: "/inventario" },
   { id: "clientes", label: "Clientes", emoji: "👥", sidebarPath: "/clientes" },
-  { id: "ia", label: "IA", emoji: "✦", sidebarPath: null }
+  { id: "ia", label: "IA", emoji: "✦", sidebarPath: null },
+  { id: "contable", label: "VIMDY Contable", emoji: "📒", sidebarPath: "/gastos-fijos" }
 ];
 
 /** Módulos base mínimos para negocios sin configuración específica. */

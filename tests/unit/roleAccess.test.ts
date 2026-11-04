@@ -78,6 +78,38 @@ describe("No se rompe el acceso de otros roles", () => {
   });
 });
 
+describe("VIMDY Contable: /gastos-fijos solo para ADMIN, GERENTE y CONTADOR", () => {
+  it("la ruta pide el permiso accounting.view", () => {
+    expect(ROUTE_PERMISSIONS["/gastos-fijos"]).toEqual(["accounting.view"]);
+  });
+
+  it("ADMIN, GERENTE y CONTADOR pueden abrirla", () => {
+    for (const role of ["ADMIN", "GERENTE", "CONTADOR"]) {
+      expect(canAccessPath("/gastos-fijos", canFor(role), role), role).toBe(true);
+    }
+  });
+
+  it("CAJERO, MESERO, COCINA, INVENTARIO y SOPORTE NO pueden abrirla", () => {
+    for (const role of ["CAJERO", "MESERO", "COCINA", "INVENTARIO", "SOPORTE", "ROL_INVENTADO"]) {
+      expect(canAccessPath("/gastos-fijos", canFor(role), role), role).toBe(false);
+    }
+  });
+
+  it("registrar/borrar (accounting.manage) es de ADMIN y GERENTE; el CONTADOR solo consulta", () => {
+    expect(canFor("ADMIN")("accounting.manage")).toBe(true);
+    expect(canFor("GERENTE")("accounting.manage")).toBe(true);
+    expect(canFor("CONTADOR")("accounting.manage")).toBe(false);
+    expect(canFor("CONTADOR")("accounting.view")).toBe(true);
+  });
+
+  it("mismos roles que la base de datos (RLS de fixed_expenses)", () => {
+    // La migración deja LEER a ADMIN/GERENTE/CONTADOR y ESCRIBIR a ADMIN/GERENTE.
+    const withView = ["ADMIN", "GERENTE", "CONTADOR", "CAJERO", "MESERO", "COCINA", "INVENTARIO", "SOPORTE"]
+      .filter((role) => canFor(role)("accounting.view"));
+    expect(withView).toEqual(["ADMIN", "GERENTE", "CONTADOR"]);
+  });
+});
+
 describe("Redirección de rutas no autorizadas, sin bucles", () => {
   it("un MESERO que intenta /inventario va a /meseros", () => {
     expect(resolveDeniedRedirect("/inventario", "MESERO")).toBe("/meseros");

@@ -14,7 +14,14 @@ import { buildVariantDisplayName } from "../utils/variantDisplayName";
 
 export interface KitchenOrderItemView {
   productId: string;
+  /** Nombre completo con variante, ej. "Pizza (Grande, Tocineta)". Lo usan los tickets impresos. */
   productName: string;
+  /** Solo el nombre del producto, sin tamaño ni extras (ej. "Pizza"). La tarjeta lo usa para pintar los extras aparte. */
+  baseName?: string;
+  /** Tamaño elegido (ej. "Grande"), si el producto tiene presentaciones. */
+  sizeName?: string;
+  /** Extras elegidos (ej. ["Tocineta", "Queso"]). Vacío o ausente si no hay. */
+  extraNames?: string[];
   quantity: number;
   price: number;
   /** Product.estimatedPrepMinutes de este item, si el negocio lo definió. */
@@ -100,13 +107,14 @@ export function enrichKitchenOrders(
       const product = productById.get(item.productId);
       const category = product ? categoryById.get(product.categoryId) : undefined;
 
+      const baseName = product?.name ?? "Producto";
+
       return {
         productId: item.productId,
-        productName: buildVariantDisplayName(
-          product?.name ?? "Producto",
-          item.selectedSize,
-          item.selectedExtras
-        ),
+        productName: buildVariantDisplayName(baseName, item.selectedSize, item.selectedExtras),
+        baseName,
+        sizeName: item.selectedSize?.name || undefined,
+        extraNames: (item.selectedExtras ?? []).map(extra => extra?.name).filter((name): name is string => !!name),
         quantity: item.quantity,
         price: item.price,
         estimatedPrepMinutes: product?.estimatedPrepMinutes,

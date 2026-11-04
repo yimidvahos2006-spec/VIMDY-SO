@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronDown, Check } from "lucide-react";
+import { ChevronDown, Check, List, Map as MapIcon } from "lucide-react";
 
 import { useTranslation } from "../../core/i18n/useTranslation";
 import { Table, Product, Waiter } from "../../core/entities/Entities";
@@ -14,12 +14,18 @@ import { useVimdyEvent } from "../../hooks/useVimdyCore";
 import { startLiveCatalog } from "../../core/utils/liveCatalog";
 import { readCachedWaiters, writeCachedWaiters } from "../../core/utils/waiterCache";
 import { loadMeserosScreen } from "../../core/utils/meserosLoad";
+import { waiterSessionService } from "../../core/services/waiterSessionService";
 import { logWarning } from "../../infrastructure/logging/opsLogger";
+import { saveTableLayouts, type TableLayoutUpdate } from "../../core/services/tableLayoutService";
+import { useAuth } from "../context/AuthContext";
 
 import { WaiterSelect } from "../components/waiter/WaiterSelect";
 import { TableGrid } from "../components/waiter/TableGrid";
+import { FloorPlan } from "../components/floorplan/FloorPlan";
 import { OpenTableDialog } from "../components/waiter/OpenTableDialog";
 import { TableDetailPanel } from "../components/waiter/TableDetailPanel";
+import { TableQuickOrder } from "../components/waiter/TableQuickOrder";
+import { TableManageSheet } from "../components/waiter/TableManageSheet";
 import { VoiceCommandButton } from "../components/waiter/VoiceCommandButton";
 import type { TableVoiceMerge, TableVoiceTarget } from "../../core/voice/useTableVoiceCommand";
 import type { ParsedVoiceOrder } from "../../core/voice/orderParser";
@@ -40,33 +46,24 @@ function shortWaiterName(name: string): string {
   return `${parts[0]} ${parts[1].charAt(0).toUpperCase()}.`;
 }
 
+type TablesView = "plan" | "list";
+const VIEW_STORAGE_KEY = "vimdy.mesas.view";
+
+/** Última vista elegida; sin preferencia: plano en pantallas grandes, lista en celular. */
+function readInitialView(): TablesView {
+  try {
+    const stored = window.localStorage.getItem(VIEW_STORAGE_KEY);
+    if (stored === "plan" || stored === "list") return stored;
+  } catch {
+    /* localStorage puede no estar disponible (modo privado): se usa el valor por defecto. */
+  }
+  return window.matchMedia?.("(min-width: 1024px)").matches ? "plan" : "list";
+}
+
 /** "mesero 2" → "Mesero 2" (solo para mostrar; el nombre guardado no cambia). */
 function capitalizeFirst(text: string): string {
   const trimmed = text.trim();
   return trimmed ? trimmed.charAt(0).toUpperCase() + trimmed.slice(1) : text;
-}
-
-/** El mesero activo sobrevive a una recarga o a una caída del Wi-Fi. */
-function activeWaiterStorageKey(businessId: string | null | undefined): string {
-  return `vimdy.meseros.activeWaiter.${businessId ?? "default"}`;
-}
-
-function readStoredWaiterId(businessId: string | null | undefined): string | null {
-  try {
-    return window.localStorage.getItem(activeWaiterStorageKey(businessId));
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredWaiterId(businessId: string | null | undefined, waiterId: string | null): void {
-  try {
-    const key = activeWaiterStorageKey(businessId);
-    if (waiterId) window.localStorage.setItem(key, waiterId);
-    else window.localStorage.removeItem(key);
-  } catch {
-    /* modo privado o almacenamiento lleno: se sigue sin recordar */
-  }
 }
 
 function MeserosContent() {
@@ -74,6 +71,8 @@ function MeserosContent() {
   const navigate = useNavigate();
   const tablesEnabled = useCanUse("tables");
   const waiterModeEnabled = useCanUse("waiters");
+  const { can, role } = useAuth();
+  const [tablesView, setTablesView] = useState<TablesView>(readInitialView);
   const [ready, setReady] = useState(false);
   const [rawTables, setTables] = useState<Table[]>([]);
   // Una mesa "unida" cuya principal ya no tiene cuenta se trata como libre.
@@ -96,6 +95,11 @@ function MeserosContent() {
   const [waiterMenuOpen, setWaiterMenuOpen] = useState(false);
 
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+  // "manage" = gestión de una mesa activa (ver cuenta, pre-cuenta, agregar, cobrar);
+  // "quick" = toma de pedido táctil; "full" = panel completo (cobrar, unir, transferir…).
+  const [detailView, setDetailView] = useState<"manage" | "quick" | "full">("quick");
+  // El panel completo se abre directo en el cobro (botón "Cobrar y liberar mesa").
+  const [openChargeOnFull, setOpenChargeOnFull] = useState(false);
   const [dialog, setDialog] = useState<"open" | "detail" | null>(null);
   // Comensales dictados por voz para precargar el diálogo de apertura.
   const [voicePeopleCount, setVoicePeopleCount] = useState<number | null>(null);
@@ -143,13 +147,19 @@ function MeserosContent() {
 
         // Aplica la lista de meseros y recupera al que estaba atendiendo antes
         // de recargar (una sola vez).
-        const applyWaiters = (list: Waiter[]) => {
+        const applyWaiters = (list: Waiter[], source: "cache" | "network" = "network") => {
           setWaiters(list);
-          if (!restoredWaiterRef.current) {
+          if (restoredWaiterRef.current) return;
+
+          const stored = waiterSessionService.resolve(businessId, list);
+          if (stored) {
             restoredWaiterRef.current = true;
-            const storedId = readStoredWaiterId(businessId);
-            const stored = storedId ? list.find(w => w.id === storedId) : undefined;
-            if (stored) setActiveWaiter(stored);
+            setActiveWaiter(stored);
+          } else if (source === "network") {
+            // Lista confirmada por la red y el mesero ya no está (borrado o
+            // desactivado) o la sesión venció: no dejar un fantasma guardado.
+            restoredWaiterRef.current = true;
+            waiterSessionService.end(businessId);
           }
         };
 
@@ -233,9 +243,14 @@ function MeserosContent() {
   function handleSelectTable(table: Table, options?: { reserve?: boolean }) {
     setOpenInReserveMode(Boolean(options?.reserve));
     setSelectedTableId(table.id);
+    setOpenChargeOnFull(false);
     if (table.status === "FREE" || table.status === "RESERVED") {
+      // Mesa libre: se abre y, al abrirse, va directo a tomar el pedido.
+      setDetailView("quick");
       setDialog("open");
     } else {
+      // Mesa activa: primero la gestión (cuenta, pre-cuenta, agregar o cobrar).
+      setDetailView("manage");
       setDialog("detail");
     }
   }
@@ -245,6 +260,8 @@ function MeserosContent() {
     setVoicePeopleCount(peopleCount);
     setVoiceOrder(order ?? null);
     handleSelectTable(table);
+    // El pedido dictado lo aplica el panel completo al abrirse.
+    if (order) setDetailView("full");
   }
 
   /** Control por voz: unir dos mesas con cuenta abierta (ya confirmado por el mesero). */
@@ -291,7 +308,7 @@ function MeserosContent() {
       navigate("/caja", { state: { tab: "venta", waiterId: waiter.id } });
       return;
     }
-    writeStoredWaiterId(getCurrentBusinessId(), waiter.id);
+    waiterSessionService.start(getCurrentBusinessId(), waiter.id);
     setActiveWaiter(waiter);
   }
 
@@ -299,7 +316,7 @@ function MeserosContent() {
   function handleQuickSwitch(waiter: Waiter) {
     setWaiterMenuOpen(false);
     if (waiter.id === activeWaiter?.id) return;
-    writeStoredWaiterId(getCurrentBusinessId(), waiter.id);
+    waiterSessionService.start(getCurrentBusinessId(), waiter.id);
     setActiveWaiter(waiter);
     toast.info(`Ahora atiende ${waiter.name}.`, 2500);
   }
@@ -307,6 +324,7 @@ function MeserosContent() {
   function closeDialogs() {
     setDialog(null);
     setSelectedTableId(null);
+    setOpenChargeOnFull(false);
     setVoicePeopleCount(null);
     setVoiceOrder(null);
   }
@@ -315,11 +333,28 @@ function MeserosContent() {
   function returnToWaiterSelect() {
     closeDialogs();
     setWaiterMenuOpen(false);
-    writeStoredWaiterId(getCurrentBusinessId(), null);
+    waiterSessionService.end(getCurrentBusinessId());
     setActiveWaiter(null);
   }
 
   const showTableTools = ready && !loadError && tablesEnabled && (!waiterModeEnabled || activeWaiter);
+
+  // Mover mesas en el plano lo hace quien administra el salón, no el mesero de turno.
+  const canEditLayout = can("tables.manage") && role?.id !== "MESERO" && !activeWaiter;
+
+  function changeTablesView(view: TablesView) {
+    setTablesView(view);
+    try {
+      window.localStorage.setItem(VIEW_STORAGE_KEY, view);
+    } catch {
+      /* preferencia opcional: si no se puede guardar, solo se pierde al recargar */
+    }
+  }
+
+  const saveLayouts = useCallback(
+    (updates: TableLayoutUpdate[]) => saveTableLayouts(container.tableEngine.get(), updates),
+    []
+  );
 
   // La pantalla de elegir mesero sigue llamándose "Meseros"; en cuanto hay
   // un mesero activo (o el negocio no usa meseros) lo que se elige son mesas.
@@ -353,6 +388,27 @@ function MeserosContent() {
 
         {/* Barra superior derecha: micrófono + mesero activo + cambio de mesero. */}
         <div className="flex flex-wrap items-center justify-end gap-3">
+          {showTableTools && (
+            <div role="group" aria-label="Vista de mesas" className="flex h-12 items-center gap-1 rounded-xl bg-slate-800 p-1">
+              {([
+                { view: "plan", label: "Plano", icon: MapIcon },
+                { view: "list", label: "Lista", icon: List }
+              ] as const).map(({ view, label, icon: Icon }) => (
+                <button
+                  key={view}
+                  type="button"
+                  aria-pressed={tablesView === view}
+                  onClick={() => changeTablesView(view)}
+                  className={`flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-semibold transition ${
+                    tablesView === view ? "bg-slate-700 text-white" : "text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  <Icon size={16} aria-hidden /> {label}
+                </button>
+              ))}
+            </div>
+          )}
+
           {showTableTools && dialog === null && (
             <VoiceCommandButton tables={tables} products={products} onTarget={handleVoiceTarget} onMerge={handleVoiceMerge} />
           )}
@@ -442,7 +498,19 @@ function MeserosContent() {
       )}
 
       {/* Paso 2: mesas, ya con el mesero identificado. */}
-      {ready && !loadError && tablesEnabled && (!waiterModeEnabled || activeWaiter) && (
+      {ready && !loadError && tablesEnabled && (!waiterModeEnabled || activeWaiter) && tablesView === "plan" && (
+        <FloorPlan
+          tables={tables}
+          waiters={waiters}
+          avgDurationMs={avgDurationMs}
+          onSelect={(table) => handleSelectTable(table)}
+          onSaveLayouts={canEditLayout ? saveLayouts : undefined}
+          onLayoutSaved={reloadTables}
+          onGoToList={() => changeTablesView("list")}
+        />
+      )}
+
+      {ready && !loadError && tablesEnabled && (!waiterModeEnabled || activeWaiter) && tablesView === "list" && (
         <TableGrid tables={tables} waiters={waiters} onSelect={(table) => handleSelectTable(table)} onReserve={(table) => handleSelectTable(table, { reserve: true })} avgDurationMs={avgDurationMs} onTablesChanged={reloadTables} />
       )}
 
@@ -461,13 +529,48 @@ function MeserosContent() {
         />
       )}
 
-      {dialog === "detail" && selectedTable && (
+      {dialog === "detail" && selectedTable && detailView === "manage" && (
+        <TableManageSheet
+          table={selectedTable}
+          products={products}
+          waiterName={waiters.find(w => w.id === selectedTable.waiterId)?.name}
+          onClose={closeDialogs}
+          onChanged={reloadTables}
+          onAddProducts={() => setDetailView("quick")}
+          onOpenFullPanel={() => setDetailView("full")}
+          onCharge={() => {
+            setOpenChargeOnFull(true);
+            setDetailView("full");
+          }}
+          onReleased={() => {
+            closeDialogs();
+            reloadTables();
+          }}
+        />
+      )}
+
+      {dialog === "detail" && selectedTable && detailView === "quick" && (
+        <TableQuickOrder
+          table={selectedTable}
+          products={products}
+          onClose={closeDialogs}
+          onChanged={reloadTables}
+          onOpenFullPanel={() => setDetailView("full")}
+          onOrderSent={() => {
+            closeDialogs();
+            reloadTables();
+          }}
+        />
+      )}
+
+      {dialog === "detail" && selectedTable && detailView === "full" && (
         <TableDetailPanel
           table={selectedTable}
           tables={tables}
           products={products}
           initialVoiceOrder={voiceOrder}
           onVoiceOrderConsumed={() => setVoiceOrder(null)}
+          autoOpenCharge={openChargeOnFull}
           onClose={closeDialogs}
           onChanged={reloadTables}
           onClosedTable={() => {

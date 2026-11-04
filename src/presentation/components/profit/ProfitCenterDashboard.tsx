@@ -28,8 +28,18 @@ import {
   type ProfitSaleLine,
   type ProfitSummary
 } from "../../../core/domain/profit/profitEngine";
+import type { FixedExpenseSummary } from "../../../core/domain/accounting/fixedExpenseSummary";
+import {
+  buildRealNetProfitBreakdown,
+  fixedExpenseFilterForPeriod,
+  withFixedExpenses,
+  type RealNetProfitBreakdown
+} from "../../../core/domain/accounting/realNetProfit";
 import { container, productsReady } from "../../../infrastructure/di/CompositionRoot";
 import { useVimdyEvent } from "../../../hooks/useVimdyCore";
+import { useCanUse } from "../../../hooks/useCanUse";
+import { useAuth } from "../../context/AuthContext";
+import { useFixedExpensesForPeriod } from "../../hooks/useFixedExpensesForPeriod";
 import { companyConfigStore } from "../../../core/store/companyConfigStore";
 import { getSaleNetItems, isRevenueSaleStatus } from "../../../core/utils/saleRefunds";
 import { startOfBusinessDay, startOfBusinessMonth, startOfBusinessWeek, startOfBusinessYear } from "../../../core/utils/businessTime";
@@ -65,6 +75,17 @@ export interface ProfitCenterViewProps {
   readonly theme?: ProfitCenterTheme | undefined;
   /** Acción del estado vacío ("Registrar primera venta"). Si falta, no se muestra el botón. */
   readonly onRegisterSale?: (() => void) | undefined;
+  /**
+   * VIMDY Contable. Resumen de los gastos fijos del periodo. Con él la vista
+   * los suma a los gastos operativos y muestra la "Utilidad neta real"
+   * (ventas − costo de insumos − gastos fijos) con su desglose. Sin él, todo
+   * se ve como antes.
+   */
+  readonly fixedExpenses?: FixedExpenseSummary | undefined;
+  /** Si los gastos fijos no se pudieron cargar: aviso de que la utilidad neta NO los incluye. */
+  readonly fixedExpensesError?: string | null | undefined;
+  /** Nota bajo el desglose (p. ej. cómo se cuentan los gastos fijos en periodos cortos). */
+  readonly fixedExpensesNote?: string | undefined;
 }
 
 /**
@@ -206,6 +227,19 @@ const STYLES = `
 .pcd-foot strong{color:var(--pcd-text);font-weight:600}
 .pcd-uncl{margin:0;padding:12px 16px;border-top:1px solid var(--pcd-border);font-size:.78rem;color:var(--pcd-muted);line-height:1.5}
 
+.pcd-real-rows{margin:0;padding:6px 0;display:flex;flex-direction:column}
+.pcd-real-row{display:flex;align-items:baseline;justify-content:space-between;gap:16px;padding:10px 16px;font-variant-numeric:tabular-nums}
+.pcd-real-row dt{margin:0;font-size:.9rem;color:var(--pcd-muted)}
+.pcd-real-row dd{margin:0;font-weight:600;font-size:.95rem;text-align:right;overflow-wrap:anywhere}
+.pcd-real-row[data-kind="sub"]{padding-top:3px;padding-bottom:3px}
+.pcd-real-row[data-kind="sub"] dt{padding-left:18px;font-size:.8rem;color:var(--pcd-faint)}
+.pcd-real-row[data-kind="sub"] dd{font-weight:500;font-size:.82rem;color:var(--pcd-muted)}
+.pcd-real-row[data-kind="total"]{margin-top:6px;padding-top:14px;padding-bottom:14px;border-top:1px solid var(--pcd-border);background:var(--pcd-surface-2)}
+.pcd-real-row[data-kind="total"] dt{font-weight:700;font-size:1rem;color:var(--pcd-text)}
+.pcd-real-row[data-kind="total"] dd{font-weight:700;font-size:1.25rem}
+.pcd-real-row dd[data-tone="good"]{color:var(--pcd-good)}
+.pcd-real-row dd[data-tone="bad"]{color:var(--pcd-bad)}
+
 .pcd-empty{border:1px dashed var(--pcd-border);background:var(--pcd-surface);border-radius:20px;padding:64px 24px;
   display:flex;flex-direction:column;align-items:center;text-align:center}
 .pcd-empty-icon{width:64px;height:64px;border-radius:18px;display:grid;place-items:center;margin-bottom:16px;
@@ -321,6 +355,67 @@ function LoadingState() {
   );
 }
 
+interface RealNetProfitPanelProps {
+  readonly breakdown: RealNetProfitBreakdown;
+  readonly money: (value: number) => string;
+  readonly decimal: (value: number) => string;
+  readonly note?: string | undefined;
+}
+
+/** Ventas − costo de insumos − gastos fijos = utilidad neta real, con las cuentas a la vista. */
+function RealNetProfitPanel({ breakdown, money, decimal, note }: RealNetProfitPanelProps) {
+  const minus = (value: number) => (value > 0 ? `− ${money(value)}` : money(0));
+  const isLoss = breakdown.realNetProfit < 0;
+
+  return (
+    <section aria-label="Utilidad neta real">
+      <div className="pcd-section-head">
+        <div>
+          <h2>Utilidad neta real</h2>
+          <p>Lo que de verdad te queda: ventas, menos lo que cuestan los insumos, menos tus gastos fijos.</p>
+        </div>
+      </div>
+      <div className="pcd-panel">
+        <dl className="pcd-real-rows">
+          <div className="pcd-real-row">
+            <dt>Ventas</dt>
+            <dd>{money(breakdown.sales)}</dd>
+          </div>
+          <div className="pcd-real-row">
+            <dt>Costo de insumos</dt>
+            <dd>{minus(breakdown.supplyCosts)}</dd>
+          </div>
+          <div className="pcd-real-row">
+            <dt>Gastos fijos</dt>
+            <dd>{minus(breakdown.fixedExpenses)}</dd>
+          </div>
+          {breakdown.byCategory.map((line) => (
+            <div key={line.category} className="pcd-real-row" data-kind="sub">
+              <dt>{line.label}</dt>
+              <dd>{money(line.total)}</dd>
+            </div>
+          ))}
+          {breakdown.otherExpenses > 0 && (
+            <div className="pcd-real-row">
+              <dt>Otros gastos operativos</dt>
+              <dd>{minus(breakdown.otherExpenses)}</dd>
+            </div>
+          )}
+          <div className="pcd-real-row" data-kind="total">
+            <dt>Utilidad neta real</dt>
+            <dd data-tone={isLoss ? "bad" : "good"}>{money(breakdown.realNetProfit)}</dd>
+          </div>
+        </dl>
+        <div className="pcd-foot">
+          Margen neto real: <strong>{decimal(breakdown.netMarginPercent)} %</strong> de las ventas.
+          {breakdown.fixedExpenses === 0 && " Aún no hay gastos fijos registrados en este periodo."}
+          {note ? ` ${note}` : ""}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function EmptyProfitState({ onRegisterSale }: { readonly onRegisterSale?: (() => void) | undefined }) {
   return (
     <div className="pcd-empty" role="status">
@@ -364,11 +459,24 @@ export function ProfitCenterView({
   marginBasis = "UNIT_PROFIT",
   periodLabel,
   theme = "dark",
-  onRegisterSale
+  onRegisterSale,
+  fixedExpenses,
+  fixedExpensesError = null,
+  fixedExpensesNote
 }: ProfitCenterViewProps) {
   const [filter, setFilter] = useState<CategoryFilter>("TODOS");
 
-  const summary: ProfitSummary = useMemo(() => computeProfitSummary(input), [input]);
+  // Con VIMDY Contable, los gastos fijos entran como gastos operativos del
+  // motor: la utilidad neta sale de su misma fórmula (nada se calcula aparte).
+  const effectiveInput = useMemo(
+    () => (fixedExpenses ? withFixedExpenses(input, fixedExpenses) : input),
+    [input, fixedExpenses]
+  );
+  const summary: ProfitSummary = useMemo(() => computeProfitSummary(effectiveInput), [effectiveInput]);
+  const realNet = useMemo(
+    () => (fixedExpenses ? buildRealNetProfitBreakdown(summary, fixedExpenses) : null),
+    [summary, fixedExpenses]
+  );
   const matrix = useMemo(() => buildMenuMatrix(input, { marginBasis }), [input, marginBasis]);
 
   const money = useMemo(() => makeMoneyFormatter(currency, locale), [currency, locale]);
@@ -409,10 +517,24 @@ export function ProfitCenterView({
         </div>
       )}
 
+      {fixedExpensesError && !loading && (
+        <div className="pcd-banner" role="alert" style={{ color: "var(--pcd-bad)", background: "var(--pcd-bad-soft)" }}>
+          <TriangleAlert size={18} aria-hidden="true" />
+          <span>
+            No pudimos cargar tus gastos fijos ({fixedExpensesError}). La ganancia neta que ves NO los incluye todavía.
+          </span>
+        </div>
+      )}
+
       {loading ? (
         <LoadingState />
       ) : !hasSales ? (
-        <EmptyProfitState onRegisterSale={onRegisterSale} />
+        <>
+          {realNet && realNet.fixedExpenses > 0 && (
+            <RealNetProfitPanel breakdown={realNet} money={money} decimal={decimal} note={fixedExpensesNote} />
+          )}
+          <EmptyProfitState onRegisterSale={onRegisterSale} />
+        </>
       ) : (
         <>
           {(summary.productsWithIncompleteCost.length > 0 || summary.unknownProductIds.length > 0) && (
@@ -456,13 +578,21 @@ export function ProfitCenterView({
             />
             <SummaryCard
               hero
-              label="Ganancia neta"
+              label={realNet ? "Utilidad neta real" : "Ganancia neta"}
               value={money(summary.netProfit)}
-              hint={`Después de ${money(summary.operatingExpenses)} en gastos · ${decimal(summary.netMarginPercent)} %`}
+              hint={
+                realNet
+                  ? `Ventas − insumos − gastos fijos · ${decimal(summary.netMarginPercent)} %`
+                  : `Después de ${money(summary.operatingExpenses)} en gastos · ${decimal(summary.netMarginPercent)} %`
+              }
               icon={netIsLoss ? <TrendingDown size={16} /> : <PiggyBank size={16} />}
               tone={netIsLoss ? "bad" : "good"}
             />
           </div>
+
+          {realNet && (
+            <RealNetProfitPanel breakdown={realNet} money={money} decimal={decimal} note={fixedExpensesNote} />
+          )}
 
           <div>
             <div className="pcd-section-head">
@@ -674,6 +804,7 @@ async function loadRawProfitData(): Promise<RawProfitData> {
 function ConnectedProfitCenter(props: Omit<ProfitCenterDashboardProps, "input">) {
   const { operatingExpenses, periodLabel, ...viewProps } = props;
   const [range, setRange] = useState<ProfitRange>("mes");
+  const { businessId, can } = useAuth();
   const [raw, setRaw] = useState<RawProfitData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -706,6 +837,21 @@ function ConnectedProfitCenter(props: Omit<ProfitCenterDashboardProps, "input">)
     return { catalog: raw?.catalog ?? [], sales: lines, operatingExpenses: operatingExpenses ?? [] };
   }, [raw, range, operatingExpenses]);
 
+  // VIMDY Contable: solo si el negocio tiene el módulo activo Y el rol puede
+  // ver gastos fijos (ADMIN, GERENTE, CONTADOR). Si no, el Centro de Ganancias
+  // queda exactamente como antes.
+  const accountingOn = useCanUse("accounting") && can("accounting.view");
+  const timezone = companyConfigStore.get().timezone || "America/Bogota";
+  const fixedFilter = useMemo(
+    () => fixedExpenseFilterForPeriod(rangeStart(range, timezone), new Date(), timezone),
+    [range, timezone]
+  );
+  const fixed = useFixedExpensesForPeriod(businessId ?? null, accountingOn, fixedFilter.from, fixedFilter.to);
+  // "Activo pero aún sin respuesta ni error" cuenta como cargando: así nunca
+  // se muestra por un instante una utilidad sin gastos fijos.
+  const fixedPending = accountingOn && fixed.summary === null && fixed.error === null;
+  const shortPeriod = range === "hoy" || range === "semana";
+
   const periodControl = (
     <div className="pcd-range" role="group" aria-label="Periodo">
       {RANGE_ORDER.map((key) => (
@@ -726,8 +872,15 @@ function ConnectedProfitCenter(props: Omit<ProfitCenterDashboardProps, "input">)
     <ProfitCenterView
       {...viewProps}
       input={input}
-      loading={loading}
+      loading={loading || fixed.loading || fixedPending}
       error={error}
+      fixedExpenses={accountingOn ? (fixed.summary ?? undefined) : undefined}
+      fixedExpensesError={accountingOn ? fixed.error : null}
+      fixedExpensesNote={
+        shortPeriod
+          ? "Los gastos fijos se cuentan por la fecha del gasto: para ver el mes completo elige «Este mes»."
+          : undefined
+      }
       periodLabel={periodLabel ?? RANGE_LABEL[range]}
       periodControl={periodControl}
       currency={viewProps.currency ?? companyConfigStore.get().currency}

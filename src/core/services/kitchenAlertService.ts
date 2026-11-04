@@ -8,6 +8,8 @@
    estar de espaldas a la pantalla y aun así enterarse de un pedido nuevo.
 =========================================================================== */
 
+import { getKitchenAudio } from "./kitchenAudio";
+
 export interface AnnouncedOrder {
   /** Texto ya resuelto a algo legible ("Mesa 5", "Domicilio", "Mostrador"). */
   origin?: string;
@@ -56,20 +58,20 @@ function capitalize(text: string): string {
 
 /**
  * Reproduce el "Tin" de aviso: dos tonos ascendentes sintetizados con
- * Web Audio API (sin depender de ningún archivo de audio).
+ * Web Audio API (sin depender de ningún archivo de audio). Usa el
+ * AudioContext compartido de kitchenAudio y solo suena si ya está
+ * desbloqueado; si no, devuelve false (la UI ya muestra el aviso).
  */
-function playChime(): Promise<void> {
+function playChime(): Promise<boolean> {
   return new Promise((resolve) => {
     try {
-      const AudioContextClass =
-        window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = getKitchenAudio().getContext();
 
-      if (!AudioContextClass) {
-        resolve();
+      if (!ctx || ctx.state !== "running") {
+        resolve(false);
         return;
       }
 
-      const ctx = new AudioContextClass();
       const now = ctx.currentTime;
 
       const notes = [
@@ -97,12 +99,9 @@ function playChime(): Promise<void> {
 
       const totalDuration = Math.max(...notes.map((n) => n.start + n.duration));
 
-      window.setTimeout(() => {
-        ctx.close().catch(() => undefined);
-        resolve();
-      }, (totalDuration + 0.05) * 1000);
+      window.setTimeout(() => resolve(true), (totalDuration + 0.05) * 1000);
     } catch {
-      resolve();
+      resolve(false);
     }
   });
 }
@@ -133,12 +132,41 @@ function speak(text: string): void {
 /**
  * Punto de entrada: suena el "Tin" y, justo después, anuncia por voz
  * cuántos pedidos llegaron (o de qué tipo, si fue solo uno).
+ * Con el audio bloqueado no hace nada: el indicador de Cocina lo avisa y
+ * evita que la voz quede en cola y salga toda junta al desbloquear.
  */
 export async function announceNewKitchenOrders(newOrders: AnnouncedOrder[]): Promise<void> {
   if (newOrders.length === 0) {
     return;
   }
 
-  await playChime();
+  const played = await playChime();
+  if (!played) {
+    return;
+  }
+
   speak(buildKitchenAnnouncementText(newOrders));
+}
+
+/**
+ * Habilita el audio desde un clic del usuario y confirma con el "Tin".
+ * También "calienta" la voz: Safari/iOS exigen un gesto para hablar.
+ */
+export async function enableKitchenAudio(): Promise<void> {
+  const status = await getKitchenAudio().enable();
+  if (status !== "enabled") {
+    return;
+  }
+
+  primeSpeech();
+  await playChime();
+}
+
+function primeSpeech(): void {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+    return;
+  }
+  const silent = new SpeechSynthesisUtterance("");
+  silent.volume = 0;
+  window.speechSynthesis.speak(silent);
 }

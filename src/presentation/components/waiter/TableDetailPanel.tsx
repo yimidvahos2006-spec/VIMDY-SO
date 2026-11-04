@@ -35,6 +35,11 @@ interface Props {
    */
   initialVoiceOrder?: ParsedVoiceOrder<Product> | null;
   onVoiceOrderConsumed?: () => void;
+  /**
+   * Abre el panel directo en el cobro (botón "Cobrar y liberar mesa" de la
+   * gestión de mesa). Solo aplica si el rol puede cobrar y hay consumo.
+   */
+  autoOpenCharge?: boolean;
 }
 
 export function TableDetailPanel({
@@ -46,7 +51,8 @@ export function TableDetailPanel({
   onClosedTable,
   onOrderSent,
   initialVoiceOrder,
-  onVoiceOrderConsumed
+  onVoiceOrderConsumed,
+  autoOpenCharge = false
 }: Props) {
   const { role } = useAuth();
   // Solo ADMIN, GERENTE y CAJERO cobran (misma lista que exige la base de datos).
@@ -55,7 +61,9 @@ export function TableDetailPanel({
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [showCloseDialog, setShowCloseDialog] = useState(false);
+  const [showCloseDialog, setShowCloseDialog] = useState(
+    () => autoOpenCharge && canCharge && table.items.length > 0
+  );
   const [priority, setPriority] = useState<OrderPriority>("NORMAL");
   const [editingLineKey, setEditingLineKey] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
@@ -198,23 +206,31 @@ export function TableDetailPanel({
     );
   }
 
-  // Un mismo producto puede tener varias líneas (una por nota): se identifica por producto + nota.
-  const lineKey = (item: Table["items"][number]) => `${item.productId}::${(item.note ?? "").trim()}`;
+  // Un mismo producto puede tener varias líneas (una por nota, tamaño y extras): se identifica por las cuatro cosas.
+  const lineKey = (item: Table["items"][number]) =>
+    `${item.productId}::${(item.note ?? "").trim()}::${item.selectedSizeId ?? ""}::${[...(item.selectedExtraIds ?? [])].sort().join(",")}`;
+
+  // Referencia completa de la línea para el motor (sin tamaño/extras no encontraría las líneas con opciones).
+  const lineRef = (item: Table["items"][number]) => ({
+    note: item.note,
+    selectedSizeId: item.selectedSizeId ?? null,
+    selectedExtraIds: item.selectedExtraIds ?? []
+  });
 
   function decreaseItem(item: Table["items"][number]) {
     run(() =>
-      container.tableEngine.get().updateItemQuantity(table.id, item.productId, item.quantity - 1, { note: item.note })
+      container.tableEngine.get().updateItemQuantity(table.id, item.productId, item.quantity - 1, lineRef(item))
     );
   }
 
   function increaseItem(item: Table["items"][number]) {
     run(() =>
-      container.tableEngine.get().updateItemQuantity(table.id, item.productId, item.quantity + 1, { note: item.note })
+      container.tableEngine.get().updateItemQuantity(table.id, item.productId, item.quantity + 1, lineRef(item))
     );
   }
 
   function removeItem(item: Table["items"][number]) {
-    run(() => container.tableEngine.get().removeItem(table.id, item.productId, { note: item.note }));
+    run(() => container.tableEngine.get().removeItem(table.id, item.productId, lineRef(item)));
   }
 
   function startEditNote(item: Table["items"][number]) {
@@ -233,7 +249,10 @@ export function TableDetailPanel({
     setNoteDraft("");
     if (next === (item.note ?? "").trim()) return;
     run(() =>
-      container.tableEngine.get().updateItemNote(table.id, item.productId, item.note, next, units)
+      container.tableEngine.get().updateItemNote(table.id, item.productId, item.note, next, units, {
+        selectedSizeId: item.selectedSizeId ?? null,
+        selectedExtraIds: item.selectedExtraIds ?? []
+      })
     );
   }
 

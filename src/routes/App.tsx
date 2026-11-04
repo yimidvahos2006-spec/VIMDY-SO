@@ -88,6 +88,9 @@ const ReportsPage = lazyWithRetry(() =>
 const ProfitCenterPage = lazyWithRetry(() =>
   import("../presentation/pages/ProfitCenterPage").then((m) => ({ default: m.ProfitCenterPage }))
 );
+const FixedExpensesPage = lazyWithRetry(() =>
+  import("../presentation/pages/FixedExpensesPage").then((m) => ({ default: m.FixedExpensesPage }))
+);
 const LossCenterPage = lazyWithRetry(() =>
   import("../presentation/pages/LossCenterPage").then((m) => ({ default: m.LossCenterPage }))
 );
@@ -262,6 +265,19 @@ function AuthenticatedApp() {
                 element={
                   <ProtectedRoute requires={ROUTE_PERMISSIONS["/ganancias"]}>
                     <ProfitCenterPage />
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* VIMDY Contable (módulo opcional): requiere el permiso Y que el
+                  negocio tenga el módulo "contable" activo en su configuración. */}
+              <Route
+                path="/gastos-fijos"
+                element={
+                  <ProtectedRoute requires={ROUTE_PERMISSIONS["/gastos-fijos"]}>
+                    <RequireModule module="contable">
+                      <FixedExpensesPage />
+                    </RequireModule>
                   </ProtectedRoute>
                 }
               />
